@@ -1,45 +1,204 @@
-# Jirita - Product Vision
+# Jirita Product Vision
 
-## Problema
+## Overview
 
-Techtivo utiliza Unfuddle para gestionar proyectos, tickets, milestones, documentación y seguimiento de tiempo.
+Jirita is a modern project management platform focused on simplicity, speed, and usability.
 
-Aunque funcionalmente cumple su propósito, la experiencia de usuario es anticuada, la navegación es poco intuitiva y la herramienta no refleja la forma moderna en que los equipos trabajan actualmente.
+The goal is not to build another Jira.
 
-Jira, Asana y otras alternativas son percibidas como excesivamente complejas para las necesidades reales del equipo.
+The goal is to build the simplest project management platform teams actually enjoy using every day.
 
-## Visión
+Jirita combines project management, ticket tracking, milestone planning, documentation, time tracking, and reporting into a single cohesive experience.
 
-Construir una herramienta moderna para gestionar el trabajo diario de equipos de software.
+---
 
-La prioridad no es tener más funcionalidades que Jira.
+## Problem Statement
 
-La prioridad es ofrecer la experiencia más simple, rápida y agradable posible.
+Many project management platforms become increasingly complex as they evolve.
 
-## Principios
+Tools such as Jira, Asana, Monday, and similar platforms often require significant configuration, training, and process management before teams can become productive.
 
-- Simplicidad sobre configurabilidad.
-- Velocidad sobre complejidad.
-- Menos clics siempre es mejor.
-- Los usuarios no deben necesitar capacitación.
-- Las funcionalidades deben ser obvias.
-- Los proyectos deben poder administrarse desde una sola herramienta.
-- El sistema debe ser agradable de usar diariamente.
+At the same time, simpler tools often lack modern user experience, intuitive navigation, and efficient workflows.
 
-## Qué NO queremos construir
+Teams are often forced to choose between:
 
-- Otro Jira.
-- Un sistema Scrum complejo.
-- Story points obligatorios.
-- Workflows configurables infinitamente.
-- Decenas de módulos que nadie utiliza.
+- Powerful but overly complex tools
+- Simple but outdated tools
 
-## Qué queremos construir
+Jirita aims to eliminate this tradeoff.
 
-- Proyectos
+---
+
+## Vision
+
+Create a project management platform that provides the essential functionality software teams need while maintaining an exceptional user experience.
+
+The platform should feel:
+
+- Fast
+- Modern
+- Intuitive
+- Efficient
+- Pleasant to use
+
+Every design and product decision should support these goals.
+
+---
+
+## Target Audience
+
+Jirita is initially designed for:
+
+- Software development teams
+- Software factories
+- Technology consulting companies
+- Product teams
+- Internal development teams
+
+The initial focus is small and medium-sized teams that need structure without unnecessary complexity.
+
+---
+
+## Product Philosophy
+
+### Simplicity Over Configuration
+
+Users should spend their time working, not configuring software.
+
+Jirita should provide sensible defaults and avoid excessive setup requirements.
+
+### Work Over Process
+
+The platform exists to help teams complete work.
+
+Processes, workflows, and methodologies should support work rather than become the primary focus.
+
+### Visibility Without Complexity
+
+Users should always understand:
+
+- What is being worked on
+- Who is responsible
+- What is blocked
+- What is completed
+- What is coming next
+
+without navigating multiple screens or reports.
+
+### Beautiful by Default
+
+Design is a product feature.
+
+A clean, modern, and polished experience should be considered a core requirement rather than an enhancement.
+
+---
+
+## Core Product Capabilities
+
+The MVP focuses on the following capabilities:
+
+- Projects
 - Milestones
 - Tickets
+- Team Management
+- Notes & Wiki
 - Time Tracking
-- Notas / Wiki
-- Reportes
-- Gestión de personas
+- Reporting
+
+Each capability should be designed to work together seamlessly.
+
+---
+
+## Work Structure
+
+Jirita follows a simple and clear structure:
+
+```text
+Workspace
+│
+├── Projects
+│   ├── Milestones
+│   ├── Tickets
+│   ├── Notes
+│   ├── Reports
+│   └── People
+│
+└── Organization Settings
+```
+
+Each concept has a specific purpose and should not be repurposed to compensate for platform limitations.
+
+Projects are projects.
+
+Milestones are milestones.
+
+Tickets are tickets.
+
+The system should not force users into artificial workarounds.
+
+---
+
+## What We Do Not Want To Build
+
+Jirita is intentionally not trying to become:
+
+- Another Jira
+- A highly configurable enterprise platform
+- A complex Scrum management system
+- A process-heavy governance tool
+- A platform with dozens of rarely used modules
+
+The objective is focus, not feature quantity.
+
+---
+
+## What Makes Jirita Different
+
+Jirita is not attempting to win through feature count.
+
+Jirita wins through:
+
+- Better usability
+- Faster workflows
+- Cleaner interfaces
+- Lower learning curve
+- Better daily experience
+
+The platform should feel lightweight without feeling limited.
+
+---
+
+## Success Criteria
+
+Jirita succeeds when:
+
+- New users can become productive immediately
+- Teams prefer using it over more complex alternatives
+- Common tasks require fewer clicks and less effort
+- Project information is easy to find
+- Daily work feels organized without feeling bureaucratic
+- The platform remains simple as it grows
+
+---
+
+## Long-Term Vision
+
+Jirita should evolve into a complete workspace for software teams.
+
+Future capabilities may include:
+
+- Client portals
+- Executive dashboards
+- GitHub integration
+- AI-powered assistance
+- Capacity planning
+- Skills management
+- Staffing insights
+
+However, simplicity must remain the primary guiding principle regardless of future expansion.
+
+Every future feature must answer a simple question:
+
+> Does this make daily work easier?
+
+If the answer is no, the feature does not belong in Jirita.
