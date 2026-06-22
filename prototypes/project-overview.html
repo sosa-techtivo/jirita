@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Mobile Banking App · Overview · Jirita</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        fontFamily: { sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'] },
+        colors: {
+          brand: {
+            50: '#f1f0ff', 100: '#e4e1ff', 500: '#6655ee', 600: '#5644dd', 700: '#4736bb'
+          }
+        }
+      }
+    }
+  }
+</script>
+<style>
+  body { font-family: 'Inter', ui-sans-serif, system-ui, sans-serif; }
+  .scrollbar-thin::-webkit-scrollbar { width: 6px; }
+  .scrollbar-thin::-webkit-scrollbar-thumb { background-color: #e2e8f0; border-radius: 9999px; }
+</style>
+</head>
+<body class="bg-slate-50 text-slate-900 antialiased">
+
+<div class="flex h-screen overflow-hidden">
+
+  <!-- ============ SIDEBAR ============ -->
+  <aside class="w-60 flex-shrink-0 border-r border-slate-200 bg-white flex flex-col">
+    <!-- Logo -->
+    <div class="h-14 flex items-center px-4 border-b border-slate-100">
+      <div class="w-6 h-6 rounded-md bg-brand-600 flex items-center justify-center text-white text-xs font-bold">J</div>
+      <span class="ml-2 font-semibold text-slate-900 tracking-tight">Jirita</span>
+    </div>
+
+    <!-- Search -->
+    <div class="px-3 pt-3">
+      <button class="w-full flex items-center gap-2 text-sm text-slate-400 bg-slate-100 hover:bg-slate-200/70 rounded-md px-2.5 py-1.5 transition-colors">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+        <span>Search</span>
+        <span class="ml-auto text-[10px] font-medium text-slate-400 bg-white border border-slate-200 rounded px-1 py-0.5">⌘K</span>
+      </button>
+    </div>
+
+    <!-- Primary nav -->
+    <nav class="px-2 pt-4 space-y-0.5 text-sm">
+      <a href="#" class="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-slate-600 hover:bg-slate-100">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>
+        Dashboard
+      </a>
+      <a href="#" class="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md bg-brand-50 text-brand-700 font-medium">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 7l4-4h6l4 4"/><rect x="3" y="7" width="18" height="13" rx="2"/></svg>
+        Projects
+      </a>
+      <a href="#" class="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-slate-600 hover:bg-slate-100">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>
+        My Work
+      </a>
+      <a href="#" class="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-slate-600 hover:bg-slate-100">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 19V9M12 19V5M20 19v-7"/></svg>
+        Reports
+      </a>
+      <a href="#" class="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-slate-600 hover:bg-slate-100">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09a1.65 1.65 0 00-1-1.51 1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09a1.65 1.65 0 001.51-1 1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33h0a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51h0a1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82v0a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+        Settings
+      </a>
+    </nav>
+
+    <!-- Projects list -->
+    <div class="mt-5 px-3">
+      <div class="flex items-center justify-between px-1 mb-1.5">
+        <span class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Projects</span>
+        <button class="text-slate-400 hover:text-slate-600">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+        </button>
+      </div>
+      <div class="space-y-0.5 text-sm">
+        <div class="rounded-md bg-brand-50">
+          <a href="#" class="flex items-center gap-2 px-2 py-1.5 text-brand-700 font-medium">
+            <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 flex-shrink-0"></span>
+            Mobile Banking App
+          </a>
+          <div class="pl-6 pb-1 space-y-0.5">
+            <a href="#" class="block px-2 py-1 rounded-md bg-white text-slate-900 font-medium text-[13px]">Overview</a>
+            <a href="#" class="block px-2 py-1 rounded-md text-slate-500 hover:bg-white text-[13px]">Milestones</a>
+            <a href="#" class="block px-2 py-1 rounded-md text-slate-500 hover:bg-white text-[13px]">Tickets</a>
+            <a href="#" class="block px-2 py-1 rounded-md text-slate-500 hover:bg-white text-[13px]">Notes</a>
+            <a href="#" class="block px-2 py-1 rounded-md text-slate-500 hover:bg-white text-[13px]">Reports</a>
+            <a href="#" class="block px-2 py-1 rounded-md text-slate-500 hover:bg-white text-[13px]">Team</a>
+          </div>
+        </div>
+        <a href="#" class="flex items-center gap-2 px-2 py-1.5 rounded-md text-slate-600 hover:bg-slate-100">
+          <span class="w-1.5 h-1.5 rounded-full bg-amber-500 flex-shrink-0"></span>
+          Client Website Redesign
+        </a>
+        <a href="#" class="flex items-center gap-2 px-2 py-1.5 rounded-md text-slate-600 hover:bg-slate-100">
+          <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 flex-shrink-0"></span>
+          Internal Platform Migration
+        </a>
+      </div>
+    </div>
+
+    <!-- User -->
+    <div class="mt-auto border-t border-slate-100 px-3 py-3 flex items-center gap-2">
+      <img src="https://i.pravatar.cc/64?img=47" class="w-7 h-7 rounded-full" />
+      <div class="text-sm leading-tight">
+        <p class="font-medium text-slate-800">Sarah Chen</p>
+        <p class="text-xs text-slate-400">Techtivo</p>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ============ MAIN ============ -->
+  <div class="flex-1 flex flex-col overflow-hidden">
+
+    <!-- Top bar -->
+    <header class="h-14 flex items-center justify-between px-8 border-b border-slate-200 bg-white flex-shrink-0">
+      <div class="flex items-center gap-1.5 text-sm text-slate-500">
+        <span class="text-slate-400">Projects</span>
+        <span class="text-slate-300">/</span>
+        <span class="text-slate-800 font-medium">Mobile Banking App</span>
+      </div>
+      <div class="flex items-center gap-3">
+        <button class="text-slate-400 hover:text-slate-600">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M18 8a6 6 0 10-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 01-3.4 0"/></svg>
+        </button>
+        <img src="https://i.pravatar.cc/64?img=47" class="w-7 h-7 rounded-full" />
+      </div>
+    </header>
+
+    <!-- Scrollable content -->
+    <main class="flex-1 overflow-y-auto scrollbar-thin">
+      <div class="max-w-6xl mx-auto px-8 py-8 space-y-8">
+
+        <!-- ===== Project Header ===== -->
+        <div class="flex items-start justify-between">
+          <div class="flex items-start gap-4">
+            <div class="w-12 h-12 rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 flex items-center justify-center text-white font-bold text-lg flex-shrink-0">
+              MB
+            </div>
+            <div>
+              <div class="flex items-center gap-2.5">
+                <h1 class="text-xl font-bold text-slate-900 tracking-tight">Mobile Banking App</h1>
+                <span class="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2.5 py-0.5">
+                  <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> Active
+                </span>
+              </div>
+              <p class="text-sm text-slate-500 mt-1 max-w-xl">iOS and Android banking experience for Meridian Bank — redesign of onboarding, transfers, and biometric authentication.</p>
+              <div class="flex items-center gap-2 mt-2.5 text-xs text-slate-400">
+                <img src="https://i.pravatar.cc/64?img=47" class="w-4.5 h-4.5 rounded-full" />
+                <span>Owned by <span class="text-slate-600 font-medium">Sarah Chen</span></span>
+                <span class="text-slate-300">·</span>
+                <span>Started Mar 3, 2026</span>
+              </div>
+            </div>
+          </div>
+          <div class="flex items-center gap-2 flex-shrink-0">
+            <button class="text-sm font-medium text-slate-600 border border-slate-200 hover:bg-slate-50 rounded-lg px-3.5 py-2 transition-colors">
+              + Milestone
+            </button>
+            <button class="text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3.5 py-2 shadow-sm shadow-brand-600/20 transition-colors">
+              + New Ticket
+            </button>
+          </div>
+        </div>
+
+        <!-- ===== Needs Attention ===== -->
+        <div class="rounded-xl border border-amber-200 bg-amber-50/60 px-5 py-4">
+          <div class="flex items-center gap-2 mb-2.5">
+            <svg class="w-4.5 h-4.5 text-amber-600" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><path d="M12 9v4M12 17h.01"/></svg>
+            <h2 class="text-sm font-semibold text-amber-900">Needs attention</h2>
+          </div>
+          <ul class="space-y-1.5 text-sm">
+            <li class="flex items-center gap-2 text-amber-900/90">
+              <span class="w-1.5 h-1.5 rounded-full bg-red-500 flex-shrink-0"></span>
+              <span><strong class="font-medium">Security Audit Fixes</strong> milestone is due in 3 days at only 30% complete</span>
+            </li>
+            <li class="flex items-center gap-2 text-amber-900/90">
+              <span class="w-1.5 h-1.5 rounded-full bg-red-500 flex-shrink-0"></span>
+              <span>2 tickets have been <strong class="font-medium">blocked</strong> for more than 3 days</span>
+            </li>
+          </ul>
+        </div>
+
+        <!-- ===== Milestones ===== -->
+        <div>
+          <div class="flex items-center justify-between mb-3">
+            <h2 class="text-sm font-semibold text-slate-700">Active Milestones</h2>
+            <a href="#" class="text-xs font-medium text-brand-600 hover:text-brand-700">View all milestones →</a>
+          </div>
+          <div class="grid grid-cols-3 gap-4">
+
+            <div class="rounded-xl border border-slate-200 bg-white p-4 hover:shadow-sm transition-shadow">
+              <div class="flex items-center justify-between mb-2.5">
+                <h3 class="text-sm font-semibold text-slate-800">Beta Release</h3>
+                <span class="text-xs text-slate-400">Jul 15</span>
+              </div>
+              <div class="w-full h-1.5 rounded-full bg-slate-100 overflow-hidden mb-2">
+                <div class="h-full bg-emerald-500 rounded-full" style="width: 67%"></div>
+              </div>
+              <p class="text-xs text-slate-500">8 of 12 tickets done · <span class="text-emerald-600 font-medium">On track</span></p>
+            </div>
+
+            <div class="rounded-xl border border-red-200 bg-red-50/40 p-4 hover:shadow-sm transition-shadow">
+              <div class="flex items-center justify-between mb-2.5">
+                <h3 class="text-sm font-semibold text-slate-800">Security Audit Fixes</h3>
+                <span class="text-xs text-red-500 font-medium">Jun 25</span>
+              </div>
+              <div class="w-full h-1.5 rounded-full bg-slate-100 overflow-hidden mb-2">
+                <div class="h-full bg-red-500 rounded-full" style="width: 30%"></div>
+              </div>
+              <p class="text-xs text-slate-500">3 of 10 tickets done · <span class="text-red-600 font-medium">At risk</span></p>
+            </div>
+
+            <div class="rounded-xl border border-slate-200 bg-white p-4 hover:shadow-sm transition-shadow">
+              <div class="flex items-center justify-between mb-2.5">
+                <h3 class="text-sm font-semibold text-slate-800">App Store Submission</h3>
+                <span class="text-xs text-slate-400">Aug 1</span>
+              </div>
+              <div class="w-full h-1.5 rounded-full bg-slate-100 overflow-hidden mb-2">
+                <div class="h-full bg-slate-400 rounded-full" style="width: 17%"></div>
+              </div>
+              <p class="text-xs text-slate-500">1 of 6 tickets done · <span class="text-slate-500 font-medium">Not started</span></p>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- ===== Two column body ===== -->
+        <div class="grid grid-cols-3 gap-6">
+
+          <!-- Left: tickets + activity -->
+          <div class="col-span-2 space-y-6">
+
+            <!-- Open tickets -->
+            <div class="rounded-xl border border-slate-200 bg-white p-5">
+              <div class="flex items-center justify-between mb-4">
+                <h2 class="text-sm font-semibold text-slate-700">Open Tickets</h2>
+                <a href="#" class="text-xs font-medium text-brand-600 hover:text-brand-700">View all tickets →</a>
+              </div>
+
+              <!-- segmented bar -->
+              <div class="flex w-full h-2 rounded-full overflow-hidden mb-4">
+                <div class="bg-slate-300" style="width: 28%"></div>
+                <div class="bg-blue-500" style="width: 18%"></div>
+                <div class="bg-red-500" style="width: 4%"></div>
+                <div class="bg-violet-400" style="width: 8%"></div>
+                <div class="bg-emerald-500" style="width: 42%"></div>
+              </div>
+
+              <div class="grid grid-cols-5 gap-3 text-center">
+                <div>
+                  <p class="text-lg font-bold text-slate-800">14</p>
+                  <p class="text-xs text-slate-500 mt-0.5 flex items-center justify-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-slate-300"></span>To Do</p>
+                </div>
+                <div>
+                  <p class="text-lg font-bold text-slate-800">9</p>
+                  <p class="text-xs text-slate-500 mt-0.5 flex items-center justify-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-blue-500"></span>In Progress</p>
+                </div>
+                <div>
+                  <p class="text-lg font-bold text-slate-800">2</p>
+                  <p class="text-xs text-slate-500 mt-0.5 flex items-center justify-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-red-500"></span>Blocked</p>
+                </div>
+                <div>
+                  <p class="text-lg font-bold text-slate-800">4</p>
+                  <p class="text-xs text-slate-500 mt-0.5 flex items-center justify-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-violet-400"></span>Review</p>
+                </div>
+                <div>
+                  <p class="text-lg font-bold text-slate-800">23</p>
+                  <p class="text-xs text-slate-500 mt-0.5 flex items-center justify-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>Done</p>
+                </div>
+              </div>
+            </div>
+
+            <!-- Recent activity -->
+            <div class="rounded-xl border border-slate-200 bg-white p-5">
+              <h2 class="text-sm font-semibold text-slate-700 mb-4">Recent Activity</h2>
+              <ul class="space-y-4">
+
+                <li class="flex items-start gap-3">
+                  <img src="https://i.pravatar.cc/64?img=12" class="w-7 h-7 rounded-full mt-0.5" />
+                  <div class="text-sm leading-snug">
+                    <p class="text-slate-700"><span class="font-medium text-slate-900">Marcus Lee</span> moved <span class="font-medium">"Fix biometric login crash"</span> to <span class="text-emerald-600 font-medium">Done</span></p>
+                    <p class="text-xs text-slate-400 mt-0.5">12 minutes ago</p>
+                  </div>
+                </li>
+
+                <li class="flex items-start gap-3">
+                  <img src="https://i.pravatar.cc/64?img=47" class="w-7 h-7 rounded-full mt-0.5" />
+                  <div class="text-sm leading-snug">
+                    <p class="text-slate-700"><span class="font-medium text-slate-900">Sarah Chen</span> commented on <span class="font-medium">"Implement transaction history pagination"</span></p>
+                    <p class="text-xs text-slate-400 mt-0.5">1 hour ago</p>
+                  </div>
+                </li>
+
+                <li class="flex items-start gap-3">
+                  <img src="https://i.pravatar.cc/64?img=33" class="w-7 h-7 rounded-full mt-0.5" />
+                  <div class="text-sm leading-snug">
+                    <p class="text-slate-700"><span class="font-medium text-slate-900">Priya Patel</span> moved <span class="font-medium">"API rate limiting"</span> to <span class="text-violet-600 font-medium">Review</span></p>
+                    <p class="text-xs text-slate-400 mt-0.5">3 hours ago</p>
+                  </div>
+                </li>
+
+                <li class="flex items-start gap-3">
+                  <img src="https://i.pravatar.cc/64?img=22" class="w-7 h-7 rounded-full mt-0.5" />
+                  <div class="text-sm leading-snug">
+                    <p class="text-slate-700"><span class="font-medium text-slate-900">David Kim</span> logged <span class="font-medium">2h</span> on <span class="font-medium">"Push notification setup"</span></p>
+                    <p class="text-xs text-slate-400 mt-0.5">5 hours ago</p>
+                  </div>
+                </li>
+
+                <li class="flex items-start gap-3">
+                  <img src="https://i.pravatar.cc/64?img=47" class="w-7 h-7 rounded-full mt-0.5" />
+                  <div class="text-sm leading-snug">
+                    <p class="text-slate-700"><span class="font-medium text-slate-900">Sarah Chen</span> created milestone <span class="font-medium">"App Store Submission"</span></p>
+                    <p class="text-xs text-slate-400 mt-0.5">Yesterday</p>
+                  </div>
+                </li>
+
+              </ul>
+            </div>
+
+          </div>
+
+          <!-- Right: team + links -->
+          <div class="space-y-6">
+
+            <div class="rounded-xl border border-slate-200 bg-white p-5">
+              <div class="flex items-center justify-between mb-4">
+                <h2 class="text-sm font-semibold text-slate-700">Team</h2>
+                <a href="#" class="text-xs font-medium text-brand-600 hover:text-brand-700">View team →</a>
+              </div>
+              <ul class="space-y-3">
+                <li class="flex items-center gap-2.5">
+                  <img src="https://i.pravatar.cc/64?img=47" class="w-8 h-8 rounded-full" />
+                  <div class="text-sm leading-tight flex-1">
+                    <p class="font-medium text-slate-800">Sarah Chen</p>
+                    <p class="text-xs text-slate-400">Project Lead</p>
+                  </div>
+                  <span class="text-xs text-slate-400">3 open</span>
+                </li>
+                <li class="flex items-center gap-2.5">
+                  <img src="https://i.pravatar.cc/64?img=12" class="w-8 h-8 rounded-full" />
+                  <div class="text-sm leading-tight flex-1">
+                    <p class="font-medium text-slate-800">Marcus Lee</p>
+                    <p class="text-xs text-slate-400">Engineer</p>
+                  </div>
+                  <span class="text-xs text-slate-400">5 open</span>
+                </li>
+                <li class="flex items-center gap-2.5">
+                  <img src="https://i.pravatar.cc/64?img=33" class="w-8 h-8 rounded-full" />
+                  <div class="text-sm leading-tight flex-1">
+                    <p class="font-medium text-slate-800">Priya Patel</p>
+                    <p class="text-xs text-slate-400">Engineer</p>
+                  </div>
+                  <span class="text-xs text-slate-400">4 open</span>
+                </li>
+                <li class="flex items-center gap-2.5">
+                  <img src="https://i.pravatar.cc/64?img=22" class="w-8 h-8 rounded-full" />
+                  <div class="text-sm leading-tight flex-1">
+                    <p class="font-medium text-slate-800">David Kim</p>
+                    <p class="text-xs text-slate-400">QA Engineer</p>
+                  </div>
+                  <span class="text-xs text-slate-400">2 open</span>
+                </li>
+                <li class="flex items-center gap-2.5">
+                  <img src="https://i.pravatar.cc/64?img=5" class="w-8 h-8 rounded-full" />
+                  <div class="text-sm leading-tight flex-1">
+                    <p class="font-medium text-slate-800">Elena Rossi</p>
+                    <p class="text-xs text-slate-400">Designer</p>
+                  </div>
+                  <span class="text-xs text-slate-400">1 open</span>
+                </li>
+              </ul>
+            </div>
+
+            <div class="rounded-xl border border-slate-200 bg-white p-5">
+              <h2 class="text-sm font-semibold text-slate-700 mb-3">Quick Links</h2>
+              <ul class="space-y-1">
+                <li>
+                  <a href="#" class="flex items-center gap-2.5 text-sm text-slate-600 hover:bg-slate-50 rounded-md px-2 py-1.5 -mx-2">
+                    <svg class="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h8"/></svg>
+                    Notes & Documentation
+                  </a>
+                </li>
+                <li>
+                  <a href="#" class="flex items-center gap-2.5 text-sm text-slate-600 hover:bg-slate-50 rounded-md px-2 py-1.5 -mx-2">
+                    <svg class="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 19V9M12 19V5M20 19v-7"/></svg>
+                    Project Reports
+                  </a>
+                </li>
+              </ul>
+            </div>
+
+          </div>
+        </div>
+
+      </div>
+    </main>
+  </div>
+</div>
+
+</body>
+</html>
