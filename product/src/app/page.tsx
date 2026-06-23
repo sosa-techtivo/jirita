@@ -1,3 +1,4 @@
+import Image from "next/image";
 import type { ReactNode } from "react";
 
 type MilestoneStatus = "on-track" | "at-risk" | "not-started";
@@ -205,11 +206,18 @@ export default function Home() {
     <div className="flex h-screen overflow-hidden bg-slate-50 text-slate-900 antialiased">
       {/* ============ SIDEBAR ============ */}
       <aside className="w-60 flex-shrink-0 border-r border-slate-200 bg-white flex flex-col">
-        <div className="h-14 flex items-center px-4 border-b border-slate-100">
-          <div className="w-6 h-6 rounded-md bg-brand-600 flex items-center justify-center text-white text-xs font-bold">
-            J
-          </div>
-          <span className="ml-2 font-semibold text-slate-900 tracking-tight">Jirita</span>
+        <div className="px-4 py-3 border-b border-slate-100">
+          <Image
+            src="/img/jirita-logo.png"
+            alt="Techtivo"
+            width={217}
+            height={47}
+            className="h-5 w-auto"
+            priority
+          />
+          <p className="mt-1.5 text-[11px] font-semibold uppercase tracking-wide text-brand-600/70 leading-none">
+            Jirita
+          </p>
         </div>
 
         <div className="px-3 pt-3">
