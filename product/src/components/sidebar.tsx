@@ -95,8 +95,8 @@ export function Sidebar({
           {pinnedProjects.map((project) => {
             const dot = statusMeta[project.status].dot;
             return project.slug === activeSlug ? (
-              <div key={project.slug} className="rounded-md bg-brand-50 dark:bg-brand-500/10">
-                <Link href={`/projects/${project.slug}`} className="flex items-center gap-2 px-2 py-1.5 text-brand-700 font-medium dark:text-brand-400">
+              <div key={project.slug} className="rounded-md bg-brand-50 dark:bg-brand-500/10 ring-1 ring-brand-100 dark:ring-brand-500/20">
+                <Link href={`/projects/${project.slug}`} className="flex items-center gap-2 px-2 py-1.5 text-brand-700 font-semibold dark:text-brand-400">
                   <span className={`w-1.5 h-1.5 rounded-full ${dot} flex-shrink-0`} />
                   {project.name}
                 </Link>
@@ -105,7 +105,7 @@ export function Sidebar({
                     href={`/projects/${project.slug}`}
                     className={
                       activeSection === "overview"
-                        ? "block px-2 py-1 rounded-md bg-white text-slate-900 font-medium text-[13px] dark:bg-zinc-800 dark:text-zinc-100"
+                        ? "block px-2 py-1 rounded-md bg-white text-brand-700 font-semibold text-[13px] shadow-sm shadow-slate-100 dark:bg-zinc-800 dark:text-brand-400"
                         : "block px-2 py-1 rounded-md text-slate-500 hover:bg-white text-[13px] dark:text-zinc-500 dark:hover:bg-zinc-800/60"
                     }
                   >
@@ -118,7 +118,7 @@ export function Sidebar({
                     href={`/projects/${project.slug}/tickets`}
                     className={
                       activeSection === "tickets"
-                        ? "block px-2 py-1 rounded-md bg-white text-slate-900 font-medium text-[13px] dark:bg-zinc-800 dark:text-zinc-100"
+                        ? "block px-2 py-1 rounded-md bg-white text-brand-700 font-semibold text-[13px] shadow-sm shadow-slate-100 dark:bg-zinc-800 dark:text-brand-400"
                         : "block px-2 py-1 rounded-md text-slate-500 hover:bg-white text-[13px] dark:text-zinc-500 dark:hover:bg-zinc-800/60"
                     }
                   >

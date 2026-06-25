@@ -263,3 +263,14 @@ Future capabilities may include:
 - Staffing Insights
 
 However, simplicity must remain the defining characteristic of the platform.
+
+## Documentation Loading Strategy
+
+At the beginning of every new session, only read:
+
+- PROJECT_STATUS.md
+- CHANGELOG.md
+
+Consult additional documentation under /docs only when it is relevant to the specific task being implemented.
+
+Do not read the entire documentation set unless explicitly requested.

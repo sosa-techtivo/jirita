@@ -1,6 +1,11 @@
 import type { TicketStatus } from "@/lib/mock-tickets";
 
 export const ticketStatusMeta: Record<TicketStatus, { label: string; dot: string; text: string }> = {
+  backlog: {
+    label: "Backlog",
+    dot: "bg-slate-400 dark:bg-zinc-500",
+    text: "text-slate-500 dark:text-zinc-500",
+  },
   "to-do": {
     label: "To Do",
     dot: "bg-slate-400 dark:bg-zinc-600",
