@@ -1,6 +1,6 @@
 "use client";
 
-export type ViewMode = "list" | "board" | "calendar" | "timeline";
+export type ViewMode = "list" | "board" | "calendar" | "timeline" | "insights";
 
 interface ViewOption {
   mode: ViewMode;
@@ -46,6 +46,15 @@ const VIEWS: ViewOption[] = [
         <rect x="1" y="2.5" width="5" height="2.5" rx="1.25" />
         <rect x="4.5" y="6" width="8" height="2.5" rx="1.25" />
         <rect x="2" y="9.5" width="6" height="2.5" rx="1.25" />
+      </svg>
+    ),
+  },
+  {
+    mode: "insights",
+    label: "Insights",
+    icon: (
+      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+        <path d="M18 20V10M12 20V4M6 20v-6" />
       </svg>
     ),
   },

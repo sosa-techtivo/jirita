@@ -8,7 +8,7 @@
 
 JIRITA is currently in the UI/UX MVP phase.
 
-The project includes the initial application shell, projects listing, project overview, and a flat ticket list. All implemented screens are navigable and connected using mock data.
+The project includes the application shell, projects listing, project overview, and a fully featured Tickets experience with five views: Board, List, Calendar, Timeline, and Insights. All implemented screens are navigable and connected using mock data.
 
 The current objective is to complete the entire frontend experience before integrating a real backend.
 
@@ -67,21 +67,21 @@ Includes:
 
 Known limitation: Project data is currently hardcoded to "Mobile Banking App" regardless of the active slug. The slug is passed correctly but the component does not use it to load different data.
 
-### Tickets — Board and List Views
+### Tickets — All Five Views
 
 Completed.
 
-The Tickets experience at `/projects/[slug]/tickets` supports two views with an instant client-side toggle. Board is the default.
+The Tickets experience at `/projects/[slug]/tickets` supports five views with an instant client-side toggle. Board is the default.
 
 #### View Switcher
 
-A segmented tab control switches between List and Board. Two additional tabs (Calendar, Timeline) are visible but disabled — they signal future views without requiring implementation.
+A segmented tab control switches between all five views: **List**, **Board**, **Calendar**, **Timeline**, and **Insights**. All tabs are active.
 
 #### Filter Bar
 
-- Search input
+- Search input (widened)
 - Dropdown filters: Assigned, Priority, Milestone, Status (visual only, not wired)
-- Quick toggle chips: Mine, Blocked, Due Soon, Recently Updated (visual only, not wired)
+- Quick toggle chips: Mine, Blocked, High Priority, Due Soon, Recently Updated (visual only, not wired)
 - "Add Filter" affordance for future expansion
 
 #### Board View
@@ -108,14 +108,52 @@ Each board card:
 
 #### List View
 
-Tickets grouped by the same 5 status sections. Each section has a labeled header with a count and a horizontal rule. Rows show title, blocked indicator (if applicable), priority (if high), milestone, due date, and assignee avatar.
+Tickets grouped by the same 5 status sections. Each section has a labeled header with a count and a horizontal rule. Rows show title, blocked indicator, priority (if high), milestone, due date, and assignee avatar.
+
+#### Calendar View
+
+Month-grid calendar showing tickets on their due dates.
+
+- 6 × 7 cell grid (42 cells), starting on Sunday
+- Up to 3 ticket pills per cell; overflow shows "+N more"
+- Today's date highlighted with a brand-coloured circle
+- Clicking a day opens a right-side panel listing that day's tickets
+- Clicking a ticket in the day panel opens a ticket detail sub-panel
+- Month navigation via chevron buttons
+
+#### Timeline View
+
+Horizontal planning view grouped by milestone. Inspired by Linear Roadmap.
+
+- Tickets rendered as horizontal bars, colour-coded by status
+- Bar width derived from `dueDate − max(3, storyPoints × 1.5)` days (no new schema fields)
+- Milestones rendered as collapsible section headers with ticket counts
+- Ticket rows indented under their milestone header
+- Frozen left label column during horizontal scroll
+- Vertical "Today" indicator in brand colour with header badge
+- Smooth scroll on mount to position Today at ~1/3 from the left edge
+- Clicking a bar navigates to the ticket detail route
+
+#### Insights View
+
+Project-level analytics dashboard computed from the existing ticket dataset.
+
+- **KPI cards**: Open Tickets, Completed, Blocked, Overdue
+- **Tickets by Status**: SVG multi-segment donut chart with legend
+- **Workload by Assignee**: horizontal bar chart with avatars
+- **Priority Distribution**: horizontal bar chart with percentage labels
+- **Milestone Progress**: progress bars per milestone, colour-coded by completion
+- **Upcoming Due Dates**: top 6 non-done tickets sorted by due date, with relative countdown
+- **Recently Completed**: done tickets with assignee avatar and timestamp
+
+No external chart libraries. All charts are pure SVG or CSS.
 
 #### UX
 
 - Cards hover with elevation lift and micro-translate (`hover:-translate-y-px`)
 - Smooth 150ms transitions
-- Full Dark Mode and Light Mode support
-- Horizontal scroll activates automatically when viewport is too narrow for the board
+- Full Dark Mode and Light Mode support across all views
+- Horizontal scroll in Board and Timeline; vertical scroll in List, Calendar, Insights
 - Board columns fill viewport height; each scrolls independently
 
 #### Future Drag & Drop Readiness
@@ -125,15 +163,18 @@ Tickets grouped by the same 5 status sections. Each section has a labeled header
 
 #### Component Architecture
 
-New reusable components in `src/components/tickets/`:
+Components in `src/components/tickets/`:
 
-- `view-switcher.tsx` — exports `ViewMode` type; renders active tabs + disabled future tabs
+- `view-switcher.tsx` — exports `ViewMode` type (`"list" | "board" | "calendar" | "timeline" | "insights"`)
 - `filter-bar.tsx` — search + filter dropdowns + quick chips
 - `filter-chip.tsx` — standalone toggleable chip
 - `ticket-card.tsx` — exports `TicketBoardCard` and `TicketListRow`
 - `board-column.tsx` — exports `BoardColumn` and `ColumnDefinition`
 - `board-view.tsx` — groups tickets into columns, handles horizontal layout
 - `list-view.tsx` — groups tickets by status section, handles vertical scroll
+- `calendar-view.tsx` — month grid, day panel, ticket detail panel
+- `timeline-view.tsx` — horizontal Gantt-style view, milestone grouping, sticky columns
+- `insights-view.tsx` — KPI cards, charts, and lists dashboard
 
 ---
 
@@ -290,6 +331,7 @@ Primary inspiration:
 Secondary inspiration:
 
 - Linear
+- GitHub
 
 Goals:
 
@@ -345,6 +387,7 @@ Current known items:
 - `ProjectOverview` component has hardcoded "Mobile Banking App" data; it does not dynamically load project data based on slug.
 - Sidebar navigation links for Dashboard, My Work, Reports, Settings, Milestones, Notes, Team use `href="#"` and are non-functional.
 - Filter chips and search inputs are UI-only; no filtering logic is wired up.
+- `kanban-board.tsx`, `kanban-column.tsx`, `kanban-card.tsx` are dead code (superseded by the `tickets/` component set).
 
 Planned future work:
 

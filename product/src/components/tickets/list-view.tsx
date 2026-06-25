@@ -1,5 +1,6 @@
 import type { Ticket } from "@/lib/mock-tickets";
 import { TicketListRow } from "@/components/tickets/ticket-card";
+import type { OnTicketClick } from "@/components/tickets/board-column";
 
 const GROUPS: { id: string; label: string; statuses: Ticket["status"][] }[] = [
   { id: "backlog", label: "Inbox", statuses: ["backlog"] },
@@ -9,7 +10,13 @@ const GROUPS: { id: string; label: string; statuses: Ticket["status"][] }[] = [
   { id: "done", label: "Done", statuses: ["done"] },
 ];
 
-export function ListView({ tickets, slug }: { tickets: Ticket[]; slug: string }) {
+export function ListView({
+  tickets,
+  onTicketClick,
+}: {
+  tickets: Ticket[];
+  onTicketClick: OnTicketClick;
+}) {
   return (
     <div className="flex-1 overflow-y-auto">
       <div className="max-w-4xl mx-auto px-6 pt-4 pb-10">
@@ -33,7 +40,7 @@ export function ListView({ tickets, slug }: { tickets: Ticket[]; slug: string })
               {/* Ticket rows */}
               <div className="rounded-xl border border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900 overflow-hidden divide-y divide-slate-100 dark:divide-zinc-800">
                 {groupTickets.map((ticket) => (
-                  <TicketListRow key={ticket.id} ticket={ticket} slug={slug} />
+                  <TicketListRow key={ticket.id} ticket={ticket} onTicketClick={onTicketClick} />
                 ))}
               </div>
             </section>

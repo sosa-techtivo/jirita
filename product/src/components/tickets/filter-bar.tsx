@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import { FilterChip } from "@/components/tickets/filter-chip";
 
 const DROPDOWN_FILTERS = [
@@ -12,18 +11,22 @@ const DROPDOWN_FILTERS = [
 
 const QUICK_FILTERS = ["Mine", "Blocked", "High Priority", "Due Soon", "Recently Updated"];
 
-export function FilterBar() {
-  const [activeChips, setActiveChips] = useState<Set<string>>(new Set());
+export interface FilterBarState {
+  activeChips: Set<string>;
+  searchQuery: string;
+}
 
-  function toggleChip(label: string) {
-    setActiveChips((prev) => {
-      const next = new Set(prev);
-      if (next.has(label)) next.delete(label);
-      else next.add(label);
-      return next;
-    });
-  }
-
+export function FilterBar({
+  activeChips,
+  onToggleChip,
+  searchQuery,
+  onSearchChange,
+}: {
+  activeChips: Set<string>;
+  onToggleChip: (label: string) => void;
+  searchQuery: string;
+  onSearchChange: (query: string) => void;
+}) {
   return (
     <div className="flex flex-col gap-3">
       {/* Search + dropdown filters */}
@@ -43,6 +46,8 @@ export function FilterBar() {
           <input
             type="text"
             placeholder="Search tickets..."
+            value={searchQuery}
+            onChange={(e) => onSearchChange(e.target.value)}
             className="w-64 text-sm bg-slate-100 dark:bg-zinc-900 placeholder:text-slate-400 dark:placeholder:text-zinc-500 text-slate-800 dark:text-zinc-100 rounded-md pl-8 pr-3 py-1.5 outline-none focus:ring-2 focus:ring-brand-500/30 transition-colors"
           />
         </label>
@@ -90,7 +95,7 @@ export function FilterBar() {
             key={label}
             label={label}
             active={activeChips.has(label)}
-            onToggle={() => toggleChip(label)}
+            onToggle={() => onToggleChip(label)}
           />
         ))}
       </div>

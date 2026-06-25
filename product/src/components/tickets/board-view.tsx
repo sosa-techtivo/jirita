@@ -1,5 +1,5 @@
 import type { Ticket } from "@/lib/mock-tickets";
-import { BoardColumn, type ColumnDefinition } from "@/components/tickets/board-column";
+import { BoardColumn, type ColumnDefinition, type OnTicketClick } from "@/components/tickets/board-column";
 
 const COLUMNS: ColumnDefinition[] = [
   {
@@ -47,7 +47,13 @@ function groupByColumn(tickets: Ticket[]): Record<string, Ticket[]> {
   return groups;
 }
 
-export function BoardView({ tickets, slug }: { tickets: Ticket[]; slug: string }) {
+export function BoardView({
+  tickets,
+  onTicketClick,
+}: {
+  tickets: Ticket[];
+  onTicketClick: OnTicketClick;
+}) {
   const byColumn = groupByColumn(tickets);
 
   return (
@@ -58,7 +64,7 @@ export function BoardView({ tickets, slug }: { tickets: Ticket[]; slug: string }
             key={col.id}
             column={col}
             tickets={byColumn[col.id]}
-            slug={slug}
+            onTicketClick={onTicketClick}
           />
         ))}
       </div>

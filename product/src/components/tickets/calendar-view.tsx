@@ -1,8 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
 import type { Ticket } from "@/lib/mock-tickets";
+import type { OnTicketClick } from "@/components/tickets/board-column";
 
 // ── Date utilities ──────────────────────────────────────────────────────────
 
@@ -23,7 +23,6 @@ function parseDueDateKey(s: string): string | null {
   const month = MONTH_MAP[mon];
   const day = parseInt(dayStr);
   if (month === undefined || isNaN(day)) return null;
-  // Mock data is always 2026; a real app would store ISO strings
   return `2026-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
@@ -94,13 +93,19 @@ function statusLabel(t: Ticket): string {
 
 // ── Ticket pill inside a calendar cell ─────────────────────────────────────
 
-function TicketPill({ ticket, onClick }: { ticket: Ticket; onClick: () => void }) {
+function TicketPill({
+  ticket,
+  onTicketClick,
+}: {
+  ticket: Ticket;
+  onTicketClick: OnTicketClick;
+}) {
   return (
     <button
       type="button"
       onClick={(e) => {
         e.stopPropagation();
-        onClick();
+        onTicketClick(ticket);
       }}
       className="w-full flex items-center gap-1 px-1.5 py-0.5 rounded text-left hover:bg-slate-200/60 dark:hover:bg-zinc-700/60 transition-colors"
     >
@@ -117,14 +122,12 @@ function TicketPill({ ticket, onClick }: { ticket: Ticket; onClick: () => void }
 function DayPanel({
   date,
   tickets,
-  slug,
   onTicketClick,
   onClose,
 }: {
   date: Date;
   tickets: Ticket[];
-  slug: string;
-  onTicketClick: (t: Ticket) => void;
+  onTicketClick: OnTicketClick;
   onClose: () => void;
 }) {
   return (
@@ -196,104 +199,19 @@ function DayPanel({
   );
 }
 
-// ── Ticket detail panel ─────────────────────────────────────────────────────
-
-function TicketPanel({
-  ticket,
-  slug,
-  onBack,
-  onClose,
-}: {
-  ticket: Ticket;
-  slug: string;
-  onBack: () => void;
-  onClose: () => void;
-}) {
-  const meta: [string, string][] = [
-    ["Status", statusLabel(ticket)],
-    ["Priority", ticket.priority.charAt(0).toUpperCase() + ticket.priority.slice(1)],
-    ["Milestone", ticket.milestone],
-    ["Due", ticket.dueDate ?? "—"],
-  ];
-
-  return (
-    <div className="flex flex-col h-full">
-      <div className="flex items-center justify-between px-4 pt-3.5 pb-3 border-b border-slate-100 dark:border-zinc-800 flex-shrink-0">
-        <button
-          type="button"
-          onClick={onBack}
-          className="flex items-center gap-1 text-xs text-slate-500 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-200 transition-colors"
-        >
-          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-            <path d="M15 18l-6-6 6-6" />
-          </svg>
-          Back
-        </button>
-        <button
-          type="button"
-          onClick={onClose}
-          className="p-1 rounded-md text-slate-400 hover:text-slate-600 dark:text-zinc-500 dark:hover:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors"
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-            <path d="M18 6L6 18M6 6l12 12" />
-          </svg>
-        </button>
-      </div>
-
-      <div className="flex-1 overflow-y-auto px-4 py-4">
-        <div className="flex items-start gap-2.5 mb-5">
-          <span className={`w-2 h-2 rounded-full mt-[5px] flex-shrink-0 ${statusDotClass(ticket)}`} />
-          <h2 className="text-[15px] font-semibold text-slate-900 dark:text-zinc-50 leading-snug">
-            {ticket.title}
-          </h2>
-        </div>
-
-        <dl className="space-y-3.5">
-          {meta.map(([label, value]) => (
-            <div key={label} className="flex items-start justify-between gap-2">
-              <dt className="text-[12px] text-slate-400 dark:text-zinc-500 flex-shrink-0">{label}</dt>
-              <dd className="text-[12px] font-medium text-slate-800 dark:text-zinc-200 text-right">{value}</dd>
-            </div>
-          ))}
-          <div className="flex items-center justify-between gap-2">
-            <dt className="text-[12px] text-slate-400 dark:text-zinc-500">Assignee</dt>
-            <dd className="flex items-center gap-1.5">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={ticket.assignee.avatar} alt={ticket.assignee.name} className="w-4 h-4 rounded-full" />
-              <span className="text-[12px] font-medium text-slate-800 dark:text-zinc-200">
-                {ticket.assignee.name}
-              </span>
-            </dd>
-          </div>
-        </dl>
-
-        <div className="mt-6 pt-5 border-t border-slate-100 dark:border-zinc-800">
-          <div className="rounded-xl border border-dashed border-slate-200 dark:border-zinc-700 px-4 py-6 text-center mb-3">
-            <p className="text-xs font-medium text-slate-500 dark:text-zinc-400">Ticket detail coming soon</p>
-            <p className="text-[11px] text-slate-400 dark:text-zinc-600 mt-0.5">
-              Full editing experience in a future update
-            </p>
-          </div>
-          <Link
-            href={`/projects/${slug}/tickets/${ticket.id}`}
-            className="block text-center text-xs font-medium text-brand-600 dark:text-brand-500 hover:text-brand-700 transition-colors"
-          >
-            Open ticket page →
-          </Link>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ── CalendarView ────────────────────────────────────────────────────────────
 
-export function CalendarView({ tickets, slug }: { tickets: Ticket[]; slug: string }) {
+export function CalendarView({
+  tickets,
+  onTicketClick,
+}: {
+  tickets: Ticket[];
+  onTicketClick: OnTicketClick;
+}) {
   const today = new Date();
   const [viewYear, setViewYear] = useState(today.getFullYear());
   const [viewMonth, setViewMonth] = useState(today.getMonth());
   const [selectedDay, setSelectedDay] = useState<Date | null>(null);
-  const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
 
   const byDate = groupTicketsByDate(tickets);
   const cells = buildCalendarCells(viewYear, viewMonth);
@@ -307,17 +225,14 @@ export function CalendarView({ tickets, slug }: { tickets: Ticket[]; slug: strin
     setViewMonth(m);
     setViewYear(y);
     setSelectedDay(null);
-    setSelectedTicket(null);
   }
 
   function selectDay(date: Date) {
     setSelectedDay(date);
-    setSelectedTicket(null);
   }
 
   function closePanel() {
     setSelectedDay(null);
-    setSelectedTicket(null);
   }
 
   const selectedDayKey = selectedDay ? toDateKey(selectedDay) : null;
@@ -348,7 +263,6 @@ export function CalendarView({ tickets, slug }: { tickets: Ticket[]; slug: strin
                 setViewYear(today.getFullYear());
                 setViewMonth(today.getMonth());
                 setSelectedDay(null);
-                setSelectedTicket(null);
               }}
               className="px-2.5 h-7 text-xs font-medium text-slate-600 dark:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800 rounded-md transition-colors"
             >
@@ -424,10 +338,7 @@ export function CalendarView({ tickets, slug }: { tickets: Ticket[]; slug: strin
                         <TicketPill
                           key={ticket.id}
                           ticket={ticket}
-                          onClick={() => {
-                            setSelectedDay(date);
-                            setSelectedTicket(ticket);
-                          }}
+                          onTicketClick={onTicketClick}
                         />
                       ))}
                       {overflow > 0 && (
@@ -444,25 +355,15 @@ export function CalendarView({ tickets, slug }: { tickets: Ticket[]; slug: strin
         </div>
       </div>
 
-      {/* ── Side panel ── */}
+      {/* ── Day panel ── */}
       {selectedDay && (
         <aside className="w-72 flex-shrink-0 border-l border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 flex flex-col min-h-0 overflow-hidden">
-          {selectedTicket ? (
-            <TicketPanel
-              ticket={selectedTicket}
-              slug={slug}
-              onBack={() => setSelectedTicket(null)}
-              onClose={closePanel}
-            />
-          ) : (
-            <DayPanel
-              date={selectedDay}
-              tickets={panelTickets}
-              slug={slug}
-              onTicketClick={setSelectedTicket}
-              onClose={closePanel}
-            />
-          )}
+          <DayPanel
+            date={selectedDay}
+            tickets={panelTickets}
+            onTicketClick={onTicketClick}
+            onClose={closePanel}
+          />
         </aside>
       )}
     </div>

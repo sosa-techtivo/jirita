@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import Link from "next/link";
 import type { Ticket } from "@/lib/mock-tickets";
+import type { OnTicketClick } from "@/components/tickets/board-column";
 
 // ── Date utilities ──────────────────────────────────────────────────────────
 
@@ -167,7 +167,13 @@ function TodayLine({ pct }: { pct: number }) {
 
 // ── Main component ──────────────────────────────────────────────────────────
 
-export function TimelineView({ tickets, slug }: { tickets: Ticket[]; slug: string }) {
+export function TimelineView({
+  tickets,
+  onTicketClick,
+}: {
+  tickets: Ticket[];
+  onTicketClick: OnTicketClick;
+}) {
   const today = new Date();
   const containerRef = useRef<HTMLDivElement>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
@@ -344,9 +350,10 @@ export function TimelineView({ tickets, slug }: { tickets: Ticket[]; slug: strin
                           <TodayLine pct={todayPct} />
 
                           {clampedWidth > 0 && (
-                            <Link
-                              href={`/projects/${slug}/tickets/${ticket.id}`}
+                            <button
+                              type="button"
                               title={`${ticket.issueKey} · ${ticket.title}`}
+                              onClick={() => onTicketClick(ticket)}
                               className={[
                                 "absolute z-20 rounded-md flex items-center gap-1.5 px-2 overflow-hidden",
                                 "hover:brightness-110 hover:shadow-md transition-all duration-150",
@@ -368,7 +375,7 @@ export function TimelineView({ tickets, slug }: { tickets: Ticket[]; slug: strin
                               <span className={`text-[11px] font-medium truncate leading-none ${textClass(ticket)}`}>
                                 {ticket.title}
                               </span>
-                            </Link>
+                            </button>
                           )}
                         </div>
                       </div>

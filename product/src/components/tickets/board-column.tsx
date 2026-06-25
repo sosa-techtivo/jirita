@@ -9,6 +9,8 @@ export interface ColumnDefinition {
   countClass: string;
 }
 
+export type OnTicketClick = (ticket: Ticket) => void;
+
 function getLastActivity(tickets: Ticket[]): string | null {
   if (tickets.length === 0) return null;
   // Prefer the most recently sounding update, in order of recency
@@ -22,11 +24,11 @@ function getLastActivity(tickets: Ticket[]): string | null {
 export function BoardColumn({
   column,
   tickets,
-  slug,
+  onTicketClick,
 }: {
   column: ColumnDefinition;
   tickets: Ticket[];
-  slug: string;
+  onTicketClick: OnTicketClick;
 }) {
   const lastActivity = getLastActivity(tickets);
 
@@ -68,7 +70,7 @@ export function BoardColumn({
           </div>
         ) : (
           tickets.map((ticket) => (
-            <TicketBoardCard key={ticket.id} ticket={ticket} slug={slug} />
+            <TicketBoardCard key={ticket.id} ticket={ticket} onTicketClick={onTicketClick} />
           ))
         )}
       </div>

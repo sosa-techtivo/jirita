@@ -1,4 +1,3 @@
-import Link from "next/link";
 import type { Ticket, TicketPriority } from "@/lib/mock-tickets";
 
 function PriorityIndicator({ priority }: { priority: TicketPriority }) {
@@ -24,16 +23,23 @@ function PriorityIndicator({ priority }: { priority: TicketPriority }) {
 
 // ── Board card (vertical, compact) ──────────────────────────────────────────
 
-export function TicketBoardCard({ ticket, slug }: { ticket: Ticket; slug: string }) {
+export function TicketBoardCard({
+  ticket,
+  onTicketClick,
+}: {
+  ticket: Ticket;
+  onTicketClick: (ticket: Ticket) => void;
+}) {
   const isBlocked = ticket.status === "blocked";
 
   return (
-    <Link
-      href={`/projects/${slug}/tickets/${ticket.id}`}
+    <button
+      type="button"
       data-ticket-id={ticket.id}
       data-ticket-status={ticket.status}
+      onClick={() => onTicketClick(ticket)}
       className={[
-        "group block rounded-lg border bg-white px-3.5 py-2.5",
+        "group w-full text-left rounded-lg border bg-white px-3.5 py-2.5",
         "shadow-sm hover:shadow-md hover:-translate-y-px transition-all duration-150",
         isBlocked
           ? "border-red-200 dark:border-red-900/60"
@@ -80,21 +86,28 @@ export function TicketBoardCard({ ticket, slug }: { ticket: Ticket; slug: string
           className="w-5 h-5 rounded-full flex-shrink-0 ring-1 ring-white dark:ring-zinc-900"
         />
       </div>
-    </Link>
+    </button>
   );
 }
 
 // ── List row (horizontal, full-width) ───────────────────────────────────────
 
-export function TicketListRow({ ticket, slug }: { ticket: Ticket; slug: string }) {
+export function TicketListRow({
+  ticket,
+  onTicketClick,
+}: {
+  ticket: Ticket;
+  onTicketClick: (ticket: Ticket) => void;
+}) {
   const isBlocked = ticket.status === "blocked";
 
   return (
-    <Link
-      href={`/projects/${slug}/tickets/${ticket.id}`}
+    <button
+      type="button"
       data-ticket-id={ticket.id}
       data-ticket-status={ticket.status}
-      className="group flex items-center gap-4 px-4 py-3.5 hover:bg-slate-50 dark:hover:bg-zinc-800/50 transition-colors"
+      onClick={() => onTicketClick(ticket)}
+      className="group w-full text-left flex items-center gap-4 px-4 py-3.5 hover:bg-slate-50 dark:hover:bg-zinc-800/50 transition-colors"
     >
       {/* Title */}
       <span className="flex-1 min-w-0 text-sm font-medium text-slate-800 dark:text-zinc-100 truncate">
@@ -133,6 +146,6 @@ export function TicketListRow({ ticket, slug }: { ticket: Ticket; slug: string }
           className="w-6 h-6 rounded-full ring-1 ring-white dark:ring-zinc-900"
         />
       </div>
-    </Link>
+    </button>
   );
 }
