@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { tickets } from "@/lib/mock-tickets";
 import type { Ticket } from "@/lib/mock-tickets";
+import { NewTicketModal } from "@/components/tickets/new-ticket-modal";
 import { ViewSwitcher, type ViewMode } from "@/components/tickets/view-switcher";
 import { FilterBar } from "@/components/tickets/filter-bar";
 import { BoardView } from "@/components/tickets/board-view";
@@ -46,11 +47,13 @@ function saveState(slug: string, state: SavedState) {
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function TicketsScreen({ slug, projectName }: { slug: string; projectName: string }) {
+  const [showNewTicket, setShowNewTicket] = useState(false);
   // Read saved state once per mount (useMemo with [] deps).
   // We keep it in sessionStorage until useEffect clears it, so strict-mode
   // double-invocation doesn't lose it on the "real" render.
   const saved = useMemo(() => readSaved(slug), []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const [ticketList, setTicketList] = useState<Ticket[]>(tickets);
   const [view, setView] = useState<ViewMode>(saved?.view ?? "board");
   const [previewTicket, setPreviewTicket] = useState<Ticket | null>(() => {
     if (!saved?.previewTicketId) return null;
@@ -105,6 +108,17 @@ export function TicketsScreen({ slug, projectName }: { slug: string; projectName
     });
   }
 
+  function handleTicketCreated(ticket: Ticket) {
+    setTicketList((prev) => [ticket, ...prev]);
+    setShowNewTicket(false);
+    setPreviewTicket(ticket);
+  }
+
+  function handlePreviewDuplicate(ticket: Ticket) {
+    setShowNewTicket(false);
+    setPreviewTicket(ticket);
+  }
+
   return (
     <div className="h-full flex flex-col">
       {/* Page header */}
@@ -123,6 +137,7 @@ export function TicketsScreen({ slug, projectName }: { slug: string; projectName
             <ViewSwitcher view={view} onChange={setView} />
             <button
               type="button"
+              onClick={() => setShowNewTicket(true)}
               className="text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-4 py-2 shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-500 dark:hover:bg-brand-600 dark:shadow-brand-500/20 whitespace-nowrap"
             >
               + New Ticket
@@ -142,15 +157,15 @@ export function TicketsScreen({ slug, projectName }: { slug: string; projectName
 
       {/* Content area */}
       {view === "board" ? (
-        <BoardView tickets={tickets} onTicketClick={openPreview} />
+        <BoardView tickets={ticketList} onTicketClick={openPreview} />
       ) : view === "calendar" ? (
-        <CalendarView tickets={tickets} onTicketClick={openPreview} />
+        <CalendarView tickets={ticketList} onTicketClick={openPreview} />
       ) : view === "timeline" ? (
-        <TimelineView tickets={tickets} onTicketClick={openPreview} />
+        <TimelineView tickets={ticketList} onTicketClick={openPreview} />
       ) : view === "insights" ? (
-        <InsightsView tickets={tickets} onTicketClick={openPreview} />
+        <InsightsView tickets={ticketList} onTicketClick={openPreview} />
       ) : (
-        <ListView tickets={tickets} onTicketClick={openPreview} />
+        <ListView tickets={ticketList} onTicketClick={openPreview} />
       )}
 
       {previewTicket !== null && (
@@ -159,6 +174,15 @@ export function TicketsScreen({ slug, projectName }: { slug: string; projectName
           slug={slug}
           onClose={closePreview}
           onBeforeNavigate={handleBeforeExpand}
+        />
+      )}
+
+      {showNewTicket && (
+        <NewTicketModal
+          slug={slug}
+          onClose={() => setShowNewTicket(false)}
+          onCreated={handleTicketCreated}
+          onPreviewDuplicate={handlePreviewDuplicate}
         />
       )}
     </div>

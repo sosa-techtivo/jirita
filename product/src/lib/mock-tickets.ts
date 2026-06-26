@@ -11,6 +11,7 @@ export interface Ticket {
   assignee: { name: string; avatar: string };
   milestone: string;
   labels: string[];
+  acceptanceCriteria?: string[];
   storyPoints?: number;
   dueDate?: string;
   commentCount?: number;
