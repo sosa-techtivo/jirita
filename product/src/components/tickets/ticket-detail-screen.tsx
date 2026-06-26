@@ -1,4 +1,3 @@
-import { ViewTransition } from "react";
 import type { ReactNode } from "react";
 import Link from "next/link";
 import type { Ticket } from "@/lib/mock-tickets";
@@ -101,9 +100,13 @@ export function TicketDetailScreen({
   const activity = getMockActivity(ticket);
 
   return (
-    <ViewTransition name="ticket-panel">
     <div className="min-h-full bg-white dark:bg-zinc-950">
       <div className="max-w-5xl mx-auto px-6 sm:px-10 py-10">
+        {/* Back navigation — top-left, always visible */}
+        <div className="mb-8">
+          <BackToTicketsButton />
+        </div>
+
         <div className="flex gap-12 items-start">
 
           {/* ── Main content ─────────────────────────────────────────────────── */}
@@ -260,14 +263,10 @@ export function TicketDetailScreen({
               </SidebarField>
             )}
 
-            <div className="mt-6">
-              <BackToTicketsButton />
-            </div>
           </aside>
 
         </div>
       </div>
     </div>
-    </ViewTransition>
   );
 }

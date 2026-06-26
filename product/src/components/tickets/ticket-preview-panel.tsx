@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ViewTransition } from "react";
 import Link from "next/link";
 import type { Ticket } from "@/lib/mock-tickets";
 import {
@@ -92,8 +91,7 @@ export function TicketPreviewPanel({
         onClick={handleClose}
       />
 
-      {/* ── Panel (named ViewTransition: morphs into the detail page) ─────── */}
-      <ViewTransition name="ticket-panel">
+      {/* ── Panel ─────────────────────────────────────────────────────────── */}
       <aside
         role="dialog"
         aria-modal="true"
@@ -299,7 +297,6 @@ export function TicketPreviewPanel({
         <div className="flex-shrink-0 px-5 py-4 border-t border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-950">
           <Link
             href={`/projects/${slug}/tickets/${ticket.id}`}
-            transitionTypes={["expand"]}
             onClick={onBeforeNavigate}
             className="flex items-center justify-center gap-2 w-full px-4 py-2.5 rounded-lg bg-brand-600 hover:bg-brand-700 dark:bg-brand-500 dark:hover:bg-brand-600 text-white text-sm font-semibold shadow-sm shadow-brand-600/20 dark:shadow-brand-500/20 transition-colors"
           >
@@ -316,7 +313,6 @@ export function TicketPreviewPanel({
           </Link>
         </div>
       </aside>
-      </ViewTransition>
     </>
   );
 }

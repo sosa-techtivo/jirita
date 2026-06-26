@@ -4,6 +4,116 @@ This changelog follows a sprint-oriented approach instead of individual commits,
 
 ---
 
+# Ticket Detail Page
+
+## Overview
+
+Implemented the full Ticket Detail page at `/projects/[slug]/tickets/[ticketId]`, replacing the previous placeholder. The page is a read-only workspace that reuses components and design language from the Quick Ticket Preview to maintain visual continuity.
+
+---
+
+## What Changed
+
+### New: `src/app/projects/[slug]/tickets/[ticketId]/page.tsx`
+
+The route now renders `<TicketDetailScreen>` instead of a placeholder. `generateStaticParams` covers all project × ticket combinations.
+
+### New: `src/components/tickets/ticket-detail-screen.tsx`
+
+Two-column server component layout:
+
+**Header**
+
+- `← Back to Tickets` button at the top-left (above the two-column layout)
+
+**Main content (left column, flex-1)**
+
+- Issue key + status badge row
+- Title (h1)
+- Description paragraph
+- Comments section — up to 3 comments rendered as speech-bubble cards with avatar, author, timestamp, and body
+- Activity timeline — vertical connected timeline of status changes and assignments
+
+**Metadata sidebar (right column, w-56, sticky top-8)**
+
+- Status badge
+- Priority badge
+- Assignee (avatar + name)
+- Milestone
+- Story Points
+- Due date (with calendar icon)
+- Labels (tag pills)
+
+### New: `src/components/tickets/ticket-ui.tsx`
+
+Shared primitives extracted to avoid duplication between the preview panel and the detail screen:
+
+- `StatusBadge` — colored pill per status
+- `PriorityBadge` — icon + label per priority
+- `LabelTag` — small tag pill
+- `getMockComments(ticket, limit)` — generates 1–3 deterministic mock comments per ticket
+- `getMockActivity(ticket)` — generates 3–5 deterministic activity events per ticket
+- `ActivityTimeline` — vertical connected timeline component
+
+### New: `src/components/tickets/back-to-tickets-button.tsx`
+
+Client component. Calls `router.back()` on click, preserving browser history. Renders as `← Back to Tickets` with a chevron icon.
+
+---
+
+# Quick Ticket Preview
+
+## Overview
+
+Added an inline Quick Ticket Preview panel to the Tickets page. Clicking a ticket card opens a slide-in panel from the right instead of navigating away, allowing users to inspect ticket details without losing their place in the board or list.
+
+---
+
+## What Changed
+
+### New: `src/components/tickets/ticket-preview-panel.tsx`
+
+A fixed right-side panel (520px wide, full viewport height).
+
+**Behaviour**
+
+- Slides in with a 250ms ease-out CSS transform on mount; slides out on close
+- Backdrop (z-40) dims the board and closes the panel on click
+- ESC key closes the panel
+- When a different ticket is selected while the panel is open, content cross-fades (150ms) rather than snapping
+
+**Header (fixed, updates immediately)**
+
+- Issue key in monospace
+- Close button (×)
+- Title
+- Status badge
+
+**Scrollable body**
+
+- Two-column metadata grid: Priority, Assignee, Milestone, Story Points, Due Date, Labels
+- Description
+- Comments (2)
+- Activity timeline
+
+**Footer (fixed)**
+
+- **Expand** button — navigates to `/projects/[slug]/tickets/[ticketId]` (Full Detail route)
+
+### `src/components/tickets-screen.tsx`
+
+- Ticket clicks now open the preview panel instead of navigating
+- `FilterBar` made fully controlled: `activeChips`, `onToggleChip`, `searchQuery`, `onSearchChange` lifted to `TicketsScreen`
+- `handleBeforeExpand` saves current state (view, filter chips, search, scroll position, open ticket ID) to sessionStorage before navigating to Full Detail
+- On mount, `useMemo` reads saved state from sessionStorage synchronously; `useEffect` removes the saved entry and restores scroll position after render
+- Restored state reopens the preview panel for the same ticket without additional navigation
+
+### `src/components/tickets/filter-bar.tsx`
+
+Converted from self-managed state to a fully controlled component. Accepts `activeChips: Set<string>`, `onToggleChip`, `searchQuery`, `onSearchChange` props. Internal chip and search state removed.
+
+---
+
 # Insights View
 
 ## Overview

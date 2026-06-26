@@ -8,7 +8,7 @@
 
 JIRITA is currently in the UI/UX MVP phase.
 
-The project includes the application shell, projects listing, project overview, and a fully featured Tickets experience with five views: Board, List, Calendar, Timeline, and Insights. All implemented screens are navigable and connected using mock data.
+The project includes the application shell, projects listing, project overview, a fully featured Tickets experience with five views, a Quick Ticket Preview panel, and a Full Ticket Detail page. All implemented screens are navigable and connected using mock data.
 
 The current objective is to complete the entire frontend experience before integrating a real backend.
 
@@ -161,12 +161,37 @@ No external chart libraries. All charts are pure SVG or CSS.
 - Cards carry `data-ticket-id` and `data-ticket-status` attributes
 - Column wrappers carry `data-column-id` and `data-droppable-id` attributes
 
+#### Quick Ticket Preview
+
+Clicking a ticket card opens a slide-in preview panel from the right (520px wide) without leaving the current view.
+
+- Panel slides in with a 250ms ease-out animation; backdrop dims the board
+- Header: issue key, title, status badge
+- Body: priority, assignee, milestone, story points, due date, labels, description, comments (2), activity timeline
+- Content cross-fades when switching between tickets while the panel is open
+- Footer: **Expand** button navigates to the Full Detail route
+- ESC key and backdrop click close the panel
+- State is fully preserved while the panel is open (view, filters, scroll)
+
+#### Full Ticket Detail Page
+
+The route `/projects/[slug]/tickets/[ticketId]` renders a complete read-only ticket workspace.
+
+- **← Back to Tickets** button at the top uses `router.back()`, preserving browser history
+- Two-column layout: main content left, metadata sidebar right
+- Main content: issue key, title, status badge, description, comments (3, in speech-bubble cards), activity timeline
+- Sidebar: status, priority, assignee, milestone, story points, due date, labels
+
+#### Navigation & State Restoration
+
+When clicking **Expand** from the preview panel, the tickets screen state is saved to sessionStorage before navigating. On return (back button), the screen restores: active view, filter chips, search query, scroll position, and the same preview ticket reopened.
+
 #### Component Architecture
 
 Components in `src/components/tickets/`:
 
 - `view-switcher.tsx` — exports `ViewMode` type (`"list" | "board" | "calendar" | "timeline" | "insights"`)
-- `filter-bar.tsx` — search + filter dropdowns + quick chips
+- `filter-bar.tsx` — controlled component; accepts `activeChips`, `onToggleChip`, `searchQuery`, `onSearchChange` props
 - `filter-chip.tsx` — standalone toggleable chip
 - `ticket-card.tsx` — exports `TicketBoardCard` and `TicketListRow`
 - `board-column.tsx` — exports `BoardColumn` and `ColumnDefinition`
@@ -175,6 +200,10 @@ Components in `src/components/tickets/`:
 - `calendar-view.tsx` — month grid, day panel, ticket detail panel
 - `timeline-view.tsx` — horizontal Gantt-style view, milestone grouping, sticky columns
 - `insights-view.tsx` — KPI cards, charts, and lists dashboard
+- `ticket-ui.tsx` — shared primitives: `StatusBadge`, `PriorityBadge`, `LabelTag`, `getMockComments`, `getMockActivity`, `ActivityTimeline`
+- `ticket-preview-panel.tsx` — slide-in right-side preview panel
+- `ticket-detail-screen.tsx` — two-column full detail layout (server component)
+- `back-to-tickets-button.tsx` — `router.back()` navigation button used on the detail page
 
 ---
 
@@ -199,10 +228,6 @@ The following features are documented as planned but do not exist in the codebas
 
 No dashboard page exists. The root route (`/`) currently redirects directly to `/projects`.
 
-### Ticket Detail
-
-The route `/projects/[slug]/tickets/[ticketId]` exists but renders a placeholder ("Ticket Detail — Coming Next"). No real content is implemented.
-
 ### Sidebar Navigation (Placeholder Links)
 
 The following sidebar items are visible but point to `href="#"` (dead links):
@@ -222,22 +247,9 @@ Only **Projects** and the per-project **Overview** and **Tickets** links are fun
 
 # Next Recommended Feature
 
-Ticket Detail page.
+Dashboard.
 
-This screen will become the central workspace of the application.
-
-It should include:
-
-- Description
-- Status (editable)
-- Assignee (editable)
-- Labels
-- Comments
-- Time Entries
-- Activity History
-- Right sidebar with editable fields
-
-The route already exists as a placeholder at `/projects/[slug]/tickets/[ticketId]`.
+A landing page at `/` (or `/dashboard`) that surfaces cross-project activity, workload, and upcoming deadlines for the signed-in user.
 
 ---
 
@@ -316,7 +328,7 @@ Current working routes:
 - `/projects`
 - `/projects/[slug]`
 - `/projects/[slug]/tickets`
-- `/projects/[slug]/tickets/[ticketId]` (placeholder)
+- `/projects/[slug]/tickets/[ticketId]`
 
 ---
 
@@ -386,7 +398,8 @@ Current known items:
 
 - `ProjectOverview` component has hardcoded "Mobile Banking App" data; it does not dynamically load project data based on slug.
 - Sidebar navigation links for Dashboard, My Work, Reports, Settings, Milestones, Notes, Team use `href="#"` and are non-functional.
-- Filter chips and search inputs are UI-only; no filtering logic is wired up.
+- Filter chips and search inputs on the Tickets page are UI-only; chips toggle visually but do not filter the ticket list.
+- Ticket Detail page is read-only; no editing of any field is implemented.
 - `kanban-board.tsx`, `kanban-column.tsx`, `kanban-card.tsx` are dead code (superseded by the `tickets/` component set).
 
 Planned future work:
@@ -418,9 +431,9 @@ Complete every major screen required for a usable project management platform be
 
 Priority order:
 
-1. Ticket Detail
-2. Dashboard
-3. Authentication
+1. Dashboard
+2. Authentication
+3. Ticket editing (inline status, assignee, priority changes)
 4. Backlog / Sprint Planning
 5. Reports
 6. Teams
