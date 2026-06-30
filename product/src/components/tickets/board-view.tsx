@@ -19,9 +19,16 @@ const COLUMNS: ColumnDefinition[] = [
   {
     id: "in-progress",
     label: "In Progress",
-    statuses: ["in-progress", "blocked"],
+    statuses: ["in-progress"],
     dotClass: "bg-amber-400 dark:bg-amber-500",
     countClass: "bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400",
+  },
+  {
+    id: "blocked",
+    label: "Blocked",
+    statuses: ["blocked"],
+    dotClass: "bg-red-400 dark:bg-red-500",
+    countClass: "bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-400",
   },
   {
     id: "in-review",
