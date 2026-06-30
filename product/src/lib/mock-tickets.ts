@@ -13,6 +13,7 @@ export interface Ticket {
   labels: string[];
   acceptanceCriteria?: string[];
   storyPoints?: number;
+  hours?: number;
   dueDate?: string;
   commentCount?: number;
   attachmentCount?: number;
@@ -34,6 +35,7 @@ export const tickets: Ticket[] = [
     milestone: "App Store Submission",
     labels: ["Enhancement"],
     storyPoints: 8,
+    hours: 16,
     dueDate: "Jul 20",
     commentCount: 3,
     updatedAt: "Updated 3 days ago",
@@ -49,6 +51,7 @@ export const tickets: Ticket[] = [
     milestone: "App Store Submission",
     labels: ["Design", "Dark Mode"],
     storyPoints: 3,
+    hours: 6,
     dueDate: "Aug 3",
     updatedAt: "Updated 4 days ago",
   },
@@ -63,6 +66,7 @@ export const tickets: Ticket[] = [
     milestone: "Security Audit",
     labels: ["Security"],
     storyPoints: 5,
+    hours: 8,
     dueDate: "Jul 15",
     commentCount: 1,
     updatedAt: "Updated 5 days ago",
@@ -80,6 +84,7 @@ export const tickets: Ticket[] = [
     milestone: "App Store Submission",
     labels: ["Design"],
     storyPoints: 5,
+    hours: 8,
     dueDate: "Jul 8",
     commentCount: 2,
     updatedAt: "Updated today",
@@ -95,6 +100,7 @@ export const tickets: Ticket[] = [
     milestone: "App Store Submission",
     labels: ["Marketing"],
     storyPoints: 3,
+    hours: 4,
     dueDate: "Jul 25",
     updatedAt: "Updated 2 days ago",
   },
@@ -109,12 +115,13 @@ export const tickets: Ticket[] = [
     milestone: "Beta Release",
     labels: ["Accessibility", "Compliance"],
     storyPoints: 8,
+    hours: 12,
     dueDate: "Jul 10",
     commentCount: 4,
     updatedAt: "Updated 1 day ago",
   },
 
-  // ── IN PROGRESS (includes blocked) ───────────────────────
+  // ── IN PROGRESS ──────────────────────────────────────────
   {
     id: "transaction-history-pagination",
     issueKey: "MBA-4",
@@ -126,6 +133,7 @@ export const tickets: Ticket[] = [
     milestone: "Beta Release",
     labels: ["Performance"],
     storyPoints: 5,
+    hours: 8,
     dueDate: "Jun 30",
     commentCount: 3,
     updatedAt: "Updated yesterday",
@@ -141,6 +149,7 @@ export const tickets: Ticket[] = [
     milestone: "Security Audit",
     labels: ["Security", "Compliance"],
     storyPoints: 13,
+    hours: 24,
     dueDate: "Jun 28",
     commentCount: 7,
     attachmentCount: 2,
@@ -157,6 +166,7 @@ export const tickets: Ticket[] = [
     milestone: "Security Audit",
     labels: ["Integration"],
     storyPoints: 8,
+    hours: 16,
     dueDate: "Jun 27",
     commentCount: 5,
     updatedAt: "Updated 6 days ago",
@@ -174,6 +184,7 @@ export const tickets: Ticket[] = [
     milestone: "Beta Release",
     labels: ["Notifications"],
     storyPoints: 5,
+    hours: 8,
     dueDate: "Jun 26",
     commentCount: 2,
     updatedAt: "Updated 3 hours ago",
@@ -189,6 +200,7 @@ export const tickets: Ticket[] = [
     milestone: "Security Audit",
     labels: ["Security", "API"],
     storyPoints: 3,
+    hours: 4,
     dueDate: "Jun 30",
     attachmentCount: 1,
     updatedAt: "Updated 3 hours ago",
@@ -206,6 +218,7 @@ export const tickets: Ticket[] = [
     milestone: "Beta Release",
     labels: ["Security", "Onboarding"],
     storyPoints: 5,
+    hours: 6,
     dueDate: "Jun 20",
     commentCount: 4,
     updatedAt: "Updated yesterday",
@@ -221,6 +234,7 @@ export const tickets: Ticket[] = [
     milestone: "Beta Release",
     labels: ["Bug", "iOS"],
     storyPoints: 3,
+    hours: 4,
     dueDate: "Jun 18",
     commentCount: 6,
     updatedAt: "Updated 12 minutes ago",

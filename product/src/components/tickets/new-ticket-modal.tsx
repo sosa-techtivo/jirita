@@ -260,6 +260,7 @@ export function NewTicketModal({
   const [milestone, setMilestone]       = useState(MILESTONES[0]);
   const [labels, setLabels]             = useState<string[]>([]);
   const [dueDate, setDueDate]           = useState("");
+  const [hours, setHours]               = useState("");
   const [moreOpen, setMoreOpen]         = useState(false);
 
   const titleRef      = useRef<HTMLInputElement>(null);
@@ -322,6 +323,7 @@ export function NewTicketModal({
       labels,
       acceptanceCriteria: filledCriteria.length > 0 ? filledCriteria : undefined,
       dueDate:     dueDate ? formatDueDate(dueDate) : undefined,
+      hours:       hours ? (parseInt(hours, 10) >= 0 ? parseInt(hours, 10) : undefined) : undefined,
       updatedAt:   "Just now",
     };
   };
@@ -661,20 +663,44 @@ export function NewTicketModal({
                       <LabelPicker selected={labels} onToggle={toggleLabel} />
                     </div>
 
-                    {/* Due Date */}
-                    <div className="pb-1">
-                      <label className={FIELD_LABEL}>
-                        Due Date
-                        <span className="ml-2 font-normal normal-case tracking-normal text-slate-300 dark:text-zinc-700">
-                          optional
-                        </span>
-                      </label>
-                      <input
-                        type="date"
-                        value={dueDate}
-                        onChange={(e) => setDueDate(e.target.value)}
-                        className={INPUT + " w-auto"}
-                      />
+                    {/* Due Date + Hours */}
+                    <div className="grid grid-cols-2 gap-3 pb-1">
+                      <div>
+                        <label className={FIELD_LABEL}>
+                          Due Date
+                          <span className="ml-2 font-normal normal-case tracking-normal text-slate-300 dark:text-zinc-700">
+                            optional
+                          </span>
+                        </label>
+                        <input
+                          type="date"
+                          value={dueDate}
+                          onChange={(e) => setDueDate(e.target.value)}
+                          className={INPUT}
+                        />
+                      </div>
+                      <div>
+                        <label className={FIELD_LABEL}>
+                          Hours
+                          <span className="ml-2 font-normal normal-case tracking-normal text-slate-300 dark:text-zinc-700">
+                            optional
+                          </span>
+                        </label>
+                        <div className="relative flex items-center">
+                          <input
+                            type="number"
+                            min="0"
+                            step="1"
+                            placeholder="8"
+                            value={hours}
+                            onChange={(e) => setHours(e.target.value)}
+                            className={INPUT + " pr-8"}
+                          />
+                          <span className="absolute right-3 text-[12px] text-slate-400 dark:text-zinc-600 pointer-events-none select-none">
+                            h
+                          </span>
+                        </div>
+                      </div>
                     </div>
 
                   </div>

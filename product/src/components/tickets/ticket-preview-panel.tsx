@@ -178,6 +178,13 @@ export function TicketPreviewPanel({
               </div>
             )}
 
+            {t.hours !== undefined && (
+              <div>
+                <p className={FIELD_LABEL}>Hours</p>
+                <p className={FIELD_VALUE}>{t.hours} h</p>
+              </div>
+            )}
+
             {t.dueDate && (
               <div>
                 <p className={FIELD_LABEL}>Due date</p>

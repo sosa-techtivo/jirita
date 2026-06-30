@@ -103,6 +103,9 @@ export function getMockActivity(ticket: Ticket): MockActivity[] {
     { label: `Assigned to ${ticket.assignee.name}`,  timeAgo: "8 days ago" },
     { label: `Added to "${ticket.milestone}"`,       timeAgo: "7 days ago" },
   ];
+  if (ticket.hours !== undefined) {
+    events.push({ label: `Hours set to ${ticket.hours} h`,  timeAgo: "6 days ago" });
+  }
   if (ticket.status !== "backlog" && ticket.status !== "to-do") {
     events.push({ label: `Status → ${STATUS_LABEL[ticket.status]}`, timeAgo: "3 days ago" });
   }

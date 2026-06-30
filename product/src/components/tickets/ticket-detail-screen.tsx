@@ -475,6 +475,61 @@ function EditableSidebarStoryPoints({
   );
 }
 
+// ── Editable: Sidebar Hours ───────────────────────────────────────────────────
+
+function EditableSidebarHours({
+  value,
+  onChange,
+}: {
+  value: number | undefined;
+  onChange: (v: number | undefined) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value?.toString() ?? "");
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => { if (editing) ref.current?.focus(); }, [editing]);
+
+  const save = () => {
+    const n = parseInt(draft, 10);
+    onChange(isNaN(n) || n < 0 ? undefined : n);
+    setEditing(false);
+  };
+  const cancel = () => { setDraft(value?.toString() ?? ""); setEditing(false); };
+  const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") { e.preventDefault(); save(); }
+    if (e.key === "Escape") cancel();
+  };
+
+  return (
+    <SidebarField label="Hours">
+      {editing ? (
+        <div className="flex items-center gap-1.5">
+          <input
+            ref={ref}
+            type="number"
+            min="0"
+            step="1"
+            className={INPUT_BASE + " w-20"}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={save}
+            onKeyDown={onKey}
+          />
+          <span className="text-[12px] text-slate-500 dark:text-zinc-400 flex-shrink-0">h</span>
+        </div>
+      ) : (
+        <div
+          className="group flex items-center gap-1.5 cursor-pointer"
+          onClick={() => { setDraft(value?.toString() ?? ""); setEditing(true); }}
+        >
+          <span>{value !== undefined ? `${value} h` : "—"}</span>
+          <button className={EDIT_BTN} aria-label="Edit hours"><PencilIcon /></button>
+        </div>
+      )}
+    </SidebarField>
+  );
+}
+
 // ── Editable: Sidebar Due Date ────────────────────────────────────────────────
 
 function EditableSidebarDueDate({
@@ -1660,6 +1715,10 @@ export function TicketDetailScreen({
   const [ticket, setTicket] = useState<Ticket | undefined>(
     () => initialTicket ?? getRegisteredTicket(ticketId)
   );
+  const [activityLog, setActivityLog] = useState<Array<{ label: string; timeAgo: string }>>(() => {
+    const t = initialTicket ?? getRegisteredTicket(ticketId);
+    return t ? getMockActivity(t) : [];
+  });
 
   if (!ticket) {
     return <NotFound ticketId={ticketId} slug={slug} />;
@@ -1669,8 +1728,11 @@ export function TicketDetailScreen({
     setTicket((prev) => prev ? { ...prev, [key]: value } : prev);
   };
 
+  const addActivity = (label: string) => {
+    setActivityLog((prev) => [{ label, timeAgo: "Just now" }, ...prev]);
+  };
+
   const comments = getMockComments(ticket, 3);
-  const activity = getMockActivity(ticket);
 
   return (
     <div className="min-h-full bg-white dark:bg-zinc-950">
@@ -1762,12 +1824,12 @@ export function TicketDetailScreen({
 
             <CollapsibleSection
               title="Activity"
-              badge={`· ${activity.length} updates`}
+              badge={`· ${activityLog.length} updates`}
               defaultOpen={true}
             >
               <div className="pb-2">
-                {activity.map((a, i) => {
-                  const isLast = i === activity.length - 1;
+                {activityLog.map((a, i) => {
+                  const isLast = i === activityLog.length - 1;
                   return (
                     <div key={i} className="flex gap-3.5">
                       <div className="flex flex-col items-center w-4 flex-shrink-0">
@@ -1818,6 +1880,19 @@ export function TicketDetailScreen({
             <EditableSidebarStoryPoints
               value={ticket.storyPoints}
               onChange={(v) => update("storyPoints", v)}
+            />
+
+            <EditableSidebarHours
+              value={ticket.hours}
+              onChange={(next) => {
+                const prev = ticket.hours;
+                update("hours", next);
+                if (next !== prev) {
+                  const from = prev !== undefined ? `${prev} h` : "—";
+                  const to   = next !== undefined ? `${next} h` : "—";
+                  addActivity(`${ticket.assignee.name} changed Hours  ${from} → ${to}`);
+                }
+              }}
             />
 
             <EditableSidebarDueDate
