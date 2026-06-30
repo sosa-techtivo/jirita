@@ -10,10 +10,13 @@ const pinnedProjects = projects.slice(0, 3);
 export function Sidebar({
   activeSlug,
   activeSection = "overview",
+  activePage,
 }: {
   activeSlug?: string;
   activeSection?: "overview" | "tickets";
+  activePage?: string;
 }) {
+  const isMyWork = activePage === "my-work";
   return (
     <aside className="hidden md:flex w-60 flex-shrink-0 border-r border-slate-200 bg-white flex-col dark:border-zinc-700/60 dark:bg-zinc-950">
       <div className="px-4 py-3 border-b border-slate-100 dark:border-zinc-800">
@@ -53,20 +56,36 @@ export function Sidebar({
           </svg>
           Dashboard
         </a>
-        <Link href="/projects" className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md bg-brand-50 text-brand-700 font-medium dark:bg-brand-500/10 dark:text-brand-400">
+        <Link
+          href="/projects"
+          className={[
+            "flex items-center gap-2.5 px-2.5 py-1.5 rounded-md",
+            !isMyWork
+              ? "bg-brand-50 text-brand-700 font-medium dark:bg-brand-500/10 dark:text-brand-400"
+              : "text-slate-600 hover:bg-slate-100 dark:text-zinc-400 dark:hover:bg-zinc-900",
+          ].join(" ")}
+        >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
             <path d="M3 7l4-4h6l4 4" />
             <rect x="3" y="7" width="18" height="13" rx="2" />
           </svg>
           Projects
         </Link>
-        <a href="#" className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-slate-600 hover:bg-slate-100 dark:text-zinc-400 dark:hover:bg-zinc-900">
+        <Link
+          href="/my-work"
+          className={[
+            "flex items-center gap-2.5 px-2.5 py-1.5 rounded-md",
+            isMyWork
+              ? "bg-brand-50 text-brand-700 font-medium dark:bg-brand-500/10 dark:text-brand-400"
+              : "text-slate-600 hover:bg-slate-100 dark:text-zinc-400 dark:hover:bg-zinc-900",
+          ].join(" ")}
+        >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
             <circle cx="12" cy="8" r="4" />
             <path d="M4 21c0-4 4-6 8-6s8 2 8 6" />
           </svg>
           My Work
-        </a>
+        </Link>
         <a href="#" className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-slate-600 hover:bg-slate-100 dark:text-zinc-400 dark:hover:bg-zinc-900">
           <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
             <path d="M4 19V9M12 19V5M20 19v-7" />
