@@ -501,7 +501,7 @@ function EditableSidebarHours({
   };
 
   return (
-    <SidebarField label="Hours">
+    <SidebarField label="Estimated">
       {editing ? (
         <div className="flex items-center gap-1.5">
           <input
@@ -1666,6 +1666,451 @@ function DevelopmentSection() {
   );
 }
 
+// ── Time Tracking ─────────────────────────────────────────────────────────────
+
+interface TimeEntry {
+  id:           string;
+  hours:        number;
+  comment:      string;
+  date:         string;
+  authorName:   string;
+  authorAvatar: string;
+}
+
+const MOCK_TIME_ENTRIES: TimeEntry[] = [
+  { id: "te-1", hours: 2, comment: "Implemented login validation", date: "Today",     authorName: "Marcus Lee", authorAvatar: "https://i.pravatar.cc/64?img=12" },
+  { id: "te-2", hours: 3, comment: "API integration",              date: "Yesterday", authorName: "Marcus Lee", authorAvatar: "https://i.pravatar.cc/64?img=12" },
+  { id: "te-3", hours: 6, comment: "Initial implementation",       date: "Jun 27",    authorName: "Marcus Lee", authorAvatar: "https://i.pravatar.cc/64?img=12" },
+];
+
+const TODAY_ISO = "2026-06-30";
+
+function formatDateDisplay(iso: string): string {
+  const today = new Date(`${TODAY_ISO}T00:00:00`);
+  const d     = new Date(`${iso}T00:00:00`);
+  const diff  = Math.round((today.getTime() - d.getTime()) / 86_400_000);
+  if (diff === 0) return "Today";
+  if (diff === 1) return "Yesterday";
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+function LogTimeModal({
+  assignee,
+  onClose,
+  onSubmit,
+}: {
+  assignee: { name: string; avatar: string };
+  onClose:  () => void;
+  onSubmit: (entry: Omit<TimeEntry, "id">) => void;
+}) {
+  const [hrsStr,  setHrsStr]  = useState("");
+  const [minsStr, setMinsStr] = useState("");
+  const [comment, setComment] = useState("");
+  const [date,    setDate]    = useState(TODAY_ISO);
+
+  const hrsRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    hrsRef.current?.focus();
+    const onKey = (e: globalThis.KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const h          = Math.max(0, parseInt(hrsStr  || "0", 10) || 0);
+  const m          = Math.max(0, Math.min(59, parseInt(minsStr || "0", 10) || 0));
+  const totalHours = h + m / 60;
+  const canSubmit  = totalHours > 0;
+
+  function handleSubmit() {
+    if (!canSubmit) return;
+    onSubmit({
+      hours:        Math.round(totalHours * 10) / 10,
+      comment:      comment.trim(),
+      date:         formatDateDisplay(date),
+      authorName:   assignee.name,
+      authorAvatar: assignee.avatar,
+    });
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div
+        className="absolute inset-0 bg-black/40 dark:bg-black/60"
+        onClick={onClose}
+        aria-hidden="true"
+      />
+      <div
+        className={[
+          "relative w-full max-w-sm rounded-2xl border shadow-2xl",
+          "bg-white dark:bg-zinc-900",
+          "border-slate-200 dark:border-zinc-700",
+          "shadow-black/15 dark:shadow-black/50",
+        ].join(" ")}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="log-time-title"
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 pt-5 pb-4 border-b border-slate-100 dark:border-zinc-800">
+          <h2 id="log-time-title" className="text-[15px] font-bold text-slate-900 dark:text-zinc-50">
+            Log Time
+          </h2>
+          <button
+            onClick={onClose}
+            className="w-6 h-6 rounded-md flex items-center justify-center text-slate-400 dark:text-zinc-500 hover:text-slate-600 dark:hover:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors"
+            aria-label="Close"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+              <path strokeLinecap="round" d="M18 6L6 18M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="px-5 py-4 space-y-4">
+          {/* Time */}
+          <div>
+            <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600 mb-1.5">
+              Worked Time
+            </label>
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-1.5">
+                <input
+                  ref={hrsRef}
+                  type="number"
+                  min="0"
+                  max="99"
+                  placeholder="0"
+                  value={hrsStr}
+                  onChange={(e) => setHrsStr(e.target.value)}
+                  onKeyDown={(e: KeyboardEvent<HTMLInputElement>) => { if (e.key === "Enter") handleSubmit(); }}
+                  className="bg-white dark:bg-zinc-950 text-[13px] font-medium text-slate-800 dark:text-zinc-200 border border-slate-200 dark:border-zinc-700 rounded-md px-2 py-1 outline-none focus:border-brand-500 dark:focus:border-brand-500 focus:ring-1 focus:ring-brand-500/30 w-16 text-center"
+                />
+                <span className="text-[13px] text-slate-500 dark:text-zinc-400 font-medium">h</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="number"
+                  min="0"
+                  max="59"
+                  placeholder="0"
+                  value={minsStr}
+                  onChange={(e) => setMinsStr(e.target.value)}
+                  onKeyDown={(e: KeyboardEvent<HTMLInputElement>) => { if (e.key === "Enter") handleSubmit(); }}
+                  className="bg-white dark:bg-zinc-950 text-[13px] font-medium text-slate-800 dark:text-zinc-200 border border-slate-200 dark:border-zinc-700 rounded-md px-2 py-1 outline-none focus:border-brand-500 dark:focus:border-brand-500 focus:ring-1 focus:ring-brand-500/30 w-16 text-center"
+                />
+                <span className="text-[13px] text-slate-500 dark:text-zinc-400 font-medium">min</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Date */}
+          <div>
+            <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600 mb-1.5">
+              Date
+            </label>
+            <input
+              type="date"
+              value={date}
+              max={TODAY_ISO}
+              onChange={(e) => setDate(e.target.value)}
+              className={INPUT_BASE}
+            />
+          </div>
+
+          {/* Comment */}
+          <div>
+            <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600 mb-1.5">
+              Comment{" "}
+              <span className="font-normal normal-case tracking-normal text-slate-300 dark:text-zinc-700">
+                (optional)
+              </span>
+            </label>
+            <textarea
+              rows={3}
+              placeholder="What did you work on?"
+              value={comment}
+              onChange={(e) => setComment(e.target.value)}
+              className={
+                "w-full resize-none text-[13px] font-medium text-slate-800 dark:text-zinc-200 " +
+                "bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-700 rounded-md px-2.5 py-2 outline-none " +
+                "focus:border-brand-500 dark:focus:border-brand-500 focus:ring-1 focus:ring-brand-500/30 " +
+                "placeholder:text-slate-300 dark:placeholder:text-zinc-700"
+              }
+            />
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-end gap-2 px-5 pb-5">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-3.5 py-1.5 text-[13px] font-medium text-slate-600 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800 rounded-lg transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={handleSubmit}
+            disabled={!canSubmit}
+            className={[
+              "px-3.5 py-1.5 text-[13px] font-semibold rounded-lg transition-all",
+              canSubmit
+                ? "bg-brand-500 hover:bg-brand-600 text-white shadow-sm shadow-brand-500/30 cursor-pointer"
+                : "bg-slate-100 dark:bg-zinc-800 text-slate-400 dark:text-zinc-600 cursor-not-allowed",
+            ].join(" ")}
+          >
+            Log Time
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TimeHistoryModal({
+  entries,
+  estimatedHours,
+  onClose,
+}: {
+  entries:        TimeEntry[];
+  estimatedHours: number | undefined;
+  onClose:        () => void;
+}) {
+  const totalLogged = entries.reduce((s, e) => s + e.hours, 0);
+  const remaining   = estimatedHours !== undefined ? Math.max(0, estimatedHours - totalLogged) : undefined;
+
+  useEffect(() => {
+    const onKey = (e: globalThis.KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/40 dark:bg-black/60" onClick={onClose} aria-hidden="true" />
+      <div
+        className="relative w-full max-w-md rounded-2xl border shadow-2xl bg-white dark:bg-zinc-900 border-slate-200 dark:border-zinc-700 shadow-black/15 dark:shadow-black/50 overflow-hidden"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="hist-modal-title"
+      >
+        <div className="flex items-center justify-between px-5 pt-5 pb-4 border-b border-slate-100 dark:border-zinc-800">
+          <h2 id="hist-modal-title" className="text-[15px] font-bold text-slate-900 dark:text-zinc-50">
+            Time History
+          </h2>
+          <button
+            onClick={onClose}
+            className="w-6 h-6 rounded-md flex items-center justify-center text-slate-400 dark:text-zinc-500 hover:text-slate-600 dark:hover:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors"
+            aria-label="Close"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+              <path strokeLinecap="round" d="M18 6L6 18M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        <div className="px-5 pt-4 pb-4 border-b border-slate-100 dark:border-zinc-800">
+          <div className="flex items-center gap-6">
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600 mb-0.5">Logged</p>
+              <p className="text-[18px] font-bold text-slate-800 dark:text-zinc-100 tabular-nums leading-none">{totalLogged}h</p>
+            </div>
+            {estimatedHours !== undefined && (
+              <>
+                <div className="w-px h-8 bg-slate-200 dark:bg-zinc-800 flex-shrink-0" />
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600 mb-0.5">Estimated</p>
+                  <p className="text-[18px] font-bold text-slate-500 dark:text-zinc-400 tabular-nums leading-none">{estimatedHours}h</p>
+                </div>
+                {remaining !== undefined && (
+                  <>
+                    <div className="w-px h-8 bg-slate-200 dark:bg-zinc-800 flex-shrink-0" />
+                    <div>
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600 mb-0.5">Remaining</p>
+                      <p className={`text-[18px] font-bold tabular-nums leading-none ${remaining === 0 ? "text-emerald-600 dark:text-emerald-400" : "text-slate-800 dark:text-zinc-100"}`}>
+                        {remaining}h
+                      </p>
+                    </div>
+                  </>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+
+        <div className="overflow-y-auto max-h-72 px-5 py-3">
+          {entries.length === 0 ? (
+            <p className="text-[13px] text-slate-400 dark:text-zinc-600 text-center py-6">No entries yet.</p>
+          ) : (
+            <div>
+              {entries.map((entry, i) => (
+                <div
+                  key={entry.id}
+                  className={`flex items-start gap-3.5 py-3 ${i < entries.length - 1 ? "border-b border-slate-100 dark:border-zinc-800/60" : ""}`}
+                >
+                  <div className="flex flex-col items-center flex-shrink-0 w-3.5 mt-0.5">
+                    <div className="w-1.5 h-1.5 rounded-full bg-brand-400 dark:bg-brand-500 ring-2 ring-white dark:ring-zinc-900" />
+                    {i < entries.length - 1 && (
+                      <div className="w-px flex-1 bg-slate-200 dark:bg-zinc-800 mt-1 min-h-[20px]" />
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-3 mb-0.5">
+                      <span className="text-[12px] font-semibold text-slate-500 dark:text-zinc-400">{entry.date}</span>
+                      <span className="text-[14px] font-bold text-slate-800 dark:text-zinc-100 tabular-nums flex-shrink-0">{entry.hours}h</span>
+                    </div>
+                    {entry.comment && (
+                      <p className="text-[13px] text-slate-600 dark:text-zinc-400 leading-snug">
+                        &ldquo;{entry.comment}&rdquo;
+                      </p>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center justify-end px-5 pb-5 pt-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-3.5 py-1.5 text-[13px] font-medium text-slate-600 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800 rounded-lg transition-colors"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TimeTrackingSection({
+  entries,
+  estimatedHours,
+  assignee,
+  onAddEntry,
+}: {
+  entries:        TimeEntry[];
+  estimatedHours: number | undefined;
+  assignee:       { name: string; avatar: string };
+  onAddEntry:     (entry: TimeEntry) => void;
+}) {
+  const [logModal,  setLogModal]  = useState(false);
+  const [histModal, setHistModal] = useState(false);
+
+  const totalLogged = entries.reduce((s, e) => s + e.hours, 0);
+  const pct         = estimatedHours ? Math.min(100, Math.round((totalLogged / estimatedHours) * 100)) : 0;
+  const variance    = estimatedHours !== undefined ? totalLogged - estimatedHours : null;
+  const isOver      = variance !== null && variance > 0;
+  // When over: brand fills the estimated portion, amber fills the rest
+  const brandPct    = isOver && estimatedHours
+    ? Math.round((estimatedHours / totalLogged) * 100)
+    : pct;
+
+  return (
+    <>
+      <CollapsibleSection
+        title="Time Tracking"
+        defaultOpen={true}
+        headerAction={
+          <button
+            type="button"
+            onClick={() => setLogModal(true)}
+            className="flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-md bg-brand-500 text-white hover:bg-brand-600 transition-colors shadow-sm shadow-brand-500/30"
+          >
+            <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24" aria-hidden="true">
+              <path strokeLinecap="round" d="M12 4v16m8-8H4" />
+            </svg>
+            Log Time
+          </button>
+        }
+      >
+        {/* Single summary line: "11h logged / 8h estimated" */}
+        <p className="text-[13px] mb-1.5">
+          <span className="font-semibold text-slate-700 dark:text-zinc-200 tabular-nums">{totalLogged}h</span>
+          <span className="text-slate-400 dark:text-zinc-600"> logged</span>
+          {estimatedHours !== undefined && (
+            <>
+              <span className="text-slate-300 dark:text-zinc-700 mx-1.5">/</span>
+              <span className="font-semibold text-slate-500 dark:text-zinc-400 tabular-nums">{estimatedHours}h</span>
+              <span className="text-slate-400 dark:text-zinc-600"> estimated</span>
+            </>
+          )}
+        </p>
+
+        {/* Over-estimate label — only shown when over */}
+        {isOver && variance !== null && (
+          <p className="text-[11px] font-medium text-amber-600 dark:text-amber-400 mb-2">
+            +{variance}h over estimate
+          </p>
+        )}
+
+        {/* Smart progress bar: brand up to estimate, amber for overage */}
+        {estimatedHours !== undefined && (
+          <div className="relative h-[4px] rounded-full bg-slate-100 dark:bg-zinc-800 overflow-hidden mb-3">
+            {isOver ? (
+              <div className="absolute inset-0 flex">
+                <div
+                  className="h-full bg-brand-500 flex-shrink-0 transition-all duration-300"
+                  style={{ width: `${brandPct}%` }}
+                />
+                <div className="h-full bg-amber-400 flex-1 transition-all duration-300" />
+              </div>
+            ) : (
+              <div
+                className="h-full bg-brand-500 rounded-full transition-all duration-300"
+                style={{ width: `${pct}%` }}
+              />
+            )}
+          </div>
+        )}
+        {estimatedHours === undefined && <div className="mb-2" />}
+
+        {/* "View N entries →" link */}
+        {entries.length > 0 ? (
+          <button
+            type="button"
+            onClick={() => setHistModal(true)}
+            className="text-[12px] font-medium text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300 flex items-center gap-1 transition-colors"
+          >
+            View {entries.length} {entries.length === 1 ? "entry" : "entries"}
+            <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true">
+              <path strokeLinecap="round" d="M9 18l6-6-6-6" />
+            </svg>
+          </button>
+        ) : (
+          <p className="text-[12px] text-slate-400 dark:text-zinc-600">No time logged yet.</p>
+        )}
+      </CollapsibleSection>
+
+      {logModal && (
+        <LogTimeModal
+          assignee={assignee}
+          onClose={() => setLogModal(false)}
+          onSubmit={(entry) => {
+            onAddEntry({ ...entry, id: `te-${Date.now()}` });
+            setLogModal(false);
+          }}
+        />
+      )}
+
+      {histModal && (
+        <TimeHistoryModal
+          entries={entries}
+          estimatedHours={estimatedHours}
+          onClose={() => setHistModal(false)}
+        />
+      )}
+    </>
+  );
+}
+
 // ── Not-found state ───────────────────────────────────────────────────────────
 
 function NotFound({ ticketId, slug }: { ticketId: string; slug: string }) {
@@ -1719,6 +2164,7 @@ export function TicketDetailScreen({
     const t = initialTicket ?? getRegisteredTicket(ticketId);
     return t ? getMockActivity(t) : [];
   });
+  const [loggedEntries, setLoggedEntries] = useState<TimeEntry[]>(MOCK_TIME_ENTRIES);
 
   if (!ticket) {
     return <NotFound ticketId={ticketId} slug={slug} />;
@@ -1730,6 +2176,18 @@ export function TicketDetailScreen({
 
   const addActivity = (label: string) => {
     setActivityLog((prev) => [{ label, timeAgo: "Just now" }, ...prev]);
+  };
+
+  const totalLogged = loggedEntries.reduce((s, e) => s + e.hours, 0);
+  const remaining   = (ticket.hours ?? 0) - totalLogged;
+
+  const addEntry = (entry: TimeEntry) => {
+    setLoggedEntries((prev) => [entry, ...prev]);
+    const hrs   = `${entry.hours}h`;
+    const label = entry.comment
+      ? `${entry.authorName} logged ${hrs} — ${entry.comment}`
+      : `${entry.authorName} logged ${hrs}`;
+    addActivity(label);
   };
 
   const comments = getMockComments(ticket, 3);
@@ -1775,6 +2233,26 @@ export function TicketDetailScreen({
                   </>
                 )}
               </p>
+              {ticket.hours !== undefined && (
+                <div className="mt-2 flex items-center gap-3.5 flex-wrap">
+                  <span className="text-[12px] text-slate-400 dark:text-zinc-600">
+                    Estimated{" "}
+                    <span className="font-semibold text-slate-600 dark:text-zinc-300">{ticket.hours}h</span>
+                  </span>
+                  <span className="text-slate-200 dark:text-zinc-800 select-none" aria-hidden="true">·</span>
+                  <span className="text-[12px] text-slate-400 dark:text-zinc-600">
+                    Logged{" "}
+                    <span className="font-semibold text-slate-600 dark:text-zinc-300">{totalLogged}h</span>
+                  </span>
+                  <span className="text-slate-200 dark:text-zinc-800 select-none" aria-hidden="true">·</span>
+                  <span className="text-[12px] text-slate-400 dark:text-zinc-600">
+                    Remaining{" "}
+                    <span className={`font-semibold ${remaining <= 0 && ticket.hours !== undefined ? "text-amber-600 dark:text-amber-400" : "text-slate-600 dark:text-zinc-300"}`}>
+                      {Math.max(0, remaining)}h
+                    </span>
+                  </span>
+                </div>
+              )}
             </header>
 
             <CollapsibleSection title="Description" defaultOpen={true}>
@@ -1789,6 +2267,13 @@ export function TicketDetailScreen({
             <AttachmentsSection />
 
             <DevelopmentSection />
+
+            <TimeTrackingSection
+              entries={loggedEntries}
+              estimatedHours={ticket.hours}
+              assignee={ticket.assignee}
+              onAddEntry={addEntry}
+            />
 
             <CollapsibleSection
               title="Comments"
@@ -1890,7 +2375,7 @@ export function TicketDetailScreen({
                 if (next !== prev) {
                   const from = prev !== undefined ? `${prev} h` : "—";
                   const to   = next !== undefined ? `${next} h` : "—";
-                  addActivity(`${ticket.assignee.name} changed Hours  ${from} → ${to}`);
+                  addActivity(`${ticket.assignee.name} changed Estimated Hours ${from} → ${to}`);
                 }
               }}
             />
