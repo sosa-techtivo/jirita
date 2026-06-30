@@ -1,4 +1,4 @@
-> Last Updated: June 2026
+> Last Updated: June 30, 2026
 
 ---
 
@@ -8,9 +8,9 @@
 
 JIRITA is currently in the UI/UX MVP phase.
 
-The project includes the application shell, projects listing, project overview, a fully featured Tickets experience with five views, a Quick Ticket Preview panel, and a Full Ticket Detail page. All implemented screens are navigable and connected using mock data.
+The application now includes the full shell, projects listing, project overview, a five-view Tickets experience, Quick Ticket Preview, Full Ticket Detail with Time Tracking, a cross-project Dashboard, a personal My Work workspace, a Reports module, and a Settings section. All implemented screens are navigable and connected using mock data.
 
-The current objective is to complete the entire frontend experience before integrating a real backend.
+The current objective is to complete the remaining frontend experience before integrating a real backend.
 
 ---
 
@@ -93,6 +93,7 @@ Five independently scrolling columns:
 - In Progress (includes blocked tickets)
 - In Review
 - Done
+- Blocked (dedicated column for blocked tickets)
 
 Each column:
 
@@ -108,7 +109,7 @@ Each board card:
 
 #### List View
 
-Tickets grouped by the same 5 status sections. Each section has a labeled header with a count and a horizontal rule. Rows show title, blocked indicator, priority (if high), milestone, due date, and assignee avatar.
+Tickets grouped by the same status sections. Each section has a labeled header with a count and a horizontal rule. Rows show title, blocked indicator, priority (if high), milestone, due date, and assignee avatar.
 
 #### Calendar View
 
@@ -148,19 +149,6 @@ Project-level analytics dashboard computed from the existing ticket dataset.
 
 No external chart libraries. All charts are pure SVG or CSS.
 
-#### UX
-
-- Cards hover with elevation lift and micro-translate (`hover:-translate-y-px`)
-- Smooth 150ms transitions
-- Full Dark Mode and Light Mode support across all views
-- Horizontal scroll in Board and Timeline; vertical scroll in List, Calendar, Insights
-- Board columns fill viewport height; each scrolls independently
-
-#### Future Drag & Drop Readiness
-
-- Cards carry `data-ticket-id` and `data-ticket-status` attributes
-- Column wrappers carry `data-column-id` and `data-droppable-id` attributes
-
 #### Quick Ticket Preview
 
 Clicking a ticket card opens a slide-in preview panel from the right (520px wide) without leaving the current view.
@@ -175,35 +163,103 @@ Clicking a ticket card opens a slide-in preview panel from the right (520px wide
 
 #### Full Ticket Detail Page
 
-The route `/projects/[slug]/tickets/[ticketId]` renders a complete read-only ticket workspace.
+The route `/projects/[slug]/tickets/[ticketId]` renders a complete ticket workspace.
 
 - **← Back to Tickets** button at the top uses `router.back()`, preserving browser history
 - Two-column layout: main content left, metadata sidebar right
-- Main content: issue key, title, status badge, description, comments (3, in speech-bubble cards), activity timeline
-- Sidebar: status, priority, assignee, milestone, story points, due date, labels
+- Main content: issue key, title, status badge, description, comments (3), activity timeline
+- Sidebar: editable status, priority, assignee, milestone, story points, due date, labels, Estimated hours
 
 #### Navigation & State Restoration
 
 When clicking **Expand** from the preview panel, the tickets screen state is saved to sessionStorage before navigating. On return (back button), the screen restores: active view, filter chips, search query, scroll position, and the same preview ticket reopened.
 
-#### Component Architecture
+### Hours & Time Tracking
 
-Components in `src/components/tickets/`:
+Completed.
 
-- `view-switcher.tsx` — exports `ViewMode` type (`"list" | "board" | "calendar" | "timeline" | "insights"`)
-- `filter-bar.tsx` — controlled component; accepts `activeChips`, `onToggleChip`, `searchQuery`, `onSearchChange` props
-- `filter-chip.tsx` — standalone toggleable chip
-- `ticket-card.tsx` — exports `TicketBoardCard` and `TicketListRow`
-- `board-column.tsx` — exports `BoardColumn` and `ColumnDefinition`
-- `board-view.tsx` — groups tickets into columns, handles horizontal layout
-- `list-view.tsx` — groups tickets by status section, handles vertical scroll
-- `calendar-view.tsx` — month grid, day panel, ticket detail panel
-- `timeline-view.tsx` — horizontal Gantt-style view, milestone grouping, sticky columns
-- `insights-view.tsx` — KPI cards, charts, and lists dashboard
-- `ticket-ui.tsx` — shared primitives: `StatusBadge`, `PriorityBadge`, `LabelTag`, `getMockComments`, `getMockActivity`, `ActivityTimeline`
-- `ticket-preview-panel.tsx` — slide-in right-side preview panel
-- `ticket-detail-screen.tsx` — two-column full detail layout (server component)
-- `back-to-tickets-button.tsx` — `router.back()` navigation button used on the detail page
+Time Tracking is integrated into the Ticket Detail page.
+
+Includes:
+
+- **`TimeTrackingSection`** (collapsible, expanded by default) below the Development section
+  - Compact summary line: `Xh logged / Yh estimated`
+  - Conditional variance text: `+Zh over estimate` in amber, shown only when over
+  - Smart 2-segment 4px progress bar: brand fills estimated portion, amber fills overage
+  - `View N entries →` link opens `TimeHistoryModal`
+- **`LogTimeModal`**: hours + minutes inputs, date picker, comment textarea; submit appends a `TimeEntry` and fires `addActivity()`
+- **`TimeHistoryModal`**: full entry list with summary stats (Logged / Estimated / Remaining), scrollable timeline-dot entry list
+- Ticket header stats row: Estimated / Logged / Remaining (shown when `ticket.hours` is set)
+- Sidebar "Estimated" field (renamed from "Hours")
+- Mock initial entries: 11h total (2h today, 3h yesterday, 6h Jun 27)
+
+### Dashboard
+
+Completed.
+
+Route: `/` (root). The root no longer redirects to `/projects`.
+
+Includes:
+
+- Header: "Good morning, Marcus 👋" + date
+- Quick actions: `+ New Ticket`, `Projects`, `Reports`
+- 4 KPI cards: Assigned (14), Hours Burn (212/320h with progress bar), Blocked (11, red), Due Today (3)
+- Insights band: 4 items with level-coded icons (critical / warning / ok)
+- Two-column layout (`xl:grid-cols-[1fr_320px]`):
+  - Left: My Active Work (5 tickets, click-to-preview) + Recent Activity
+  - Right: Projects at Risk + Team Workload (progress bars) + Upcoming Deadlines
+- Ticket quick-preview panel on row click (reuses `TicketPreviewPanel`)
+
+### My Work
+
+Completed.
+
+Route: `/my-work`. Personal home screen for every team member.
+
+Includes:
+
+- Greeting header with user avatar
+- KPI cards: Open tickets, Due today, Hours logged, Blocked
+- Focus Mode toggle: collapses non-focus tickets for distraction-free view
+- Active tickets list with inline status, priority, and due date
+- Recent activity feed
+- Ticket quick-preview panel on row click
+
+### Reports
+
+Completed.
+
+Route: `/reports`.
+
+Includes:
+
+- KPI summary row: Projects, Active Tickets, Estimated Hours, Completed Hours, Blocked, Completed This Month, Overdue
+- Hours by Person: horizontal bar chart with avatars
+- Project Health table: status badges, progress bars, ticket counts
+- Team Workload: capacity bars per member
+- Insights band reused from `ReportStatusBar`
+
+### Settings
+
+Completed.
+
+Routes: `/settings` (redirects to `/settings/general`) and `/settings/[section]` for 7 sections.
+
+Sections:
+
+- **General**: Workspace name, logo, timezone, language, working days (day picker)
+- **People**: Team member list with role badges, invite button, default role and capacity fields
+- **Projects**: Chip pickers for statuses, priorities, labels, and ticket types (+ Add buttons)
+- **Time Tracking**: Hours per day, weekly capacity, estimation defaults, rounding preferences
+- **Notifications**: Email, desktop, and digest toggles with per-channel granularity
+- **Integrations**: GitHub (connected, 3 repos), Slack and Google Calendar (Connect buttons), Jira Import (Coming Soon)
+- **Danger Zone**: Archive Workspace (amber) and Delete Workspace (red) actions with warning messaging
+
+Navigation:
+- Left sub-nav lists all 7 sections; active section highlighted
+- Breadcrumb: `Settings / Section Name`
+- `/settings` redirects server-side to `/settings/general`
+- Sidebar Settings link goes directly to `/settings/general`
 
 ---
 
@@ -224,32 +280,26 @@ The following features are documented as planned but do not exist in the codebas
 - Forgot Password screen
 - Session persistence
 
-### Dashboard
-
-No dashboard page exists. The root route (`/`) currently redirects directly to `/projects`.
-
-### Sidebar Navigation (Placeholder Links)
+### Sidebar Navigation (Remaining Dead Links)
 
 The following sidebar items are visible but point to `href="#"` (dead links):
 
-- Dashboard
-- My Work
-- Reports
-- Settings
 - Milestones (per-project)
 - Notes (per-project)
 - Reports (per-project)
 - Team (per-project)
 
-Only **Projects** and the per-project **Overview** and **Tickets** links are functional.
+All top-level navigation items (Dashboard, My Work, Projects, Reports, Settings) are now functional.
 
 ---
 
 # Next Recommended Feature
 
-Dashboard.
+Authentication.
 
-A landing page at `/` (or `/dashboard`) that surfaces cross-project activity, workload, and upcoming deadlines for the signed-in user.
+A login screen at `/login` that allows users to sign in. Since the app uses mock data, this can be a mock authentication flow with hardcoded credentials, setting the foundation for real auth later.
+
+Alternatively: Ticket editing — inline status, assignee, and priority changes directly in the ticket detail page.
 
 ---
 
@@ -257,7 +307,6 @@ A landing page at `/` (or `/dashboard`) that surfaces cross-project activity, wo
 
 ## Project Management
 
-- Ticket Detail
 - Backlog
 - Sprint Planning
 - Releases
@@ -267,26 +316,22 @@ A landing page at `/` (or `/dashboard`) that surfaces cross-project activity, wo
 
 ## Collaboration
 
-- Comments
+- Comments (editable)
 - Mentions
-- Activity Timeline
+- Real-time Activity Timeline
 - Notifications
 
 ## Reporting
 
-- Reports
 - Velocity
 - Burndown
 - Cycle Time
-- Workload
 
 ## Administration
 
 - Teams
-- Members
 - Roles
 - Permissions
-- Organization Settings
 
 ---
 
@@ -307,7 +352,7 @@ Not installed:
 
 Current data source:
 
-- Mock data only (`/product/src/lib/mock-projects.ts`, `/product/src/lib/mock-tickets.ts`)
+- Mock data only (`/product/src/lib/mock-projects.ts`, `/product/src/lib/mock-tickets.ts`, module-level constants in screen components)
 
 Backend integration will happen after the UI reaches MVP completeness.
 
@@ -325,10 +370,21 @@ Every new feature must be integrated into the application's navigation so that a
 
 Current working routes:
 
+- `/` → redirects to `/` (Dashboard)
+- `/my-work`
 - `/projects`
 - `/projects/[slug]`
 - `/projects/[slug]/tickets`
 - `/projects/[slug]/tickets/[ticketId]`
+- `/reports`
+- `/settings` → redirects to `/settings/general`
+- `/settings/general`
+- `/settings/people`
+- `/settings/projects`
+- `/settings/time-tracking`
+- `/settings/notifications`
+- `/settings/integrations`
+- `/settings/danger-zone`
 
 ---
 
@@ -338,12 +394,13 @@ Current working routes:
 
 Primary inspiration:
 
-- Jira
+- Linear
 
 Secondary inspiration:
 
-- Linear
+- Jira
 - GitHub
+- Notion
 
 Goals:
 
@@ -397,10 +454,12 @@ Favor reusable components over duplicated implementations.
 Current known items:
 
 - `ProjectOverview` component has hardcoded "Mobile Banking App" data; it does not dynamically load project data based on slug.
-- Sidebar navigation links for Dashboard, My Work, Reports, Settings, Milestones, Notes, Team use `href="#"` and are non-functional.
 - Filter chips and search inputs on the Tickets page are UI-only; chips toggle visually but do not filter the ticket list.
-- Ticket Detail page is read-only; no editing of any field is implemented.
+- Ticket Detail page fields are mostly read-only; no inline editing is implemented beyond status transitions.
 - `kanban-board.tsx`, `kanban-column.tsx`, `kanban-card.tsx` are dead code (superseded by the `tickets/` component set).
+- `settings-screen.tsx` (`SettingsScreen` hub component) is retained but no longer rendered — `/settings` redirects directly to `/settings/general`.
+- Settings toggles and fields are visual only; no state persists between page loads.
+- Per-project sidebar links (Milestones, Notes, Reports, Team) use `href="#"` and are non-functional.
 
 Planned future work:
 
@@ -429,15 +488,12 @@ Expected high-change areas:
 
 Complete every major screen required for a usable project management platform before connecting real services.
 
-Priority order:
+Remaining priority order:
 
-1. Dashboard
-2. Authentication
-3. Ticket editing (inline status, assignee, priority changes)
-4. Backlog / Sprint Planning
-5. Reports
-6. Teams
-7. Settings
+1. Authentication
+2. Ticket editing (inline status, assignee, priority changes)
+3. Backlog / Sprint Planning
+4. Per-project Reports, Milestones, Notes, Team pages
 
 ---
 

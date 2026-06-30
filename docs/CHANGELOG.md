@@ -4,6 +4,264 @@ This changelog follows a sprint-oriented approach instead of individual commits,
 
 ---
 
+# Settings
+
+## Overview
+
+Implemented the Settings section of JIRITA. `/settings` redirects server-side to `/settings/general`. Seven section pages share a consistent two-column layout: a 180px sticky left sub-nav listing all sections, and a right content area with mock settings fields.
+
+---
+
+## What Changed
+
+### New: `src/app/settings/page.tsx`
+
+Server-side redirect to `/settings/general` via `next/navigation`. No UI rendered.
+
+### New: `src/app/settings/[section]/page.tsx`
+
+Dynamic route. Generates static params for all 7 known slugs. Includes `generateMetadata` for per-section page titles. Passes `activePage="settings"` to `AppShell` so the sidebar Settings link remains highlighted across all section pages.
+
+### New: `src/components/settings-section-screen.tsx`
+
+Client component. Two-column layout shared by all section pages.
+
+**Left nav (180px, sticky):** Lists all 7 sections. Active section highlighted in brand colour; Danger Zone uses red accents. Each item shows the section icon.
+
+**Right content area:** Section header (icon + title + description), then section-specific mock content.
+
+**Utility sub-components:** `Toggle` (on/off pill), `SelectField` (visual dropdown), `TextField`, `NumberField`, `SettingRow` (label + optional hint + right-side control), `SettingGroup` (titled bordered card), `Chip` (colored badge).
+
+**Section content:**
+
+- `General` — Workspace name (text input), logo (preview + change link), timezone and language (select fields), working days (interactive day-picker buttons Mon–Sun)
+- `People` — Team member list (avatar + name + role badge + more button), invite member link, default role and capacity fields
+- `Projects` — Chip pickers for statuses, priorities, labels, and ticket types, each with an `+ Add` affordance
+- `Time Tracking` — Hours per day and weekly capacity (number inputs), estimation unit and visibility (select + toggle), rounding increment and round-up default (select + toggle)
+- `Notifications` — Per-channel toggles for email (assigned, mentioned, status changes, digest), desktop (enable, mentions-only), and digest scheduling (day + time selects)
+- `Integrations` — GitHub shown as connected (3 repos listed, Disconnect link); Slack and Google Calendar as available (Connect buttons); Jira Import as Coming Soon (disabled badge)
+- `Danger Zone` — Amber advisory banner, Archive Workspace action (amber button), Delete Workspace action (red button) with permanent-action copy
+
+### New: `src/components/settings-screen.tsx`
+
+Hub component with 7 section cards in a 2-column grid (Danger Zone spans full width). No longer rendered after the redirect change, but retained as a component. Each card shows icon, title, description, and sub-item list.
+
+### Modified: `src/components/sidebar.tsx`
+
+- Settings `<a href="#">` → `<Link href="/settings/general">`
+- Added `isSettings = activePage === "settings"` active state
+- `isProjects` updated to exclude `isSettings`
+
+---
+
+# Dashboard
+
+## Overview
+
+Implemented the Dashboard landing page at `/`. The root route no longer redirects to `/projects`. The Dashboard surfaces cross-project KPIs, team activity, at-risk projects, workload, and upcoming deadlines in a two-column layout.
+
+---
+
+## What Changed
+
+### New: `src/components/dashboard-screen.tsx`
+
+Client component. Module-level mock data for 5 active tickets, 3 at-risk projects, 5 team workload entries, 4 insights, and 4 recent activity entries.
+
+**Sub-components:** `DashKpiCard` (supports optional progress bar and accent colour), `InsightsBand` (4-item band with level-coded icons), `Card` (section container), `ActiveTicketRow` (clickable ticket row), `RiskBadge`, `WorkloadRow` (progress bar per person).
+
+**Layout:** `xl:grid-cols-[1fr_320px]` two-column grid.
+
+- **Header:** "Good morning, Marcus 👋" + "Tuesday, June 30" + quick action buttons (`+ New Ticket`, `Projects`, `Reports`)
+- **KPI row:** Assigned (14) · Hours Burn (212/320h, 66%, accent brand progress bar) · Blocked (11, red) · Due Today (3)
+- **Insights band:** 4 items — critical blocked alert, warning overdue alert, ok sprint velocity, warning capacity warning
+- **Left column:** My Active Work (5 tickets with status badges + click-to-preview) · Recent Activity feed
+- **Right column:** Projects at Risk (3 projects with risk badges) · Team Workload (capacity bars) · Upcoming Deadlines (sorted by date)
+- **Ticket preview:** `TicketPreviewPanel` opens on active-work row click
+
+### Modified: `src/app/page.tsx`
+
+Replaced the previous `redirect("/projects")` with a full server page rendering `<DashboardScreen />` inside `<AppShell activePage="dashboard">`.
+
+### Modified: `src/components/sidebar.tsx`
+
+- Dashboard `<a href="#">` → `<Link href="/">` with `isDashboard` active state
+
+---
+
+# My Work
+
+## Overview
+
+Implemented the My Work module — a personal daily workspace for every team member. Focused on the signed-in user's assigned tickets, logged hours, and activity.
+
+---
+
+## What Changed
+
+### New: `src/app/my-work/page.tsx`
+
+Route wrapper. Renders `<MyWorkScreen />` inside `<AppShell activePage="my-work">`.
+
+### New: `src/components/my-work-screen.tsx`
+
+Client component. Persona: Marcus Lee (avatar `pravatar img=12`).
+
+**KPI cards:** Open tickets · Due today · Hours logged this week · Blocked tickets
+
+**Focus Mode:** Toggle button collapses all tickets except those flagged `focus: true`, giving a distraction-free view of the day's priority work. Button label and icon update to reflect state.
+
+**Ticket list (`FocusTicketRow`):** Status badge, priority dot, title, due date chip, and assignee avatar. Clicking a row opens `TicketPreviewPanel`.
+
+**Recent Activity feed:** 5 entries with JSX `ReactNode` action fields for rich formatting.
+
+### Modified: `src/components/sidebar.tsx`
+
+- My Work `<a href="#">` → `<Link href="/my-work">` with `isMyWork` active state
+
+---
+
+# Reports
+
+## Overview
+
+Implemented the Reports module — a cross-project analytics dashboard driven entirely by mock data. No external chart libraries used.
+
+---
+
+## What Changed
+
+### New: `src/app/reports/page.tsx`
+
+Route wrapper. Renders `<ReportsScreen />` inside `<AppShell activePage="reports">`.
+
+### New: `src/components/reports-screen.tsx`
+
+Client component.
+
+**KPI summary row:** Projects · Active Tickets · Estimated Hours · Completed Hours · Blocked Tickets · Completed This Month · Overdue Tickets
+
+**Hours by Person:** Horizontal bar chart with avatars, sorted by logged hours descending. Bar width relative to highest-logged member.
+
+**Project Health table:** One row per project — name, status badge (On Track / At Risk / Blocked), progress bar (completed/total tickets), ticket counts, and due date.
+
+**Team Workload:** Capacity bar per member showing logged vs. maximum hours. Colour-coded (brand → amber → red) based on utilisation percentage.
+
+**`ReportStatusBar` (exported):** Reusable horizontal progress bar component, also used by the Dashboard.
+
+### Modified: `src/components/sidebar.tsx`
+
+- Reports `<a href="#">` → `<Link href="/reports">` with `isReports` active state
+
+---
+
+# Time Tracking
+
+## Overview
+
+Implemented Time Tracking as a first-class feature within the Ticket Detail page. Users can log time against a ticket, view logged history, and track estimated vs. actual hours. Three rounds of UX refinement followed the initial implementation.
+
+---
+
+## What Changed
+
+### New data model (`ticket-detail-screen.tsx`)
+
+```ts
+interface TimeEntry {
+  id: string;
+  hours: number;
+  comment: string;
+  date: string;
+  authorName: string;
+  authorAvatar: string;
+}
+```
+
+Mock initial entries: 11h total — 2h today, 3h yesterday, 6h Jun 27.
+
+### New: `TimeTrackingSection`
+
+Collapsible section (expanded by default) below the Development section in the ticket detail.
+
+**Summary line:** `11h logged / 16h estimated`
+
+**Variance text:** `+Zh over estimate` in amber — rendered only when `totalLogged > estimatedHours`.
+
+**Progress bar (4px, 2-segment):**
+- Brand-500 segment fills the estimated portion
+- Amber segment (`flex-1`) fills overage when over budget
+- When under budget: single brand segment at `pct%` width
+
+**Footer:** `View N entries →` opens `TimeHistoryModal`. `+ Log Time` opens `LogTimeModal`.
+
+### New: `LogTimeModal`
+
+Full-screen backdrop modal.
+
+Fields: hours (number), minutes (number), date (defaults to today, `input[type=date]`), comment (textarea).
+
+On submit: appends a new `TimeEntry` to `loggedEntries` state and calls `addActivity()` with a descriptive log string. ESC key handled via `globalThis.KeyboardEvent` to avoid conflict with React's `KeyboardEvent` type import.
+
+### New: `TimeHistoryModal`
+
+Full-screen backdrop modal listing all entries.
+
+Header stats: Logged / Estimated / Remaining. Entry list with timeline-dot pattern: avatar, author name, date, hours badge, comment text.
+
+### Modified: `TicketDetailScreen`
+
+- State: `loggedEntries`, `totalLogged`, `remaining`, `addEntry`
+- Header: added Estimated / Logged / Remaining stat row below the date/due paragraph (conditional on `ticket.hours !== undefined`)
+- Sidebar: `EditableSidebarHours` label changed from "Hours" to "Estimated"; removed duplicate Logged / Remaining sidebar fields; `addActivity` text updated to "changed Estimated Hours"
+
+---
+
+# Tickets — Blocked Column & Filter Dropdowns
+
+## Overview
+
+Added a dedicated Blocked column to the Board view and wired the filter bar dropdowns with interactive state. Minor UX improvements to ticket cards and column layouts.
+
+---
+
+## What Changed
+
+### Board View
+
+- Added **Blocked** as a sixth column (red accent), surfacing blocked tickets in their own dedicated space
+- Column definitions updated in `board-view.tsx`
+
+### Filter Bar
+
+- Assigned, Priority, Milestone, and Status dropdown buttons now open a simple popover with selectable options (visual state, not wired to ticket data)
+- Active filter count badge appears on dropdowns when a selection is made
+
+---
+
+# Tickets — Hours Estimation Field
+
+## Overview
+
+Added an Estimated Hours field to the Ticket metadata sidebar, making hours a visible, editable field in the ticket detail page.
+
+---
+
+## What Changed
+
+### Modified: `src/components/tickets/ticket-detail-screen.tsx`
+
+- Added `EditableSidebarHours` component — click-to-edit number input for the `hours` field
+- `Ticket` type extended with optional `hours?: number`
+- Mock ticket data updated: selected tickets have pre-set hour estimates
+
+### Modified: `src/lib/mock-tickets.ts`
+
+- `hours` field added to `Ticket` type
+- Representative tickets given hour estimates ranging from 4h to 24h
+
+---
+
 # Ticket Detail Page
 
 ## Overview

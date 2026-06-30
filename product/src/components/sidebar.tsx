@@ -3,6 +3,7 @@ import Link from "next/link";
 import { projects } from "@/lib/mock-projects";
 import { statusMeta } from "@/components/status-badge";
 
+
 const avatar = (id: number) => `https://i.pravatar.cc/64?img=${id}`;
 
 const pinnedProjects = projects.slice(0, 3);
@@ -13,10 +14,14 @@ export function Sidebar({
   activePage,
 }: {
   activeSlug?: string;
-  activeSection?: "overview" | "tickets";
+  activeSection?: "overview" | "tickets" | "notes";
   activePage?: string;
 }) {
-  const isMyWork = activePage === "my-work";
+  const isDashboard = activePage === "dashboard";
+  const isMyWork    = activePage === "my-work";
+  const isReports   = activePage === "reports";
+  const isSettings  = activePage === "settings";
+  const isProjects  = !isDashboard && !isMyWork && !isReports && !isSettings;
   return (
     <aside className="hidden md:flex w-60 flex-shrink-0 border-r border-slate-200 bg-white flex-col dark:border-zinc-700/60 dark:bg-zinc-950">
       <div className="px-4 py-3 border-b border-slate-100 dark:border-zinc-800">
@@ -47,7 +52,15 @@ export function Sidebar({
       </div>
 
       <nav className="px-2 pt-4 space-y-0.5 text-sm">
-        <a href="#" className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-slate-600 hover:bg-slate-100 dark:text-zinc-400 dark:hover:bg-zinc-900">
+        <Link
+          href="/"
+          className={[
+            "flex items-center gap-2.5 px-2.5 py-1.5 rounded-md",
+            isDashboard
+              ? "bg-brand-50 text-brand-700 font-medium dark:bg-brand-500/10 dark:text-brand-400"
+              : "text-slate-600 hover:bg-slate-100 dark:text-zinc-400 dark:hover:bg-zinc-900",
+          ].join(" ")}
+        >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
             <rect x="3" y="3" width="7" height="9" rx="1" />
             <rect x="14" y="3" width="7" height="5" rx="1" />
@@ -55,12 +68,12 @@ export function Sidebar({
             <rect x="3" y="16" width="7" height="5" rx="1" />
           </svg>
           Dashboard
-        </a>
+        </Link>
         <Link
           href="/projects"
           className={[
             "flex items-center gap-2.5 px-2.5 py-1.5 rounded-md",
-            !isMyWork
+            isProjects
               ? "bg-brand-50 text-brand-700 font-medium dark:bg-brand-500/10 dark:text-brand-400"
               : "text-slate-600 hover:bg-slate-100 dark:text-zinc-400 dark:hover:bg-zinc-900",
           ].join(" ")}
@@ -86,19 +99,35 @@ export function Sidebar({
           </svg>
           My Work
         </Link>
-        <a href="#" className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-slate-600 hover:bg-slate-100 dark:text-zinc-400 dark:hover:bg-zinc-900">
+        <Link
+          href="/reports"
+          className={[
+            "flex items-center gap-2.5 px-2.5 py-1.5 rounded-md",
+            isReports
+              ? "bg-brand-50 text-brand-700 font-medium dark:bg-brand-500/10 dark:text-brand-400"
+              : "text-slate-600 hover:bg-slate-100 dark:text-zinc-400 dark:hover:bg-zinc-900",
+          ].join(" ")}
+        >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
             <path d="M4 19V9M12 19V5M20 19v-7" />
           </svg>
           Reports
-        </a>
-        <a href="#" className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-slate-600 hover:bg-slate-100 dark:text-zinc-400 dark:hover:bg-zinc-900">
+        </Link>
+        <Link
+          href="/settings/general"
+          className={[
+            "flex items-center gap-2.5 px-2.5 py-1.5 rounded-md",
+            isSettings
+              ? "bg-brand-50 text-brand-700 font-medium dark:bg-brand-500/10 dark:text-brand-400"
+              : "text-slate-600 hover:bg-slate-100 dark:text-zinc-400 dark:hover:bg-zinc-900",
+          ].join(" ")}
+        >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
             <circle cx="12" cy="12" r="3" />
             <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09a1.65 1.65 0 00-1-1.51 1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09a1.65 1.65 0 001.51-1 1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33h0a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51h0a1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82v0a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z" />
           </svg>
           Settings
-        </a>
+        </Link>
       </nav>
 
       <div className="mt-5 px-3">
@@ -143,9 +172,16 @@ export function Sidebar({
                   >
                     Tickets
                   </Link>
-                  <a href="#" className="block px-2 py-1 rounded-md text-slate-500 hover:bg-white text-[13px] dark:text-zinc-500 dark:hover:bg-zinc-800/60">
+                  <Link
+                    href={`/projects/${project.slug}/notes`}
+                    className={
+                      activeSection === "notes"
+                        ? "block px-2 py-1 rounded-md bg-white text-brand-700 font-semibold text-[13px] shadow-sm shadow-slate-100 dark:bg-zinc-800 dark:text-brand-400"
+                        : "block px-2 py-1 rounded-md text-slate-500 hover:bg-white text-[13px] dark:text-zinc-500 dark:hover:bg-zinc-800/60"
+                    }
+                  >
                     Notes
-                  </a>
+                  </Link>
                   <a href="#" className="block px-2 py-1 rounded-md text-slate-500 hover:bg-white text-[13px] dark:text-zinc-500 dark:hover:bg-zinc-800/60">
                     Reports
                   </a>
