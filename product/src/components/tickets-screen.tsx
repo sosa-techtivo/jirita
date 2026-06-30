@@ -152,7 +152,23 @@ export function TicketsScreen({ slug, projectName }: { slug: string; projectName
           onSearchChange={setSearchQuery}
         />
 
-        <div className="mt-4 border-b border-slate-200 dark:border-zinc-800" />
+        {/* Quick stats */}
+        <div className="flex items-center gap-1.5 mt-3 text-xs text-slate-500 dark:text-zinc-500">
+          <span className="font-semibold text-slate-700 dark:text-zinc-300">{ticketList.length}</span>
+          <span>Tickets</span>
+          <span className="mx-1 text-slate-200 dark:text-zinc-700">·</span>
+          <span className="font-semibold text-slate-700 dark:text-zinc-300">
+            {ticketList.reduce((s, t) => s + (t.hours ?? 0), 0)}h
+          </span>
+          <span>Estimated</span>
+          <span className="mx-1 text-slate-200 dark:text-zinc-700">·</span>
+          <span className="font-semibold text-red-600 dark:text-red-400">
+            {ticketList.filter((t) => t.status === "blocked").length}
+          </span>
+          <span>Blocked</span>
+        </div>
+
+        <div className="mt-3 border-b border-slate-200 dark:border-zinc-800" />
       </div>
 
       {/* Content area */}

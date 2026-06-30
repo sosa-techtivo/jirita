@@ -543,6 +543,30 @@ export function NewTicketModal({
               </button>
             </div>
 
+            {/* Hours */}
+            <div>
+              <label className={FIELD_LABEL}>
+                Hours
+                <span className="ml-2 font-normal normal-case tracking-normal text-slate-300 dark:text-zinc-700">
+                  optional
+                </span>
+              </label>
+              <div className="relative flex items-center w-36">
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  placeholder="8"
+                  value={hours}
+                  onChange={(e) => setHours(e.target.value)}
+                  className={INPUT + " pr-8"}
+                />
+                <span className="absolute right-3 text-[12px] text-slate-400 dark:text-zinc-600 pointer-events-none select-none">
+                  h
+                </span>
+              </div>
+            </div>
+
             {/* Possible Duplicates */}
             {duplicates.length > 0 && (
               <div className="rounded-xl border border-amber-200 dark:border-amber-900/50 bg-amber-50/60 dark:bg-amber-950/15 overflow-hidden">
@@ -663,44 +687,20 @@ export function NewTicketModal({
                       <LabelPicker selected={labels} onToggle={toggleLabel} />
                     </div>
 
-                    {/* Due Date + Hours */}
-                    <div className="grid grid-cols-2 gap-3 pb-1">
-                      <div>
-                        <label className={FIELD_LABEL}>
-                          Due Date
-                          <span className="ml-2 font-normal normal-case tracking-normal text-slate-300 dark:text-zinc-700">
-                            optional
-                          </span>
-                        </label>
-                        <input
-                          type="date"
-                          value={dueDate}
-                          onChange={(e) => setDueDate(e.target.value)}
-                          className={INPUT}
-                        />
-                      </div>
-                      <div>
-                        <label className={FIELD_LABEL}>
-                          Hours
-                          <span className="ml-2 font-normal normal-case tracking-normal text-slate-300 dark:text-zinc-700">
-                            optional
-                          </span>
-                        </label>
-                        <div className="relative flex items-center">
-                          <input
-                            type="number"
-                            min="0"
-                            step="1"
-                            placeholder="8"
-                            value={hours}
-                            onChange={(e) => setHours(e.target.value)}
-                            className={INPUT + " pr-8"}
-                          />
-                          <span className="absolute right-3 text-[12px] text-slate-400 dark:text-zinc-600 pointer-events-none select-none">
-                            h
-                          </span>
-                        </div>
-                      </div>
+                    {/* Due Date */}
+                    <div className="pb-1">
+                      <label className={FIELD_LABEL}>
+                        Due Date
+                        <span className="ml-2 font-normal normal-case tracking-normal text-slate-300 dark:text-zinc-700">
+                          optional
+                        </span>
+                      </label>
+                      <input
+                        type="date"
+                        value={dueDate}
+                        onChange={(e) => setDueDate(e.target.value)}
+                        className={INPUT}
+                      />
                     </div>
 
                   </div>

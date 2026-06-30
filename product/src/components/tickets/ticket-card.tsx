@@ -78,13 +78,20 @@ export function TicketBoardCard({
             {ticket.milestone}
           </span>
         </div>
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={ticket.assignee.avatar}
-          alt={ticket.assignee.name}
-          title={ticket.assignee.name}
-          className="w-5 h-5 rounded-full flex-shrink-0 ring-1 ring-white dark:ring-zinc-900"
-        />
+        <div className="flex items-center gap-1.5 flex-shrink-0">
+          {ticket.hours !== undefined && (
+            <span className="text-[11px] font-medium text-slate-400 dark:text-zinc-500">
+              {ticket.hours}h
+            </span>
+          )}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={ticket.assignee.avatar}
+            alt={ticket.assignee.name}
+            title={ticket.assignee.name}
+            className="w-5 h-5 rounded-full ring-1 ring-white dark:ring-zinc-900"
+          />
+        </div>
       </div>
     </button>
   );
@@ -135,6 +142,12 @@ export function TicketListRow({
               <path d="M16 2v4M8 2v4M3 10h18" />
             </svg>
             {ticket.dueDate}
+          </span>
+        )}
+
+        {ticket.hours !== undefined && (
+          <span className="hidden sm:block text-xs font-medium text-slate-400 dark:text-zinc-500">
+            {ticket.hours}h
           </span>
         )}
 

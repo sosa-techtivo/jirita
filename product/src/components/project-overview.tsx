@@ -1,5 +1,13 @@
+"use client";
+
 import Link from "next/link";
+import { useState } from "react";
 import type { ReactNode } from "react";
+import { NewTicketModal } from "@/components/tickets/new-ticket-modal";
+import { tickets as ALL_MOCK_TICKETS } from "@/lib/mock-tickets";
+import type { Ticket } from "@/lib/mock-tickets";
+
+const MOCK_ESTIMATED_HOURS = ALL_MOCK_TICKETS.reduce((sum, t) => sum + (t.hours ?? 0), 0);
 
 type MilestoneStatus = "on-track" | "at-risk" | "not-started";
 
@@ -57,7 +65,7 @@ const milestoneStyles: Record<
   "not-started": { bar: "bg-slate-400 dark:bg-zinc-600", label: "text-slate-400 dark:text-zinc-500", due: "text-slate-400 dark:text-zinc-500" },
 };
 
-const milestones: Milestone[] = [
+const INITIAL_MILESTONES: Milestone[] = [
   {
     id: "beta-release",
     name: "Beta Release",
@@ -87,7 +95,7 @@ const milestones: Milestone[] = [
   },
 ];
 
-const blockedTickets: BlockedTicket[] = [
+const INITIAL_BLOCKED_TICKETS: BlockedTicket[] = [
   {
     id: "blocked-pci",
     title: "Resolve PCI compliance gap in card storage",
@@ -102,7 +110,7 @@ const blockedTickets: BlockedTicket[] = [
   },
 ];
 
-const inProgressTickets: ActiveTicket[] = [
+const INITIAL_IN_PROGRESS: ActiveTicket[] = [
   {
     id: "active-pagination",
     title: "Implement transaction history pagination",
@@ -125,7 +133,7 @@ const inProgressTickets: ActiveTicket[] = [
   },
 ];
 
-const activity: ActivityEntry[] = [
+const INITIAL_ACTIVITY: ActivityEntry[] = [
   {
     id: "activity-1",
     avatar: avatar(12),
@@ -196,6 +204,58 @@ const team: TeamMember[] = [
 ];
 
 export function ProjectOverview({ slug = "mobile-banking-app" }: { slug?: string }) {
+  const [showNewTicket, setShowNewTicket] = useState(false);
+  const [milestones, setMilestones] = useState<Milestone[]>(INITIAL_MILESTONES);
+  const [inProgressTickets, setInProgressTickets] = useState<ActiveTicket[]>(INITIAL_IN_PROGRESS);
+  const [activity, setActivity] = useState<ActivityEntry[]>(INITIAL_ACTIVITY);
+  const [openCount, setOpenCount] = useState(29);
+
+  function handleTicketCreated(ticket: Ticket) {
+    setShowNewTicket(false);
+
+    // Update milestone ticket total if the ticket has a matching milestone
+    if (ticket.milestone) {
+      setMilestones((prev) =>
+        prev.map((m) =>
+          m.name === ticket.milestone ? { ...m, ticketsTotal: m.ticketsTotal + 1 } : m
+        )
+      );
+    }
+
+    // Add to in-progress list if the status warrants it
+    if (ticket.status === "in-progress") {
+      setInProgressTickets((prev) => [
+        { id: ticket.id, title: ticket.title, assignee: ticket.assignee },
+        ...prev,
+      ]);
+    }
+
+    // Increment open count for any non-done ticket
+    if (ticket.status !== "done") {
+      setOpenCount((n) => n + 1);
+    }
+
+    // Prepend activity entry
+    setActivity((prev) => [
+      {
+        id: `activity-new-${ticket.id}`,
+        avatar: "https://i.pravatar.cc/64?img=1",
+        name: "You",
+        message: (
+          <>
+            created ticket <span className="font-medium">&quot;{ticket.title}&quot;</span>
+          </>
+        ),
+        time: "Just now",
+      },
+      ...prev,
+    ]);
+  }
+
+  function handlePreviewDuplicate(_ticket: Ticket) {
+    setShowNewTicket(false);
+  }
+
   return (
     <div className="max-w-4xl mx-auto px-8 py-10">
       {/* ===== Project Header ===== */}
@@ -228,7 +288,10 @@ export function ProjectOverview({ slug = "mobile-banking-app" }: { slug?: string
           <button className="text-sm font-medium text-slate-600 border border-slate-200 hover:bg-slate-50 rounded-lg px-3.5 py-2 transition-colors dark:text-zinc-300 dark:border-zinc-700 dark:hover:bg-zinc-900">
             + Milestone
           </button>
-          <button className="text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3.5 py-2 shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-500 dark:hover:bg-brand-600 dark:shadow-brand-500/20">
+          <button
+            onClick={() => setShowNewTicket(true)}
+            className="text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3.5 py-2 shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-500 dark:hover:bg-brand-600 dark:shadow-brand-500/20"
+          >
             + New Ticket
           </button>
         </div>
@@ -245,6 +308,32 @@ export function ProjectOverview({ slug = "mobile-banking-app" }: { slug?: string
         <a href="#" className="text-xs font-medium text-amber-700 hover:text-amber-900 flex-shrink-0 dark:text-amber-400 dark:hover:text-amber-200">
           Review →
         </a>
+      </div>
+
+      {/* ===== KPI strip ===== */}
+      <div className="mt-6 flex items-stretch divide-x divide-slate-100 dark:divide-zinc-800 rounded-xl border border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900 shadow-sm shadow-slate-200/40 dark:shadow-black/20 overflow-hidden">
+        <div className="flex-1 px-5 py-4">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600">Open Tickets</p>
+          <p className="text-2xl font-bold text-slate-900 dark:text-zinc-50 mt-1 leading-none">{openCount}</p>
+        </div>
+        <div className="flex-1 px-5 py-4 bg-brand-50/30 dark:bg-brand-950/10">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-brand-500 dark:text-brand-400">Estimated Hours</p>
+          <p className="text-2xl font-bold text-brand-700 dark:text-brand-300 mt-1 leading-none">
+            {MOCK_ESTIMATED_HOURS}
+            <span className="text-base font-medium text-brand-400 dark:text-brand-500 ml-0.5">h</span>
+          </p>
+        </div>
+        <div className="flex-1 px-5 py-4">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600">Blocked</p>
+          <p className="text-2xl font-bold text-red-600 dark:text-red-400 mt-1 leading-none">2</p>
+        </div>
+        <div className="flex-1 px-5 py-4">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600">Closed</p>
+          <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400 mt-1 leading-none">
+            23
+            <span className="text-xs font-normal text-slate-400 dark:text-zinc-500 ml-1">this mo.</span>
+          </p>
+        </div>
       </div>
 
       {/* ===== Milestones — the main character ===== */}
@@ -294,14 +383,14 @@ export function ProjectOverview({ slug = "mobile-banking-app" }: { slug?: string
                 href={`/projects/${slug}/tickets`}
                 className="text-xs font-medium text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300"
               >
-                View all 29 tickets →
+                View all {openCount} tickets →
               </Link>
             </div>
 
             <div className="mt-4">
               <p className="text-xs font-medium text-red-500 mb-1.5 dark:text-red-400">Blocked</p>
               <div className="divide-y divide-slate-100 dark:divide-zinc-800">
-                {blockedTickets.map((ticket) => (
+                {INITIAL_BLOCKED_TICKETS.map((ticket) => (
                   <div key={ticket.id} className="py-2.5 flex items-center justify-between">
                     <p className="text-sm text-slate-800 dark:text-zinc-200">{ticket.title}</p>
                     <div className="flex items-center gap-2 flex-shrink-0">
@@ -335,7 +424,7 @@ export function ProjectOverview({ slug = "mobile-banking-app" }: { slug?: string
               </div>
             </div>
 
-            <p className="text-xs text-slate-400 mt-4 dark:text-zinc-500">29 open · 23 closed this month</p>
+            <p className="text-xs text-slate-400 mt-4 dark:text-zinc-500">{openCount} open · 23 closed this month</p>
           </section>
 
           <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/40 dark:border-zinc-700/70 dark:bg-zinc-900 dark:shadow-black/20">
@@ -392,6 +481,15 @@ export function ProjectOverview({ slug = "mobile-banking-app" }: { slug?: string
           </section>
         </div>
       </div>
+
+      {showNewTicket && (
+        <NewTicketModal
+          slug={slug}
+          onClose={() => setShowNewTicket(false)}
+          onCreated={handleTicketCreated}
+          onPreviewDuplicate={handlePreviewDuplicate}
+        />
+      )}
     </div>
   );
 }
