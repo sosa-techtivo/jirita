@@ -468,9 +468,12 @@ export function ProjectOverview({ slug = "mobile-banking-app" }: { slug?: string
             <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2 dark:text-zinc-400">Quick Links</h2>
             <ul className="space-y-1.5 text-sm">
               <li>
-                <a href="#" className="text-slate-600 hover:text-brand-600 dark:text-zinc-400 dark:hover:text-brand-400">
+                <Link
+                  href={`/projects/${slug}/notes`}
+                  className="text-slate-600 hover:text-brand-600 dark:text-zinc-400 dark:hover:text-brand-400"
+                >
                   Notes &amp; Documentation
-                </a>
+                </Link>
               </li>
               <li>
                 <a href="#" className="text-slate-600 hover:text-brand-600 dark:text-zinc-400 dark:hover:text-brand-400">
