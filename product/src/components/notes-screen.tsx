@@ -3,30 +3,15 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { getNotesByProjectSlug } from "@/lib/mock-notes";
 import type { ProjectNote } from "@/lib/mock-notes";
-
-const TAG_OPTIONS = ["Decision", "Meeting Notes", "Links", "Compliance", "General"];
-
-const TAG_CLASS: Record<string, string> = {
-  Decision: "bg-brand-50 text-brand-700 dark:bg-brand-500/10 dark:text-brand-400",
-  "Meeting Notes": "bg-violet-50 text-violet-700 dark:bg-violet-500/10 dark:text-violet-400",
-  Links: "bg-sky-50 text-sky-700 dark:bg-sky-500/10 dark:text-sky-400",
-  Compliance: "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400",
-  General: "bg-slate-100 text-slate-600 dark:bg-zinc-800 dark:text-zinc-400",
-};
-
-function TagBadge({ tag }: { tag: string }) {
-  const cls = TAG_CLASS[tag] ?? TAG_CLASS.General;
-  return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-semibold flex-shrink-0 ${cls}`}>
-      {tag}
-    </span>
-  );
-}
+import { NoteDetailModal } from "@/components/note-detail-modal";
+import { TAG_OPTIONS, TagBadge, INPUT, FIELD_LABEL } from "@/components/notes-shared";
 
 export function NotesScreen({ slug, projectName }: { slug: string; projectName: string }) {
   const [notes, setNotes] = useState<ProjectNote[]>(() => getNotesByProjectSlug(slug));
   const [search, setSearch] = useState("");
   const [showNewNote, setShowNewNote] = useState(false);
+  const [activeNote, setActiveNote] = useState<ProjectNote | null>(null);
+  const [activeNoteEditMode, setActiveNoteEditMode] = useState(false);
   const searchId = useId();
 
   const query = search.trim().toLowerCase();
@@ -42,6 +27,16 @@ export function NotesScreen({ slug, projectName }: { slug: string; projectName: 
   function handleCreated(note: ProjectNote) {
     setNotes((prev) => [note, ...prev]);
     setShowNewNote(false);
+  }
+
+  function handleOpenNote(note: ProjectNote, opts?: { edit?: boolean }) {
+    setActiveNote(note);
+    setActiveNoteEditMode(!!opts?.edit);
+  }
+
+  function handleSaveNote(updated: ProjectNote) {
+    setNotes((prev) => prev.map((n) => (n.id === updated.id ? updated : n)));
+    setActiveNote(updated);
   }
 
   const hasAnyNotes = notes.length > 0;
@@ -93,7 +88,7 @@ export function NotesScreen({ slug, projectName }: { slug: string; projectName: 
         ) : (
           <div className="grid sm:grid-cols-2 gap-4">
             {filtered.map((note) => (
-              <NoteCard key={note.id} note={note} />
+              <NoteCard key={note.id} note={note} onOpen={handleOpenNote} />
             ))}
           </div>
         )}
@@ -107,25 +102,132 @@ export function NotesScreen({ slug, projectName }: { slug: string; projectName: 
           onCreated={handleCreated}
         />
       )}
+
+      {activeNote && (
+        <NoteDetailModal
+          note={activeNote}
+          startInEditMode={activeNoteEditMode}
+          onClose={() => setActiveNote(null)}
+          onSave={handleSaveNote}
+        />
+      )}
     </div>
   );
 }
 
-function NoteCard({ note }: { note: ProjectNote }) {
+function NoteCard({
+  note,
+  onOpen,
+}: {
+  note: ProjectNote;
+  onOpen: (note: ProjectNote, opts?: { edit?: boolean }) => void;
+}) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm shadow-slate-200/40 dark:border-zinc-700/70 dark:bg-zinc-900 dark:shadow-black/20">
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={() => onOpen(note)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onOpen(note);
+        }
+      }}
+      className="group relative flex flex-col min-h-[152px] rounded-xl border border-slate-200 bg-white p-4 shadow-sm shadow-slate-200/40 cursor-pointer outline-none transition-all duration-150 hover:-translate-y-px hover:bg-slate-50/60 hover:shadow-md focus-visible:ring-2 focus-visible:ring-brand-500/40 dark:border-zinc-700/70 dark:bg-zinc-900 dark:shadow-black/20 dark:hover:bg-zinc-800/40"
+    >
       <div className="flex items-start justify-between gap-2">
-        <h3 className="text-sm font-semibold text-slate-900 dark:text-zinc-100 leading-snug">{note.title}</h3>
-        {note.tag && <TagBadge tag={note.tag} />}
-      </div>
-      <p className="text-sm text-slate-500 dark:text-zinc-400 mt-1.5 line-clamp-2">{note.body}</p>
-      <div className="flex items-center justify-between mt-3.5">
-        <div className="flex items-center gap-1.5">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={note.author.avatar} alt={note.author.name} className="w-5 h-5 rounded-full" />
-          <span className="text-xs text-slate-500 dark:text-zinc-400">{note.author.name}</span>
+        <h3 className="flex-1 min-w-0 text-sm font-semibold text-slate-900 dark:text-zinc-100 leading-snug">
+          {note.title}
+        </h3>
+        <div className="flex items-center gap-1.5 flex-shrink-0">
+          {note.tag && <TagBadge tag={note.tag} />}
+          <NoteCardMenu onEdit={() => onOpen(note, { edit: true })} />
         </div>
-        <span className="text-xs text-slate-400 dark:text-zinc-500">{note.updatedAt}</span>
+      </div>
+
+      <p className="text-sm text-slate-500 dark:text-zinc-400 mt-1.5 line-clamp-2">{note.body}</p>
+
+      <div className="flex items-center justify-between mt-auto pt-3.5">
+        <div className="flex items-center gap-1.5 min-w-0">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={note.author.avatar} alt={note.author.name} className="w-5 h-5 rounded-full flex-shrink-0" />
+          <span className="text-xs text-slate-500 dark:text-zinc-400 truncate">{note.author.name}</span>
+        </div>
+        <span className="flex items-center gap-1 text-xs text-slate-400 dark:text-zinc-500 flex-shrink-0">
+          <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+            <circle cx="12" cy="12" r="9" />
+            <path d="M12 7v5l3 2" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          {note.updatedAt}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function NoteCardMenu({ onEdit }: { onEdit: () => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onMouseDown(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onMouseDown);
+    return () => document.removeEventListener("mousedown", onMouseDown);
+  }, [open]);
+
+  const items: { label: string; danger?: boolean; onSelect: () => void }[] = [
+    { label: "Edit", onSelect: onEdit },
+    { label: "Duplicate", onSelect: () => {} },
+    { label: "Delete", danger: true, onSelect: () => {} },
+  ];
+
+  return (
+    <div ref={ref} className="relative" onClick={(e) => e.stopPropagation()}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-label="Note actions"
+        className={
+          "p-1 rounded-md text-slate-300 dark:text-zinc-600 hover:text-slate-600 dark:hover:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors " +
+          (open ? "text-slate-600 dark:text-zinc-300 bg-slate-100 dark:bg-zinc-800" : "opacity-0 group-hover:opacity-100 focus:opacity-100")
+        }
+      >
+        <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
+          <path d="M6 10a2 2 0 11-4 0 2 2 0 014 0zm6 0a2 2 0 11-4 0 2 2 0 014 0zm6 0a2 2 0 11-4 0 2 2 0 014 0z" />
+        </svg>
+      </button>
+
+      <div
+        className={
+          "absolute right-0 top-full mt-1.5 z-10 w-32 rounded-lg border bg-white dark:bg-zinc-900 " +
+          "shadow-lg shadow-black/10 dark:shadow-black/40 border-slate-200 dark:border-zinc-700/60 " +
+          "transition-all duration-150 origin-top-right " +
+          (open ? "opacity-100 scale-100 pointer-events-auto" : "opacity-0 scale-95 pointer-events-none")
+        }
+      >
+        <div className="py-1">
+          {items.map((item) => (
+            <button
+              key={item.label}
+              type="button"
+              onClick={() => {
+                item.onSelect();
+                setOpen(false);
+              }}
+              className={
+                "w-full px-3 py-1.5 text-[13px] text-left transition-colors duration-150 " +
+                (item.danger
+                  ? "text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10"
+                  : "text-slate-700 dark:text-zinc-300 hover:bg-slate-50 dark:hover:bg-zinc-800/60")
+              }
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -158,15 +260,6 @@ function EmptyState({ hasAnyNotes, onCreate }: { hasAnyNotes: boolean; onCreate:
     </div>
   );
 }
-
-const INPUT =
-  "w-full bg-white dark:bg-zinc-900 text-[13px] font-medium text-slate-800 dark:text-zinc-200 " +
-  "border border-slate-200 dark:border-zinc-700 rounded-lg px-3 py-2 outline-none " +
-  "focus:border-brand-500 dark:focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 " +
-  "placeholder:text-slate-300 dark:placeholder:text-zinc-600 transition-colors";
-
-const FIELD_LABEL =
-  "block text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600 mb-1.5";
 
 function NewNoteModal({
   slug,
