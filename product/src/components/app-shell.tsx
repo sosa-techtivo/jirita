@@ -10,7 +10,7 @@ export function AppShell({
   children,
 }: {
   activeSlug?: string;
-  activeSection?: "overview" | "tickets" | "notes" | "team";
+  activeSection?: "overview" | "tickets" | "notes" | "team" | "reports";
   activePage?: string;
   breadcrumb: ReactNode;
   children: ReactNode;

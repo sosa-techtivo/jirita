@@ -20,7 +20,7 @@ const STATUS_STYLE: Record<AvailabilityStatus, { dot: string; text: string; bg: 
   Away:      { dot: "bg-slate-400 dark:bg-zinc-600", text: "text-slate-500 dark:text-zinc-400", bg: "bg-slate-100 dark:bg-zinc-800" },
 };
 
-function StatusBadge({ status }: { status: AvailabilityStatus }) {
+export function StatusBadge({ status }: { status: AvailabilityStatus }) {
   const style = STATUS_STYLE[status];
   return (
     <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold flex-shrink-0 ${style.bg} ${style.text}`}>
@@ -30,7 +30,7 @@ function StatusBadge({ status }: { status: AvailabilityStatus }) {
   );
 }
 
-function utilizationOf(member: TeamMember): number {
+export function utilizationOf(member: TeamMember): number {
   return Math.round((member.assignedHours / member.weeklyCapacity) * 100);
 }
 
@@ -38,7 +38,7 @@ function capacityBarColor(pct: number): string {
   return pct > 100 ? "bg-red-500" : pct > 80 ? "bg-amber-400" : "bg-emerald-500";
 }
 
-function capacityTextColor(pct: number): string {
+export function capacityTextColor(pct: number): string {
   return pct > 100
     ? "text-red-600 dark:text-red-400"
     : pct > 80
@@ -46,7 +46,7 @@ function capacityTextColor(pct: number): string {
     : "text-emerald-600 dark:text-emerald-400";
 }
 
-function CapacityBar({ pct }: { pct: number }) {
+export function CapacityBar({ pct }: { pct: number }) {
   return (
     <div className="h-1.5 rounded-full bg-slate-100 dark:bg-zinc-800 overflow-hidden">
       <div className={`h-full rounded-full ${capacityBarColor(pct)}`} style={{ width: `${Math.min(pct, 100)}%` }} />
@@ -54,7 +54,7 @@ function CapacityBar({ pct }: { pct: number }) {
   );
 }
 
-function remainingAvailabilityLabel(member: TeamMember): string {
+export function remainingAvailabilityLabel(member: TeamMember): string {
   const remaining = member.weeklyCapacity - member.assignedHours;
   return remaining >= 0 ? `${remaining}h available` : `${Math.abs(remaining)}h over capacity`;
 }
@@ -280,7 +280,7 @@ function EmptyState({ hasAnyMembers }: { hasAnyMembers: boolean }) {
 
 // ── Member modal ──────────────────────────────────────────────────────────────
 
-function MemberModal({ member, slug, onClose }: { member: TeamMember; slug: string; onClose: () => void }) {
+export function MemberModal({ member, slug, onClose }: { member: TeamMember; slug: string; onClose: () => void }) {
   const [visible, setVisible] = useState(false);
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
   const pct = utilizationOf(member);

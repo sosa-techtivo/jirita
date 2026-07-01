@@ -420,9 +420,12 @@ export function ProjectOverview({ slug = "mobile-banking-app" }: { slug?: string
                 </Link>
               </li>
               <li>
-                <a href="#" className="text-slate-600 hover:text-brand-600 dark:text-zinc-400 dark:hover:text-brand-400">
+                <Link
+                  href={`/projects/${slug}/reports`}
+                  className="text-slate-600 hover:text-brand-600 dark:text-zinc-400 dark:hover:text-brand-400"
+                >
                   Project Reports
-                </a>
+                </Link>
               </li>
             </ul>
           </section>
