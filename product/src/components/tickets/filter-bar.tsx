@@ -39,16 +39,6 @@ const PRIORITY_GROUPS: DropdownGroup[] = [
   },
 ];
 
-const MILESTONE_GROUPS: DropdownGroup[] = [
-  {
-    options: [
-      { value: "beta",     label: "Beta Release"       },
-      { value: "security", label: "Security Audit"     },
-      { value: "appstore", label: "App Store Submission" },
-    ],
-  },
-];
-
 const STATUS_GROUPS: DropdownGroup[] = [
   {
     options: [
@@ -97,7 +87,6 @@ export function FilterBar({
 }) {
   const [assigned,  setAssigned]  = useState<string[]>([]);
   const [priority,  setPriority]  = useState<string[]>([]);
-  const [milestone, setMilestone] = useState<string[]>([]);
   const [status,    setStatus]    = useState<string[]>([]);
 
   return (
@@ -143,13 +132,6 @@ export function FilterBar({
           groups={PRIORITY_GROUPS}
           selected={priority}
           onChange={setPriority}
-        />
-        <FilterDropdown
-          label="Milestone"
-          mode="multi"
-          groups={MILESTONE_GROUPS}
-          selected={milestone}
-          onChange={setMilestone}
         />
         <FilterDropdown
           label="Status"

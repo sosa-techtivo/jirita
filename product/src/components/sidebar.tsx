@@ -159,9 +159,6 @@ export function Sidebar({
                   >
                     Overview
                   </Link>
-                  <a href="#" className="block px-2 py-1 rounded-md text-slate-500 hover:bg-white text-[13px] dark:text-zinc-500 dark:hover:bg-zinc-800/60">
-                    Milestones
-                  </a>
                   <Link
                     href={`/projects/${project.slug}/tickets`}
                     className={

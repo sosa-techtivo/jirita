@@ -74,9 +74,6 @@ export function TicketBoardCard({
       <div className="flex items-center justify-between mt-2.5 gap-2">
         <div className="flex items-center gap-2 min-w-0 overflow-hidden">
           <PriorityIndicator priority={ticket.priority} />
-          <span className="text-[11px] text-slate-500 dark:text-zinc-400 truncate">
-            {ticket.milestone}
-          </span>
         </div>
         <div className="flex items-center gap-1.5 flex-shrink-0">
           {ticket.hours !== undefined && (
@@ -130,10 +127,6 @@ export function TicketListRow({
         )}
 
         <PriorityIndicator priority={ticket.priority} />
-
-        <span className="hidden md:block text-xs text-slate-500 dark:text-zinc-400 truncate max-w-[120px]">
-          {ticket.milestone}
-        </span>
 
         {ticket.dueDate && (
           <span className="hidden sm:flex items-center gap-1 text-xs text-slate-400 dark:text-zinc-500">

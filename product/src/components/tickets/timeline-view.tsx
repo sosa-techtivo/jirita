@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import type { Ticket } from "@/lib/mock-tickets";
 import type { OnTicketClick } from "@/components/tickets/board-column";
 
@@ -65,35 +65,19 @@ interface Row {
   end: Date;
 }
 
-interface Group {
-  milestone: string;
-  rows: Row[];
-}
-
-function buildGroups(tickets: Ticket[]): Group[] {
-  const map = new Map<string, Row[]>();
+function buildRows(tickets: Ticket[]): Row[] {
+  const rows: Row[] = [];
   for (const ticket of tickets) {
     const end = ticket.dueDate ? parseDate(ticket.dueDate) : null;
     const start = barStart(ticket);
     if (!start || !end) continue;
-    const list = map.get(ticket.milestone) ?? [];
-    list.push({ ticket, start, end });
-    map.set(ticket.milestone, list);
+    rows.push({ ticket, start, end });
   }
-  return Array.from(map.entries())
-    .map(([milestone, rows]) => ({
-      milestone,
-      rows: rows.sort((a, b) => a.start.getTime() - b.start.getTime()),
-    }))
-    .sort(
-      (a, b) =>
-        Math.min(...a.rows.map((r) => r.start.getTime())) -
-        Math.min(...b.rows.map((r) => r.start.getTime()))
-    );
+  return rows.sort((a, b) => a.start.getTime() - b.start.getTime());
 }
 
-function buildRange(groups: Group[]): { rangeStart: Date; totalDays: number } {
-  const all = groups.flatMap((g) => g.rows.flatMap((r) => [r.start.getTime(), r.end.getTime()]));
+function buildRange(rows: Row[]): { rangeStart: Date; totalDays: number } {
+  const all = rows.flatMap((r) => [r.start.getTime(), r.end.getTime()]);
   const earliest = new Date(Math.min(...all));
   const latest = new Date(Math.max(...all));
   const padded = addDays(earliest, -14);
@@ -134,7 +118,6 @@ function weekPcts(rangeStart: Date, totalDays: number): number[] {
 
 const LABEL_W = 192;  // px, matches w-48
 const ROW_H   = 36;   // px per ticket row (reduced for density)
-const GH_H    = 34;   // px group header
 const HDR_H   = 50;   // px time-scale header
 const BAR_H   = 22;   // px bar height (reduced)
 const PX_PER_DAY = 9;
@@ -176,20 +159,10 @@ export function TimelineView({
 }) {
   const today = new Date();
   const containerRef = useRef<HTMLDivElement>(null);
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
-  function toggleGroup(milestone: string) {
-    setCollapsed((prev) => {
-      const next = new Set(prev);
-      if (next.has(milestone)) next.delete(milestone);
-      else next.add(milestone);
-      return next;
-    });
-  }
+  const rows = buildRows(tickets);
 
-  const groups = buildGroups(tickets);
-
-  if (groups.length === 0) {
+  if (rows.length === 0) {
     return (
       <div className="flex-1 flex items-center justify-center">
         <p className="text-sm text-slate-400 dark:text-zinc-500">No tickets with due dates to display.</p>
@@ -197,7 +170,7 @@ export function TimelineView({
     );
   }
 
-  const { rangeStart, totalDays } = buildRange(groups);
+  const { rangeStart, totalDays } = buildRange(rows);
   const months = monthSegments(rangeStart, totalDays);
   const weeks = weekPcts(rangeStart, totalDays);
   const todayPct = (daysBetween(rangeStart, today) / totalDays) * 100;
@@ -234,7 +207,7 @@ export function TimelineView({
               style={{ width: LABEL_W }}
             >
               <span className="text-[10px] font-semibold uppercase tracking-widest text-slate-400 dark:text-zinc-600">
-                Milestone · Ticket
+                Ticket
               </span>
             </div>
 
@@ -281,106 +254,62 @@ export function TimelineView({
             </div>
           </div>
 
-          {/* ── Milestone groups ─────────────────────────────────────────── */}
-          {groups.map((group) => {
-            const isCollapsed = collapsed.has(group.milestone);
+          {/* ── Ticket rows ───────────────────────────────────────────────── */}
+          {rows.map(({ ticket, start, end }) => {
+            const leftPct = toPct(start);
+            const widthPct = toPct(end) - leftPct;
+            const clampedLeft = Math.max(0, leftPct);
+            const clampedWidth = Math.min(widthPct, 100 - clampedLeft);
 
             return (
-              <div key={group.milestone}>
-                {/* Group header — full row is the collapse toggle */}
+              <div
+                key={ticket.id}
+                className="flex border-b border-slate-100 dark:border-zinc-800/40 hover:bg-slate-50/50 dark:hover:bg-zinc-800/20 transition-colors group/row"
+                style={{ height: ROW_H }}
+              >
                 <div
-                  className="flex border-b border-slate-200/70 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-900/50 cursor-pointer select-none hover:bg-slate-100/70 dark:hover:bg-zinc-800/40 transition-colors"
-                  style={{ height: GH_H }}
-                  onClick={() => toggleGroup(group.milestone)}
+                  className="flex-shrink-0 sticky left-0 z-10 bg-white dark:bg-zinc-950 group-hover/row:bg-slate-50/50 dark:group-hover/row:bg-zinc-800/20 border-r border-slate-200 dark:border-zinc-800 flex items-center px-4 transition-colors"
+                  style={{ width: LABEL_W }}
                 >
-                  <div
-                    className="flex-shrink-0 sticky left-0 z-10 bg-slate-50 dark:bg-zinc-900/50 border-r border-slate-200 dark:border-zinc-800 flex items-center gap-2 px-3"
-                    style={{ width: LABEL_W }}
-                  >
-                    {/* Chevron */}
-                    <svg
-                      className={`w-3 h-3 flex-shrink-0 text-slate-400 dark:text-zinc-500 transition-transform duration-150 ${isCollapsed ? "-rotate-90" : ""}`}
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2.5"
-                      viewBox="0 0 24 24"
-                    >
-                      <path d="M6 9l6 6 6-6" />
-                    </svg>
-                    <span className="text-[13px] font-semibold text-slate-700 dark:text-zinc-200 truncate">
-                      {group.milestone}
-                    </span>
-                    <span className="text-[11px] text-slate-400 dark:text-zinc-600 flex-shrink-0">
-                      ({group.rows.length})
-                    </span>
-                  </div>
-                  <div className="flex-1 relative overflow-hidden">
-                    <GridLines weeks={weeks} months={months} />
-                    <TodayLine pct={todayPct} />
-                  </div>
+                  <span className="text-xs text-slate-600 dark:text-zinc-400 truncate">
+                    {ticket.title}
+                  </span>
                 </div>
 
-                {/* Ticket rows — hidden when collapsed */}
-                {!isCollapsed &&
-                  group.rows.map(({ ticket, start, end }) => {
-                    const leftPct = toPct(start);
-                    const widthPct = toPct(end) - leftPct;
-                    const clampedLeft = Math.max(0, leftPct);
-                    const clampedWidth = Math.min(widthPct, 100 - clampedLeft);
+                {/* Grid + bar */}
+                <div className="flex-1 relative overflow-hidden" style={{ height: ROW_H }}>
+                  <GridLines weeks={weeks} months={months} />
+                  <TodayLine pct={todayPct} />
 
-                    return (
-                      <div
-                        key={ticket.id}
-                        className="flex border-b border-slate-100 dark:border-zinc-800/40 hover:bg-slate-50/50 dark:hover:bg-zinc-800/20 transition-colors group/row"
-                        style={{ height: ROW_H }}
-                      >
-                        {/* Label — indented to show grouping */}
-                        <div
-                          className="flex-shrink-0 sticky left-0 z-10 bg-white dark:bg-zinc-950 group-hover/row:bg-slate-50/50 dark:group-hover/row:bg-zinc-800/20 border-r border-slate-200 dark:border-zinc-800 flex items-center pl-7 pr-4 transition-colors"
-                          style={{ width: LABEL_W }}
-                        >
-                          <span className="text-xs text-slate-600 dark:text-zinc-400 truncate">
-                            {ticket.title}
-                          </span>
-                        </div>
-
-                        {/* Grid + bar */}
-                        <div className="flex-1 relative overflow-hidden" style={{ height: ROW_H }}>
-                          <GridLines weeks={weeks} months={months} />
-                          <TodayLine pct={todayPct} />
-
-                          {clampedWidth > 0 && (
-                            <button
-                              type="button"
-                              title={`${ticket.issueKey} · ${ticket.title}`}
-                              onClick={() => onTicketClick(ticket)}
-                              className={[
-                                "absolute z-20 rounded-md flex items-center gap-1.5 px-2 overflow-hidden",
-                                "hover:brightness-110 hover:shadow-md transition-all duration-150",
-                                bgClass(ticket),
-                              ].join(" ")}
-                              style={{
-                                top: "50%",
-                                transform: "translateY(-50%)",
-                                height: BAR_H,
-                                left: `${clampedLeft}%`,
-                                width: `${clampedWidth}%`,
-                                minWidth: 24,
-                              }}
-                            >
-                              <span className={`text-[10px] font-semibold flex-shrink-0 opacity-70 leading-none ${textClass(ticket)}`}>
-                                {ticket.issueKey}
-                              </span>
-                              <span className={`text-[10px] opacity-40 flex-shrink-0 leading-none ${textClass(ticket)}`}>·</span>
-                              <span className={`text-[11px] font-medium truncate leading-none ${textClass(ticket)}`}>
-                                {ticket.title}
-                              </span>
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
+                  {clampedWidth > 0 && (
+                    <button
+                      type="button"
+                      title={`${ticket.issueKey} · ${ticket.title}`}
+                      onClick={() => onTicketClick(ticket)}
+                      className={[
+                        "absolute z-20 rounded-md flex items-center gap-1.5 px-2 overflow-hidden",
+                        "hover:brightness-110 hover:shadow-md transition-all duration-150",
+                        bgClass(ticket),
+                      ].join(" ")}
+                      style={{
+                        top: "50%",
+                        transform: "translateY(-50%)",
+                        height: BAR_H,
+                        left: `${clampedLeft}%`,
+                        width: `${clampedWidth}%`,
+                        minWidth: 24,
+                      }}
+                    >
+                      <span className={`text-[10px] font-semibold flex-shrink-0 opacity-70 leading-none ${textClass(ticket)}`}>
+                        {ticket.issueKey}
+                      </span>
+                      <span className={`text-[10px] opacity-40 flex-shrink-0 leading-none ${textClass(ticket)}`}>·</span>
+                      <span className={`text-[11px] font-medium truncate leading-none ${textClass(ticket)}`}>
+                        {ticket.title}
+                      </span>
+                    </button>
+                  )}
+                </div>
               </div>
             );
           })}

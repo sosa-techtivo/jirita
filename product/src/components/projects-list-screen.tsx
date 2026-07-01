@@ -133,7 +133,6 @@ function ProjectRow({ project }: { project: ProjectSummary }) {
           <img src={project.owner.avatar} alt={project.owner.name} className="w-5 h-5 rounded-full" />
           <span className="text-slate-600 dark:text-zinc-300">{project.owner.name}</span>
         </span>
-        <span className="hidden lg:inline">{project.activeMilestones} milestones</span>
         <span className="hidden lg:inline">{project.openTickets} open</span>
         <span className="hidden sm:inline">{project.updatedAt}</span>
       </div>

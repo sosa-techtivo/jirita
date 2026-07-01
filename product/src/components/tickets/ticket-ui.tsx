@@ -101,7 +101,6 @@ export function getMockActivity(ticket: Ticket): MockActivity[] {
   const events: MockActivity[] = [
     { label: "Ticket created",                       timeAgo: "9 days ago" },
     { label: `Assigned to ${ticket.assignee.name}`,  timeAgo: "8 days ago" },
-    { label: `Added to "${ticket.milestone}"`,       timeAgo: "7 days ago" },
   ];
   if (ticket.hours !== undefined) {
     events.push({ label: `Hours set to ${ticket.hours} h`,  timeAgo: "6 days ago" });

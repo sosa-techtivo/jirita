@@ -182,17 +182,6 @@ const INITIAL_ACTIVITY: ActivityEntry[] = [
     ),
     time: "5 hours ago",
   },
-  {
-    id: "activity-5",
-    avatar: avatar(47),
-    name: "Sarah Chen",
-    message: (
-      <>
-        created milestone <span className="font-medium">&quot;App Store Submission&quot;</span>
-      </>
-    ),
-    time: "Yesterday",
-  },
 ];
 
 const team: TeamMember[] = [
@@ -205,22 +194,12 @@ const team: TeamMember[] = [
 
 export function ProjectOverview({ slug = "mobile-banking-app" }: { slug?: string }) {
   const [showNewTicket, setShowNewTicket] = useState(false);
-  const [milestones, setMilestones] = useState<Milestone[]>(INITIAL_MILESTONES);
   const [inProgressTickets, setInProgressTickets] = useState<ActiveTicket[]>(INITIAL_IN_PROGRESS);
   const [activity, setActivity] = useState<ActivityEntry[]>(INITIAL_ACTIVITY);
   const [openCount, setOpenCount] = useState(29);
 
   function handleTicketCreated(ticket: Ticket) {
     setShowNewTicket(false);
-
-    // Update milestone ticket total if the ticket has a matching milestone
-    if (ticket.milestone) {
-      setMilestones((prev) =>
-        prev.map((m) =>
-          m.name === ticket.milestone ? { ...m, ticketsTotal: m.ticketsTotal + 1 } : m
-        )
-      );
-    }
 
     // Add to in-progress list if the status warrants it
     if (ticket.status === "in-progress") {
@@ -285,9 +264,6 @@ export function ProjectOverview({ slug = "mobile-banking-app" }: { slug?: string
           </div>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
-          <button className="text-sm font-medium text-slate-600 border border-slate-200 hover:bg-slate-50 rounded-lg px-3.5 py-2 transition-colors dark:text-zinc-300 dark:border-zinc-700 dark:hover:bg-zinc-900">
-            + Milestone
-          </button>
           <button
             onClick={() => setShowNewTicket(true)}
             className="text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3.5 py-2 shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-500 dark:hover:bg-brand-600 dark:shadow-brand-500/20"
@@ -300,11 +276,7 @@ export function ProjectOverview({ slug = "mobile-banking-app" }: { slug?: string
       {/* ===== Slim attention line (not a hero) ===== */}
       <div className="mt-5 flex items-center gap-2.5 text-sm text-amber-800 bg-amber-50/70 rounded-md px-3 py-2 dark:text-amber-300 dark:bg-amber-500/10">
         <span className="w-1.5 h-1.5 rounded-full bg-amber-500 flex-shrink-0" />
-        <p className="flex-1">
-          <span className="font-medium">Security Audit Fixes</span> due in 3 days at 30% complete
-          <span className="text-amber-400 dark:text-amber-600 mx-1.5">·</span>
-          2 tickets blocked 4+ days
-        </p>
+        <p className="flex-1">2 tickets blocked 4+ days</p>
         <a href="#" className="text-xs font-medium text-amber-700 hover:text-amber-900 flex-shrink-0 dark:text-amber-400 dark:hover:text-amber-200">
           Review →
         </a>
@@ -335,42 +307,6 @@ export function ProjectOverview({ slug = "mobile-banking-app" }: { slug?: string
           </p>
         </div>
       </div>
-
-      {/* ===== Milestones — the main character ===== */}
-      <section className="mt-10">
-        <div className="flex items-baseline justify-between mb-1">
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-zinc-400">Milestones</h2>
-          <a href="#" className="text-xs font-medium text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300">
-            View all →
-          </a>
-        </div>
-
-        <div className="divide-y divide-slate-100 dark:divide-zinc-800">
-          {milestones.map((milestone) => {
-            const style = milestoneStyles[milestone.status];
-            const progress = Math.round((milestone.ticketsDone / milestone.ticketsTotal) * 100);
-            return (
-              <div key={milestone.id} className="py-4 flex items-center gap-6">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-baseline gap-2">
-                    <h3 className="text-base font-semibold text-slate-900 dark:text-zinc-100">{milestone.name}</h3>
-                    <span className={`text-xs font-medium ${style.label}`}>{milestone.statusLabel}</span>
-                  </div>
-                  <div className="flex items-center gap-3 mt-2">
-                    <div className="flex-1 max-w-xs h-1.5 rounded-full bg-slate-100 overflow-hidden dark:bg-zinc-800">
-                      <div className={`h-full rounded-full ${style.bar}`} style={{ width: `${progress}%` }} />
-                    </div>
-                    <span className="text-xs text-slate-400 dark:text-zinc-500">
-                      {milestone.ticketsDone} of {milestone.ticketsTotal} tickets
-                    </span>
-                  </div>
-                </div>
-                <span className={`text-sm flex-shrink-0 ${style.due}`}>{milestone.dueDate}</span>
-              </div>
-            );
-          })}
-        </div>
-      </section>
 
       {/* ===== Active Work + Team, Recent Activity + Quick Links ===== */}
       <div className="mt-10 grid grid-cols-3 gap-8 items-start">

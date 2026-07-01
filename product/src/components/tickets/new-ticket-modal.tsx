@@ -257,7 +257,6 @@ export function NewTicketModal({
   const [status, setStatus]             = useState<TicketStatus>("to-do");
   const [priority, setPriority]         = useState<TicketPriority>("normal");
   const [assigneeName, setAssigneeName] = useState("");
-  const [milestone, setMilestone]       = useState(MILESTONES[0]);
   const [labels, setLabels]             = useState<string[]>([]);
   const [dueDate, setDueDate]           = useState("");
   const [hours, setHours]               = useState("");
@@ -319,7 +318,7 @@ export function NewTicketModal({
       status,
       priority,
       assignee,
-      milestone:   milestone || MILESTONES[0],
+      milestone:   MILESTONES[0],
       labels,
       acceptanceCriteria: filledCriteria.length > 0 ? filledCriteria : undefined,
       dueDate:     dueDate ? formatDueDate(dueDate) : undefined,
@@ -659,26 +658,15 @@ export function NewTicketModal({
                       </div>
                     </div>
 
-                    {/* Assignee + Milestone */}
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className={FIELD_LABEL}>Assignee</label>
-                        <select value={assigneeName} onChange={(e) => setAssigneeName(e.target.value)} className={INPUT}>
-                          <option value="">— Unassigned</option>
-                          {TEAM_MEMBERS.map((m) => (
-                            <option key={m.name} value={m.name}>{m.name}</option>
-                          ))}
-                        </select>
-                      </div>
-                      <div>
-                        <label className={FIELD_LABEL}>Milestone</label>
-                        <select value={milestone} onChange={(e) => setMilestone(e.target.value)} className={INPUT}>
-                          <option value="">— None</option>
-                          {MILESTONES.map((m) => (
-                            <option key={m} value={m}>{m}</option>
-                          ))}
-                        </select>
-                      </div>
+                    {/* Assignee */}
+                    <div>
+                      <label className={FIELD_LABEL}>Assignee</label>
+                      <select value={assigneeName} onChange={(e) => setAssigneeName(e.target.value)} className={INPUT}>
+                        <option value="">— Unassigned</option>
+                        {TEAM_MEMBERS.map((m) => (
+                          <option key={m.name} value={m.name}>{m.name}</option>
+                        ))}
+                      </select>
                     </div>
 
                     {/* Labels — searchable inline picker */}

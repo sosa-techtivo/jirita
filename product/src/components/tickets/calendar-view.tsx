@@ -182,8 +182,6 @@ function DayPanel({
                 </div>
                 <div className="flex items-center gap-2.5 mt-1.5">
                   <span className="text-[11px] text-slate-500 dark:text-zinc-400">{statusLabel(ticket)}</span>
-                  <span className="text-slate-300 dark:text-zinc-700">·</span>
-                  <span className="text-[11px] text-slate-400 dark:text-zinc-500 truncate">{ticket.milestone}</span>
                 </div>
                 <div className="flex items-center gap-1.5 mt-2">
                   {/* eslint-disable-next-line @next/next/no-img-element */}

@@ -166,11 +166,6 @@ export function TicketPreviewPanel({
               </div>
             </div>
 
-            <div className="min-w-0">
-              <p className={FIELD_LABEL}>Milestone</p>
-              <p className={`${FIELD_VALUE} truncate`}>{t.milestone}</p>
-            </div>
-
             {t.storyPoints !== undefined && (
               <div>
                 <p className={FIELD_LABEL}>Story points</p>

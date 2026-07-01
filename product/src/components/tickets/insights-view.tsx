@@ -380,7 +380,7 @@ function RecentlyCompleted({
                   {t.title}
                 </p>
                 <p className="text-[10px] text-slate-400 dark:text-zinc-600 mt-0.5">
-                  {t.issueKey} · {t.milestone}
+                  {t.issueKey}
                 </p>
               </div>
               <div className="flex items-center gap-2 flex-shrink-0">
@@ -470,16 +470,11 @@ export function InsightsView({
           />
         </div>
 
-        {/* ── Charts row 1 ─────────────────────────────────────────────── */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* ── Charts row ───────────────────────────────────────────────── */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <StatusDonut tickets={tickets} />
           <AssigneeWorkload tickets={tickets} />
-        </div>
-
-        {/* ── Charts row 2 ─────────────────────────────────────────────── */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <PriorityDistribution tickets={tickets} />
-          <MilestoneProgress tickets={tickets} />
         </div>
 
         {/* ── Lists row ────────────────────────────────────────────────── */}
