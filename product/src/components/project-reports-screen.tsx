@@ -34,8 +34,7 @@ const STATUS_LOG_RATIO: Record<TicketStatus, number> = {
   done: 1,
 };
 
-const CURRENT_SPRINT = "Sprint 14 · Jun 23 – Jul 4";
-const AVG_VELOCITY = "34 pts / sprint";
+const REPORTING_PERIOD = "Jun 23 – Jul 4";
 
 const DELIVERY_STATUS_FILTER: Record<"total" | "completed" | "in-progress" | "blocked", string | null> = {
   total: null,
@@ -135,8 +134,6 @@ export function ProjectReportsScreen({ slug }: { slug: string }) {
   const blockedCount = tickets.filter((t) => t.status === "blocked").length;
   const completionPct = totalTickets === 0 ? 0 : Math.round((completedTickets.length / totalTickets) * 100);
 
-  // Velocity (completed figures are real; sprint cadence isn't modeled yet, so
-  // current sprint + average velocity stay as placeholders).
   const completedHours = completedTickets.reduce((sum, t) => sum + (t.hours ?? 0), 0);
 
   function goToTickets(status: string | null) {
@@ -292,9 +289,9 @@ export function ProjectReportsScreen({ slug }: { slug: string }) {
           </div>
         </Section>
 
-        {/* Velocity Snapshot */}
+        {/* Delivery Snapshot */}
         <Section
-          title="Velocity Snapshot"
+          title="Delivery Snapshot"
           icon={
             <svg className="w-3.5 h-3.5 text-slate-400 dark:text-zinc-500 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
               <path d="M13 2L3 14h7l-1 8 10-12h-7l1-8z" />
@@ -302,10 +299,10 @@ export function ProjectReportsScreen({ slug }: { slug: string }) {
           }
         >
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            <Stat label="Current Sprint" value={<span className="text-sm">{CURRENT_SPRINT}</span>} />
+            <Stat label="Reporting Period" value={<span className="text-sm">{REPORTING_PERIOD}</span>} />
             <Stat label="Completed Tickets" value={completedTickets.length} />
             <Stat label="Completed Hours" value={`${completedHours}h`} />
-            <Stat label="Average Velocity" value={<span className="text-sm">{AVG_VELOCITY}</span>} />
+            <Stat label="Remaining Hours" value={`${remainingHours}h`} />
           </div>
         </Section>
       </div>

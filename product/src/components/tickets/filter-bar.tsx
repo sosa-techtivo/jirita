@@ -57,7 +57,6 @@ const ADD_FILTER_GROUPS: DropdownGroup[] = [
     options: [
       { value: "labels",       label: "Labels"       },
       { value: "due-date",     label: "Due Date"     },
-      { value: "story-points", label: "Story Points" },
       { value: "reporter",     label: "Reporter"     },
       { value: "created-date", label: "Created Date" },
       { value: "updated-date", label: "Updated Date" },

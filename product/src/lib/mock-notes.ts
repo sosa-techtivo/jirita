@@ -66,7 +66,7 @@ export const notes: ProjectNote[] = [
     projectSlug: "internal-platform-migration",
     title: "Weekly sync — Jun 24",
     body:
-      "Legacy monolith database export is on track for next sprint. Blocked on infra team provisioning the new read replicas. Marcus to follow up with infra by Wednesday.",
+      "Legacy monolith database export is progressing on schedule. Blocked on infra team provisioning the new read replicas. Marcus to follow up with infra by Wednesday.",
     tag: "Meeting Notes",
     updatedAt: "1 week ago",
     author: { name: "Marcus Lee", avatar: avatar(12) },

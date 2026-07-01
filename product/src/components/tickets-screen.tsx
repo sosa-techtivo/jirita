@@ -12,6 +12,8 @@ import { CalendarView } from "@/components/tickets/calendar-view";
 import { TimelineView } from "@/components/tickets/timeline-view";
 import { InsightsView } from "@/components/tickets/insights-view";
 import { TicketPreviewPanel } from "@/components/tickets/ticket-preview-panel";
+import { useCurrentUser } from "@/components/current-user-provider";
+import { canManage } from "@/lib/current-user";
 
 // ── Persisted state shape ─────────────────────────────────────────────────────
 
@@ -47,6 +49,8 @@ function saveState(slug: string, state: SavedState) {
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function TicketsScreen({ slug, projectName }: { slug: string; projectName: string }) {
+  const { user } = useCurrentUser();
+  const canCreateTicket = canManage(user.role);
   const [showNewTicket, setShowNewTicket] = useState(false);
   // Read saved state once per mount (useMemo with [] deps).
   // We keep it in sessionStorage until useEffect clears it, so strict-mode
@@ -135,13 +139,15 @@ export function TicketsScreen({ slug, projectName }: { slug: string; projectName
 
           <div className="flex items-center gap-3 flex-shrink-0 mt-0.5">
             <ViewSwitcher view={view} onChange={setView} />
-            <button
-              type="button"
-              onClick={() => setShowNewTicket(true)}
-              className="text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-4 py-2 shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-500 dark:hover:bg-brand-600 dark:shadow-brand-500/20 whitespace-nowrap"
-            >
-              + New Ticket
-            </button>
+            {canCreateTicket && (
+              <button
+                type="button"
+                onClick={() => setShowNewTicket(true)}
+                className="text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-4 py-2 shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-500 dark:hover:bg-brand-600 dark:shadow-brand-500/20 whitespace-nowrap"
+              >
+                + New Ticket
+              </button>
+            )}
           </div>
         </div>
 

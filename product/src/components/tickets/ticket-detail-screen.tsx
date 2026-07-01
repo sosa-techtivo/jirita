@@ -2357,11 +2357,6 @@ export function TicketDetailScreen({
               onChange={(v) => update("assignee", v)}
             />
 
-            <EditableSidebarStoryPoints
-              value={ticket.storyPoints}
-              onChange={(v) => update("storyPoints", v)}
-            />
-
             <EditableSidebarHours
               value={ticket.hours}
               onChange={(next) => {

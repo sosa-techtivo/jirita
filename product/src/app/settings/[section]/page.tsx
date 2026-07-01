@@ -1,6 +1,5 @@
 import { AppShell } from "@/components/app-shell";
-import { SettingsSectionScreen } from "@/components/settings-section-screen";
-import Link from "next/link";
+import { SettingsSectionScreen, SettingsBreadcrumb } from "@/components/settings-section-screen";
 
 const SECTION_TITLES: Record<string, string> = {
   "general":       "General",
@@ -33,22 +32,12 @@ export default async function SettingsSectionPage({
 }) {
   const { section } = await params;
   const title = SECTION_TITLES[section] ?? "Settings";
+  const activePage = section === "time-tracking" ? "time-tracking" : "settings";
 
   return (
     <AppShell
-      activePage="settings"
-      breadcrumb={
-        <>
-          <Link
-            href="/settings"
-            className="text-slate-400 hover:text-slate-600 dark:text-zinc-500 dark:hover:text-zinc-300"
-          >
-            Settings
-          </Link>
-          <span className="text-slate-300 dark:text-zinc-700">/</span>
-          <span className="text-slate-800 font-medium dark:text-zinc-200">{title}</span>
-        </>
-      }
+      activePage={activePage}
+      breadcrumb={<SettingsBreadcrumb section={section} title={title} />}
     >
       <SettingsSectionScreen section={section} />
     </AppShell>

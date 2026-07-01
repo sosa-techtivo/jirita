@@ -5,6 +5,8 @@ import { useId, useState } from "react";
 import { projects as allProjects } from "@/lib/mock-projects";
 import type { ProjectStatus, ProjectSummary } from "@/lib/mock-projects";
 import { StatusBadge } from "@/components/status-badge";
+import { useCurrentUser } from "@/components/current-user-provider";
+import { canManage } from "@/lib/current-user";
 
 type FilterValue = "all" | ProjectStatus;
 
@@ -18,6 +20,8 @@ const FILTERS: { value: FilterValue; label: string }[] = [
 ];
 
 export function ProjectsListScreen() {
+  const { user } = useCurrentUser();
+  const canCreateProject = canManage(user.role);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<FilterValue>("all");
   const searchId = useId();
@@ -42,12 +46,14 @@ export function ProjectsListScreen() {
             Every project across your workspace, at a glance.
           </p>
         </div>
-        <button
-          type="button"
-          className="text-sm font-medium text-slate-600 border border-slate-200 hover:bg-slate-50 rounded-lg px-3.5 py-2 transition-colors flex-shrink-0 dark:text-zinc-300 dark:border-zinc-700 dark:hover:bg-zinc-900"
-        >
-          + Create Project
-        </button>
+        {canCreateProject && (
+          <button
+            type="button"
+            className="text-sm font-medium text-slate-600 border border-slate-200 hover:bg-slate-50 rounded-lg px-3.5 py-2 transition-colors flex-shrink-0 dark:text-zinc-300 dark:border-zinc-700 dark:hover:bg-zinc-900"
+          >
+            + Create Project
+          </button>
+        )}
       </div>
 
       <div className="mt-6 flex flex-col sm:flex-row sm:items-center gap-3">
@@ -141,6 +147,7 @@ function ProjectRow({ project }: { project: ProjectSummary }) {
 }
 
 function EmptyState({ hasAnyProjects }: { hasAnyProjects: boolean }) {
+  const { user } = useCurrentUser();
   return (
     <div className="flex flex-col items-center justify-center text-center py-20 px-4">
       <div className="w-10 h-10 rounded-lg border border-slate-200 flex items-center justify-center text-slate-400 mb-4 dark:border-zinc-700 dark:text-zinc-500">
@@ -155,12 +162,14 @@ function EmptyState({ hasAnyProjects }: { hasAnyProjects: boolean }) {
       <p className="text-sm text-slate-400 mt-1 max-w-xs dark:text-zinc-500">
         {hasAnyProjects ? "Try adjusting your search or filters." : "Get started by creating your first project."}
       </p>
-      <button
-        type="button"
-        className="mt-5 text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3.5 py-2 shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-500 dark:hover:bg-brand-600 dark:shadow-brand-500/20"
-      >
-        + Create Project
-      </button>
+      {canManage(user.role) && (
+        <button
+          type="button"
+          className="mt-5 text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3.5 py-2 shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-500 dark:hover:bg-brand-600 dark:shadow-brand-500/20"
+        >
+          + Create Project
+        </button>
+      )}
     </div>
   );
 }

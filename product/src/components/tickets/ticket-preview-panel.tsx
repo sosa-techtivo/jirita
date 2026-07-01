@@ -166,13 +166,6 @@ export function TicketPreviewPanel({
               </div>
             </div>
 
-            {t.storyPoints !== undefined && (
-              <div>
-                <p className={FIELD_LABEL}>Story points</p>
-                <p className={FIELD_VALUE}>{t.storyPoints} pts</p>
-              </div>
-            )}
-
             {t.hours !== undefined && (
               <div>
                 <p className={FIELD_LABEL}>Hours</p>

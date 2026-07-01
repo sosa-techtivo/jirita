@@ -78,6 +78,18 @@ export const teamMembers: TeamMember[] = [
     activeTicketIds: ["dark-mode-charts", "redesign-account-settings", "app-store-screenshots"],
   },
   {
+    id: "team-cwd-elena",
+    projectSlug: "client-website-redesign",
+    name: "Elena Rossi",
+    role: "Designer",
+    email: "elena.rossi@techtivo.com",
+    avatar: avatar(5),
+    status: "Busy",
+    weeklyCapacity: 10,
+    assignedHours: 8,
+    activeTicketIds: [],
+  },
+  {
     id: "team-ipm-jordan",
     projectSlug: "internal-platform-migration",
     name: "Jordan Wu",

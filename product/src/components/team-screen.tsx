@@ -11,6 +11,8 @@ import { StatusBadge as TicketStatusBadge, PriorityBadge } from "@/components/ti
 import { TicketPreviewPanel } from "@/components/tickets/ticket-preview-panel";
 import { FilterDropdown } from "@/components/tickets/filter-dropdown";
 import type { DropdownGroup } from "@/components/tickets/filter-dropdown";
+import { useCurrentUser } from "@/components/current-user-provider";
+import { canManage } from "@/lib/current-user";
 
 // ── Status & capacity styling ───────────────────────────────────────────────────
 
@@ -34,7 +36,7 @@ export function utilizationOf(member: TeamMember): number {
   return Math.round((member.assignedHours / member.weeklyCapacity) * 100);
 }
 
-function capacityBarColor(pct: number): string {
+export function capacityBarColor(pct: number): string {
   return pct > 100 ? "bg-red-500" : pct > 80 ? "bg-amber-400" : "bg-emerald-500";
 }
 
@@ -66,6 +68,8 @@ function assigneeQueryValue(name: string): string {
 // ── Main screen ───────────────────────────────────────────────────────────────
 
 export function TeamScreen({ slug }: { slug: string }) {
+  const { user } = useCurrentUser();
+  const canAddMember = canManage(user.role);
   const members = useMemo(() => getTeamByProjectSlug(slug), [slug]);
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState<string[]>([]);
@@ -113,12 +117,14 @@ export function TeamScreen({ slug }: { slug: string }) {
             Monitor team members, workload and capacity.
           </p>
         </div>
-        <button
-          type="button"
-          className="text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3.5 py-2 shadow-sm shadow-brand-600/20 transition-colors flex-shrink-0 dark:bg-brand-500 dark:hover:bg-brand-600 dark:shadow-brand-500/20"
-        >
-          + Add Member
-        </button>
+        {canAddMember && (
+          <button
+            type="button"
+            className="text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3.5 py-2 shadow-sm shadow-brand-600/20 transition-colors flex-shrink-0 dark:bg-brand-500 dark:hover:bg-brand-600 dark:shadow-brand-500/20"
+          >
+            + Add Member
+          </button>
+        )}
       </div>
 
       <div className="mt-6 flex items-stretch divide-x divide-slate-100 dark:divide-zinc-800 rounded-xl border border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900 shadow-sm shadow-slate-200/40 dark:shadow-black/20 overflow-hidden">

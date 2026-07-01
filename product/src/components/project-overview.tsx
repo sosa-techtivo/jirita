@@ -6,6 +6,8 @@ import type { ReactNode } from "react";
 import { NewTicketModal } from "@/components/tickets/new-ticket-modal";
 import { tickets as ALL_MOCK_TICKETS } from "@/lib/mock-tickets";
 import type { Ticket } from "@/lib/mock-tickets";
+import { useCurrentUser } from "@/components/current-user-provider";
+import { canManage } from "@/lib/current-user";
 
 const MOCK_ESTIMATED_HOURS = ALL_MOCK_TICKETS.reduce((sum, t) => sum + (t.hours ?? 0), 0);
 
@@ -193,6 +195,8 @@ const team: TeamMember[] = [
 ];
 
 export function ProjectOverview({ slug = "mobile-banking-app" }: { slug?: string }) {
+  const { user } = useCurrentUser();
+  const canManageProject = canManage(user.role);
   const [showNewTicket, setShowNewTicket] = useState(false);
   const [inProgressTickets, setInProgressTickets] = useState<ActiveTicket[]>(INITIAL_IN_PROGRESS);
   const [activity, setActivity] = useState<ActivityEntry[]>(INITIAL_ACTIVITY);
@@ -263,14 +267,16 @@ export function ProjectOverview({ slug = "mobile-banking-app" }: { slug?: string
             </div>
           </div>
         </div>
-        <div className="flex items-center gap-2 flex-shrink-0">
-          <button
-            onClick={() => setShowNewTicket(true)}
-            className="text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3.5 py-2 shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-500 dark:hover:bg-brand-600 dark:shadow-brand-500/20"
-          >
-            + New Ticket
-          </button>
-        </div>
+        {canManageProject && (
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <button
+              onClick={() => setShowNewTicket(true)}
+              className="text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3.5 py-2 shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-500 dark:hover:bg-brand-600 dark:shadow-brand-500/20"
+            >
+              + New Ticket
+            </button>
+          </div>
+        )}
       </div>
 
       {/* ===== Slim attention line (not a hero) ===== */}
@@ -387,12 +393,14 @@ export function ProjectOverview({ slug = "mobile-banking-app" }: { slug?: string
           <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/40 dark:border-zinc-700/70 dark:bg-zinc-900 dark:shadow-black/20">
             <div className="flex items-baseline justify-between mb-3">
               <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-zinc-400">Team</h2>
-              <Link
-                href={`/projects/${slug}/team`}
-                className="text-xs font-medium text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300"
-              >
-                View all →
-              </Link>
+              {canManageProject && (
+                <Link
+                  href={`/projects/${slug}/team`}
+                  className="text-xs font-medium text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300"
+                >
+                  View all →
+                </Link>
+              )}
             </div>
             <ul className="space-y-3">
               {team.map((member) => (
@@ -419,14 +427,16 @@ export function ProjectOverview({ slug = "mobile-banking-app" }: { slug?: string
                   Notes &amp; Documentation
                 </Link>
               </li>
-              <li>
-                <Link
-                  href={`/projects/${slug}/reports`}
-                  className="text-slate-600 hover:text-brand-600 dark:text-zinc-400 dark:hover:text-brand-400"
-                >
-                  Project Reports
-                </Link>
-              </li>
+              {canManageProject && (
+                <li>
+                  <Link
+                    href={`/projects/${slug}/reports`}
+                    className="text-slate-600 hover:text-brand-600 dark:text-zinc-400 dark:hover:text-brand-400"
+                  >
+                    Project Reports
+                  </Link>
+                </li>
+              )}
             </ul>
           </section>
         </div>

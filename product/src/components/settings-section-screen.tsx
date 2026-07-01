@@ -3,6 +3,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { SETTINGS_SECTIONS, DANGER_SECTION } from "./settings-screen";
+import { useCurrentUser } from "@/components/current-user-provider";
 
 // ── Shared primitive components ───────────────────────────────────────────────
 
@@ -514,9 +515,15 @@ function sectionMeta(slug: string) {
 // ── Left nav ───────────────────────────────────────────────────────────────────
 
 function SettingsNav({ active }: { active: string }) {
+  const { user } = useCurrentUser();
+  // Only ADMIN has the Settings nav item; other roles reach this screen via
+  // the Time Tracking nav link only, so they shouldn't see the rest of the
+  // admin settings area from here.
+  const sections = user.role === "ADMIN" ? ALL_SECTIONS : ALL_SECTIONS.filter((s) => s.slug === "time-tracking");
+
   return (
     <nav className="space-y-0.5 sticky top-4">
-      {ALL_SECTIONS.map((s) => {
+      {sections.map((s) => {
         const isActive = s.slug === active;
         const isDanger = s.slug === "danger-zone";
         return (
@@ -546,6 +553,29 @@ function SettingsNav({ active }: { active: string }) {
         );
       })}
     </nav>
+  );
+}
+
+// ── Breadcrumb ─────────────────────────────────────────────────────────────────
+
+export function SettingsBreadcrumb({ section, title }: { section: string; title: string }) {
+  const { user } = useCurrentUser();
+  // Non-admins only ever reach here via the Time Tracking nav item, so the
+  // "Settings" crumb shouldn't link them into the admin-only settings hub.
+  if (section === "time-tracking" && user.role !== "ADMIN") {
+    return <span className="text-slate-800 font-medium dark:text-zinc-200">{title}</span>;
+  }
+  return (
+    <>
+      <Link
+        href="/settings"
+        className="text-slate-400 hover:text-slate-600 dark:text-zinc-500 dark:hover:text-zinc-300"
+      >
+        Settings
+      </Link>
+      <span className="text-slate-300 dark:text-zinc-700">/</span>
+      <span className="text-slate-800 font-medium dark:text-zinc-200">{title}</span>
+    </>
   );
 }
 
