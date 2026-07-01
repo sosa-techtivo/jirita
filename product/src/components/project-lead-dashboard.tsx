@@ -69,7 +69,7 @@ const DUE_TODAY_BY_PROJECT: Record<string, number> = {
 // Per-project ticket pools that feed "Awaiting Review" and "Upcoming
 // Deadlines" — Mobile Banking App reuses the Lead's own active work list
 // since that's already scoped to this project.
-const PROJECT_TICKETS: Record<string, Ticket[]> = {
+export const PROJECT_TICKETS: Record<string, Ticket[]> = {
   "mobile-banking-app": MY_ACTIVE,
   "client-website-redesign": [
     {

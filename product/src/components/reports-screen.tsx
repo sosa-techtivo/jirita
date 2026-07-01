@@ -1,20 +1,18 @@
 "use client";
 
-import { useState, useEffect, useRef, Fragment } from "react";
+import { useState, useEffect, useRef } from "react";
 import type { ReactNode } from "react";
 import { FilterDropdown } from "@/components/tickets/filter-dropdown";
 import type { DropdownGroup } from "@/components/tickets/filter-dropdown";
+import { useCurrentUser } from "@/components/current-user-provider";
+import { ReportStatusBar, KpiCard, Section, BlockCompletion, AnimatedBar } from "@/components/reports-shared";
+import type { StatusItem } from "@/components/reports-shared";
+import { ProjectLeadReportsScreen } from "@/components/project-lead-reports-screen";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type Risk          = "on-track" | "at-risk" | "blocked";
 type PersonSortKey = "assignedTickets" | "estimatedHours" | "completedHours" | "remainingHours" | "blockedHours" | "capacity";
-
-export interface StatusItem {
-  id:    string;
-  level: "warning" | "critical" | "ok";
-  text:  string;
-}
 
 interface PersonRow {
   id:              string;
@@ -65,6 +63,28 @@ interface ActivityEntry {
   group:  "today" | "yesterday" | "earlier";
 }
 
+type PeriodKey = "this-month" | "last-month" | "this-quarter" | "custom";
+
+// Billing rows carry hours + a rate; the invoice/revenue figure is always
+// derived (billableHours × avgRate) rather than stored, so the numbers can
+// never drift out of sync with each other.
+interface ClientBillingRow {
+  id:               string;
+  client:           string;
+  billableHours:    number;
+  nonBillableHours: number;
+  avgRate:          number;
+}
+
+interface MemberBillingRow {
+  id:               string;
+  name:             string;
+  avatar:           string;
+  billableHours:    number;
+  nonBillableHours: number;
+  avgRate:          number;
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 const av = (id: number) => `https://i.pravatar.cc/64?img=${id}`;
@@ -98,6 +118,122 @@ const PROJECT_HEALTH: ProjectRow[] = [
   { id: "cwd", name: "Client Website Redesign",     shortName: "CWD", tickets: 6,  completedHours: 6,   estimatedHours: 18,  blocked: 1, completion: 35, risk: "at-risk"  },
   { id: "pai", name: "Partner API Integration",     shortName: "PAI", tickets: 4,  completedHours: 8,   estimatedHours: 16,  blocked: 0, completion: 50, risk: "on-track" },
 ];
+
+// ── Billing (Admin-only) ─────────────────────────────────────────────────────
+// Mock only — hours/rates below are illustrative placeholders standing in for
+// a future Time Tracking + invoicing integration. Billable + non-billable
+// hours across clients (and separately across members) both total 212h, the
+// same figure as KPI_SUMMARY.completedHours above — same underlying hours,
+// just sliced two different ways.
+
+const PERIOD_OPTIONS: { key: PeriodKey; label: string }[] = [
+  { key: "this-month",   label: "This Month" },
+  { key: "last-month",   label: "Last Month" },
+  { key: "this-quarter", label: "This Quarter" },
+  { key: "custom",       label: "Custom Range" },
+];
+
+interface CustomRange {
+  from: string; // yyyy-mm-dd, native <input type="date"> format
+  to:   string;
+}
+
+// Pre-filled with June's bounds so Apply produces a sensible label even if
+// nobody touches the fields — matches the "This Month" mock period.
+const DEFAULT_CUSTOM_RANGE: CustomRange = { from: "2026-06-01", to: "2026-06-30" };
+
+const SHORT_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+function formatShortDate(iso: string): string {
+  if (!iso) return "";
+  const [, month, day] = iso.split("-").map(Number);
+  return `${SHORT_MONTHS[month - 1]} ${day}`;
+}
+
+function formatRangeLabel(range: CustomRange): string {
+  return `${formatShortDate(range.from)} – ${formatShortDate(range.to)}`;
+}
+
+// Same mock "today" the rest of this report is dated against.
+const TODAY = new Date(2026, 5, 30);
+
+function toISO(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function addDays(d: Date, days: number): Date {
+  const copy = new Date(d);
+  copy.setDate(copy.getDate() + days);
+  return copy;
+}
+
+type PresetKey = "today" | "this-week" | "this-month" | "last-month" | "this-quarter";
+
+const RANGE_PRESETS: { key: PresetKey; label: string }[] = [
+  { key: "today",        label: "Today" },
+  { key: "this-week",    label: "This Week" },
+  { key: "this-month",   label: "This Month" },
+  { key: "last-month",   label: "Last Month" },
+  { key: "this-quarter", label: "This Quarter" },
+];
+
+function rangeForPreset(preset: PresetKey): CustomRange {
+  const year = TODAY.getFullYear();
+  const month = TODAY.getMonth();
+
+  switch (preset) {
+    case "today":
+      return { from: toISO(TODAY), to: toISO(TODAY) };
+    case "this-week": {
+      const day = TODAY.getDay();
+      const start = addDays(TODAY, day === 0 ? -6 : 1 - day); // Monday
+      return { from: toISO(start), to: toISO(addDays(start, 6)) };
+    }
+    case "this-month":
+      return { from: toISO(new Date(year, month, 1)), to: toISO(new Date(year, month + 1, 0)) };
+    case "last-month":
+      return { from: toISO(new Date(year, month - 1, 1)), to: toISO(new Date(year, month, 0)) };
+    case "this-quarter": {
+      const quarterStartMonth = Math.floor(month / 3) * 3;
+      return { from: toISO(new Date(year, quarterStartMonth, 1)), to: toISO(new Date(year, quarterStartMonth + 3, 0)) };
+    }
+  }
+}
+
+const BILLING_BY_CLIENT: ClientBillingRow[] = [
+  { id: "meridian",  client: "Meridian Bank", billableHours: 120, nonBillableHours: 8,  avgRate: 110 },
+  { id: "retail-co", client: "RetailCo",      billableHours: 40,  nonBillableHours: 6,  avgRate: 85  },
+  { id: "partner-a", client: "Partner A",     billableHours: 18,  nonBillableHours: 4,  avgRate: 90  },
+  { id: "internal",  client: "Internal",      billableHours: 0,   nonBillableHours: 16, avgRate: 0   },
+];
+
+const BILLING_BY_MEMBER: MemberBillingRow[] = [
+  { id: "marcus", name: "Marcus Lee",  avatar: av(12), billableHours: 64, nonBillableHours: 6, avgRate: 105 },
+  { id: "sarah",  name: "Sarah Chen",  avatar: av(47), billableHours: 48, nonBillableHours: 6, avgRate: 115 },
+  { id: "david",  name: "David Kim",   avatar: av(22), billableHours: 26, nonBillableHours: 6, avgRate: 80  },
+  { id: "priya",  name: "Priya Patel", avatar: av(33), billableHours: 32, nonBillableHours: 8, avgRate: 90  },
+  { id: "elena",  name: "Elena Rossi", avatar: av(5),  billableHours: 8,  nonBillableHours: 8, avgRate: 100 },
+];
+
+const BILLING_TOTALS = BILLING_BY_CLIENT.reduce(
+  (acc, row) => ({
+    billableHours:    acc.billableHours + row.billableHours,
+    nonBillableHours: acc.nonBillableHours + row.nonBillableHours,
+    revenue:          acc.revenue + row.billableHours * row.avgRate,
+  }),
+  { billableHours: 0, nonBillableHours: 0, revenue: 0 }
+);
+
+const UTILIZATION_PCT = Math.round(
+  (BILLING_TOTALS.billableHours / (BILLING_TOTALS.billableHours + BILLING_TOTALS.nonBillableHours)) * 100
+);
+
+function formatCurrency(amount: number): string {
+  return `$${amount.toLocaleString("en-US")}`;
+}
 
 const WORKLOAD: WorkloadEntry[] = [
   { id: "marcus", name: "Marcus Lee",  avatar: av(12), hours: 112, sprintCapacity: 120, weekDelta: +18, capacity: 104 },
@@ -257,6 +393,8 @@ const CLIENT_GROUPS: DropdownGroup[] = [{
   ],
 }];
 
+// Used by Project Lead's filter bar only — Admin has the Billing Period
+// selector as the single source of truth for the reporting window instead.
 const DATE_GROUPS: DropdownGroup[] = [{
   options: [
     { value: "this-week",    label: "This Week" },
@@ -306,30 +444,8 @@ const HOURS_GROUPS: DropdownGroup[] = [{
 }];
 
 // ── Report Status Bar ─────────────────────────────────────────────────────────
-
-const STATUS_ICON: Record<StatusItem["level"], ReactNode> = {
-  warning: (
-    <svg className="w-3.5 h-3.5 flex-shrink-0 text-amber-500" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
-    </svg>
-  ),
-  critical: (
-    <svg className="w-3.5 h-3.5 flex-shrink-0 text-red-500" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
-    </svg>
-  ),
-  ok: (
-    <svg className="w-3.5 h-3.5 flex-shrink-0 text-emerald-500" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-    </svg>
-  ),
-};
-
-const STATUS_TEXT: Record<StatusItem["level"], string> = {
-  warning:  "text-amber-600 dark:text-amber-400",
-  critical: "text-red-600 dark:text-red-400",
-  ok:       "text-emerald-700 dark:text-emerald-500",
-};
+// ReportStatusBar itself lives in reports-shared.tsx (reused by the Project
+// Lead's Reports page too); this function only derives Admin-specific items.
 
 function deriveStatusItems(): StatusItem[] {
   const items: StatusItem[] = [];
@@ -363,122 +479,8 @@ function deriveStatusItems(): StatusItem[] {
 
 const STATUS_ITEMS = deriveStatusItems();
 
-export function ReportStatusBar({ items }: { items: StatusItem[] }) {
-  return (
-    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-center gap-y-2 px-5 py-2.5 min-h-[44px] rounded-xl border border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900 shadow-sm shadow-slate-200/40 dark:shadow-black/20">
-      {items.map((item, i) => (
-        <Fragment key={item.id}>
-          {i > 0 && (
-            <span
-              className="hidden sm:block px-3 text-slate-300 dark:text-zinc-700 select-none text-sm leading-none"
-              aria-hidden
-            >
-              ·
-            </span>
-          )}
-          <div className="flex items-center gap-1.5">
-            {STATUS_ICON[item.level]}
-            <span className={`text-[13px] font-medium whitespace-nowrap ${STATUS_TEXT[item.level]}`}>
-              {item.text}
-            </span>
-          </div>
-        </Fragment>
-      ))}
-    </div>
-  );
-}
-
-// ── Sub-components ────────────────────────────────────────────────────────────
-
-function KpiCard({
-  label,
-  value,
-  sub,
-  accent,
-  danger,
-  progress,
-}: {
-  label:     string;
-  value:     ReactNode;
-  sub?:      string;
-  accent?:   boolean;
-  danger?:   boolean;
-  progress?: number;
-}) {
-  return (
-    <div
-      className={[
-        "rounded-xl border px-5 pt-4 shadow-sm shadow-slate-200/40 dark:shadow-black/20",
-        "transition-all duration-200 hover:shadow-md hover:-translate-y-px",
-        progress !== undefined ? "pb-3" : "pb-4",
-        accent
-          ? "border-brand-100 dark:border-brand-700/40 bg-brand-50/40 dark:bg-brand-500/5"
-          : "border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900",
-      ].join(" ")}
-    >
-      <p
-        className={[
-          "text-[10px] font-bold uppercase tracking-widest mb-1",
-          accent ? "text-brand-500" : "text-slate-400 dark:text-zinc-600",
-        ].join(" ")}
-      >
-        {label}
-      </p>
-      <p
-        className={[
-          "text-2xl font-bold leading-none",
-          danger
-            ? "text-red-600 dark:text-red-400"
-            : accent
-            ? "text-brand-700 dark:text-brand-500"
-            : "text-slate-900 dark:text-zinc-50",
-        ].join(" ")}
-      >
-        {value}
-      </p>
-      {sub && (
-        <p className="text-xs text-slate-400 dark:text-zinc-600 mt-1">{sub}</p>
-      )}
-      {progress !== undefined && (
-        <div className="mt-2 h-1 rounded-full bg-slate-100 dark:bg-zinc-800 overflow-hidden">
-          <div
-            className="h-full rounded-full bg-brand-500"
-            style={{ width: `${progress}%` }}
-          />
-        </div>
-      )}
-    </div>
-  );
-}
-
-function Section({
-  title,
-  count,
-  icon,
-  children,
-}: {
-  title:    string;
-  count?:   number;
-  icon?:    ReactNode;
-  children: ReactNode;
-}) {
-  return (
-    <section className="rounded-xl border border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900 p-5 shadow-sm shadow-slate-200/40 dark:shadow-black/20">
-      <div className="flex items-center gap-2 mb-4">
-        {icon}
-        <h2 className="text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:text-zinc-400">
-          {title}
-        </h2>
-        {count !== undefined && (
-          <span className="text-[10px] font-semibold text-slate-400 dark:text-zinc-500 bg-slate-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded-full">
-            {count}
-          </span>
-        )}
-      </div>
-      {children}
-    </section>
-  );
-}
+// ReportStatusBar, KpiCard, Section, BlockCompletion, and AnimatedBar all live
+// in reports-shared.tsx now — reused as-is by the Project Lead's Reports page.
 
 const RISK_STYLES: Record<Risk, string> = {
   "on-track": "text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-500/10",
@@ -500,37 +502,6 @@ function RiskBadge({ risk }: { risk: Risk }) {
   );
 }
 
-function BlockCompletion({ pct }: { pct: number }) {
-  const TOTAL  = 10;
-  const filled = Math.round(pct / 10);
-  const empty  = TOTAL - filled;
-  return (
-    <span className="inline-flex items-center gap-2">
-      <span className="font-mono text-[13px] leading-none select-none" aria-hidden>
-        <span className="text-brand-500">{"█".repeat(filled)}</span>
-        <span className="text-slate-200 dark:text-zinc-700">{"░".repeat(empty)}</span>
-      </span>
-      <span className="text-xs text-slate-500 dark:text-zinc-400 tabular-nums w-8">
-        {pct}%
-      </span>
-    </span>
-  );
-}
-
-function AnimatedBar({ pct, className }: { pct: number; className: string }) {
-  const [width, setWidth] = useState(0);
-  useEffect(() => {
-    const id = setTimeout(() => setWidth(pct), 60);
-    return () => clearTimeout(id);
-  }, [pct]);
-  return (
-    <div
-      className={`h-full rounded-full ${className}`}
-      style={{ width: `${width}%`, transition: "width 220ms ease-out" }}
-    />
-  );
-}
-
 function CapacityCell({ pct }: { pct: number }) {
   const cls =
     pct > 100 ? "text-red-600 dark:text-red-400" :
@@ -538,6 +509,184 @@ function CapacityCell({ pct }: { pct: number }) {
                 "text-emerald-600 dark:text-emerald-400";
   return (
     <span className={`font-semibold tabular-nums ${cls}`}>{pct}%</span>
+  );
+}
+
+// Unlike CapacityCell (where high = overloaded = bad), a high billable
+// utilization % is the goal, so the color scale runs the other direction.
+function UtilizationCell({ pct }: { pct: number }) {
+  const cls =
+    pct < 60 ? "text-red-600 dark:text-red-400" :
+    pct < 80 ? "text-amber-600 dark:text-amber-400" :
+               "text-emerald-600 dark:text-emerald-400";
+  return (
+    <span className={`font-semibold tabular-nums ${cls}`}>{pct}%</span>
+  );
+}
+
+type ReportTab = "delivery" | "finance";
+
+const REPORT_TABS: { key: ReportTab; label: string }[] = [
+  { key: "delivery", label: "Delivery" },
+  { key: "finance",  label: "Finance"  },
+];
+
+// Same segmented-pill styling as ViewSwitcher (tickets board/list/etc. toggle)
+// so the tab language stays consistent across the app.
+function ReportTabs({ tab, onChange }: { tab: ReportTab; onChange: (t: ReportTab) => void }) {
+  return (
+    <div className="inline-flex items-center bg-slate-100 dark:bg-zinc-800/80 rounded-lg p-0.5 gap-0.5">
+      {REPORT_TABS.map((t) => (
+        <button
+          key={t.key}
+          type="button"
+          onClick={() => onChange(t.key)}
+          className={[
+            "px-3.5 py-1.5 rounded-[7px] text-sm font-medium transition-all duration-150",
+            tab === t.key
+              ? "bg-white dark:bg-zinc-900 text-slate-900 dark:text-zinc-50 shadow-sm shadow-slate-200/80 dark:shadow-black/40"
+              : "text-slate-500 dark:text-zinc-400 hover:text-slate-700 dark:hover:text-zinc-200",
+          ].join(" ")}
+        >
+          {t.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// Global period selector — cosmetic only for now. Selecting a period doesn't
+// recompute any figures yet; it's here to establish where a real Time
+// Tracking date-range integration will plug in later.
+function PeriodSelector({ value, onChange }: { value: PeriodKey; onChange: (key: PeriodKey) => void }) {
+  const [popoverOpen, setPopoverOpen] = useState(false);
+  const [appliedRange, setAppliedRange] = useState<CustomRange>(DEFAULT_CUSTOM_RANGE);
+  const [draftRange, setDraftRange] = useState<CustomRange>(DEFAULT_CUSTOM_RANGE);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!popoverOpen) return;
+    function onMouseDown(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setPopoverOpen(false);
+    }
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setPopoverOpen(false);
+    }
+    document.addEventListener("mousedown", onMouseDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onMouseDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [popoverOpen]);
+
+  function openCustomRange() {
+    setDraftRange(appliedRange);
+    setPopoverOpen(true);
+  }
+
+  function applyCustomRange() {
+    setAppliedRange(draftRange);
+    onChange("custom");
+    setPopoverOpen(false);
+  }
+
+  return (
+    <div ref={ref} className="relative inline-block">
+      <div className="inline-flex items-center gap-0.5 rounded-lg border border-slate-200 dark:border-zinc-700 bg-slate-50 dark:bg-zinc-800/60 p-1">
+        {PERIOD_OPTIONS.map((option) => {
+          const active = option.key === value;
+          const isCustom = option.key === "custom";
+          const label = isCustom && active ? formatRangeLabel(appliedRange) : option.label;
+          return (
+            <button
+              key={option.key}
+              type="button"
+              onClick={() => {
+                if (isCustom) {
+                  openCustomRange();
+                } else {
+                  onChange(option.key);
+                  setPopoverOpen(false);
+                }
+              }}
+              className={[
+                "text-xs font-medium px-2.5 py-1 rounded-md transition-colors duration-150 whitespace-nowrap",
+                active
+                  ? "bg-white dark:bg-zinc-900 text-slate-900 dark:text-zinc-50 shadow-sm"
+                  : "text-slate-500 dark:text-zinc-400 hover:text-slate-700 dark:hover:text-zinc-200",
+              ].join(" ")}
+            >
+              {label}
+            </button>
+          );
+        })}
+      </div>
+
+      {popoverOpen && (
+        <div
+          role="dialog"
+          aria-label="Custom date range"
+          className="absolute right-0 top-full mt-2 z-30 w-72 rounded-xl border border-slate-200 dark:border-zinc-700/60 bg-white dark:bg-zinc-900 shadow-lg shadow-black/10 dark:shadow-black/40 p-4"
+        >
+          <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600 mb-2.5">
+            Custom Range
+          </p>
+
+          <div className="flex flex-wrap gap-1.5 mb-3">
+            {RANGE_PRESETS.map((preset) => (
+              <button
+                key={preset.key}
+                type="button"
+                onClick={() => setDraftRange(rangeForPreset(preset.key))}
+                className="text-[11px] font-medium px-2 py-1 rounded-full border border-slate-200 dark:border-zinc-700 text-slate-600 dark:text-zinc-300 hover:bg-slate-50 dark:hover:bg-zinc-800 transition-colors"
+              >
+                {preset.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="border-t border-slate-100 dark:border-zinc-800 -mx-4 mb-3" />
+
+          <div className="space-y-3">
+            <label className="block">
+              <span className="block text-xs font-medium text-slate-500 dark:text-zinc-400 mb-1">From</span>
+              <input
+                type="date"
+                value={draftRange.from}
+                onChange={(e) => setDraftRange((r) => ({ ...r, from: e.target.value }))}
+                className="w-full text-sm bg-slate-50 dark:bg-zinc-800 text-slate-800 dark:text-zinc-100 rounded-md border border-slate-200 dark:border-zinc-700 px-2.5 py-1.5 outline-none focus:ring-2 focus:ring-brand-500/30 transition-colors"
+              />
+            </label>
+            <label className="block">
+              <span className="block text-xs font-medium text-slate-500 dark:text-zinc-400 mb-1">To</span>
+              <input
+                type="date"
+                value={draftRange.to}
+                onChange={(e) => setDraftRange((r) => ({ ...r, to: e.target.value }))}
+                className="w-full text-sm bg-slate-50 dark:bg-zinc-800 text-slate-800 dark:text-zinc-100 rounded-md border border-slate-200 dark:border-zinc-700 px-2.5 py-1.5 outline-none focus:ring-2 focus:ring-brand-500/30 transition-colors"
+              />
+            </label>
+          </div>
+          <div className="flex items-center justify-end gap-2 mt-4">
+            <button
+              type="button"
+              onClick={() => setPopoverOpen(false)}
+              className="text-xs font-medium px-3 py-1.5 rounded-lg border border-slate-200 dark:border-zinc-700 text-slate-600 dark:text-zinc-300 hover:bg-slate-50 dark:hover:bg-zinc-800 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={applyCustomRange}
+              className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-brand-500 hover:bg-brand-600 text-white transition-colors shadow-sm shadow-brand-500/30"
+            >
+              Apply
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -692,6 +841,28 @@ function ExportDropdown() {
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function ReportsScreen() {
+  const { user } = useCurrentUser();
+
+  // Project Lead gets a purpose-built Delivery/Team report scoped to their own
+  // projects instead of this company-wide Delivery/Finance view — has to be a
+  // separate component (not just an early return with more hooks below) so
+  // switching roles never changes how many hooks render on this component.
+  if (user.role === "PROJECT_LEAD") {
+    return <ProjectLeadReportsScreen />;
+  }
+
+  return <AdminReportsScreen />;
+}
+
+function AdminReportsScreen() {
+  const { user } = useCurrentUser();
+  const isAdmin = user.role === "ADMIN";
+
+  const [tab, setTab] = useState<ReportTab>("delivery");
+
+  // Cosmetic only — see PeriodSelector.
+  const [period, setPeriod] = useState<PeriodKey>("this-month");
+
   const [projectFilter,  setProjectFilter]  = useState<string[]>([]);
   const [assigneeFilter, setAssigneeFilter] = useState<string[]>([]);
   const [clientFilter,   setClientFilter]   = useState<string[]>([]);
@@ -740,6 +911,16 @@ export function ReportsScreen() {
         <ExportDropdown />
       </div>
 
+      {/* ── Report tabs (Admin only — Project Lead only ever sees Delivery) ─── */}
+      {isAdmin && (
+        <div className="mb-5">
+          <ReportTabs tab={tab} onChange={setTab} />
+        </div>
+      )}
+
+      {(!isAdmin || tab === "delivery") && (
+        <>
+
       {/* ── Status bar ───────────────────────────────────────────────────────── */}
       <div className="mb-4">
         <ReportStatusBar items={STATUS_ITEMS} />
@@ -753,7 +934,9 @@ export function ReportsScreen() {
         <FilterDropdown label="Project"    mode="multi"  groups={PROJECT_GROUPS}  selected={projectFilter}  onChange={setProjectFilter} />
         <FilterDropdown label="Assignee"   mode="multi"  groups={ASSIGNEE_GROUPS} selected={assigneeFilter} onChange={setAssigneeFilter} searchable />
         <FilterDropdown label="Client"     mode="single" groups={CLIENT_GROUPS}   selected={clientFilter}   onChange={setClientFilter} />
-        <FilterDropdown label="Date Range" mode="single" groups={DATE_GROUPS}     selected={dateFilter}     onChange={setDateFilter} />
+        {!isAdmin && (
+          <FilterDropdown label="Date Range" mode="single" groups={DATE_GROUPS} selected={dateFilter} onChange={setDateFilter} />
+        )}
         <FilterDropdown label="Status"     mode="multi"  groups={STATUS_GROUPS}   selected={statusFilter}   onChange={setStatusFilter} />
         <FilterDropdown label="Priority"   mode="multi"  groups={PRIORITY_GROUPS} selected={priorityFilter} onChange={setPriorityFilter} />
         <FilterDropdown label="Labels"     mode="multi"  groups={LABEL_GROUPS}    selected={labelFilter}    onChange={setLabelFilter} />
@@ -1113,6 +1296,194 @@ export function ReportsScreen() {
           </div>
         </Section>
       </div>
+
+        </>
+      )}
+
+      {/* ── Finance tab (Admin only) — billing/business metrics, kept fully
+          separate from Delivery's project-execution metrics above. ─────── */}
+      {isAdmin && tab === "finance" && (
+        <>
+          {/* ── Billing period + financial KPIs ──────────────────────────── */}
+          <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
+            <h2 className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600">
+              Billing Period
+            </h2>
+            <PeriodSelector value={period} onChange={setPeriod} />
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-8">
+            <KpiCard
+              label="Billable Hours"
+              value={<>{BILLING_TOTALS.billableHours}<span className="text-base font-medium ml-0.5">h</span></>}
+              sub="this period"
+              accent
+            />
+            <KpiCard
+              label="Non-billable Hours"
+              value={<>{BILLING_TOTALS.nonBillableHours}<span className="text-base font-medium ml-0.5">h</span></>}
+              sub="internal / overhead"
+            />
+            <KpiCard
+              label="Utilization"
+              value={`${UTILIZATION_PCT}%`}
+              sub="billable ÷ logged"
+              progress={UTILIZATION_PCT}
+              accent
+            />
+            <KpiCard
+              label="Estimated Revenue"
+              value={formatCurrency(BILLING_TOTALS.revenue)}
+              sub="billable hours × rate"
+              accent
+            />
+          </div>
+
+          {/* ── Sections ─────────────────────────────────────────────────── */}
+          <div className="space-y-5">
+            <Section
+              title="Billing Overview"
+              count={BILLING_BY_CLIENT.length}
+              icon={
+                <svg className="w-3.5 h-3.5 text-slate-400 dark:text-zinc-500 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.66 0-3 .672-3 1.5S10.34 11 12 11s3 .672 3 1.5-1.34 1.5-3 1.5m0-6V6m0 1v6m0 0v1m0-1c-1.66 0-3-.672-3-1.5M17 7H9a2 2 0 00-2 2v6a2 2 0 002 2h8a2 2 0 002-2V9a2 2 0 00-2-2z" />
+                </svg>
+              }
+            >
+              <div className="overflow-x-auto -mx-5 px-5">
+                <table className="w-full text-sm min-w-[520px]">
+                  <thead>
+                    <tr className="border-b border-slate-100 dark:border-zinc-800">
+                      <th className="pb-2.5 text-left text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600 w-[200px]">
+                        Client
+                      </th>
+                      <th className="pb-2.5 text-right text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600">
+                        Billable Hours
+                      </th>
+                      <th className="pb-2.5 text-right text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600">
+                        Non-billable Hours
+                      </th>
+                      <th className="pb-2.5 text-right text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600">
+                        Average Rate
+                      </th>
+                      <th className="pb-2.5 text-right text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600">
+                        Estimated Invoice
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-50 dark:divide-zinc-800/60">
+                    {BILLING_BY_CLIENT.map((row) => (
+                      <tr key={row.id} className="hover:bg-slate-50/60 dark:hover:bg-zinc-800/30 transition-colors duration-150 cursor-default">
+                        <td className="py-2.5 pr-4 font-medium text-slate-800 dark:text-zinc-200">
+                          {row.client}
+                        </td>
+                        <td className="py-2.5 text-right font-semibold text-slate-800 dark:text-zinc-200 tabular-nums">
+                          {row.billableHours}h
+                        </td>
+                        <td className="py-2.5 text-right tabular-nums">
+                          {row.nonBillableHours > 0 ? (
+                            <span className="text-slate-500 dark:text-zinc-400">{row.nonBillableHours}h</span>
+                          ) : (
+                            <span className="text-slate-300 dark:text-zinc-600">—</span>
+                          )}
+                        </td>
+                        <td className="py-2.5 text-right tabular-nums">
+                          {row.avgRate > 0 ? (
+                            <span className="text-slate-500 dark:text-zinc-400">{formatCurrency(row.avgRate)}/h</span>
+                          ) : (
+                            <span className="text-slate-300 dark:text-zinc-600">—</span>
+                          )}
+                        </td>
+                        <td className="py-2.5 text-right font-semibold text-brand-700 dark:text-brand-400 tabular-nums">
+                          {formatCurrency(row.billableHours * row.avgRate)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr className="border-t border-slate-100 dark:border-zinc-800">
+                      <td className="pt-2.5 font-semibold text-slate-600 dark:text-zinc-300">Total</td>
+                      <td className="pt-2.5 text-right font-semibold text-slate-800 dark:text-zinc-200 tabular-nums">
+                        {BILLING_TOTALS.billableHours}h
+                      </td>
+                      <td className="pt-2.5 text-right text-slate-500 dark:text-zinc-400 tabular-nums">
+                        {BILLING_TOTALS.nonBillableHours}h
+                      </td>
+                      <td className="pt-2.5" />
+                      <td className="pt-2.5 text-right font-bold text-brand-700 dark:text-brand-400 tabular-nums">
+                        {formatCurrency(BILLING_TOTALS.revenue)}
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </Section>
+
+            <Section
+              title="Billable Hours by Member"
+              count={BILLING_BY_MEMBER.length}
+              icon={
+                <svg className="w-3.5 h-3.5 text-slate-400 dark:text-zinc-500 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                  <circle cx="12" cy="8" r="4" />
+                  <path d="M4 21c0-4 4-6 8-6s8 2 8 6" />
+                </svg>
+              }
+            >
+              <div className="overflow-x-auto -mx-5 px-5">
+                <table className="w-full text-sm min-w-[480px]">
+                  <thead>
+                    <tr className="border-b border-slate-100 dark:border-zinc-800">
+                      <th className="pb-2.5 text-left text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600 w-[200px]">
+                        Member
+                      </th>
+                      <th className="pb-2.5 text-right text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600">
+                        Billable
+                      </th>
+                      <th className="pb-2.5 text-right text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600">
+                        Non-billable
+                      </th>
+                      <th className="pb-2.5 text-right text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600">
+                        Utilization %
+                      </th>
+                      <th className="pb-2.5 text-right text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600">
+                        Estimated Revenue
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-50 dark:divide-zinc-800/60">
+                    {BILLING_BY_MEMBER.map((row) => {
+                      const utilization = Math.round((row.billableHours / (row.billableHours + row.nonBillableHours)) * 100);
+                      return (
+                        <tr key={row.id} className="hover:bg-slate-50/60 dark:hover:bg-zinc-800/30 transition-colors duration-150 cursor-default">
+                          <td className="py-2.5 pr-4">
+                            <div className="flex items-center gap-2.5">
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img src={row.avatar} alt={row.name} className="w-6 h-6 rounded-full flex-shrink-0" />
+                              <span className="font-medium text-slate-800 dark:text-zinc-200">{row.name}</span>
+                            </div>
+                          </td>
+                          <td className="py-2.5 text-right font-semibold text-slate-800 dark:text-zinc-200 tabular-nums">
+                            {row.billableHours}h
+                          </td>
+                          <td className="py-2.5 text-right text-slate-500 dark:text-zinc-400 tabular-nums">
+                            {row.nonBillableHours}h
+                          </td>
+                          <td className="py-2.5 text-right">
+                            <UtilizationCell pct={utilization} />
+                          </td>
+                          <td className="py-2.5 text-right font-semibold text-brand-700 dark:text-brand-400 tabular-nums">
+                            {formatCurrency(row.billableHours * row.avgRate)}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </Section>
+          </div>
+        </>
+      )}
     </div>
   );
 }
