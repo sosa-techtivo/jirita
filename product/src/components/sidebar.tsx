@@ -14,7 +14,7 @@ export function Sidebar({
   activePage,
 }: {
   activeSlug?: string;
-  activeSection?: "overview" | "tickets" | "notes";
+  activeSection?: "overview" | "tickets" | "notes" | "team";
   activePage?: string;
 }) {
   const isDashboard = activePage === "dashboard";
@@ -182,9 +182,16 @@ export function Sidebar({
                   <a href="#" className="block px-2 py-1 rounded-md text-slate-500 hover:bg-white text-[13px] dark:text-zinc-500 dark:hover:bg-zinc-800/60">
                     Reports
                   </a>
-                  <a href="#" className="block px-2 py-1 rounded-md text-slate-500 hover:bg-white text-[13px] dark:text-zinc-500 dark:hover:bg-zinc-800/60">
+                  <Link
+                    href={`/projects/${project.slug}/team`}
+                    className={
+                      activeSection === "team"
+                        ? "block px-2 py-1 rounded-md bg-white text-brand-700 font-semibold text-[13px] shadow-sm shadow-slate-100 dark:bg-zinc-800 dark:text-brand-400"
+                        : "block px-2 py-1 rounded-md text-slate-500 hover:bg-white text-[13px] dark:text-zinc-500 dark:hover:bg-zinc-800/60"
+                    }
+                  >
                     Team
-                  </a>
+                  </Link>
                 </div>
               </div>
             ) : (

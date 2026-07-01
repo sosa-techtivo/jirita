@@ -385,7 +385,15 @@ export function ProjectOverview({ slug = "mobile-banking-app" }: { slug?: string
         {/* Right column: secondary content, kept above the fold */}
         <div className="space-y-6">
           <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/40 dark:border-zinc-700/70 dark:bg-zinc-900 dark:shadow-black/20">
-            <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-3 dark:text-zinc-400">Team</h2>
+            <div className="flex items-baseline justify-between mb-3">
+              <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-zinc-400">Team</h2>
+              <Link
+                href={`/projects/${slug}/team`}
+                className="text-xs font-medium text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300"
+              >
+                View all →
+              </Link>
+            </div>
             <ul className="space-y-3">
               {team.map((member) => (
                 <li key={member.id} className="flex items-center gap-2.5">
