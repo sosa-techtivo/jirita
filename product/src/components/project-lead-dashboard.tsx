@@ -40,8 +40,9 @@ const DEFAULT_PROJECT_SLUG = "mobile-banking-app";
 
 // Projects this Project Lead is responsible for. A real backend would scope
 // this by an actual ownership/membership relation — here we just hardcode
-// the mock set the Lead manages.
-const LEAD_PROJECT_SLUGS = ["mobile-banking-app", "client-website-redesign", "internal-platform-migration"];
+// the mock set the Lead manages. Exported so other Project Lead-scoped views
+// (e.g. the Projects list) stay consistent with this dashboard.
+export const LEAD_PROJECT_SLUGS = ["mobile-banking-app", "client-website-redesign", "internal-platform-migration"];
 
 interface DeliverySnapshot {
   completedTickets: number;
@@ -144,7 +145,7 @@ function sumDelivery(slugs: string[]): DeliverySnapshot {
 
 // Merge team rosters across projects, summing hours/capacity for anyone
 // staffed on more than one of the selected projects.
-function aggregateTeam(slugs: string[]): TeamMember[] {
+export function aggregateTeam(slugs: string[]): TeamMember[] {
   const merged = new Map<string, TeamMember>();
   for (const slug of slugs) {
     for (const member of getTeamByProjectSlug(slug)) {

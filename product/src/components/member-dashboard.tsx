@@ -29,7 +29,7 @@ import {
 const URGENT_LABELS = new Set(["Jun 28", "Jun 29", "Jun 30"]);
 const TODAY_LABEL = "Jun 30";
 
-interface Project {
+export interface Project {
   slug: string;
   name: string;
   /** Shortened label for the compact project badge (e.g. "Mobile Banking"
@@ -58,15 +58,18 @@ function ProjectBadge({ project }: { project: Project }) {
   );
 }
 
-interface WorkItem {
+export interface WorkItem {
   ticket: Ticket;
   project: Project;
 }
 
 // ── Data (David Kim, QA Engineer — the mock MEMBER user, staffed across
 //    three projects at once) ───────────────────────────────────────────────
+// Exported so other Member-scoped views (e.g. the Projects list) can derive
+// "what am I staffed on / what's assigned to me per project" from the same
+// source instead of re-deriving it.
 
-const MEMBER_WORK: WorkItem[] = [
+export const MEMBER_WORK: WorkItem[] = [
   {
     project: PROJECTS.mba,
     ticket: {

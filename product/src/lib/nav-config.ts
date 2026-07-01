@@ -9,7 +9,7 @@ export type ProjectNavKey = "overview" | "tickets" | "notes" | "team" | "reports
 const MAIN_NAV_BY_ROLE: Record<Role, MainNavKey[]> = {
   ADMIN: ["dashboard", "projects", "my-work", "reports", "time-tracking", "settings"],
   PROJECT_LEAD: ["dashboard", "projects", "my-work", "reports", "time-tracking"],
-  MEMBER: ["dashboard", "my-work", "time-tracking", "projects"],
+  MEMBER: ["dashboard", "my-work", "projects", "time-tracking"],
 };
 
 const PROJECT_NAV_BY_ROLE: Record<Role, ProjectNavKey[]> = {
