@@ -10,6 +10,27 @@ import type { Ticket } from "@/lib/mock-tickets";
 
 export const av = (id: number) => `https://i.pravatar.cc/64?img=${id}`;
 
+// ── Shared "hero" gradient card treatment ────────────────────────────────────
+//
+// Used by the Project Lead's "Current Delivery" card and the Member's
+// "Recommended Next" card — the two purple gradient heroes in the app.
+//
+// The theme only defines brand-50/100/500/600/700 (see globals.css); shades
+// like brand-300/400/900/950 don't exist, so any `dark:` class referencing
+// them is silently dropped and the *light* class stays in effect — that's
+// why these cards looked washed out in dark mode (a light lavender-to-white
+// gradient was still rendering against a dark page). Tailwind's built-in
+// violet scale is used for the dark accent instead, since it's always
+// available and reads as the same purple family as brand.
+export const HERO_CARD_CLASS =
+  "rounded-2xl border border-brand-100 dark:border-violet-900/50 bg-gradient-to-br from-brand-50 to-white dark:from-violet-950/40 dark:to-zinc-900 shadow-sm shadow-brand-100/50 dark:shadow-black/40";
+
+export const HERO_LABEL_CLASS = "text-brand-500 dark:text-violet-300";
+
+export const HERO_ACCENT_TEXT_CLASS = "text-brand-700 dark:text-violet-300";
+
+export const HERO_BORDER_CLASS = "border-brand-100 dark:border-violet-800/40";
+
 // Marcus's 5 most urgent active tickets — the "My Active Work" list is the
 // same underlying data for every role that has assigned work.
 export const MY_ACTIVE: Ticket[] = [
@@ -158,7 +179,18 @@ export function Card({
   );
 }
 
-export function ActiveTicketRow({ ticket, onOpen }: { ticket: Ticket; onOpen: (t: Ticket) => void }) {
+export function ActiveTicketRow({
+  ticket,
+  onOpen,
+  projectBadge,
+}: {
+  ticket: Ticket;
+  onOpen: (t: Ticket) => void;
+  /** Optional badge rendered above the title — lets multi-project views
+   *  (e.g. a Member's cross-project work queue) show which project a
+   *  ticket belongs to without competing with the title for attention. */
+  projectBadge?: ReactNode;
+}) {
   const isOverdue =
     ticket.status !== "done" &&
     (ticket.dueDate === "Jun 28" || ticket.dueDate === "Jun 29" || ticket.dueDate === "Jun 30");
@@ -170,8 +202,11 @@ export function ActiveTicketRow({ ticket, onOpen }: { ticket: Ticket; onOpen: (t
       className="w-full flex items-center gap-3 py-2 px-2.5 -mx-2.5 rounded-lg hover:bg-slate-50 dark:hover:bg-zinc-800/50 transition-colors text-left"
     >
       <StatusBadge status={ticket.status} />
-      <span className="flex-1 min-w-0 text-[13px] font-medium text-slate-800 dark:text-zinc-200 truncate">
-        {ticket.title}
+      <span className="flex-1 min-w-0 flex flex-col gap-0.5">
+        {projectBadge}
+        <span className="text-[13px] font-medium text-slate-800 dark:text-zinc-200 truncate">
+          {ticket.title}
+        </span>
       </span>
       {ticket.dueDate && (
         <span className={`text-[11px] font-medium flex-shrink-0 ${isOverdue ? "text-red-500 dark:text-red-400" : "text-slate-400 dark:text-zinc-500"}`}>

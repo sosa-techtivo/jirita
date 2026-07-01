@@ -8,6 +8,7 @@ import type { Ticket } from "@/lib/mock-tickets";
 import { useCurrentUser } from "@/components/current-user-provider";
 import { canManage } from "@/lib/current-user";
 import { ProjectLeadDashboard } from "@/components/project-lead-dashboard";
+import { MemberDashboard } from "@/components/member-dashboard";
 import {
   av,
   MY_ACTIVE,
@@ -15,6 +16,8 @@ import {
   Card,
   ActiveTicketRow,
   RecentActivityList,
+  HERO_LABEL_CLASS,
+  HERO_ACCENT_TEXT_CLASS,
 } from "@/components/dashboard-shared";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -112,15 +115,22 @@ function DashKpiCard({
     <div
       className={[
         "h-full flex flex-col rounded-xl border shadow-sm shadow-slate-200/40 dark:shadow-black/20 px-5 pt-4 pb-4",
+        // Every KPI card shares the same dark card background/border — an
+        // Admin overview shouldn't let one metric visually outweigh the
+        // others. Accent cards keep their light-mode tint but, in dark
+        // mode, only add a faint violet ring as emphasis instead of a
+        // brighter background (brand-300/400/900/950 aren't defined in the
+        // theme, so the old `dark:bg-brand-950/15` etc. silently fell back
+        // to the *light* class, which is why this card looked washed out).
         accent
-          ? "border-brand-100 dark:border-brand-900/40 bg-brand-50/40 dark:bg-brand-950/15"
+          ? "border-brand-100 bg-brand-50/40 dark:border-zinc-700/70 dark:bg-zinc-900 dark:ring-1 dark:ring-inset dark:ring-violet-500/15"
           : "border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900",
       ].join(" ")}
     >
-      <p className={`text-[10px] font-bold uppercase tracking-widest mb-1 ${accent ? "text-brand-500 dark:text-brand-400" : "text-slate-400 dark:text-zinc-600"}`}>
+      <p className={`text-[10px] font-bold uppercase tracking-widest mb-1 ${accent ? HERO_LABEL_CLASS : "text-slate-400 dark:text-zinc-600"}`}>
         {label}
       </p>
-      <p className={`text-2xl font-bold leading-none ${danger ? "text-red-600 dark:text-red-400" : accent ? "text-brand-700 dark:text-brand-300" : "text-slate-900 dark:text-zinc-50"}`}>
+      <p className={`text-2xl font-bold leading-none ${danger ? "text-red-600 dark:text-red-400" : accent ? HERO_ACCENT_TEXT_CLASS : "text-slate-900 dark:text-zinc-50"}`}>
         {value}
       </p>
       {sub && <p className="text-xs text-slate-400 dark:text-zinc-600 mt-1">{sub}</p>}
@@ -197,6 +207,12 @@ export function DashboardScreen() {
   // filtered version of this organization-wide one.
   if (user.role === "PROJECT_LEAD") {
     return <ProjectLeadDashboard />;
+  }
+
+  // Members (Engineer / QA / Designer) get a personal-productivity dashboard
+  // instead of a filtered version of this organization-wide one.
+  if (user.role === "MEMBER") {
+    return <MemberDashboard />;
   }
 
   const canManageOrg = canManage(user.role);

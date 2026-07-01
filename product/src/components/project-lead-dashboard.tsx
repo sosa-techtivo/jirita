@@ -9,7 +9,18 @@ import type { TeamMember } from "@/lib/mock-team";
 import { projects } from "@/lib/mock-projects";
 import { TicketPreviewPanel } from "@/components/tickets/ticket-preview-panel";
 import type { Ticket } from "@/lib/mock-tickets";
-import { Card, ActiveTicketRow, RecentActivityList, MY_ACTIVE, RECENT_ACTIVITY, av } from "@/components/dashboard-shared";
+import {
+  Card,
+  ActiveTicketRow,
+  RecentActivityList,
+  MY_ACTIVE,
+  RECENT_ACTIVITY,
+  av,
+  HERO_CARD_CLASS,
+  HERO_LABEL_CLASS,
+  HERO_ACCENT_TEXT_CLASS,
+  HERO_BORDER_CLASS,
+} from "@/components/dashboard-shared";
 import {
   utilizationOf,
   capacityTextColor,
@@ -368,10 +379,10 @@ export function ProjectLeadDashboard() {
       </div>
 
       {/* ── Section 1: Delivery Health (hero) ───────────────────────────────── */}
-      <section className="rounded-2xl border border-brand-100 dark:border-brand-900/40 bg-gradient-to-br from-brand-50 to-white dark:from-brand-950/20 dark:to-zinc-900 p-6 sm:p-7 shadow-sm shadow-brand-100/50 dark:shadow-black/20 mb-5">
+      <section className={`${HERO_CARD_CLASS} p-6 sm:p-7 mb-5`}>
         <div className="flex items-start justify-between gap-4 mb-5">
           <div>
-            <p className="text-[11px] font-bold uppercase tracking-widest text-brand-500 dark:text-brand-400 mb-1">
+            <p className={`text-[11px] font-bold uppercase tracking-widest mb-1 ${HERO_LABEL_CLASS}`}>
               Current Delivery
             </p>
             <h2 className="text-xl font-bold text-slate-900 dark:text-zinc-50">{contextTitle}</h2>
@@ -385,12 +396,12 @@ export function ProjectLeadDashboard() {
         <div className="flex flex-col lg:flex-row lg:items-center gap-6">
           <div className="flex-shrink-0">
             <div className="flex items-baseline gap-2">
-              <span className="text-5xl font-bold text-brand-700 dark:text-brand-300 tabular-nums leading-none">
+              <span className={`text-5xl font-bold tabular-nums leading-none ${HERO_ACCENT_TEXT_CLASS}`}>
                 {deliveryPct}%
               </span>
               <span className="text-sm font-medium text-slate-500 dark:text-zinc-400">Delivery Progress</span>
             </div>
-            <div className="w-full sm:w-56 h-2 rounded-full bg-white/80 dark:bg-zinc-800 border border-brand-100 dark:border-brand-900/40 overflow-hidden mt-3">
+            <div className={`w-full sm:w-56 h-2 rounded-full bg-white/80 dark:bg-zinc-800 border overflow-hidden mt-3 ${HERO_BORDER_CLASS}`}>
               <div
                 className="h-full rounded-full bg-brand-500 transition-all duration-500"
                 style={{ width: `${deliveryPct}%` }}
@@ -398,7 +409,7 @@ export function ProjectLeadDashboard() {
             </div>
           </div>
 
-          <div className="flex-1 grid grid-cols-2 sm:grid-cols-3 gap-4 lg:pl-6 lg:border-l lg:border-brand-100 dark:lg:border-brand-900/40">
+          <div className={`flex-1 grid grid-cols-2 sm:grid-cols-3 gap-4 lg:pl-6 lg:border-l ${HERO_BORDER_CLASS}`}>
             <HeroStat label="Completed Tickets" value={`${delivery.completedTickets} / ${delivery.totalTickets}`} />
             <HeroStat label="Remaining Hours" value={`${delivery.remainingHours}h`} />
             <HeroStat label="Blocked Tickets" value={delivery.blockedTickets} danger />

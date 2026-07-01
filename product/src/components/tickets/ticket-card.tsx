@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { Ticket, TicketPriority } from "@/lib/mock-tickets";
 
 function PriorityIndicator({ priority }: { priority: TicketPriority }) {
@@ -99,9 +100,14 @@ export function TicketBoardCard({
 export function TicketListRow({
   ticket,
   onTicketClick,
+  projectBadge,
 }: {
   ticket: Ticket;
   onTicketClick: (ticket: Ticket) => void;
+  /** Optional badge rendered above the title — lets multi-project views
+   *  (e.g. a Member's cross-project work queue) show which project a
+   *  ticket belongs to without competing with the title for attention. */
+  projectBadge?: ReactNode;
 }) {
   const isBlocked = ticket.status === "blocked";
 
@@ -113,9 +119,12 @@ export function TicketListRow({
       onClick={() => onTicketClick(ticket)}
       className="group w-full text-left flex items-center gap-4 px-4 py-3.5 hover:bg-slate-50 dark:hover:bg-zinc-800/50 transition-colors"
     >
-      {/* Title */}
-      <span className="flex-1 min-w-0 text-sm font-medium text-slate-800 dark:text-zinc-100 truncate">
-        {ticket.title}
+      {/* Project badge (+ title) */}
+      <span className="flex-1 min-w-0 flex flex-col gap-0.5">
+        {projectBadge}
+        <span className="text-sm font-medium text-slate-800 dark:text-zinc-100 truncate">
+          {ticket.title}
+        </span>
       </span>
 
       {/* Right-side metadata */}
