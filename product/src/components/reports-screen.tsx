@@ -8,6 +8,11 @@ import { useCurrentUser } from "@/components/current-user-provider";
 import { ReportStatusBar, KpiCard, Section, BlockCompletion, AnimatedBar } from "@/components/reports-shared";
 import type { StatusItem } from "@/components/reports-shared";
 import { ProjectLeadReportsScreen } from "@/components/project-lead-reports-screen";
+import { getTicketById, getTicketDisplayKey } from "@/lib/mock-tickets";
+import type { Ticket } from "@/lib/mock-tickets";
+import { TicketPreviewPanel } from "@/components/tickets/ticket-preview-panel";
+import { TicketTypeIcon } from "@/components/tickets/ticket-ui";
+import { MemberTrigger } from "@/components/member-profile";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -58,9 +63,12 @@ interface ActivityEntry {
   id:     string;
   name:   string;
   avatar: string;
+  /** The action fragment only — the ticket title never appears here; when
+   *  `ticket` is set it renders on its own clickable line instead. */
   action: ReactNode;
   time:   string;
   group:  "today" | "yesterday" | "earlier";
+  ticket?: Ticket;
 }
 
 type PeriodKey = "this-month" | "last-month" | "this-quarter" | "custom";
@@ -264,99 +272,64 @@ const RECENT_CHANGES: ActivityEntry[] = [
     id: "rc-1",
     name: "Priya Patel",
     avatar: av(33),
-    action: (
-      <>
-        changed Hours on{" "}
-        <span className="font-medium">&ldquo;Accessibility audit&rdquo;</span>
-        {" — "}
-        <span className="font-medium">8h → 12h</span>
-      </>
-    ),
+    action: <>changed Hours — <span className="font-medium">8h → 12h</span></>,
     time: "2 hours ago",
     group: "today",
+    ticket: getTicketById("accessibility-audit"),
   },
   {
     id: "rc-2",
     name: "Marcus Lee",
     avatar: av(12),
-    action: (
-      <>
-        moved{" "}
-        <span className="font-medium">&ldquo;Fix biometric login crash&rdquo;</span> to{" "}
-        <span className="text-emerald-600 dark:text-emerald-400 font-medium">Done</span>
-      </>
-    ),
+    action: <>moved to <span className="text-emerald-600 dark:text-emerald-400 font-medium">Done</span></>,
     time: "4 hours ago",
     group: "today",
+    ticket: getTicketById("biometric-login-crash"),
   },
   {
     id: "rc-3",
     name: "Sarah Chen",
     avatar: av(47),
-    action: (
-      <>
-        linked a PR to{" "}
-        <span className="font-medium">&ldquo;Transaction history pagination&rdquo;</span>
-      </>
-    ),
+    action: "linked a PR to",
     time: "6 hours ago",
     group: "today",
+    ticket: getTicketById("transaction-history-pagination"),
   },
   {
     id: "rc-4",
     name: "David Kim",
     avatar: av(22),
-    action: (
-      <>
-        changed assignee on{" "}
-        <span className="font-medium">&ldquo;KYC vendor API outage plan&rdquo;</span> to{" "}
-        <span className="font-medium">Marcus Lee</span>
-      </>
-    ),
+    action: <>changed assignee — <span className="font-medium">Marcus Lee</span></>,
     time: "Yesterday, 3pm",
     group: "yesterday",
+    ticket: getTicketById("kyc-vendor-outage"),
   },
   {
     id: "rc-5",
     name: "Elena Rossi",
     avatar: av(5),
-    action: (
-      <>
-        changed Hours on{" "}
-        <span className="font-medium">&ldquo;Dark mode charts&rdquo;</span>
-        {" — "}
-        <span className="font-medium">4h → 6h</span>
-      </>
-    ),
+    action: <>changed Hours — <span className="font-medium">4h → 6h</span></>,
     time: "Yesterday, 11am",
     group: "yesterday",
+    ticket: getTicketById("dark-mode-charts"),
   },
   {
     id: "rc-6",
     name: "Marcus Lee",
     avatar: av(12),
-    action: (
-      <>
-        completed{" "}
-        <span className="font-medium">&ldquo;Add MFA onboarding step&rdquo;</span>
-      </>
-    ),
+    action: "completed",
     time: "2 days ago",
     group: "earlier",
+    ticket: getTicketById("mfa-onboarding"),
   },
   {
     id: "rc-7",
     name: "Sarah Chen",
     avatar: av(47),
-    action: (
-      <>
-        moved{" "}
-        <span className="font-medium">&ldquo;Push notification setup&rdquo;</span> to{" "}
-        <span className="text-amber-600 dark:text-amber-400 font-medium">In Progress</span>
-      </>
-    ),
+    action: <>moved to <span className="text-amber-600 dark:text-amber-400 font-medium">In Progress</span></>,
     time: "2 days ago",
     group: "earlier",
+    ticket: getTicketById("push-notification-setup"),
   },
 ];
 
@@ -871,6 +844,7 @@ function AdminReportsScreen() {
   const [priorityFilter, setPriorityFilter] = useState<string[]>([]);
   const [labelFilter,    setLabelFilter]    = useState<string[]>([]);
   const [hoursFilter,    setHoursFilter]    = useState<string[]>([]);
+  const [preview,        setPreview]        = useState<Ticket | null>(null);
 
   // Hours by Person — sort state
   const [personSort,    setPersonSort]    = useState<PersonSortKey>("estimatedHours");
@@ -1012,11 +986,11 @@ function AdminReportsScreen() {
                     className="hover:bg-slate-50/60 dark:hover:bg-zinc-800/30 transition-colors duration-150 cursor-default"
                   >
                     <td className="py-2.5 pr-4">
-                      <div className="flex items-center gap-2.5">
+                      <MemberTrigger name={row.name} avatar={row.avatar} className="flex items-center gap-2.5">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img src={row.avatar} alt={row.name} className="w-6 h-6 rounded-full flex-shrink-0" />
                         <span className="font-medium text-slate-800 dark:text-zinc-200">{row.name}</span>
-                      </div>
+                      </MemberTrigger>
                     </td>
                     <td className="py-2.5 text-right text-slate-500 dark:text-zinc-400 tabular-nums">
                       {row.assignedTickets}
@@ -1162,13 +1136,13 @@ function AdminReportsScreen() {
                 return (
                   <div key={entry.id}>
                     <div className="flex items-center justify-between mb-1">
-                      <div className="flex items-center gap-2">
+                      <MemberTrigger name={entry.name} avatar={entry.avatar} className="flex items-center gap-2">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img src={entry.avatar} alt={entry.name} className="w-5 h-5 rounded-full flex-shrink-0" />
                         <span className="text-sm font-medium text-slate-700 dark:text-zinc-300">
                           {entry.name}
                         </span>
-                      </div>
+                      </MemberTrigger>
                       <div className="text-right">
                         <p className="text-sm font-semibold text-slate-700 dark:text-zinc-200 tabular-nums leading-tight">
                           {entry.hours}h
@@ -1270,19 +1244,36 @@ function AdminReportsScreen() {
                   <ul className="space-y-3.5">
                     {entries.map((entry) => (
                       <li key={entry.id} className="flex items-start gap-3">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={entry.avatar}
-                          alt={entry.name}
-                          className="w-6 h-6 rounded-full mt-0.5 flex-shrink-0"
-                        />
-                        <div className="text-sm leading-snug min-w-0">
+                        <MemberTrigger name={entry.name} avatar={entry.avatar} className="flex-shrink-0 mt-0.5 rounded-full">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={entry.avatar}
+                            alt={entry.name}
+                            className="w-6 h-6 rounded-full"
+                          />
+                        </MemberTrigger>
+                        <div className="text-sm leading-snug min-w-0 flex-1">
                           <p className="text-slate-700 dark:text-zinc-300">
-                            <span className="font-medium text-slate-900 dark:text-zinc-100">
+                            <MemberTrigger name={entry.name} avatar={entry.avatar} className="font-medium text-slate-900 dark:text-zinc-100 hover:underline">
                               {entry.name}
-                            </span>{" "}
+                            </MemberTrigger>{" "}
                             {entry.action}
                           </p>
+                          {entry.ticket && (
+                            <button
+                              type="button"
+                              onClick={() => setPreview(entry.ticket!)}
+                              className="group/ref mt-1 flex items-baseline gap-1.5 min-w-0 max-w-full text-left"
+                            >
+                              <TicketTypeIcon type={entry.ticket.type} />
+                              <span className="text-[11px] font-mono font-semibold text-slate-500 dark:text-zinc-400 group-hover/ref:text-brand-600 dark:group-hover/ref:text-brand-400 flex-shrink-0">
+                                {getTicketDisplayKey(entry.ticket)}
+                              </span>
+                              <span className="text-sm font-medium text-slate-700 dark:text-zinc-300 group-hover/ref:text-brand-600 dark:group-hover/ref:text-brand-400 group-hover/ref:underline truncate">
+                                {entry.ticket.title}
+                              </span>
+                            </button>
+                          )}
                           <p className="text-xs text-slate-400 dark:text-zinc-500 mt-0.5">
                             {entry.time}
                           </p>
@@ -1456,11 +1447,11 @@ function AdminReportsScreen() {
                       return (
                         <tr key={row.id} className="hover:bg-slate-50/60 dark:hover:bg-zinc-800/30 transition-colors duration-150 cursor-default">
                           <td className="py-2.5 pr-4">
-                            <div className="flex items-center gap-2.5">
+                            <MemberTrigger name={row.name} avatar={row.avatar} className="flex items-center gap-2.5">
                               {/* eslint-disable-next-line @next/next/no-img-element */}
                               <img src={row.avatar} alt={row.name} className="w-6 h-6 rounded-full flex-shrink-0" />
                               <span className="font-medium text-slate-800 dark:text-zinc-200">{row.name}</span>
-                            </div>
+                            </MemberTrigger>
                           </td>
                           <td className="py-2.5 text-right font-semibold text-slate-800 dark:text-zinc-200 tabular-nums">
                             {row.billableHours}h
@@ -1483,6 +1474,15 @@ function AdminReportsScreen() {
             </Section>
           </div>
         </>
+      )}
+
+      {/* ── Ticket preview panel ────────────────────────────────────────────── */}
+      {preview !== null && (
+        <TicketPreviewPanel
+          ticket={preview}
+          slug={preview.projectSlug}
+          onClose={() => setPreview(null)}
+        />
       )}
     </div>
   );

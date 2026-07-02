@@ -1,5 +1,8 @@
 import type { ReactNode } from "react";
 import type { Ticket, TicketPriority } from "@/lib/mock-tickets";
+import { getTicketDisplayKey } from "@/lib/mock-tickets";
+import { TicketTypeIcon } from "@/components/tickets/ticket-ui";
+import { MemberTrigger } from "@/components/member-profile";
 
 function PriorityIndicator({ priority }: { priority: TicketPriority }) {
   if (priority === "high") {
@@ -55,6 +58,12 @@ export function TicketBoardCard({
         </p>
       )}
 
+      {/* Ticket ID */}
+      <p className="flex items-center gap-1 text-[11px] font-mono font-medium text-slate-400 dark:text-zinc-500 mb-1 leading-none">
+        <TicketTypeIcon type={ticket.type} />
+        {getTicketDisplayKey(ticket)}
+      </p>
+
       {/* Title */}
       <p className="text-[13px] font-medium text-slate-800 dark:text-zinc-100 leading-snug line-clamp-2">
         {ticket.title}
@@ -82,13 +91,21 @@ export function TicketBoardCard({
               {ticket.hours}h
             </span>
           )}
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={ticket.assignee.avatar}
-            alt={ticket.assignee.name}
-            title={ticket.assignee.name}
-            className="w-5 h-5 rounded-full ring-1 ring-white dark:ring-zinc-900"
-          />
+          <MemberTrigger
+            name={ticket.assignee.name}
+            avatar={ticket.assignee.avatar}
+            projectSlug={ticket.projectSlug}
+            nested
+            className="rounded-full"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={ticket.assignee.avatar}
+              alt={ticket.assignee.name}
+              title={ticket.assignee.name}
+              className="w-5 h-5 rounded-full ring-1 ring-white dark:ring-zinc-900"
+            />
+          </MemberTrigger>
         </div>
       </div>
     </button>
@@ -119,11 +136,17 @@ export function TicketListRow({
       onClick={() => onTicketClick(ticket)}
       className="group w-full text-left flex items-center gap-4 px-4 py-3.5 hover:bg-slate-50 dark:hover:bg-zinc-800/50 transition-colors"
     >
-      {/* Project badge (+ title) */}
+      {/* Project badge + ticket ID (+ title) */}
       <span className="flex-1 min-w-0 flex flex-col gap-0.5">
         {projectBadge}
-        <span className="text-sm font-medium text-slate-800 dark:text-zinc-100 truncate">
-          {ticket.title}
+        <span className="flex items-baseline gap-1.5 min-w-0">
+          <TicketTypeIcon type={ticket.type} />
+          <span className="text-[11px] font-mono font-medium text-slate-400 dark:text-zinc-500 flex-shrink-0">
+            {getTicketDisplayKey(ticket)}
+          </span>
+          <span className="text-sm font-medium text-slate-800 dark:text-zinc-100 truncate">
+            {ticket.title}
+          </span>
         </span>
       </span>
 
@@ -153,13 +176,21 @@ export function TicketListRow({
           </span>
         )}
 
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={ticket.assignee.avatar}
-          alt={ticket.assignee.name}
-          title={ticket.assignee.name}
-          className="w-6 h-6 rounded-full ring-1 ring-white dark:ring-zinc-900"
-        />
+        <MemberTrigger
+          name={ticket.assignee.name}
+          avatar={ticket.assignee.avatar}
+          projectSlug={ticket.projectSlug}
+          nested
+          className="rounded-full"
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={ticket.assignee.avatar}
+            alt={ticket.assignee.name}
+            title={ticket.assignee.name}
+            className="w-6 h-6 rounded-full ring-1 ring-white dark:ring-zinc-900"
+          />
+        </MemberTrigger>
       </div>
     </button>
   );

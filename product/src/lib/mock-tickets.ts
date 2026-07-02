@@ -2,6 +2,12 @@ import { getProjectBySlug } from "@/lib/mock-projects";
 
 export type TicketStatus = "backlog" | "to-do" | "in-progress" | "review" | "blocked" | "done";
 export type TicketPriority = "high" | "normal" | "low";
+export type TicketType = "TASK" | "BUG";
+
+export const TICKET_TYPE_LABEL: Record<TicketType, string> = {
+  TASK: "Task",
+  BUG:  "Bug",
+};
 
 export interface Ticket {
   /** Internal id — stable, never shown to users. Everything (routing, lookups, links) keys off this. */
@@ -14,6 +20,8 @@ export interface Ticket {
   description: string;
   status: TicketStatus;
   priority: TicketPriority;
+  /** Task vs Bug — defaults to "TASK" for anything created without an explicit choice. */
+  type: TicketType;
   assignee: { name: string; avatar: string };
   milestone: string;
   labels: string[];
@@ -47,6 +55,7 @@ export const tickets: Ticket[] = [
     description: "Allow users to view their last cached balance and recent transactions without a network connection.",
     status: "backlog",
     priority: "normal",
+    type: "TASK",
     assignee: { name: "Marcus Lee", avatar: avatar(12) },
     milestone: "App Store Submission",
     labels: ["Enhancement"],
@@ -64,6 +73,7 @@ export const tickets: Ticket[] = [
     description: "Update chart color palette so graphs look polished in dark mode.",
     status: "backlog",
     priority: "low",
+    type: "TASK",
     assignee: { name: "Elena Rossi", avatar: avatar(5) },
     milestone: "App Store Submission",
     labels: ["Design", "Dark Mode"],
@@ -80,6 +90,7 @@ export const tickets: Ticket[] = [
     description: "Let users choose how long before the app locks after inactivity.",
     status: "backlog",
     priority: "low",
+    type: "TASK",
     assignee: { name: "Sarah Chen", avatar: avatar(47) },
     milestone: "Security Audit",
     labels: ["Security"],
@@ -99,6 +110,7 @@ export const tickets: Ticket[] = [
     description: "Simplify the settings layout and surface security controls more clearly.",
     status: "to-do",
     priority: "normal",
+    type: "TASK",
     assignee: { name: "Elena Rossi", avatar: avatar(5) },
     milestone: "App Store Submission",
     labels: ["Design"],
@@ -116,6 +128,7 @@ export const tickets: Ticket[] = [
     description: "Finalize localized screenshots and metadata ahead of submission.",
     status: "to-do",
     priority: "normal",
+    type: "TASK",
     assignee: { name: "Elena Rossi", avatar: avatar(5) },
     milestone: "App Store Submission",
     labels: ["Marketing"],
@@ -132,6 +145,7 @@ export const tickets: Ticket[] = [
     description: "Ensure VoiceOver and TalkBack compatibility for WCAG 2.1 AA compliance.",
     status: "to-do",
     priority: "high",
+    type: "TASK",
     assignee: { name: "Priya Patel", avatar: avatar(33) },
     milestone: "Beta Release",
     labels: ["Accessibility", "Compliance"],
@@ -151,6 +165,7 @@ export const tickets: Ticket[] = [
     description: "Paginate the transaction list to keep load times fast for high-volume accounts.",
     status: "in-progress",
     priority: "normal",
+    type: "TASK",
     assignee: { name: "Marcus Lee", avatar: avatar(12) },
     milestone: "Beta Release",
     labels: ["Performance"],
@@ -168,6 +183,7 @@ export const tickets: Ticket[] = [
     description: "Card storage flow needs to meet updated PCI-DSS encryption requirements.",
     status: "blocked",
     priority: "high",
+    type: "TASK",
     assignee: { name: "Sarah Chen", avatar: avatar(47) },
     milestone: "Security Audit",
     labels: ["Security", "Compliance"],
@@ -186,6 +202,7 @@ export const tickets: Ticket[] = [
     description: "Vendor integration has been failing intermittently for the past week.",
     status: "blocked",
     priority: "high",
+    type: "BUG",
     assignee: { name: "David Kim", avatar: avatar(22) },
     milestone: "Security Audit",
     labels: ["Integration"],
@@ -205,6 +222,7 @@ export const tickets: Ticket[] = [
     description: "Wire up push notification delivery for transaction and security alerts.",
     status: "review",
     priority: "normal",
+    type: "TASK",
     assignee: { name: "Priya Patel", avatar: avatar(33) },
     milestone: "Beta Release",
     labels: ["Notifications"],
@@ -222,6 +240,7 @@ export const tickets: Ticket[] = [
     description: "Add per-client rate limits to protect the transfers API from abuse.",
     status: "review",
     priority: "normal",
+    type: "TASK",
     assignee: { name: "Priya Patel", avatar: avatar(33) },
     milestone: "Security Audit",
     labels: ["Security", "API"],
@@ -241,6 +260,7 @@ export const tickets: Ticket[] = [
     description: "Guide new users through enabling multi-factor authentication on first login.",
     status: "done",
     priority: "normal",
+    type: "TASK",
     assignee: { name: "David Kim", avatar: avatar(22) },
     milestone: "Beta Release",
     labels: ["Security", "Onboarding"],
@@ -258,6 +278,7 @@ export const tickets: Ticket[] = [
     description: "Face ID login intermittently crashes the app on iOS 18 devices.",
     status: "done",
     priority: "high",
+    type: "BUG",
     assignee: { name: "Marcus Lee", avatar: avatar(12) },
     milestone: "Beta Release",
     labels: ["Bug", "iOS"],
@@ -277,6 +298,7 @@ export const tickets: Ticket[] = [
     description: "Export the legacy monolith database in preparation for migration to the new platform.",
     status: "in-progress",
     priority: "normal",
+    type: "TASK",
     assignee: { name: "Jordan Wu", avatar: avatar(15) },
     milestone: "Platform Cutover",
     labels: ["Migration"],
@@ -294,6 +316,7 @@ export const tickets: Ticket[] = [
     description: "Stand up read replicas on the new platform ahead of the database cutover.",
     status: "to-do",
     priority: "high",
+    type: "TASK",
     assignee: { name: "Jordan Wu", avatar: avatar(15) },
     milestone: "Platform Cutover",
     labels: ["Infrastructure"],
@@ -310,6 +333,7 @@ export const tickets: Ticket[] = [
     description: "Document the staged cutover plan and rollback runbook for the platform migration.",
     status: "in-progress",
     priority: "high",
+    type: "TASK",
     assignee: { name: "Marcus Lee", avatar: avatar(12) },
     milestone: "Platform Cutover",
     labels: ["Planning"],
@@ -327,6 +351,7 @@ export const tickets: Ticket[] = [
     description: "Update internal routing so admin tooling resolves against the new platform endpoints.",
     status: "to-do",
     priority: "normal",
+    type: "TASK",
     assignee: { name: "Marcus Lee", avatar: avatar(12) },
     milestone: "Platform Cutover",
     labels: ["Migration"],

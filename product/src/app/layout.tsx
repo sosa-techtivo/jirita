@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import { ThemeProvider } from "@/components/theme-provider";
 import { CurrentUserProvider } from "@/components/current-user-provider";
+import { MemberProfileProvider } from "@/components/member-profile";
 import "./globals.css";
 
 const inter = Inter({
@@ -23,7 +24,9 @@ export default function RootLayout({
     <html lang="en" className={`${inter.variable} h-full antialiased`} suppressHydrationWarning>
       <body className="min-h-full flex flex-col">
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
-          <CurrentUserProvider>{children}</CurrentUserProvider>
+          <CurrentUserProvider>
+            <MemberProfileProvider>{children}</MemberProfileProvider>
+          </CurrentUserProvider>
         </ThemeProvider>
       </body>
     </html>

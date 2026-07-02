@@ -2,7 +2,10 @@
 
 import { useState } from "react";
 import type { Ticket } from "@/lib/mock-tickets";
+import { getTicketDisplayKey } from "@/lib/mock-tickets";
 import type { OnTicketClick } from "@/components/tickets/board-column";
+import { TicketTypeIcon } from "@/components/tickets/ticket-ui";
+import { MemberTrigger } from "@/components/member-profile";
 
 // ── Date utilities ──────────────────────────────────────────────────────────
 
@@ -110,6 +113,10 @@ function TicketPill({
       className="w-full flex items-center gap-1 px-1.5 py-0.5 rounded text-left hover:bg-slate-200/60 dark:hover:bg-zinc-700/60 transition-colors"
     >
       <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${statusDotClass(ticket)}`} />
+      <TicketTypeIcon type={ticket.type} className="w-2.5 h-2.5" />
+      <span className="text-[10px] font-mono font-medium text-slate-400 dark:text-zinc-500 flex-shrink-0">
+        {getTicketDisplayKey(ticket)}
+      </span>
       <span className="text-[11px] text-slate-700 dark:text-zinc-300 truncate leading-tight">
         {ticket.title}
       </span>
@@ -175,19 +182,31 @@ function DayPanel({
                 className="w-full text-left rounded-xl border border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900 px-3.5 py-3 hover:border-slate-300 dark:hover:border-zinc-600 hover:shadow-sm transition-all"
               >
                 <div className="flex items-start justify-between gap-2">
-                  <p className="text-[13px] font-medium text-slate-800 dark:text-zinc-100 leading-snug flex-1">
-                    {ticket.title}
-                  </p>
+                  <div className="flex-1 min-w-0">
+                    <p className="flex items-center gap-1 text-[11px] font-mono font-medium text-slate-400 dark:text-zinc-500 mb-0.5 leading-none">
+                      <TicketTypeIcon type={ticket.type} />
+                      {getTicketDisplayKey(ticket)}
+                    </p>
+                    <p className="text-[13px] font-medium text-slate-800 dark:text-zinc-100 leading-snug">
+                      {ticket.title}
+                    </p>
+                  </div>
                   <span className={`flex-shrink-0 w-1.5 h-1.5 rounded-full mt-1.5 ${statusDotClass(ticket)}`} />
                 </div>
                 <div className="flex items-center gap-2.5 mt-1.5">
                   <span className="text-[11px] text-slate-500 dark:text-zinc-400">{statusLabel(ticket)}</span>
                 </div>
-                <div className="flex items-center gap-1.5 mt-2">
+                <MemberTrigger
+                  name={ticket.assignee.name}
+                  avatar={ticket.assignee.avatar}
+                  projectSlug={ticket.projectSlug}
+                  nested
+                  className="flex items-center gap-1.5 mt-2"
+                >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={ticket.assignee.avatar} alt={ticket.assignee.name} className="w-4 h-4 rounded-full" />
                   <span className="text-[11px] text-slate-500 dark:text-zinc-400">{ticket.assignee.name}</span>
-                </div>
+                </MemberTrigger>
               </button>
             ))}
           </div>

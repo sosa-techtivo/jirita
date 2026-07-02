@@ -1,4 +1,8 @@
-import type { Ticket, TicketStatus, TicketPriority } from "@/lib/mock-tickets";
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import type { Ticket, TicketStatus, TicketPriority, TicketType } from "@/lib/mock-tickets";
+import { TICKET_TYPE_LABEL } from "@/lib/mock-tickets";
 
 // ── Status metadata ──────────────────────────────────────────────────────────
 
@@ -45,6 +49,158 @@ export function PriorityBadge({ priority }: { priority: TicketPriority }) {
     return <span className="text-[11px] text-slate-400 dark:text-zinc-500">Low</span>;
   }
   return <span className="text-[11px] text-slate-500 dark:text-zinc-400">Normal</span>;
+}
+
+// ── Ticket type icon ─────────────────────────────────────────────────────────
+//
+// The one place that renders a Task/Bug glyph — every screen that shows a
+// ticket ID puts this immediately before it (never redraws its own icon)
+// so the glyph and its color stay identical everywhere. Deliberately plain:
+// Task uses the same neutral tone as the ID text next to it so it never
+// competes with a Status or Priority badge; Bug borrows the same red already
+// used for "High" priority and "Blocked" status, since a bug is inherently
+// higher-signal than a task.
+
+export function TicketTypeIcon({ type, className }: { type: TicketType; className?: string }) {
+  const size = className ?? "w-3 h-3";
+  const label = TICKET_TYPE_LABEL[type];
+
+  if (type === "BUG") {
+    return (
+      <svg
+        className={`${size} text-red-500 dark:text-red-400 flex-shrink-0`}
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-label={label}
+        role="img"
+      >
+        <title>{label}</title>
+        <rect x="8" y="9" width="8" height="10" rx="4" />
+        <path d="M12 9V6M9 6L7.5 4.5M15 6l1.5-1.5M8 13H4M20 13h-4M8 17l-2.5 2M18.5 19L16 17M10 6h4" />
+      </svg>
+    );
+  }
+
+  return (
+    <svg
+      className={`${size} text-slate-400 dark:text-zinc-500 flex-shrink-0`}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-label={label}
+      role="img"
+    >
+      <title>{label}</title>
+      <rect x="4" y="4" width="16" height="16" rx="2.5" />
+    </svg>
+  );
+}
+
+function TypeSelectChevron() {
+  return (
+    <svg className="w-3 h-3 flex-shrink-0 text-slate-400 dark:text-zinc-600 ml-auto" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M6 9l6 6 6-6" />
+    </svg>
+  );
+}
+
+// The one place that renders a Task/Bug *picker* — both the ticket creation
+// form and the ticket detail sidebar use this instead of a native <select>,
+// since a native <option> can't render the TicketTypeIcon glyph. Built on
+// TicketTypeIcon rather than redrawing the icons, so the picker's trigger
+// and menu always match every other Type indicator in the app.
+export function TicketTypeSelect({
+  value,
+  onChange,
+  buttonClassName,
+}: {
+  value: TicketType;
+  onChange: (next: TicketType) => void;
+  /** Overrides the trigger's classes so callers can match surrounding form
+   *  chrome (e.g. a bordered input row) instead of the compact default. */
+  buttonClassName?: string;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    function onMouseDown(e: MouseEvent) {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setIsOpen(false);
+    }
+    document.addEventListener("mousedown", onMouseDown);
+    return () => document.removeEventListener("mousedown", onMouseDown);
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setIsOpen(false);
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [isOpen]);
+
+  const defaultTrigger =
+    "group inline-flex items-center gap-1.5 text-[13px] font-medium text-slate-800 dark:text-zinc-200 " +
+    "hover:text-brand-600 dark:hover:text-brand-400 transition-colors cursor-pointer";
+
+  return (
+    <div ref={rootRef} className="relative inline-block">
+      <button
+        type="button"
+        onClick={() => setIsOpen((v) => !v)}
+        aria-haspopup="listbox"
+        aria-expanded={isOpen}
+        className={buttonClassName ?? defaultTrigger}
+      >
+        <span className="inline-flex items-center gap-1.5 min-w-0">
+          <TicketTypeIcon type={value} />
+          <span className="truncate">{TICKET_TYPE_LABEL[value]}</span>
+        </span>
+        <TypeSelectChevron />
+      </button>
+
+      <div
+        role="listbox"
+        aria-label="Ticket type"
+        className={[
+          "absolute left-0 top-full mt-1.5 z-50 w-36",
+          "rounded-lg border bg-white dark:bg-zinc-900",
+          "shadow-lg shadow-black/10 dark:shadow-black/40",
+          "border-slate-200 dark:border-zinc-700/60",
+          "transition-all duration-150 origin-top-left py-1",
+          isOpen ? "opacity-100 scale-100 pointer-events-auto" : "opacity-0 scale-95 pointer-events-none",
+        ].join(" ")}
+      >
+        {(Object.keys(TICKET_TYPE_LABEL) as TicketType[]).map((k) => (
+          <button
+            key={k}
+            type="button"
+            role="option"
+            aria-selected={k === value}
+            onClick={() => { onChange(k); setIsOpen(false); }}
+            className={[
+              "w-full flex items-center gap-2 px-2.5 py-1.5 text-[13px] text-left transition-colors",
+              k === value
+                ? "text-brand-700 dark:text-brand-400 bg-brand-50/60 dark:bg-brand-500/10 font-medium"
+                : "text-slate-700 dark:text-zinc-300 hover:bg-slate-50 dark:hover:bg-zinc-800/60",
+            ].join(" ")}
+          >
+            <TicketTypeIcon type={k} />
+            {TICKET_TYPE_LABEL[k]}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 // ── Label tag ─────────────────────────────────────────────────────────────────

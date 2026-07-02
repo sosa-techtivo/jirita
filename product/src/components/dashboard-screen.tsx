@@ -5,6 +5,9 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { TicketPreviewPanel } from "@/components/tickets/ticket-preview-panel";
 import type { Ticket } from "@/lib/mock-tickets";
+import { getTicketDisplayKey } from "@/lib/mock-tickets";
+import { TicketTypeIcon } from "@/components/tickets/ticket-ui";
+import { MemberTrigger } from "@/components/member-profile";
 import { useCurrentUser } from "@/components/current-user-provider";
 import { canManage } from "@/lib/current-user";
 import { ProjectLeadDashboard } from "@/components/project-lead-dashboard";
@@ -179,11 +182,13 @@ function WorkloadRow({
 
   return (
     <div className="flex items-center gap-2.5 py-1.5">
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={avatar} alt={name} className="w-5 h-5 rounded-full flex-shrink-0" />
-      <span className="text-[12px] text-slate-600 dark:text-zinc-400 w-14 flex-shrink-0 truncate">
-        {name.split(" ")[0]}
-      </span>
+      <MemberTrigger name={name} avatar={avatar} className="flex items-center gap-2.5 min-w-0">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={avatar} alt={name} className="w-5 h-5 rounded-full flex-shrink-0" />
+        <span className="text-[12px] text-slate-600 dark:text-zinc-400 w-14 flex-shrink-0 truncate text-left">
+          {name.split(" ")[0]}
+        </span>
+      </MemberTrigger>
       <div className="flex-1 h-1.5 rounded-full bg-slate-100 dark:bg-zinc-800 overflow-hidden">
         <div
           className={`h-full rounded-full transition-all duration-300 ${isOver ? "bg-amber-400" : isHigh ? "bg-amber-300" : "bg-brand-500"}`}
@@ -331,7 +336,7 @@ export function DashboardScreen() {
           </Card>
 
           <Card title="Recent Activity">
-            <RecentActivityList items={RECENT_ACTIVITY} />
+            <RecentActivityList items={RECENT_ACTIVITY} onOpenTicket={setPreview} />
           </Card>
 
         </div>
@@ -411,8 +416,14 @@ export function DashboardScreen() {
                     className="w-full flex items-center gap-2.5 py-1.5 px-2.5 -mx-2.5 rounded-lg hover:bg-slate-50 dark:hover:bg-zinc-800/50 transition-colors text-left"
                   >
                     <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${isOverdue ? "bg-red-400" : "bg-slate-300 dark:bg-zinc-600"}`} />
-                    <span className="flex-1 min-w-0 text-[12px] text-slate-700 dark:text-zinc-300 truncate">
-                      {t.title}
+                    <span className="flex-1 min-w-0 flex items-baseline gap-1.5">
+                      <TicketTypeIcon type={t.type} />
+                      <span className="text-[11px] font-mono font-medium text-slate-400 dark:text-zinc-500 flex-shrink-0">
+                        {getTicketDisplayKey(t)}
+                      </span>
+                      <span className="min-w-0 text-[12px] text-slate-700 dark:text-zinc-300 truncate">
+                        {t.title}
+                      </span>
                     </span>
                     <span className={`text-[11px] font-semibold flex-shrink-0 ${isOverdue ? "text-red-500 dark:text-red-400" : "text-slate-500 dark:text-zinc-400"}`}>
                       {t.dueDate}
@@ -430,7 +441,7 @@ export function DashboardScreen() {
       {preview !== null && (
         <TicketPreviewPanel
           ticket={preview}
-          slug="mobile-banking-app"
+          slug={preview.projectSlug}
           onClose={() => setPreview(null)}
         />
       )}

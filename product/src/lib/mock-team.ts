@@ -118,3 +118,45 @@ export const teamMembers: TeamMember[] = [
 export function getTeamByProjectSlug(slug: string): TeamMember[] {
   return teamMembers.filter((member) => member.projectSlug === slug);
 }
+
+/** Loosely-known identity for someone referenced as a member somewhere in the
+ *  UI — a ticket assignee, a comment author, an activity-feed actor, etc.
+ *  Only `name`/`avatar` are guaranteed; the rest are hints. */
+export interface MemberIdentity {
+  name: string;
+  avatar: string;
+  role?: string;
+  projectSlug?: string;
+}
+
+// The single lookup every "click a member" trigger goes through before
+// opening the shared Member Profile Modal. Prefers an exact project-scoped
+// match (the same person can be staffed on multiple projects with different
+// hours/role), falls back to matching by name alone, and — since plenty of
+// places only ever had a name+avatar to begin with (comment authors, PR
+// authors, activity-feed actors) — synthesizes a minimal read-only record
+// rather than refusing to open the modal at all.
+export function resolveTeamMember(identity: MemberIdentity): TeamMember {
+  if (identity.projectSlug) {
+    const scoped = teamMembers.find(
+      (m) => m.name === identity.name && m.projectSlug === identity.projectSlug
+    );
+    if (scoped) return scoped;
+  }
+
+  const anyMatch = teamMembers.find((m) => m.name === identity.name);
+  if (anyMatch) return anyMatch;
+
+  return {
+    id: `unknown-${identity.name.toLowerCase().replace(/\s+/g, "-")}`,
+    projectSlug: identity.projectSlug ?? "",
+    name: identity.name,
+    role: identity.role ?? "Team Member",
+    email: "",
+    avatar: identity.avatar,
+    status: "Available",
+    weeklyCapacity: 40,
+    assignedHours: 0,
+    activeTicketIds: [],
+  };
+}

@@ -4,6 +4,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { FilterDropdown } from "@/components/tickets/filter-dropdown";
 import type { DropdownGroup } from "@/components/tickets/filter-dropdown";
 import { KpiCard, Section } from "@/components/reports-shared";
+import { useCurrentUser } from "@/components/current-user-provider";
+import { ProjectLeadTimeTrackingScreen } from "@/components/project-lead-time-tracking-screen";
+import { MemberTrigger } from "@/components/member-profile";
 import {
   timesheetRows,
   computeSummary,
@@ -29,11 +32,11 @@ import type { CustomRange, TimePeriod, TimesheetRow, TimesheetStatus } from "@/l
 // The Period control is the one control that actually recomputes the numbers
 // below it (KPI cards + the Billable/Non-Billable columns in the table).
 
-const MEMBER_GROUPS: DropdownGroup[] = [{
+export const MEMBER_GROUPS: DropdownGroup[] = [{
   options: timesheetRows.map((r) => ({ value: r.id, label: r.name, avatar: r.avatar })),
 }];
 
-const PROJECT_GROUPS: DropdownGroup[] = [{
+export const PROJECT_GROUPS: DropdownGroup[] = [{
   options: [
     { value: "mobile-banking-app",          label: "Mobile Banking App" },
     { value: "internal-platform-migration", label: "Internal Platform Migration" },
@@ -44,7 +47,7 @@ const PROJECT_GROUPS: DropdownGroup[] = [{
   ],
 }];
 
-const CLIENT_GROUPS: DropdownGroup[] = [{
+export const CLIENT_GROUPS: DropdownGroup[] = [{
   options: [
     { value: "Meridian Bank", label: "Meridian Bank" },
     { value: "RetailCo",      label: "RetailCo" },
@@ -91,7 +94,7 @@ function formatRangeLabel(range: CustomRange): string {
 // Custom Range popover UX as Reports → Finance's Billing Period selector:
 // selecting a range replaces the button label with the formatted range;
 // clicking that label again reopens the popover to adjust it.
-function PeriodSelector({
+export function PeriodSelector({
   value,
   onChange,
   appliedRange,
@@ -222,7 +225,7 @@ const STATUS_STYLES: Record<TimesheetStatus, string> = {
   Missing:  "bg-red-50     text-red-700     dark:bg-red-500/10     dark:text-red-400",
 };
 
-function StatusPill({ status }: { status: TimesheetStatus }) {
+export function StatusPill({ status }: { status: TimesheetStatus }) {
   return (
     <span className={`inline-flex items-center text-[11px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap ${STATUS_STYLES[status]}`}>
       {status}
@@ -231,7 +234,7 @@ function StatusPill({ status }: { status: TimesheetStatus }) {
 }
 
 // High = overloaded = bad, same color direction as the Reports Team Workload table.
-function CapacityCell({ pct }: { pct: number }) {
+export function CapacityCell({ pct }: { pct: number }) {
   const cls =
     pct > 100 ? "text-red-600 dark:text-red-400" :
     pct > 85  ? "text-amber-600 dark:text-amber-400" :
@@ -239,7 +242,7 @@ function CapacityCell({ pct }: { pct: number }) {
   return <span className={`font-semibold tabular-nums ${cls}`}>{pct}%</span>;
 }
 
-function formatHours(h: number): string {
+export function formatHours(h: number): string {
   return `${Math.round(h * 10) / 10}h`;
 }
 
@@ -247,7 +250,7 @@ function formatCurrency(amount: number): string {
   return `$${amount.toLocaleString("en-US")}`;
 }
 
-function periodSubLabel(period: TimePeriod, range: CustomRange): string {
+export function periodSubLabel(period: TimePeriod, range: CustomRange): string {
   if (period === "today") return "today";
   if (period === "month") return "this month";
   if (period === "custom") return formatRangeLabel(range);
@@ -284,6 +287,7 @@ function getReferenceColumns(period: TimePeriod, customRange: CustomRange): Refe
 }
 
 export function TimeTrackingScreen() {
+  const { user } = useCurrentUser();
   const [period, setPeriod]     = useState<TimePeriod>("week");
   const [customRange, setCustomRange] = useState<CustomRange>(DEFAULT_CUSTOM_RANGE);
   const [memberFilter, setMemberFilter]     = useState<string[]>([]);
@@ -306,6 +310,13 @@ export function TimeTrackingScreen() {
     [rows, period, customRange]
   );
   const referenceColumns = useMemo(() => getReferenceColumns(period, customRange), [period, customRange]);
+
+  // Project Leads manage delivery and team capacity, not company finances —
+  // they get a purpose-built page with every billing/revenue concept
+  // stripped out instead of a filtered version of this Admin view.
+  if (user.role === "PROJECT_LEAD") {
+    return <ProjectLeadTimeTrackingScreen />;
+  }
 
   return (
     <div className="max-w-5xl mx-auto px-6 py-6 pb-16">
@@ -414,14 +425,18 @@ export function TimeTrackingScreen() {
             <div>
               {missingHours.slice(0, 5).map((entry) => (
                 <div key={entry.id} className="flex items-center justify-between gap-2 py-2 border-b border-slate-100 dark:border-zinc-800/70 last:border-0">
-                  <div className="flex items-center gap-2 min-w-0">
+                  <MemberTrigger
+                    name={entry.name}
+                    avatar={entry.avatar}
+                    className="flex items-center gap-2 min-w-0"
+                  >
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={entry.avatar} alt={entry.name} className="w-6 h-6 rounded-full flex-shrink-0" />
                     <div className="min-w-0">
                       <p className="text-[13px] font-medium text-slate-800 dark:text-zinc-200 truncate">{entry.name}</p>
                       <p className="text-[11px] text-slate-400 dark:text-zinc-500">{entry.periodLabel}</p>
                     </div>
-                  </div>
+                  </MemberTrigger>
                   <span className="text-[11px] font-semibold text-red-600 dark:text-red-400 whitespace-nowrap flex-shrink-0">
                     {formatHours(entry.missingHours)} missing
                   </span>
@@ -481,14 +496,20 @@ function TimesheetTableRow({
   return (
     <tr className="hover:bg-slate-50/60 dark:hover:bg-zinc-800/30 transition-colors duration-150">
       <td className="py-2.5 pr-4">
-        <div className="flex items-center gap-2.5">
+        <MemberTrigger
+          name={row.name}
+          avatar={row.avatar}
+          role={row.role}
+          projectSlug={row.projectSlugs[0]}
+          className="flex items-center gap-2.5"
+        >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={row.avatar} alt={row.name} className="w-7 h-7 rounded-full flex-shrink-0" />
           <div className="min-w-0">
             <p className="font-medium text-slate-800 dark:text-zinc-200 truncate">{row.name}</p>
             <p className="text-[11px] text-slate-400 dark:text-zinc-500 truncate">{row.role}</p>
           </div>
-        </div>
+        </MemberTrigger>
       </td>
       {referenceColumns.map((col) => (
         <td key={col.label} className="py-2.5 text-right tabular-nums text-slate-600 dark:text-zinc-400">

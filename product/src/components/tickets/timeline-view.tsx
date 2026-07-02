@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import type { Ticket } from "@/lib/mock-tickets";
 import { getTicketDisplayKey } from "@/lib/mock-tickets";
 import type { OnTicketClick } from "@/components/tickets/board-column";
+import { TicketTypeIcon } from "@/components/tickets/ticket-ui";
 
 // ── Date utilities ──────────────────────────────────────────────────────────
 
@@ -301,6 +302,7 @@ export function TimelineView({
                         minWidth: 24,
                       }}
                     >
+                      <TicketTypeIcon type={ticket.type} className="w-2.5 h-2.5 flex-shrink-0" />
                       <span className={`text-[10px] font-semibold flex-shrink-0 opacity-70 leading-none ${textClass(ticket)}`}>
                         {getTicketDisplayKey(ticket)}
                       </span>

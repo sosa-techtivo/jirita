@@ -5,13 +5,18 @@ import { projects } from "@/lib/mock-projects";
 import type { ProjectHealth } from "@/lib/mock-projects";
 import type { TeamMember } from "@/lib/mock-team";
 import { LEAD_PROJECT_SLUGS, aggregateTeam, PROJECT_TICKETS } from "@/components/project-lead-dashboard";
-import { utilizationOf, capacityBarColor, capacityTextColor, remainingAvailabilityLabel } from "@/components/team-screen";
+import { utilizationOf, capacityBarColor, capacityTextColor, remainingAvailabilityLabel } from "@/components/member-profile-modal";
+import { MemberTrigger } from "@/components/member-profile";
 import { StatusBadge, HealthBadge } from "@/components/status-badge";
 import { ReportStatusBar, Section, KpiCard, BlockCompletion, AnimatedBar } from "@/components/reports-shared";
 import type { StatusItem } from "@/components/reports-shared";
 import { RECENT_ACTIVITY, RecentActivityList } from "@/components/dashboard-shared";
 import { FilterDropdown } from "@/components/tickets/filter-dropdown";
 import type { DropdownGroup } from "@/components/tickets/filter-dropdown";
+import { getTicketDisplayKey } from "@/lib/mock-tickets";
+import type { Ticket } from "@/lib/mock-tickets";
+import { TicketPreviewPanel } from "@/components/tickets/ticket-preview-panel";
+import { TicketTypeIcon } from "@/components/tickets/ticket-ui";
 
 // A Project Lead's Reports has no company-wide or billing data at all — every
 // number here is scoped to LEAD_PROJECT_SLUGS (the same projects their
@@ -220,6 +225,7 @@ export function ProjectLeadReportsScreen() {
   const [assigneeFilter, setAssigneeFilter] = useState<string[]>([]);
   const [statusFilter, setStatusFilter] = useState<string[]>([]);
   const [priorityFilter, setPriorityFilter] = useState<string[]>([]);
+  const [preview, setPreview] = useState<Ticket | null>(null);
 
   return (
     <div className="max-w-5xl mx-auto px-6 py-6 pb-16">
@@ -353,8 +359,14 @@ export function ProjectLeadReportsScreen() {
                   return (
                     <div key={ticket.id} className="flex items-center gap-2.5 py-1.5 px-2.5 -mx-2.5 rounded-lg">
                       <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${isOverdue ? "bg-red-400" : "bg-slate-300 dark:bg-zinc-600"}`} />
-                      <span className="flex-1 min-w-0 text-[13px] text-slate-700 dark:text-zinc-300 truncate">
-                        {ticket.title}
+                      <span className="flex-1 min-w-0 flex items-baseline gap-1.5">
+                        <TicketTypeIcon type={ticket.type} />
+                        <span className="text-[11px] font-mono font-medium text-slate-400 dark:text-zinc-500 flex-shrink-0">
+                          {getTicketDisplayKey(ticket)}
+                        </span>
+                        <span className="min-w-0 text-[13px] text-slate-700 dark:text-zinc-300 truncate">
+                          {ticket.title}
+                        </span>
                       </span>
                       <span className={`text-[11px] font-semibold flex-shrink-0 ${isOverdue ? "text-red-500 dark:text-red-400" : "text-slate-500 dark:text-zinc-400"}`}>
                         {ticket.dueDate}
@@ -367,7 +379,7 @@ export function ProjectLeadReportsScreen() {
 
             {/* ── Recent Changes ──────────────────────────────────────────── */}
             <Section title="Recent Changes" icon={ClockIcon}>
-              <RecentActivityList items={MY_RECENT_ACTIVITY} />
+              <RecentActivityList items={MY_RECENT_ACTIVITY} onOpenTicket={setPreview} />
             </Section>
           </div>
         </>
@@ -420,11 +432,11 @@ export function ProjectLeadReportsScreen() {
                     return (
                       <tr key={member.name} className="hover:bg-slate-50/60 dark:hover:bg-zinc-800/30 transition-colors duration-150 cursor-default">
                         <td className="py-2.5 pr-4">
-                          <div className="flex items-center gap-2.5">
+                          <MemberTrigger name={member.name} avatar={member.avatar} role={member.role} projectSlug={member.projectSlug} className="flex items-center gap-2.5">
                             {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img src={member.avatar} alt={member.name} className="w-6 h-6 rounded-full flex-shrink-0" />
                             <span className="font-medium text-slate-800 dark:text-zinc-200">{member.name}</span>
-                          </div>
+                          </MemberTrigger>
                         </td>
                         <td className="py-2.5 text-right font-semibold text-slate-800 dark:text-zinc-200 tabular-nums">
                           {member.assignedHours}h
@@ -454,11 +466,11 @@ export function ProjectLeadReportsScreen() {
                 return (
                   <div key={member.name}>
                     <div className="flex items-center justify-between mb-1">
-                      <div className="flex items-center gap-2">
+                      <MemberTrigger name={member.name} avatar={member.avatar} role={member.role} projectSlug={member.projectSlug} className="flex items-center gap-2">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img src={member.avatar} alt={member.name} className="w-5 h-5 rounded-full flex-shrink-0" />
                         <span className="text-sm font-medium text-slate-700 dark:text-zinc-300">{member.name}</span>
-                      </div>
+                      </MemberTrigger>
                       <p className="text-sm font-semibold text-slate-700 dark:text-zinc-200 tabular-nums leading-tight">
                         {member.assignedHours}h
                         <span className="font-normal text-slate-400 dark:text-zinc-600">{" / "}{member.weeklyCapacity}h</span>
@@ -494,11 +506,11 @@ export function ProjectLeadReportsScreen() {
                     return (
                       <tr key={member.name} className="hover:bg-slate-50/60 dark:hover:bg-zinc-800/30 transition-colors duration-150 cursor-default">
                         <td className="py-2.5 pr-4">
-                          <div className="flex items-center gap-2.5">
+                          <MemberTrigger name={member.name} avatar={member.avatar} role={member.role} projectSlug={member.projectSlug} className="flex items-center gap-2.5">
                             {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img src={member.avatar} alt={member.name} className="w-6 h-6 rounded-full flex-shrink-0" />
                             <span className="font-medium text-slate-800 dark:text-zinc-200">{member.name}</span>
-                          </div>
+                          </MemberTrigger>
                         </td>
                         <td className="py-2.5 text-right tabular-nums">
                           {blocked > 0 ? (
@@ -533,11 +545,11 @@ export function ProjectLeadReportsScreen() {
                   {TEAM.map((member) => (
                     <tr key={member.name} className="hover:bg-slate-50/60 dark:hover:bg-zinc-800/30 transition-colors duration-150 cursor-default">
                       <td className="py-2.5 pr-4">
-                        <div className="flex items-center gap-2.5">
+                        <MemberTrigger name={member.name} avatar={member.avatar} role={member.role} projectSlug={member.projectSlug} className="flex items-center gap-2.5">
                           {/* eslint-disable-next-line @next/next/no-img-element */}
                           <img src={member.avatar} alt={member.name} className="w-6 h-6 rounded-full flex-shrink-0" />
                           <span className="font-medium text-slate-800 dark:text-zinc-200">{member.name}</span>
-                        </div>
+                        </MemberTrigger>
                       </td>
                       <td className="py-2.5">
                         <HealthBadge health={healthOf(member)} />
@@ -550,6 +562,15 @@ export function ProjectLeadReportsScreen() {
           </Section>
 
         </div>
+      )}
+
+      {/* ── Ticket preview panel ─────────────────────────────────────────── */}
+      {preview !== null && (
+        <TicketPreviewPanel
+          ticket={preview}
+          slug={preview.projectSlug}
+          onClose={() => setPreview(null)}
+        />
       )}
     </div>
   );

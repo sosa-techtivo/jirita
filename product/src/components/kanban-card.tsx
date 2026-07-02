@@ -1,6 +1,8 @@
 import Link from "next/link";
 import type { Ticket } from "@/lib/mock-tickets";
 import { getTicketDisplayKey } from "@/lib/mock-tickets";
+import { TicketTypeIcon } from "@/components/tickets/ticket-ui";
+import { MemberTrigger } from "@/components/member-profile";
 
 const LABEL_COLORS: Record<string, string> = {
   Security:      "bg-red-50    text-red-600    dark:bg-red-500/10    dark:text-red-400",
@@ -81,7 +83,8 @@ export function KanbanCard({ ticket, slug }: { ticket: Ticket; slug: string }) {
       )}
 
       {/* Issue key */}
-      <p className="text-[11px] font-mono font-medium text-slate-400 dark:text-zinc-500 mb-1 leading-none">
+      <p className="flex items-center gap-1 text-[11px] font-mono font-medium text-slate-400 dark:text-zinc-500 mb-1 leading-none">
+        <TicketTypeIcon type={ticket.type} />
         {getTicketDisplayKey(ticket)}
       </p>
 
@@ -150,13 +153,21 @@ export function KanbanCard({ ticket, slug }: { ticket: Ticket; slug: string }) {
           )}
         </div>
 
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={ticket.assignee.avatar}
-          alt={ticket.assignee.name}
-          title={ticket.assignee.name}
-          className="w-6 h-6 rounded-full flex-shrink-0 ring-1 ring-white dark:ring-zinc-900"
-        />
+        <MemberTrigger
+          name={ticket.assignee.name}
+          avatar={ticket.assignee.avatar}
+          projectSlug={slug}
+          nested
+          className="flex-shrink-0 rounded-full"
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={ticket.assignee.avatar}
+            alt={ticket.assignee.name}
+            title={ticket.assignee.name}
+            className="w-6 h-6 rounded-full flex-shrink-0 ring-1 ring-white dark:ring-zinc-900"
+          />
+        </MemberTrigger>
       </div>
     </Link>
   );

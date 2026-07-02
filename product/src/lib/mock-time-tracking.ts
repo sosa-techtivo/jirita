@@ -2,6 +2,8 @@
 // mock-team.ts (which is per-project staffing) since this screen aggregates
 // one row per person across all of their projects.
 
+import { getProjectBySlug } from "@/lib/mock-projects";
+
 export type TimesheetStatus = "Complete" | "Missing";
 export type TimePeriod = "today" | "week" | "month" | "custom";
 
@@ -309,6 +311,42 @@ export function computeClientBilling(
       projectedBilling: Math.round(c.projectedBilling),
     }))
     .sort((a, b) => b.projectedBilling - a.projectedBilling);
+}
+
+export interface ProjectHoursRow {
+  projectSlug: string;
+  projectName: string;
+  hours: number;
+}
+
+// Delivery-focused counterpart to computeClientBilling — "which projects are
+// consuming the team's time" instead of "which clients to invoice". A row's
+// hours are split evenly across their projectSlugs for this period, since
+// there's no per-project time-entry breakdown in this MVP; that keeps the
+// totals here consistent with hoursForPeriod rather than double-counting a
+// person's hours once per project they're staffed on.
+export function computeProjectHours(
+  rows: TimesheetRow[],
+  period: TimePeriod,
+  customRange: CustomRange = DEFAULT_CUSTOM_RANGE
+): ProjectHoursRow[] {
+  const byProject = new Map<string, number>();
+
+  for (const row of rows) {
+    if (row.projectSlugs.length === 0) continue;
+    const share = hoursForPeriod(row, period, customRange) / row.projectSlugs.length;
+    for (const slug of row.projectSlugs) {
+      byProject.set(slug, (byProject.get(slug) ?? 0) + share);
+    }
+  }
+
+  return [...byProject.entries()]
+    .map(([projectSlug, hours]) => ({
+      projectSlug,
+      projectName: getProjectBySlug(projectSlug)?.name ?? projectSlug,
+      hours: Math.round(hours * 10) / 10,
+    }))
+    .sort((a, b) => b.hours - a.hours);
 }
 
 export interface MissingHoursEntry {

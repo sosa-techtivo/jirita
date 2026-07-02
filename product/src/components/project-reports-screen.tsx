@@ -1,21 +1,19 @@
 "use client";
 
-import { useState } from "react";
 import type { ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { getTeamByProjectSlug } from "@/lib/mock-team";
-import type { TeamMember } from "@/lib/mock-team";
 import { tickets } from "@/lib/mock-tickets";
 import type { TicketStatus } from "@/lib/mock-tickets";
 import { getProjectBySlug } from "@/lib/mock-projects";
 import { StatusBadge as ProjectStatusBadge } from "@/components/status-badge";
 import {
-  MemberModal,
   StatusBadge as MemberStatusBadge,
   CapacityBar,
   capacityTextColor,
   utilizationOf,
-} from "@/components/team-screen";
+} from "@/components/member-profile-modal";
+import { useMemberProfile } from "@/components/member-profile";
 
 // ── Mock/derived data helpers ────────────────────────────────────────────────
 //
@@ -112,7 +110,7 @@ export function ProjectReportsScreen({ slug }: { slug: string }) {
   const router = useRouter();
   const project = getProjectBySlug(slug);
   const members = getTeamByProjectSlug(slug);
-  const [activeMember, setActiveMember] = useState<TeamMember | null>(null);
+  const { openMemberProfile } = useMemberProfile();
 
   // Team capacity — same computation as the Team page.
   const totalWeeklyCapacity = members.reduce((sum, m) => sum + m.weeklyCapacity, 0);
@@ -224,7 +222,7 @@ export function ProjectReportsScreen({ slug }: { slug: string }) {
                   <button
                     key={member.id}
                     type="button"
-                    onClick={() => setActiveMember(member)}
+                    onClick={() => openMemberProfile({ name: member.name, avatar: member.avatar, role: member.role, projectSlug: member.projectSlug })}
                     className="w-full flex items-center gap-3 py-2.5 px-2 -mx-2 rounded-lg text-left hover:bg-slate-50 dark:hover:bg-zinc-800/50 transition-colors"
                   >
                     {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -307,9 +305,6 @@ export function ProjectReportsScreen({ slug }: { slug: string }) {
         </Section>
       </div>
 
-      {activeMember && (
-        <MemberModal member={activeMember} slug={slug} onClose={() => setActiveMember(null)} />
-      )}
     </div>
   );
 }

@@ -3,12 +3,19 @@
 import { useState } from "react";
 import type { ReactNode } from "react";
 import type { Ticket, TicketStatus } from "@/lib/mock-tickets";
+import { getTicketDisplayKey } from "@/lib/mock-tickets";
 import { TicketListRow } from "@/components/tickets/ticket-card";
 import { BoardView } from "@/components/tickets/board-view";
 import { TicketPreviewPanel } from "@/components/tickets/ticket-preview-panel";
 import { FilterDropdown } from "@/components/tickets/filter-dropdown";
 import type { DropdownGroup } from "@/components/tickets/filter-dropdown";
-import { StatusBadge } from "@/components/tickets/ticket-ui";
+import { StatusBadge, TicketTypeIcon } from "@/components/tickets/ticket-ui";
+import { MemberTrigger } from "@/components/member-profile";
+import { useCurrentUser } from "@/components/current-user-provider";
+import { timesheetRows, weeklyCapacityPct } from "@/lib/mock-time-tracking";
+import { CapacityCell, formatHours } from "@/components/time-tracking-screen";
+import { PersonalTimesheetPanel } from "@/components/personal-timesheet-panel";
+import type { PersonalTimesheetEntry } from "@/components/personal-timesheet-panel";
 
 // ── Mock current user ─────────────────────────────────────────────────────────
 
@@ -28,6 +35,7 @@ const MY_TICKETS: Ticket[] = [
     description: "Card storage flow needs to meet updated PCI-DSS encryption requirements.",
     status: "blocked",
     priority: "high",
+    type: "TASK",
     assignee: CURRENT_USER,
     milestone: "Security Audit",
     labels: ["Security", "Compliance"],
@@ -45,6 +53,7 @@ const MY_TICKETS: Ticket[] = [
     description: "Vendor integration has been failing intermittently. Need contingency plan and escalation.",
     status: "blocked",
     priority: "high",
+    type: "BUG",
     assignee: CURRENT_USER,
     milestone: "Security Audit",
     labels: ["Integration"],
@@ -62,6 +71,7 @@ const MY_TICKETS: Ticket[] = [
     description: "Paginate the transaction list to keep load times fast for high-volume accounts.",
     status: "in-progress",
     priority: "normal",
+    type: "TASK",
     assignee: CURRENT_USER,
     milestone: "Beta Release",
     labels: ["Performance"],
@@ -79,6 +89,7 @@ const MY_TICKETS: Ticket[] = [
     description: "Wire up push notification delivery for transaction and security alerts.",
     status: "in-progress",
     priority: "normal",
+    type: "TASK",
     assignee: CURRENT_USER,
     milestone: "Beta Release",
     labels: ["Notifications"],
@@ -96,6 +107,7 @@ const MY_TICKETS: Ticket[] = [
     description: "Allow users to view their last cached balance and recent transactions without a network connection.",
     status: "in-progress",
     priority: "normal",
+    type: "TASK",
     assignee: CURRENT_USER,
     milestone: "App Store Submission",
     labels: ["Enhancement"],
@@ -113,6 +125,7 @@ const MY_TICKETS: Ticket[] = [
     description: "Let users choose how long before the app locks after inactivity.",
     status: "to-do",
     priority: "low",
+    type: "TASK",
     assignee: CURRENT_USER,
     milestone: "Security Audit",
     labels: ["Security"],
@@ -130,6 +143,7 @@ const MY_TICKETS: Ticket[] = [
     description: "Update chart color palette so graphs look polished in dark mode.",
     status: "to-do",
     priority: "low",
+    type: "TASK",
     assignee: CURRENT_USER,
     milestone: "App Store Submission",
     labels: ["Design", "Dark Mode"],
@@ -146,6 +160,7 @@ const MY_TICKETS: Ticket[] = [
     description: "Add per-client rate limits to protect the transfers API from abuse.",
     status: "review",
     priority: "normal",
+    type: "TASK",
     assignee: CURRENT_USER,
     milestone: "Security Audit",
     labels: ["Security", "API"],
@@ -162,6 +177,7 @@ const MY_TICKETS: Ticket[] = [
     description: "Ensure VoiceOver and TalkBack compatibility for WCAG 2.1 AA compliance.",
     status: "review",
     priority: "high",
+    type: "TASK",
     assignee: CURRENT_USER,
     milestone: "Beta Release",
     labels: ["Accessibility", "Compliance"],
@@ -179,6 +195,7 @@ const MY_TICKETS: Ticket[] = [
     description: "Face ID login intermittently crashes the app on iOS 18 devices.",
     status: "done",
     priority: "high",
+    type: "BUG",
     assignee: CURRENT_USER,
     milestone: "Beta Release",
     labels: ["Bug", "iOS"],
@@ -196,6 +213,7 @@ const MY_TICKETS: Ticket[] = [
     description: "Guide new users through enabling multi-factor authentication on first login.",
     status: "done",
     priority: "normal",
+    type: "TASK",
     assignee: CURRENT_USER,
     milestone: "Beta Release",
     labels: ["Security", "Onboarding"],
@@ -213,80 +231,63 @@ interface ActivityEntry {
   id: string;
   name: string;
   avatar: string;
+  /** The action fragment only — the ticket title never appears here; when
+   *  `ticket` is set it renders on its own clickable line instead. */
   action: ReactNode;
   time: string;
   group: "today" | "yesterday" | "earlier";
+  ticket?: Ticket;
 }
 
 const av = (id: number) => `https://i.pravatar.cc/64?img=${id}`;
+
+const MY_TICKETS_BY_ID = new Map(MY_TICKETS.map((t) => [t.id, t]));
 
 const RECENT_ACTIVITY: ActivityEntry[] = [
   {
     id: "ra-1",
     name: "Sarah Chen",
     avatar: av(47),
-    action: (
-      <>
-        commented on{" "}
-        <span className="font-medium">&ldquo;Transaction history pagination&rdquo;</span>
-      </>
-    ),
+    action: "commented on",
     time: "2 hours ago",
     group: "today",
+    ticket: MY_TICKETS_BY_ID.get("mw-pagination"),
   },
   {
     id: "ra-2",
     name: "Priya Patel",
     avatar: av(33),
-    action: (
-      <>
-        changed Hours on{" "}
-        <span className="font-medium">&ldquo;Accessibility audit&rdquo;</span>
-        {" — "}
-        <span className="font-medium">8h → 12h</span>
-      </>
-    ),
+    action: <>changed Hours — <span className="font-medium">8h → 12h</span></>,
     time: "5 hours ago",
     group: "today",
+    ticket: MY_TICKETS_BY_ID.get("mw-a11y"),
   },
   {
     id: "ra-3",
     name: "Elena Rossi",
     avatar: av(5),
-    action: (
-      <>
-        linked a PR to{" "}
-        <span className="font-medium">&ldquo;Dark mode charts&rdquo;</span>
-      </>
-    ),
+    action: "linked a PR to",
     time: "Yesterday",
     group: "yesterday",
+    ticket: MY_TICKETS_BY_ID.get("mw-dark"),
   },
   {
     id: "ra-4",
     name: "Marcus Lee",
     avatar: av(12),
-    action: (
-      <>
-        moved <span className="font-medium">&ldquo;Fix biometric login crash&rdquo;</span> to{" "}
-        <span className="text-emerald-600 dark:text-emerald-400 font-medium">Done</span>
-      </>
-    ),
+    action: <>moved to <span className="text-emerald-600 dark:text-emerald-400 font-medium">Done</span></>,
     time: "Yesterday",
     group: "yesterday",
+    ticket: MY_TICKETS_BY_ID.get("mw-biometric"),
   },
   {
     id: "ra-5",
     name: "David Kim",
     avatar: av(22),
-    action: (
-      <>
-        commented on{" "}
-        <span className="font-medium">&ldquo;PCI compliance gap&rdquo;</span>
-      </>
-    ),
+    action: "commented on",
     time: "2 days ago",
     group: "earlier",
+    ticket: MY_TICKETS_BY_ID.get("mw-pci"),
   },
 ];
 
@@ -383,11 +384,27 @@ const HOURS_BY_STATUS = {
   done:       MY_TICKETS.filter(t => t.status === "done").reduce((s, t) => s + (t.hours ?? 0), 0),
 };
 
+const REMAINING_ESTIMATED_HOURS = TOTAL_HOURS - HOURS_BY_STATUS.done;
+
+// ── My Time (Member role only) ──────────────────────────────────────────────
+// Time tracking isn't a separate module for Members — it's a compact summary
+// of what "Log Time" on their own tickets has already produced, plus a
+// read-only view of those entries. Sized to sum to the Member persona's
+// hoursWeek in mock-time-tracking.ts so the summary row and the timesheet
+// panel agree with each other and with what Admin/Project Lead see for this
+// same person in Time Tracking.
+const MY_TIME_ENTRIES: PersonalTimesheetEntry[] = [
+  { id: "mte-1", ticket: MY_TICKETS.find((t) => t.id === "mw-pci")!,        hours: 7, date: "Yesterday", comment: "Reviewed encryption requirements with security" },
+  { id: "mte-2", ticket: MY_TICKETS.find((t) => t.id === "mw-kyc")!,        hours: 6, date: "Jun 28",     comment: "Investigated vendor timeout errors" },
+  { id: "mte-3", ticket: MY_TICKETS.find((t) => t.id === "mw-a11y")!,       hours: 5, date: "Jun 27",     comment: "VoiceOver pass on settings screens" },
+  { id: "mte-4", ticket: MY_TICKETS.find((t) => t.id === "mw-pagination")!, hours: 4, date: "Jun 26",     comment: "Pagination edge cases for large accounts" },
+];
+
 // ── Focus mode config ─────────────────────────────────────────────────────────
 
 // Sections hidden in focus mode. Add entries here to extend without rewriting the page.
 const FOCUS_MODE_HIDDEN: ReadonlySet<string> = new Set([
-  "kpis", "my-hours", "blocked", "due-soon", "activity",
+  "kpis", "my-hours", "my-time", "blocked", "due-soon", "activity",
 ]);
 
 // ── KPI filter mode ───────────────────────────────────────────────────────────
@@ -475,8 +492,14 @@ function FocusTicketRow({ ticket, onOpen }: { ticket: Ticket; onOpen: (t: Ticket
     >
       <StatusBadge status={ticket.status} />
 
-      <span className="flex-1 min-w-0 text-[13px] font-medium text-slate-800 dark:text-zinc-200 truncate">
-        {ticket.title}
+      <span className="flex-1 min-w-0 flex items-baseline gap-1.5">
+        <TicketTypeIcon type={ticket.type} />
+        <span className="text-[11px] font-mono font-medium text-slate-400 dark:text-zinc-500 flex-shrink-0">
+          {getTicketDisplayKey(ticket)}
+        </span>
+        <span className="min-w-0 text-[13px] font-medium text-slate-800 dark:text-zinc-200 truncate">
+          {ticket.title}
+        </span>
       </span>
 
       {ticket.hours !== undefined && (
@@ -556,6 +579,7 @@ const VIEW_ICONS: Record<WorkView, ReactNode> = {
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function MyWorkScreen() {
+  const { user } = useCurrentUser();
   const [previewTicket, setPreviewTicket] = useState<Ticket | null>(null);
   const [view, setView]                   = useState<WorkView>("list");
   const [statusFilter, setStatusFilter]   = useState<string[]>([]);
@@ -564,9 +588,16 @@ export function MyWorkScreen() {
   const [labelFilter, setLabelFilter]     = useState<string[]>([]);
   const [kpiMode, setKpiMode]             = useState<KpiMode | null>(null);
   const [focusMode, setFocusMode]         = useState(false);
+  const [showTimesheet, setShowTimesheet] = useState(false);
 
   const openPreview = (ticket: Ticket) => setPreviewTicket(ticket);
   const show        = (section: string) => !focusMode || !FOCUS_MODE_HIDDEN.has(section);
+
+  // Only Members get personal time tracking folded into My Work — Admin and
+  // Project Lead keep their dedicated Time Tracking page for this data.
+  const myTimesheetRow = user.role === "MEMBER"
+    ? timesheetRows.find((r) => r.name === user.name)
+    : undefined;
 
   const activeCount = MY_TICKETS.filter((t) => t.status !== "done").length;
 
@@ -679,6 +710,43 @@ export function MyWorkScreen() {
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* ── My Time (Member only) ───────────────────────────────────────────── */}
+      {/* Time tracking isn't a separate module for a Member — it's folded in
+          here as a compact summary, with the ticket's own Log Time button
+          remaining the only way to actually log time. */}
+      {myTimesheetRow && show("my-time") && (
+        <div className="mt-3 flex items-center gap-5 rounded-xl border border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900 px-5 py-3.5 shadow-sm shadow-slate-200/40 dark:shadow-black/20 overflow-x-auto">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600 flex-shrink-0">
+            My Time
+          </p>
+          <div className="flex items-center gap-6 flex-1 min-w-0">
+            <div className="flex-shrink-0">
+              <p className="text-[10px] text-slate-400 dark:text-zinc-600">Logged Today</p>
+              <p className="text-sm font-bold text-slate-900 dark:text-zinc-50 tabular-nums">{formatHours(myTimesheetRow.hoursToday)}</p>
+            </div>
+            <div className="flex-shrink-0">
+              <p className="text-[10px] text-slate-400 dark:text-zinc-600">Logged This Week</p>
+              <p className="text-sm font-bold text-slate-900 dark:text-zinc-50 tabular-nums">{formatHours(myTimesheetRow.hoursWeek)}</p>
+            </div>
+            <div className="flex-shrink-0">
+              <p className="text-[10px] text-slate-400 dark:text-zinc-600">Remaining Estimated</p>
+              <p className="text-sm font-bold text-slate-900 dark:text-zinc-50 tabular-nums">{REMAINING_ESTIMATED_HOURS}h</p>
+            </div>
+            <div className="flex-shrink-0">
+              <p className="text-[10px] text-slate-400 dark:text-zinc-600 mb-0.5">Personal Capacity</p>
+              <CapacityCell pct={weeklyCapacityPct(myTimesheetRow)} />
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowTimesheet(true)}
+            className="flex-shrink-0 text-[11px] font-medium text-brand-600 dark:text-brand-400 hover:underline whitespace-nowrap"
+          >
+            View Timesheet →
+          </button>
         </div>
       )}
 
@@ -860,19 +928,36 @@ export function MyWorkScreen() {
                     <ul className="space-y-3.5">
                       {entries.map((entry) => (
                         <li key={entry.id} className="flex items-start gap-3">
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img
-                            src={entry.avatar}
-                            alt={entry.name}
-                            className="w-6 h-6 rounded-full mt-0.5 flex-shrink-0"
-                          />
-                          <div className="text-sm leading-snug min-w-0">
+                          <MemberTrigger name={entry.name} avatar={entry.avatar} className="flex-shrink-0 mt-0.5 rounded-full">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={entry.avatar}
+                              alt={entry.name}
+                              className="w-6 h-6 rounded-full"
+                            />
+                          </MemberTrigger>
+                          <div className="text-sm leading-snug min-w-0 flex-1">
                             <p className="text-slate-700 dark:text-zinc-300">
-                              <span className="font-medium text-slate-900 dark:text-zinc-100">
+                              <MemberTrigger name={entry.name} avatar={entry.avatar} className="font-medium text-slate-900 dark:text-zinc-100 hover:underline">
                                 {entry.name}
-                              </span>{" "}
+                              </MemberTrigger>{" "}
                               {entry.action}
                             </p>
+                            {entry.ticket && (
+                              <button
+                                type="button"
+                                onClick={() => openPreview(entry.ticket!)}
+                                className="group/ref mt-1 flex items-baseline gap-1.5 min-w-0 max-w-full text-left"
+                              >
+                                <TicketTypeIcon type={entry.ticket.type} />
+                                <span className="text-[11px] font-mono font-semibold text-slate-500 dark:text-zinc-400 group-hover/ref:text-brand-600 dark:group-hover/ref:text-brand-400 flex-shrink-0">
+                                  {getTicketDisplayKey(entry.ticket)}
+                                </span>
+                                <span className="text-sm font-medium text-slate-700 dark:text-zinc-300 group-hover/ref:text-brand-600 dark:group-hover/ref:text-brand-400 group-hover/ref:underline truncate">
+                                  {entry.ticket.title}
+                                </span>
+                              </button>
+                            )}
                             <p className="text-xs text-slate-400 dark:text-zinc-500 mt-0.5">
                               {entry.time}
                             </p>
@@ -892,8 +977,23 @@ export function MyWorkScreen() {
       {previewTicket !== null && (
         <TicketPreviewPanel
           ticket={previewTicket}
-          slug="mobile-banking-app"
+          slug={previewTicket.projectSlug}
           onClose={() => setPreviewTicket(null)}
+        />
+      )}
+
+      {/* ── My Timesheet panel ──────────────────────────────────────────────── */}
+      {showTimesheet && myTimesheetRow && (
+        <PersonalTimesheetPanel
+          today={myTimesheetRow.hoursToday}
+          week={myTimesheetRow.hoursWeek}
+          month={myTimesheetRow.hoursMonth}
+          entries={MY_TIME_ENTRIES}
+          onOpenTicket={(ticket) => {
+            setShowTimesheet(false);
+            openPreview(ticket);
+          }}
+          onClose={() => setShowTimesheet(false)}
         />
       )}
     </div>

@@ -7,9 +7,11 @@ import { getTicketDisplayKey } from "@/lib/mock-tickets";
 import {
   StatusBadge,
   PriorityBadge,
+  TicketTypeIcon,
   getMockComments,
   getMockActivity,
 } from "@/components/tickets/ticket-ui";
+import { MemberTrigger } from "@/components/member-profile";
 
 const FIELD_LABEL = "text-[10px] font-semibold uppercase tracking-widest text-slate-400 dark:text-zinc-600 mb-1";
 const FIELD_VALUE = "text-[12px] font-medium text-slate-800 dark:text-zinc-200";
@@ -111,7 +113,8 @@ export function TicketPreviewPanel({
         {/* ── Header (always visible, updates immediately) ─────────────────── */}
         <div className="flex-shrink-0 px-5 pt-4 pb-4 border-b border-slate-100 dark:border-zinc-800">
           <div className="flex items-center justify-between gap-3 mb-3">
-            <span className="font-mono text-[11px] font-semibold tracking-widest text-slate-400 dark:text-zinc-500">
+            <span className="flex items-center gap-1.5 font-mono text-[11px] font-semibold tracking-widest text-slate-400 dark:text-zinc-500">
+              <TicketTypeIcon type={t.type} />
               {getTicketDisplayKey(t)}
             </span>
             <button
@@ -156,14 +159,21 @@ export function TicketPreviewPanel({
 
             <div className="min-w-0">
               <p className={FIELD_LABEL}>Assignee</p>
-              <div className={`${FIELD_VALUE} flex items-center gap-1.5`}>
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={t.assignee.avatar}
-                  alt={t.assignee.name}
-                  className="w-4 h-4 rounded-full flex-shrink-0"
-                />
-                <span className="truncate">{t.assignee.name}</span>
+              <div className={FIELD_VALUE}>
+                <MemberTrigger
+                  name={t.assignee.name}
+                  avatar={t.assignee.avatar}
+                  projectSlug={t.projectSlug}
+                  className="flex items-center gap-1.5 min-w-0"
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={t.assignee.avatar}
+                    alt={t.assignee.name}
+                    className="w-4 h-4 rounded-full flex-shrink-0"
+                  />
+                  <span className="truncate">{t.assignee.name}</span>
+                </MemberTrigger>
               </div>
             </div>
 
@@ -233,16 +243,25 @@ export function TicketPreviewPanel({
             <div className="space-y-4">
               {comments.map((c, i) => (
                 <div key={i} className="flex items-start gap-2.5">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={c.avatar}
-                    alt={c.name}
-                    className="w-6 h-6 rounded-full flex-shrink-0 mt-0.5 ring-1 ring-white dark:ring-zinc-900"
-                  />
+                  <MemberTrigger
+                    name={c.name}
+                    avatar={c.avatar}
+                    projectSlug={t.projectSlug}
+                    className="flex-shrink-0 mt-0.5 rounded-full"
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={c.avatar}
+                      alt={c.name}
+                      className="w-6 h-6 rounded-full flex-shrink-0 ring-1 ring-white dark:ring-zinc-900"
+                    />
+                  </MemberTrigger>
                   <div className="flex-1 min-w-0">
                     {/* Author · timestamp on one line */}
                     <p className="text-[12px] font-semibold text-slate-800 dark:text-zinc-200 leading-snug">
-                      {c.name}
+                      <MemberTrigger name={c.name} avatar={c.avatar} projectSlug={t.projectSlug} className="hover:underline">
+                        {c.name}
+                      </MemberTrigger>
                       <span className="ml-1.5 font-normal text-slate-400 dark:text-zinc-600">
                         · {c.timeAgo}
                       </span>

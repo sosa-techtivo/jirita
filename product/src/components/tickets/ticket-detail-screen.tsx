@@ -2,12 +2,14 @@
 
 import { useState, useRef, useEffect, type KeyboardEvent, type ReactNode } from "react";
 import Link from "next/link";
-import type { Ticket, TicketStatus, TicketPriority } from "@/lib/mock-tickets";
+import type { Ticket, TicketStatus, TicketPriority, TicketType } from "@/lib/mock-tickets";
 import { tickets as ALL_TICKETS, getTicketDisplayKey } from "@/lib/mock-tickets";
 import {
   StatusBadge,
   PriorityBadge,
   LabelTag,
+  TicketTypeIcon,
+  TicketTypeSelect,
   getMockComments,
   getMockActivity,
   STATUS_LABEL,
@@ -15,6 +17,7 @@ import {
 import { BackToTicketsButton } from "@/components/tickets/back-to-tickets-button";
 import { TicketPreviewPanel } from "@/components/tickets/ticket-preview-panel";
 import { getRegisteredTicket } from "@/lib/pending-tickets";
+import { MemberTrigger } from "@/components/member-profile";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -347,14 +350,28 @@ function EditableSidebarPriority({ value, onChange }: { value: TicketPriority; o
   );
 }
 
+function EditableSidebarType({ value, onChange }: { value: TicketType; onChange: (v: TicketType) => void }) {
+  return (
+    <SidebarField label="Type">
+      <TicketTypeSelect
+        value={value}
+        onChange={onChange}
+        buttonClassName="group inline-flex items-center gap-1.5 text-[13px] font-medium text-slate-700 dark:text-zinc-300 hover:text-brand-600 dark:hover:text-brand-400 transition-colors cursor-pointer"
+      />
+    </SidebarField>
+  );
+}
+
 // ── Editable: Sidebar Assignee ────────────────────────────────────────────────
 
 function EditableSidebarAssignee({
   value,
   onChange,
+  projectSlug,
 }: {
   value: { name: string; avatar: string };
   onChange: (v: { name: string; avatar: string }) => void;
+  projectSlug?: string;
 }) {
   const [editing, setEditing] = useState(false);
   const ref = useRef<HTMLSelectElement>(null);
@@ -381,11 +398,25 @@ function EditableSidebarAssignee({
           ))}
         </select>
       ) : (
-        <div className="group flex items-center gap-1.5 cursor-pointer" onClick={() => setEditing(true)}>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={value.avatar} alt={value.name} className="w-5 h-5 rounded-full flex-shrink-0" />
-          <span className="truncate">{value.name}</span>
-          <button className={EDIT_BTN} aria-label="Edit assignee"><PencilIcon /></button>
+        <div className="group flex items-center gap-1.5">
+          <MemberTrigger
+            name={value.name}
+            avatar={value.avatar}
+            projectSlug={projectSlug}
+            className="flex items-center gap-1.5 min-w-0"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={value.avatar} alt={value.name} className="w-5 h-5 rounded-full flex-shrink-0" />
+            <span className="truncate">{value.name}</span>
+          </MemberTrigger>
+          <button
+            type="button"
+            className={EDIT_BTN}
+            aria-label="Edit assignee"
+            onClick={() => setEditing(true)}
+          >
+            <PencilIcon />
+          </button>
         </div>
       )}
     </SidebarField>
@@ -724,6 +755,7 @@ function RelatedTicketCard({
         }
       >
         <div className="flex items-center gap-1 mb-1 pr-3">
+          <TicketTypeIcon type={ticket.type} className="w-2.5 h-2.5" />
           <span className="font-mono text-[9px] font-semibold text-slate-400 dark:text-zinc-600 flex-shrink-0">
             {getTicketDisplayKey(ticket)}
           </span>
@@ -736,12 +768,20 @@ function RelatedTicketCard({
               title="High priority"
             />
           )}
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={ticket.assignee.avatar}
-            alt={ticket.assignee.name}
-            className="w-3.5 h-3.5 rounded-full ml-auto flex-shrink-0"
-          />
+          <MemberTrigger
+            name={ticket.assignee.name}
+            avatar={ticket.assignee.avatar}
+            projectSlug={ticket.projectSlug}
+            nested
+            className="ml-auto flex-shrink-0 rounded-full"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={ticket.assignee.avatar}
+              alt={ticket.assignee.name}
+              className="w-3.5 h-3.5 rounded-full flex-shrink-0"
+            />
+          </MemberTrigger>
         </div>
         <p className="text-[11px] text-slate-700 dark:text-zinc-300 leading-snug line-clamp-2 pr-2">
           {ticket.title}
@@ -878,6 +918,7 @@ function RelatedTicketsSection({
                   className="w-full text-left px-2.5 py-2 hover:bg-slate-50 dark:hover:bg-zinc-800/50 transition-colors border-b border-slate-50 dark:border-zinc-800/30 last:border-0"
                 >
                   <div className="flex items-center gap-1 mb-0.5">
+                    <TicketTypeIcon type={t.type} className="w-2.5 h-2.5" />
                     <span className="font-mono text-[9px] font-semibold text-slate-400 dark:text-zinc-600 flex-shrink-0">
                       {getTicketDisplayKey(t)}
                     </span>
@@ -1233,9 +1274,11 @@ function AttachmentRow({
         <p className="text-[11px] text-slate-400 dark:text-zinc-600 mt-0.5 flex items-center gap-1.5">
           <span>{file.size}</span>
           <span>·</span>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={file.avatar} alt={file.addedBy} className="w-3.5 h-3.5 rounded-full flex-shrink-0" />
-          <span>{file.addedBy}</span>
+          <MemberTrigger name={file.addedBy} avatar={file.avatar} className="flex items-center gap-1.5">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={file.avatar} alt={file.addedBy} className="w-3.5 h-3.5 rounded-full flex-shrink-0" />
+            <span>{file.addedBy}</span>
+          </MemberTrigger>
           <span>·</span>
           <span>{replacing ? "Updating…" : file.uploadedAt}</span>
         </p>
@@ -1579,9 +1622,11 @@ function renderDevGroup(group: MockDevGroup): ReactNode {
                     {pr.branch}
                   </span>
                   <span className="text-slate-300 dark:text-zinc-700">·</span>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={pr.authorAvatar} alt={pr.author} className="w-3.5 h-3.5 rounded-full flex-shrink-0" />
-                  <span className="text-[11px] text-slate-400 dark:text-zinc-600">{pr.author}</span>
+                  <MemberTrigger name={pr.author} avatar={pr.authorAvatar} className="flex items-center gap-1.5">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={pr.authorAvatar} alt={pr.author} className="w-3.5 h-3.5 rounded-full flex-shrink-0" />
+                    <span className="text-[11px] text-slate-400 dark:text-zinc-600">{pr.author}</span>
+                  </MemberTrigger>
                   <span className="text-slate-300 dark:text-zinc-700">·</span>
                   <span className="text-[11px] text-slate-400 dark:text-zinc-600">{pr.updatedAt}</span>
                 </div>
@@ -1621,9 +1666,11 @@ function renderDevGroup(group: MockDevGroup): ReactNode {
                 {c.message}
               </span>
               <div className="flex items-center gap-1.5 flex-shrink-0">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={c.authorAvatar} alt={c.author} className="w-3.5 h-3.5 rounded-full" />
-                <span className="text-[11px] text-slate-400 dark:text-zinc-600">{c.author}</span>
+                <MemberTrigger name={c.author} avatar={c.authorAvatar} className="flex items-center gap-1.5">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={c.authorAvatar} alt={c.author} className="w-3.5 h-3.5 rounded-full" />
+                  <span className="text-[11px] text-slate-400 dark:text-zinc-600">{c.author}</span>
+                </MemberTrigger>
                 <span className="text-slate-300 dark:text-zinc-700">·</span>
                 <span className="text-[11px] text-slate-400 dark:text-zinc-600">{c.time}</span>
               </div>
@@ -2207,7 +2254,8 @@ export function TicketDetailScreen({
             {/* Title */}
             <header>
               <div className="flex items-center gap-2.5 mb-3">
-                <span className="font-mono text-[12px] font-semibold tracking-wider text-slate-400 dark:text-zinc-500">
+                <span className="flex items-center gap-1.5 font-mono text-[12px] font-semibold tracking-wider text-slate-400 dark:text-zinc-500">
+                  <TicketTypeIcon type={ticket.type} className="w-3.5 h-3.5" />
                   {getTicketDisplayKey(ticket)}
                 </span>
                 <EditableStatusBadge
@@ -2283,15 +2331,24 @@ export function TicketDetailScreen({
               <div className="space-y-6">
                 {comments.map((c, i) => (
                   <div key={i} className="flex items-start gap-3">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={c.avatar}
-                      alt={c.name}
-                      className="w-7 h-7 rounded-full flex-shrink-0 mt-0.5 ring-1 ring-slate-200 dark:ring-zinc-700"
-                    />
+                    <MemberTrigger
+                      name={c.name}
+                      avatar={c.avatar}
+                      projectSlug={ticket.projectSlug}
+                      className="flex-shrink-0 mt-0.5 rounded-full"
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={c.avatar}
+                        alt={c.name}
+                        className="w-7 h-7 rounded-full flex-shrink-0 ring-1 ring-slate-200 dark:ring-zinc-700"
+                      />
+                    </MemberTrigger>
                     <div className="flex-1 min-w-0">
                       <p className="text-[13px] font-semibold text-slate-800 dark:text-zinc-200 leading-snug">
-                        {c.name}
+                        <MemberTrigger name={c.name} avatar={c.avatar} projectSlug={ticket.projectSlug} className="hover:underline">
+                          {c.name}
+                        </MemberTrigger>
                         <span className="ml-2 font-normal text-slate-400 dark:text-zinc-600">
                           · {c.timeAgo}
                         </span>
@@ -2347,6 +2404,11 @@ export function TicketDetailScreen({
               onChange={(v) => update("status", v)}
             />
 
+            <EditableSidebarType
+              value={ticket.type}
+              onChange={(v) => update("type", v)}
+            />
+
             <EditableSidebarPriority
               value={ticket.priority}
               onChange={(v) => update("priority", v)}
@@ -2355,6 +2417,7 @@ export function TicketDetailScreen({
             <EditableSidebarAssignee
               value={ticket.assignee}
               onChange={(v) => update("assignee", v)}
+              projectSlug={ticket.projectSlug}
             />
 
             <EditableSidebarHours

@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { Ticket, TicketStatus, TicketPriority } from "@/lib/mock-tickets";
+import type { Ticket, TicketStatus, TicketPriority, TicketType } from "@/lib/mock-tickets";
 import { tickets as ALL_TICKETS, getTicketDisplayKey } from "@/lib/mock-tickets";
-import { StatusBadge, STATUS_LABEL } from "@/components/tickets/ticket-ui";
+import { StatusBadge, STATUS_LABEL, TicketTypeIcon, TicketTypeSelect } from "@/components/tickets/ticket-ui";
 import { registerTicket, nextTicketNumber, titleToTicketId } from "@/lib/pending-tickets";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -256,6 +256,7 @@ export function NewTicketModal({
   const [criteria, setCriteria]         = useState<string[]>([]);
   const [status, setStatus]             = useState<TicketStatus>("to-do");
   const [priority, setPriority]         = useState<TicketPriority>("normal");
+  const [ticketType, setTicketType]     = useState<TicketType>("TASK");
   const [assigneeName, setAssigneeName] = useState("");
   const [labels, setLabels]             = useState<string[]>([]);
   const [dueDate, setDueDate]           = useState("");
@@ -318,6 +319,7 @@ export function NewTicketModal({
       description: description.trim(),
       status,
       priority,
+      type:        ticketType,
       assignee,
       milestone:   MILESTONES[0],
       labels,
@@ -586,6 +588,7 @@ export function NewTicketModal({
                       onClick={() => { onPreviewDuplicate(t); onClose(); }}
                       className="w-full flex items-center gap-2.5 px-3.5 py-2.5 hover:bg-amber-100/60 dark:hover:bg-amber-950/30 transition-colors text-left"
                     >
+                      <TicketTypeIcon type={t.type} />
                       <span className="font-mono text-[10px] font-semibold text-amber-700 dark:text-amber-500 flex-shrink-0">
                         {getTicketDisplayKey(t)}
                       </span>
@@ -639,8 +642,16 @@ export function NewTicketModal({
                 <div className="overflow-hidden">
                   <div className="pt-4 space-y-3">
 
-                    {/* Status + Priority */}
-                    <div className="grid grid-cols-2 gap-3">
+                    {/* Type + Status + Priority */}
+                    <div className="grid grid-cols-3 gap-3">
+                      <div>
+                        <label className={FIELD_LABEL}>Type</label>
+                        <TicketTypeSelect
+                          value={ticketType}
+                          onChange={setTicketType}
+                          buttonClassName={INPUT + " flex items-center justify-between"}
+                        />
+                      </div>
                       <div>
                         <label className={FIELD_LABEL}>Status</label>
                         <select value={status} onChange={(e) => setStatus(e.target.value as TicketStatus)} className={INPUT}>

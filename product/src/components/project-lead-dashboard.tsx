@@ -9,6 +9,8 @@ import type { TeamMember } from "@/lib/mock-team";
 import { projects } from "@/lib/mock-projects";
 import { TicketPreviewPanel } from "@/components/tickets/ticket-preview-panel";
 import type { Ticket } from "@/lib/mock-tickets";
+import { getTicketDisplayKey } from "@/lib/mock-tickets";
+import { TicketTypeIcon } from "@/components/tickets/ticket-ui";
 import {
   Card,
   ActiveTicketRow,
@@ -26,8 +28,8 @@ import {
   capacityTextColor,
   capacityBarColor,
   remainingAvailabilityLabel,
-  MemberModal,
-} from "@/components/team-screen";
+} from "@/components/member-profile-modal";
+import { useMemberProfile } from "@/components/member-profile";
 
 // ── Data ──────────────────────────────────────────────────────────────────────
 // This is an operational view scoped to the Project Lead's own projects —
@@ -76,7 +78,7 @@ export const PROJECT_TICKETS: Record<string, Ticket[]> = {
       id: "cwd-homepage-review", projectSlug: "client-website-redesign", ticketNumber: 1,
       title: "Homepage redesign review",
       description: "Review the updated homepage layout against brand guidelines before handoff.",
-      status: "review", priority: "high",
+      status: "review", priority: "high", type: "TASK",
       assignee: { name: "Elena Rossi", avatar: av(5) },
       milestone: "Homepage Redesign", labels: ["Design"],
       hours: 6, dueDate: "Jul 10", updatedAt: "Updated 1 day ago",
@@ -85,7 +87,7 @@ export const PROJECT_TICKETS: Record<string, Ticket[]> = {
       id: "cwd-cms-audit", projectSlug: "client-website-redesign", ticketNumber: 2,
       title: "CMS migration content audit",
       description: "Audit legacy CMS content before migrating to the new platform.",
-      status: "to-do", priority: "normal",
+      status: "to-do", priority: "normal", type: "TASK",
       assignee: { name: "Elena Rossi", avatar: av(5) },
       milestone: "CMS Migration", labels: ["Content"],
       hours: 8, dueDate: "Jul 18", updatedAt: "Updated 3 days ago",
@@ -96,7 +98,7 @@ export const PROJECT_TICKETS: Record<string, Ticket[]> = {
       id: "ipm-db-export-lead", projectSlug: "internal-platform-migration", ticketNumber: 1,
       title: "Legacy database export",
       description: "Export the legacy monolith database ahead of platform cutover.",
-      status: "in-progress", priority: "high",
+      status: "in-progress", priority: "high", type: "TASK",
       assignee: { name: "Jordan Wu", avatar: av(15) },
       milestone: "Platform Cutover", labels: ["Migration"],
       hours: 16, dueDate: "Jul 5", updatedAt: "Updated 4h ago",
@@ -105,7 +107,7 @@ export const PROJECT_TICKETS: Record<string, Ticket[]> = {
       id: "ipm-cutover-plan-lead", projectSlug: "internal-platform-migration", ticketNumber: 2,
       title: "Migration cutover plan",
       description: "Finalize the staged cutover plan and rollback runbook.",
-      status: "review", priority: "high",
+      status: "review", priority: "high", type: "TASK",
       assignee: { name: "Marcus Lee", avatar: av(12) },
       milestone: "Platform Cutover", labels: ["Planning"],
       hours: 8, dueDate: "Jul 1", updatedAt: "Updated 1 day ago",
@@ -114,7 +116,7 @@ export const PROJECT_TICKETS: Record<string, Ticket[]> = {
       id: "ipm-read-replicas-lead", projectSlug: "internal-platform-migration", ticketNumber: 3,
       title: "Provision new read replicas",
       description: "Provision read replicas for the new platform's database layer.",
-      status: "to-do", priority: "normal",
+      status: "to-do", priority: "normal", type: "TASK",
       assignee: { name: "Jordan Wu", avatar: av(15) },
       milestone: "Platform Cutover", labels: ["Infrastructure"],
       hours: 10, dueDate: "Jul 8", updatedAt: "Updated 2 days ago",
@@ -262,8 +264,8 @@ function TeamCapacityRow({ member, onOpen }: { member: TeamMember; onOpen: (m: T
 
 export function ProjectLeadDashboard() {
   const { user } = useCurrentUser();
+  const { openMemberProfile } = useMemberProfile();
   const [preview, setPreview] = useState<Ticket | null>(null);
-  const [activeMember, setActiveMember] = useState<TeamMember | null>(null);
 
   // Projects this Project Lead manages — the Project Context selector below
   // lets them switch between any one of these, or view all of them at once.
@@ -488,7 +490,11 @@ export function ProjectLeadDashboard() {
       >
         <div className="space-y-0.5">
           {team.map((member) => (
-            <TeamCapacityRow key={member.name} member={member} onOpen={setActiveMember} />
+            <TeamCapacityRow
+              key={member.name}
+              member={member}
+              onOpen={(m) => openMemberProfile({ name: m.name, avatar: m.avatar, role: m.role, projectSlug: m.projectSlug })}
+            />
           ))}
         </div>
       </Card>
@@ -514,7 +520,7 @@ export function ProjectLeadDashboard() {
 
         {/* ── Section 5: Recent Activity ──────────────────────────────────────── */}
         <Card title="Recent Activity">
-          <RecentActivityList items={projectActivity} />
+          <RecentActivityList items={projectActivity} onOpenTicket={setPreview} />
         </Card>
 
         {/* ── Section 6: Upcoming Deadlines ───────────────────────────────────── */}
@@ -533,8 +539,14 @@ export function ProjectLeadDashboard() {
                   className="w-full flex items-center gap-2.5 py-1.5 px-2.5 -mx-2.5 rounded-lg hover:bg-slate-50 dark:hover:bg-zinc-800/50 transition-colors text-left"
                 >
                   <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${isOverdue ? "bg-red-400" : "bg-slate-300 dark:bg-zinc-600"}`} />
-                  <span className="flex-1 min-w-0 text-[12px] text-slate-700 dark:text-zinc-300 truncate">
-                    {t.title}
+                  <span className="flex-1 min-w-0 flex items-baseline gap-1.5">
+                    <TicketTypeIcon type={t.type} />
+                    <span className="text-[11px] font-mono font-medium text-slate-400 dark:text-zinc-500 flex-shrink-0">
+                      {getTicketDisplayKey(t)}
+                    </span>
+                    <span className="min-w-0 text-[12px] text-slate-700 dark:text-zinc-300 truncate">
+                      {t.title}
+                    </span>
                   </span>
                   <span className={`text-[11px] font-semibold flex-shrink-0 ${isOverdue ? "text-red-500 dark:text-red-400" : "text-slate-500 dark:text-zinc-400"}`}>
                     {t.dueDate}
@@ -551,17 +563,8 @@ export function ProjectLeadDashboard() {
       {preview !== null && (
         <TicketPreviewPanel
           ticket={preview}
-          slug={linkSlug ?? DEFAULT_PROJECT_SLUG}
+          slug={preview.projectSlug}
           onClose={() => setPreview(null)}
-        />
-      )}
-
-      {/* ── Team member modal ─────────────────────────────────────────────────── */}
-      {activeMember && (
-        <MemberModal
-          member={activeMember}
-          slug={linkSlug ?? activeMember.projectSlug}
-          onClose={() => setActiveMember(null)}
         />
       )}
 

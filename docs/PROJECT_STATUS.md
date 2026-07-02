@@ -1,4 +1,4 @@
-> Last Updated: July 1, 2026
+> Last Updated: July 2, 2026
 
 ---
 
@@ -8,7 +8,7 @@
 
 JIRITA is currently in the UI/UX MVP phase.
 
-The application now includes the full shell, a role-based UX layer (Admin / Project Lead / Member), projects listing, project overview, a five-view Tickets experience, Quick Ticket Preview, Full Ticket Detail with Time Tracking, role-specific Dashboards, role-specific Projects and Reports screens, a personal My Work workspace, an editable Notes experience, and a Settings section. All implemented screens are navigable and connected using mock data.
+The application now includes the full shell, a role-based UX layer (Admin / Project Lead / Member), projects listing, role-specific project overviews, a five-view Tickets experience with Task/Bug ticket types, Quick Ticket Preview, Full Ticket Detail with Time Tracking, role-specific Dashboards, role-specific Projects/Reports/Time Tracking screens, a personal My Work workspace, an editable Notes experience, a Settings section, and a single shared Member Profile Modal used everywhere a person is referenced. All implemented screens are navigable and connected using mock data.
 
 The current objective is to complete the remaining frontend experience before integrating a real backend.
 
@@ -78,28 +78,45 @@ A dedicated "My Projects" screen, not a filtered Admin/Lead table.
 - Surfaces who leads each project
 - Surfaces what's assigned to the Member within each project
 
-### Project Details
+### Project Overview
 
-Completed, with a known limitation.
+Completed. Route: `/projects/[slug]`. `ProjectOverview` now branches by role rather than showing one page to everyone — Admin, Project Lead, and Member each get a purpose-built rebuild.
 
-Includes:
+#### Admin — `admin-project-overview.tsx`
 
-- Header
-- Project information
-- Milestones section
-- Active Work (blocked + in-progress tickets)
-- Recent Activity
-- Team members
-- Quick Links
-- Navigation to Tickets
+An executive dashboard: KPI strip (Open Tickets, Progress with inline bar, Blocked, Closed This Month), Project Health card (Schedule / Capacity / Scope / Risks, each with a status dot and one-line reason — the top alert banner deep-links into Tickets pre-filtered to Blocked), Active Work grouped by status with per-group ticket counts, Team card, and Project Activity feed.
 
-Known limitation: Project data is currently hardcoded to "Mobile Banking App" regardless of the active slug. The slug is passed correctly but the component does not use it to load different data.
+Every Project Health row is a drill-down, not a static status: **Schedule** opens Tickets pre-filtered to Blocked, **Capacity** opens the over-capacity member's Member Profile Modal, **Risks** opens the ticket(s) causing the risk in the Ticket Preview Panel, and **Scope** falls back to the plain Tickets page (no scope-change event data model exists yet). Rows share a hover affordance (light background highlight) and the card's layout is otherwise unchanged.
+
+#### Project Lead — `project-lead-project-overview.tsx`
+
+An execution-focused rebuild, not a filtered Admin view: same KPI/Active-Work/Team baseline, but Project Health shows only the reasons (no status labels) — with the same clickable drill-downs as the Admin variant — plus a "Needs Your Attention" card — a prioritized, actionable ticket list derived from real ticket data (blocked first, then overdue review, then overdue, then due-today) — and a multi-alert banner.
+
+#### Member — `project-overview.tsx`
+
+Rebuilt as a personal workspace inside the project — "what do I need to work on here today?" — not a scaled-down Admin/Project Lead view. Project-wide health, capacity, and org metrics are intentionally absent.
+
+- **KPI strip** — My Open Tickets, Due This Week, My Blocked Tickets, Completed This Month (scoped to the current member's own tickets in this project)
+- **Alert banner** — member-specific only (tickets due today, review requests, mentions, blocked tickets), deep-links into Tickets pre-filtered to `Mine`/`Blocked` via `presetTicketsFilter`
+- **My Project Work** — the member's own tickets in this project, with a **List**/**Board** view toggle (last-selected view persisted per project via `localStorage`); List groups by status (Blocked/In Progress/In Review/To Do/Backlog, empty groups hidden), Board reuses the same Kanban `BoardView` as Tickets/My Work; both are capped preview lists (most urgent tickets first) with a "View all project tickets →" link into Tickets pre-filtered to `Mine`
+- **My Activity** — only events where the member participates (their own actions, or actions directed at them — assigned, commented on, mentioned), never general project activity
+- **Needs My Attention** — personalized: blocked/overdue/due-today tickets plus review-request/mention notifications, positioned above Team since actionable content leads informational content
+- **Team card** — real per-project roster via `getTeamByProjectSlug`, every avatar/name opens the Member Profile Modal
+- **Quick Links** — Notes & Documentation
+
+All data is correctly scoped to the active `slug` (tickets, team, activity) — only the header's title/description text is still fixed to "Mobile Banking App" regardless of slug, matching the Admin and Project Lead variants.
+
+A cross-project "My Work" equivalent already exists (`my-work-screen.tsx`); this Member Project Overview is its single-project counterpart and deliberately does not offer a Focus view — scope is already limited to one project, and Needs My Attention already covers prioritization. Focus remains exclusive to My Work.
 
 ### Tickets — All Five Views
 
 Completed.
 
 The Tickets experience at `/projects/[slug]/tickets` supports five views with an instant client-side toggle. Board is the default.
+
+#### Ticket Types (Task / Bug)
+
+Every ticket has a `type: "TASK" | "BUG"`. A shared `TicketTypeIcon` renders immediately before the ticket ID on every screen that shows one (ticket cards, Ticket Detail, Ticket Preview Panel, Calendar, Timeline, Insights, Dashboard/Reports activity rows) — one component, so the glyph and its color stay identical everywhere. A custom `TicketTypeSelect` dropdown (not a native `<select>`) is used in the New Ticket form and Ticket Detail sidebar so the picker itself can render the icon inside each option.
 
 #### View Switcher
 
@@ -204,9 +221,21 @@ When clicking **Expand** from the preview panel, the tickets screen state is sav
 
 ### Hours & Time Tracking
 
-Completed.
+Completed. Route: `/time-tracking`, branches by role. Personal time logging always happens the same way regardless of role — the "Log Time" button on a ticket in Ticket Detail.
 
-Time Tracking is integrated into the Ticket Detail page.
+#### Admin — `time-tracking-screen.tsx`
+
+Full Billing/Finance view: period selector (Today/This Week/This Month/Custom Range), overview KPIs, Member/Project/Client/Billing filters, Timesheets table, Hours Missing operational reminder, Billing by Client and Billing by Member tables.
+
+#### Project Lead — `project-lead-time-tracking-screen.tsx` (new)
+
+A delivery-focused rebuild with no revenue, invoicing, hourly-rate, or billing-by-client concepts: delivery-labeled KPIs, a **Capacity Risk** card (who's over/near capacity) in place of "Team Capacity", the same Hours Missing reminder, and a Timesheets table scoped to the Lead's own team.
+
+#### Member — no dedicated module
+
+Members have no Time Tracking nav item. A compact "My Time" summary row plus a "View Timesheet" link (`personal-timesheet-panel.tsx`) live inside My Work instead.
+
+Time Tracking is also integrated into the Ticket Detail page for logging against a specific ticket.
 
 Includes:
 
@@ -337,6 +366,20 @@ Added a `NoteDetailModal` (`src/components/note-detail-modal.tsx`) opened by cli
 
 ---
 
+### Member Profile Modal — Standardized Everywhere
+
+Completed.
+
+The existing Member Profile Modal (previously wired independently into three screens) is now the single, standard way to inspect any user across the entire application. Every avatar or member name — Dashboard widgets, Project Overview, ticket cards (Kanban/List/Calendar/Insights), Ticket Detail (assignee, comments, related tickets, PR/commit authors, file uploaders), Reports tables, and Time Tracking tables — is clickable and opens the same modal.
+
+- `src/components/member-profile.tsx` — `MemberProfileProvider` (mounted once in `layout.tsx`), `useMemberProfile()`, and `MemberTrigger` (the shared clickable wrapper; supports a `nested` mode for avatars sitting inside another clickable element, e.g. a ticket row or card `<Link>`, so the two actions don't both fire)
+- `src/components/member-profile-modal.tsx` — the modal itself, extracted from the old `team-screen.tsx`
+- `resolveTeamMember()` in `src/lib/mock-team.ts` — resolves any `{name, avatar, projectSlug?}` identity to a full `TeamMember`, falling back to a synthesized minimal record for names that only exist as free text (e.g. mock PR authors), so the modal always has something to render
+- Standard UX rule going forward: clicking a ticket (card, title, or ID) opens Ticket Detail; clicking a member (avatar or name) opens the Member Profile Modal
+- Form controls that list member names (assignee filter dropdown, New Ticket/Ticket Detail assignee picker) are intentionally left as plain selects — those are data-entry controls, not member-viewing surfaces
+
+---
+
 # In Progress
 
 Nothing currently in progress.
@@ -448,7 +491,9 @@ Current working routes:
 - `/projects/[slug]/notes`
 - `/projects/[slug]/team`
 - `/projects/[slug]/reports`
+- `/projects/[slug]/settings` — Admin/Project Lead only (per-project General/Billing/Danger Zone)
 - `/reports` — role-specific (Admin company-wide / Project Lead scoped Delivery+Team / Member: no access)
+- `/time-tracking` — role-specific (Admin Billing/Finance / Project Lead delivery-focused / Member: no access, folded into My Work instead)
 - `/settings` → redirects to `/settings/general`
 - `/settings/general`
 - `/settings/people`
@@ -525,7 +570,7 @@ Favor reusable components over duplicated implementations.
 
 Current known items:
 
-- `ProjectOverview` component has hardcoded "Mobile Banking App" data; it does not dynamically load project data based on slug.
+- `ProjectOverview`'s Member-role variant (the original, unmodified page) has hardcoded "Mobile Banking App" data; it does not dynamically load project data based on slug. The Admin and Project Lead rebuilds (`admin-project-overview.tsx`, `project-lead-project-overview.tsx`) correctly key off `slug`.
 - Filter chips and search inputs on the Tickets page are UI-only; chips toggle visually but do not filter the ticket list.
 - Ticket Detail page fields are mostly read-only; no inline editing is implemented beyond status transitions.
 - `kanban-board.tsx`, `kanban-column.tsx`, `kanban-card.tsx` are dead code (superseded by the `tickets/` component set).

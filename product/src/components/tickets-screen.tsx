@@ -46,6 +46,21 @@ function saveState(slug: string, state: SavedState) {
   sessionStorage.setItem(sessionKey(slug), JSON.stringify(state));
 }
 
+// Lets another screen (e.g. the Admin Project Overview's blocked-tickets
+// banner) hand off to this screen already filtered, by writing into the same
+// saved-state slot this screen reads on mount — the same mechanism the
+// ticket preview panel already uses to restore view/scroll position.
+export function presetTicketsFilter(slug: string, chips: string[]) {
+  if (typeof window === "undefined") return;
+  saveState(slug, {
+    view: "board",
+    previewTicketId: null,
+    activeChips: chips,
+    searchQuery: "",
+    scrollTop: 0,
+  });
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function TicketsScreen({ slug, projectName }: { slug: string; projectName: string }) {

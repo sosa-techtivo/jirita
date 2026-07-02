@@ -5,10 +5,11 @@ import type { ReactNode } from "react";
 import { useCurrentUser } from "@/components/current-user-provider";
 import { TicketListRow } from "@/components/tickets/ticket-card";
 import { TicketPreviewPanel } from "@/components/tickets/ticket-preview-panel";
-import { StatusBadge, PriorityBadge } from "@/components/tickets/ticket-ui";
+import { StatusBadge, PriorityBadge, TicketTypeIcon } from "@/components/tickets/ticket-ui";
 import { getProjectBySlug } from "@/lib/mock-projects";
 import { statusMeta } from "@/components/status-badge";
 import type { Ticket } from "@/lib/mock-tickets";
+import { getTicketDisplayKey } from "@/lib/mock-tickets";
 import {
   Card,
   ActiveTicketRow,
@@ -76,7 +77,7 @@ export const MEMBER_WORK: WorkItem[] = [
       id: "dk-kyc-outage", projectSlug: "mobile-banking-app", ticketNumber: 8,
       title: "Third-party KYC vendor API outage",
       description: "Vendor integration has been failing intermittently for the past week.",
-      status: "blocked", priority: "high",
+      status: "blocked", priority: "high", type: "BUG",
       assignee: { name: "David Kim", avatar: av(22) },
       milestone: "Security Audit", labels: ["Integration"],
       hours: 16, dueDate: "Jun 28", updatedAt: "Updated 6 days ago",
@@ -88,7 +89,7 @@ export const MEMBER_WORK: WorkItem[] = [
       id: "dk-regression-ios", projectSlug: "mobile-banking-app", ticketNumber: 18,
       title: "iOS 18 regression suite failing on biometric flow",
       description: "The automated regression suite can't get past the Face ID step on iOS 18 devices.",
-      status: "blocked", priority: "high",
+      status: "blocked", priority: "high", type: "BUG",
       assignee: { name: "David Kim", avatar: av(22) },
       milestone: "Beta Release", labels: ["QA", "Bug"],
       hours: 5, dueDate: "Jul 2", updatedAt: "Updated 1 day ago",
@@ -100,7 +101,7 @@ export const MEMBER_WORK: WorkItem[] = [
       id: "dk-homepage-review", projectSlug: "client-website-redesign", ticketNumber: 1,
       title: "Homepage redesign review",
       description: "Sign off on the updated homepage layout against brand guidelines before handoff.",
-      status: "in-progress", priority: "normal",
+      status: "in-progress", priority: "normal", type: "TASK",
       assignee: { name: "David Kim", avatar: av(22) },
       milestone: "Homepage Redesign", labels: ["QA"],
       hours: 2, dueDate: "Jun 30", updatedAt: "Updated 3h ago",
@@ -112,7 +113,7 @@ export const MEMBER_WORK: WorkItem[] = [
       id: "dk-cms-audit", projectSlug: "client-website-redesign", ticketNumber: 2,
       title: "CMS migration content audit",
       description: "Audit legacy CMS content before migrating to the new platform.",
-      status: "to-do", priority: "high",
+      status: "to-do", priority: "high", type: "TASK",
       assignee: { name: "David Kim", avatar: av(22) },
       milestone: "CMS Migration", labels: ["Content"],
       hours: 8, dueDate: "Jul 20", updatedAt: "Updated 3 days ago",
@@ -124,7 +125,7 @@ export const MEMBER_WORK: WorkItem[] = [
       id: "dk-a11y-audit", projectSlug: "mobile-banking-app", ticketNumber: 12,
       title: "Accessibility audit and WCAG 2.1 fixes",
       description: "Ensure VoiceOver and TalkBack compatibility for WCAG 2.1 AA compliance.",
-      status: "in-progress", priority: "normal",
+      status: "in-progress", priority: "normal", type: "TASK",
       assignee: { name: "David Kim", avatar: av(22) },
       milestone: "Beta Release", labels: ["Accessibility", "Compliance"],
       hours: 6, dueDate: "Jul 5", updatedAt: "Updated yesterday",
@@ -136,7 +137,7 @@ export const MEMBER_WORK: WorkItem[] = [
       id: "dk-db-export-qa", projectSlug: "internal-platform-migration", ticketNumber: 4,
       title: "Legacy database export QA verification",
       description: "Verify row counts and integrity checksums on the exported legacy database.",
-      status: "to-do", priority: "low",
+      status: "to-do", priority: "low", type: "TASK",
       assignee: { name: "David Kim", avatar: av(22) },
       milestone: "Platform Cutover", labels: ["QA"],
       hours: 4, dueDate: "Jul 8", updatedAt: "Updated 2 days ago",
@@ -148,7 +149,7 @@ export const MEMBER_WORK: WorkItem[] = [
       id: "dk-api-rate-review", projectSlug: "mobile-banking-app", ticketNumber: 7,
       title: "API rate limiting — QA sign-off",
       description: "Final verification pass on per-client rate limits before release.",
-      status: "review", priority: "normal",
+      status: "review", priority: "normal", type: "TASK",
       assignee: { name: "David Kim", avatar: av(22) },
       milestone: "Security Audit", labels: ["Security", "API"],
       hours: 2, dueDate: "Jul 3", updatedAt: "Updated 3h ago",
@@ -174,18 +175,22 @@ const PLANNED_TODAY = 7;
 // or notice a new blocker), it doesn't qualify.
 type AttentionType = "mention" | "reassigned" | "review" | "estimate" | "blocked";
 
-const ATTENTION_META: Record<AttentionType, string> = {
-  mention:    "bg-violet-400",
-  reassigned: "bg-sky-400",
-  review:     "bg-sky-400",
-  estimate:   "bg-brand-400",
-  blocked:    "bg-red-400",
+const ATTENTION_META: Record<AttentionType, { dot: string; label: string }> = {
+  mention:    { dot: "bg-violet-400", label: "Mentioned" },
+  reassigned: { dot: "bg-sky-400",    label: "Reassigned" },
+  review:     { dot: "bg-sky-400",    label: "Review requested" },
+  estimate:   { dot: "bg-brand-400",  label: "Estimate changed" },
+  blocked:    { dot: "bg-red-400",    label: "Blocked" },
 };
 
 interface AttentionItem {
   id: string;
   type: AttentionType;
-  text: ReactNode;
+  /** The action fragment only — the ticket title never appears here; it
+   *  renders on its own clickable line via getTicketDisplayKey instead. */
+  verb: ReactNode;
+  /** Extra context shown in the meta line, e.g. "8h → 6h" or "to you". */
+  detail?: ReactNode;
   time: string;
   ticketId?: string;
 }
@@ -195,23 +200,25 @@ interface AttentionItem {
 const ATTENTION_ITEMS: AttentionItem[] = [
   {
     id: "n1", type: "mention", time: "1h ago", ticketId: "dk-kyc-outage",
-    text: <><span className="font-medium">Sarah Chen</span> mentioned you in a comment on <span className="font-medium">&ldquo;Third-party KYC vendor API outage&rdquo;</span></>,
+    verb: <><span className="font-medium">Sarah Chen</span> mentioned you in a comment</>,
   },
   {
     id: "n2", type: "review", time: "3h ago", ticketId: "dk-homepage-review",
-    text: <><span className="font-medium">Elena Rossi</span> requested your review on <span className="font-medium">&ldquo;Homepage redesign review&rdquo;</span></>,
+    verb: <><span className="font-medium">Elena Rossi</span> requested your review</>,
   },
   {
     id: "n3", type: "blocked", time: "5h ago", ticketId: "dk-regression-ios",
-    text: <><span className="font-medium">Marcus Lee</span> marked <span className="font-medium">&ldquo;iOS 18 regression suite&rdquo;</span> as Blocked</>,
+    verb: <><span className="font-medium">Marcus Lee</span> marked</>,
   },
   {
     id: "n4", type: "reassigned", time: "Yesterday", ticketId: "dk-regression-ios",
-    text: <><span className="font-medium">Marcus Lee</span> reassigned <span className="font-medium">&ldquo;iOS 18 regression suite&rdquo;</span> to you</>,
+    verb: <><span className="font-medium">Marcus Lee</span> reassigned</>,
+    detail: "to you",
   },
   {
     id: "n5", type: "estimate", time: "Yesterday", ticketId: "dk-a11y-audit",
-    text: <>Estimate changed on <span className="font-medium">&ldquo;Accessibility audit&rdquo;</span> — <span className="font-medium">8h → 6h</span></>,
+    verb: "Estimate changed",
+    detail: <span className="font-medium">8h → 6h</span>,
   },
 ];
 
@@ -258,12 +265,36 @@ function HeroStat({ label, value, danger }: { label: string; value: ReactNode; d
 }
 
 function AttentionRow({ item, onOpen }: { item: AttentionItem; onOpen: (id: string) => void }) {
+  const meta = ATTENTION_META[item.type];
+  const ticket = item.ticketId ? WORK_BY_TICKET_ID.get(item.ticketId)?.ticket : undefined;
+
   const content = (
     <>
-      <span className={`w-1.5 h-1.5 rounded-full mt-1.5 flex-shrink-0 ${ATTENTION_META[item.type]}`} aria-hidden="true" />
+      <span className={`w-1.5 h-1.5 rounded-full mt-1.5 flex-shrink-0 ${meta.dot}`} aria-hidden="true" />
       <div className="min-w-0 flex-1">
-        <p className="text-[13px] leading-snug text-slate-700 dark:text-zinc-300">{item.text}</p>
-        <p className="text-[11px] text-slate-400 dark:text-zinc-500 mt-0.5">{item.time}</p>
+        <p className="text-[13px] leading-snug text-slate-700 dark:text-zinc-300">{item.verb}</p>
+        {ticket && (
+          <p className="flex items-baseline gap-1.5 min-w-0 mt-1">
+            <TicketTypeIcon type={ticket.type} />
+            <span className="text-[11px] font-mono font-semibold text-slate-500 dark:text-zinc-400 flex-shrink-0">
+              {getTicketDisplayKey(ticket)}
+            </span>
+            <span className="text-[13px] font-medium text-slate-700 dark:text-zinc-300 truncate">
+              {ticket.title}
+            </span>
+          </p>
+        )}
+        <p className="flex items-center gap-1.5 flex-wrap text-[11px] text-slate-400 dark:text-zinc-500 mt-0.5">
+          {meta.label}
+          {item.detail && (
+            <>
+              <span className="text-slate-300 dark:text-zinc-700" aria-hidden="true">·</span>
+              {item.detail}
+            </>
+          )}
+          <span className="text-slate-300 dark:text-zinc-700" aria-hidden="true">·</span>
+          {item.time}
+        </p>
       </div>
     </>
   );
@@ -339,6 +370,10 @@ export function MemberDashboard() {
               <div className="mb-1">
                 <ProjectBadge project={recommended.project} />
               </div>
+              <p className="flex items-center gap-1 text-[11px] font-mono font-medium text-slate-400 dark:text-zinc-500 mb-1 leading-none">
+                <TicketTypeIcon type={recommended.ticket.type} />
+                {getTicketDisplayKey(recommended.ticket)}
+              </p>
               <h2 className="text-xl font-bold text-slate-900 dark:text-zinc-50 leading-snug">
                 {recommended.ticket.title}
               </h2>

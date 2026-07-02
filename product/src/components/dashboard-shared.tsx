@@ -1,8 +1,10 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { StatusBadge } from "@/components/tickets/ticket-ui";
+import { StatusBadge, TicketTypeIcon } from "@/components/tickets/ticket-ui";
 import type { Ticket } from "@/lib/mock-tickets";
+import { getTicketDisplayKey, getTicketById } from "@/lib/mock-tickets";
+import { MemberTrigger } from "@/components/member-profile";
 
 // Pieces shared between the Admin dashboard (dashboard-screen.tsx) and the
 // Project Lead dashboard (project-lead-dashboard.tsx). Lives in its own module
@@ -38,7 +40,7 @@ export const MY_ACTIVE: Ticket[] = [
     id: "d-pci",  projectSlug: "mobile-banking-app", ticketNumber: 1,
     title: "Resolve PCI compliance gap in card storage",
     description: "Card storage flow needs to meet updated PCI-DSS encryption requirements.",
-    status: "blocked", priority: "high",
+    status: "blocked", priority: "high", type: "TASK",
     assignee: { name: "Marcus Lee", avatar: av(12) },
     milestone: "Security Audit", labels: ["Security", "Compliance"],
     hours: 24, dueDate: "Jun 28", updatedAt: "Updated 2h ago",
@@ -47,7 +49,7 @@ export const MY_ACTIVE: Ticket[] = [
     id: "d-kyc",  projectSlug: "mobile-banking-app", ticketNumber: 8,
     title: "KYC vendor API outage response plan",
     description: "Vendor integration has been failing intermittently.",
-    status: "blocked", priority: "high",
+    status: "blocked", priority: "high", type: "BUG",
     assignee: { name: "Marcus Lee", avatar: av(12) },
     milestone: "Security Audit", labels: ["Integration"],
     hours: 16, dueDate: "Jul 1", updatedAt: "Updated 1 day ago",
@@ -56,7 +58,7 @@ export const MY_ACTIVE: Ticket[] = [
     id: "d-api",  projectSlug: "mobile-banking-app", ticketNumber: 7,
     title: "API rate limiting implementation",
     description: "Add per-client rate limits to protect the transfers API.",
-    status: "review", priority: "high",
+    status: "review", priority: "high", type: "TASK",
     assignee: { name: "Marcus Lee", avatar: av(12) },
     milestone: "Security Audit", labels: ["Security", "API"],
     hours: 4, dueDate: "Jul 3", updatedAt: "Updated 3h ago",
@@ -65,7 +67,7 @@ export const MY_ACTIVE: Ticket[] = [
     id: "d-page", projectSlug: "mobile-banking-app", ticketNumber: 4,
     title: "Implement transaction history pagination",
     description: "Paginate the transaction list to keep load times fast for high-volume accounts.",
-    status: "in-progress", priority: "normal",
+    status: "in-progress", priority: "normal", type: "TASK",
     assignee: { name: "Marcus Lee", avatar: av(12) },
     milestone: "Beta Release", labels: ["Performance"],
     hours: 8, dueDate: "Jul 2", updatedAt: "Updated yesterday",
@@ -74,7 +76,7 @@ export const MY_ACTIVE: Ticket[] = [
     id: "d-push", projectSlug: "mobile-banking-app", ticketNumber: 3,
     title: "Push notification setup for transaction alerts",
     description: "Wire up push notification delivery for transaction and security alerts.",
-    status: "in-progress", priority: "normal",
+    status: "in-progress", priority: "normal", type: "TASK",
     assignee: { name: "Marcus Lee", avatar: av(12) },
     milestone: "Beta Release", labels: ["Notifications"],
     hours: 8, dueDate: "Jul 5", updatedAt: "Updated 3h ago",
@@ -94,56 +96,75 @@ export const ACTIVITY_META: Record<ActivityType, { label: string; dot: string }>
 };
 
 export const RECENT_ACTIVITY: Array<{
-  id: string; type: ActivityType; avatar: string; name: string; action: ReactNode; project: string; time: string;
+  id: string;
+  type: ActivityType;
+  avatar: string;
+  name: string;
+  /** The action fragment only — e.g. "marked", "completed". Never embeds the
+   *  ticket title; when `ticketId` is set, the title renders on its own
+   *  clickable line via getTicketDisplayKey instead. */
+  verb: ReactNode;
+  /** References Ticket.id in mock-tickets.ts. Omit for activity that isn't
+   *  about a specific ticket (e.g. project-level events) — those render as a
+   *  plain sentence with no ticket-reference line. */
+  ticketId?: string;
+  /** Extra context shown in the meta line, e.g. "8h → 12h" or "to Priya Patel". */
+  detail?: ReactNode;
+  project: string;
+  time: string;
 }> = [
   {
     id: "a1", type: "blocked", avatar: av(22), name: "David Kim",
-    action: <>marked <span className="font-medium">&ldquo;Third-party KYC vendor outage&rdquo;</span> as blocked</>,
+    verb: "marked", ticketId: "kyc-vendor-outage",
     project: "Mobile Banking App", time: "2h ago",
   },
   {
     id: "a7", type: "note", avatar: av(47), name: "Sarah Chen",
-    action: <>added a note — <span className="font-medium">&ldquo;Onboarding flow — final decision&rdquo;</span></>,
+    verb: <>added a note — <span className="font-medium">&ldquo;Onboarding flow — final decision&rdquo;</span></>,
     project: "Mobile Banking App", time: "3h ago",
   },
   {
     id: "a2", type: "completed", avatar: av(12), name: "Marcus Lee",
-    action: <>completed <span className="font-medium">&ldquo;Fix biometric login crash&rdquo;</span></>,
+    verb: "completed", ticketId: "biometric-login-crash",
     project: "Mobile Banking App", time: "4h ago",
   },
   {
     id: "a8", type: "assigned", avatar: av(22), name: "David Kim",
-    action: <>reassigned <span className="font-medium">&ldquo;Push notification setup for transaction alerts&rdquo;</span> to <span className="font-medium">Priya Patel</span></>,
+    verb: "reassigned", ticketId: "push-notification-setup",
+    detail: <>to <span className="font-medium">Priya Patel</span></>,
     project: "Mobile Banking App", time: "5h ago",
   },
   {
     id: "a3", type: "hours", avatar: av(33), name: "Priya Patel",
-    action: <>updated the estimate on <span className="font-medium">&ldquo;Accessibility audit&rdquo;</span> — <span className="font-medium">8h → 12h</span></>,
+    verb: "updated the estimate on", ticketId: "accessibility-audit",
+    detail: <span className="font-medium">8h → 12h</span>,
     project: "Mobile Banking App", time: "6h ago",
   },
   {
     id: "a4", type: "note", avatar: av(5), name: "Elena Rossi",
-    action: <>added a note — <span className="font-medium">&ldquo;Homepage timeline pushed to Q3&rdquo;</span></>,
+    verb: <>added a note — <span className="font-medium">&ldquo;Homepage timeline pushed to Q3&rdquo;</span></>,
     project: "Client Website Redesign", time: "Yesterday",
   },
   {
     id: "a5", type: "assigned", avatar: av(47), name: "Sarah Chen",
-    action: <>assigned <span className="font-medium">Elena Rossi</span> to the project</>,
+    verb: <>assigned <span className="font-medium">Elena Rossi</span> to the project</>,
     project: "Marketing Site Relaunch", time: "Yesterday",
   },
   {
     id: "a6", type: "priority", avatar: av(22), name: "David Kim",
-    action: <>raised priority on <span className="font-medium">&ldquo;API rate limiting implementation&rdquo;</span> — Normal → High</>,
+    verb: "raised priority on", ticketId: "api-rate-limiting",
+    detail: <span className="font-medium">Normal → High</span>,
     project: "Mobile Banking App", time: "2 days ago",
   },
   {
     id: "a9", type: "completed", avatar: av(15), name: "Jordan Wu",
-    action: <>completed <span className="font-medium">&ldquo;Route admin panels to new platform&rdquo;</span></>,
+    verb: "completed", ticketId: "admin-panel-routing",
     project: "Internal Platform Migration", time: "1 day ago",
   },
   {
     id: "a10", type: "priority", avatar: av(12), name: "Marcus Lee",
-    action: <>raised priority on <span className="font-medium">&ldquo;Migration cutover plan&rdquo;</span> — Normal → High</>,
+    verb: "raised priority on", ticketId: "cutover-plan",
+    detail: <span className="font-medium">Normal → High</span>,
     project: "Internal Platform Migration", time: "2 days ago",
   },
 ];
@@ -204,8 +225,14 @@ export function ActiveTicketRow({
       <StatusBadge status={ticket.status} />
       <span className="flex-1 min-w-0 flex flex-col gap-0.5">
         {projectBadge}
-        <span className="text-[13px] font-medium text-slate-800 dark:text-zinc-200 truncate">
-          {ticket.title}
+        <span className="flex items-baseline gap-1.5 min-w-0">
+          <TicketTypeIcon type={ticket.type} />
+          <span className="text-[11px] font-mono font-medium text-slate-400 dark:text-zinc-500 flex-shrink-0">
+            {getTicketDisplayKey(ticket)}
+          </span>
+          <span className="text-[13px] font-medium text-slate-800 dark:text-zinc-200 truncate">
+            {ticket.title}
+          </span>
         </span>
       </span>
       {ticket.dueDate && (
@@ -217,27 +244,61 @@ export function ActiveTicketRow({
   );
 }
 
-export function RecentActivityList({ items }: { items: typeof RECENT_ACTIVITY }) {
+export function RecentActivityList({
+  items,
+  onOpenTicket,
+}: {
+  items: typeof RECENT_ACTIVITY;
+  /** Opens the existing Ticket Detail preview/page — every clickable ticket
+   *  reference in this list calls into it rather than inventing new navigation. */
+  onOpenTicket: (ticket: Ticket) => void;
+}) {
   return (
     <ul className="space-y-4">
       {items.map((entry) => {
         const meta = ACTIVITY_META[entry.type];
+        const ticket = entry.ticketId ? getTicketById(entry.ticketId) : undefined;
         return (
           <li key={entry.id} className="flex items-start gap-3">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={entry.avatar}
-              alt={entry.name}
-              className="w-6 h-6 rounded-full mt-0.5 flex-shrink-0"
-            />
+            <MemberTrigger name={entry.name} avatar={entry.avatar} className="flex-shrink-0 mt-0.5 rounded-full">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={entry.avatar}
+                alt={entry.name}
+                className="w-6 h-6 rounded-full"
+              />
+            </MemberTrigger>
             <div className="text-[13px] leading-snug min-w-0 flex-1">
               <p className="text-slate-700 dark:text-zinc-300">
-                <span className="font-medium text-slate-900 dark:text-zinc-100">{entry.name}</span>{" "}
-                {entry.action}
+                <MemberTrigger name={entry.name} avatar={entry.avatar} className="font-medium text-slate-900 dark:text-zinc-100 hover:underline">
+                  {entry.name}
+                </MemberTrigger>{" "}
+                {entry.verb}
               </p>
-              <p className="flex items-center gap-1.5 text-[11px] text-slate-400 dark:text-zinc-500 mt-1">
+              {ticket && (
+                <button
+                  type="button"
+                  onClick={() => onOpenTicket(ticket)}
+                  className="group/ref mt-1 flex items-baseline gap-1.5 min-w-0 max-w-full text-left"
+                >
+                  <TicketTypeIcon type={ticket.type} />
+                  <span className="text-[11px] font-mono font-semibold text-slate-500 dark:text-zinc-400 group-hover/ref:text-brand-600 dark:group-hover/ref:text-brand-400 flex-shrink-0">
+                    {getTicketDisplayKey(ticket)}
+                  </span>
+                  <span className="text-[13px] font-medium text-slate-700 dark:text-zinc-300 group-hover/ref:text-brand-600 dark:group-hover/ref:text-brand-400 group-hover/ref:underline truncate">
+                    {ticket.title}
+                  </span>
+                </button>
+              )}
+              <p className="flex items-center gap-1.5 flex-wrap text-[11px] text-slate-400 dark:text-zinc-500 mt-1">
                 <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${meta.dot}`} aria-hidden="true" />
                 {meta.label}
+                {entry.detail && (
+                  <>
+                    <span className="text-slate-300 dark:text-zinc-700" aria-hidden="true">·</span>
+                    {entry.detail}
+                  </>
+                )}
                 <span className="text-slate-300 dark:text-zinc-700" aria-hidden="true">·</span>
                 {entry.project}
                 <span className="text-slate-300 dark:text-zinc-700" aria-hidden="true">·</span>
