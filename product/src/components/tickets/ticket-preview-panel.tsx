@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import type { Ticket } from "@/lib/mock-tickets";
+import { getTicketDisplayKey } from "@/lib/mock-tickets";
 import {
   StatusBadge,
   PriorityBadge,
@@ -95,7 +96,7 @@ export function TicketPreviewPanel({
       <aside
         role="dialog"
         aria-modal="true"
-        aria-label={`Ticket preview: ${t.issueKey}`}
+        aria-label={`Ticket preview: ${getTicketDisplayKey(t)}`}
         className={[
           "fixed inset-y-0 right-0 z-50",
           "w-[520px] max-w-[calc(100vw-3rem)]",
@@ -111,7 +112,7 @@ export function TicketPreviewPanel({
         <div className="flex-shrink-0 px-5 pt-4 pb-4 border-b border-slate-100 dark:border-zinc-800">
           <div className="flex items-center justify-between gap-3 mb-3">
             <span className="font-mono text-[11px] font-semibold tracking-widest text-slate-400 dark:text-zinc-500">
-              {t.issueKey}
+              {getTicketDisplayKey(t)}
             </span>
             <button
               type="button"

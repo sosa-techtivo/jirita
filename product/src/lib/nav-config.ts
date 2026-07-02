@@ -1,7 +1,7 @@
 import type { Role } from "@/lib/current-user";
 
 export type MainNavKey = "dashboard" | "projects" | "my-work" | "reports" | "time-tracking" | "settings";
-export type ProjectNavKey = "overview" | "tickets" | "notes" | "team" | "reports";
+export type ProjectNavKey = "overview" | "tickets" | "notes" | "team" | "reports" | "settings";
 
 // Order matters: the sidebar renders each role's main nav in this exact
 // sequence (a JS Set preserves insertion order), so reordering a role's
@@ -12,9 +12,11 @@ const MAIN_NAV_BY_ROLE: Record<Role, MainNavKey[]> = {
   MEMBER: ["dashboard", "my-work", "projects", "time-tracking"],
 };
 
+// Per-project Settings (billing/category, archive) is Admin/Project Lead
+// only — a Member never sees it, same as the workspace-wide Settings link.
 const PROJECT_NAV_BY_ROLE: Record<Role, ProjectNavKey[]> = {
-  ADMIN: ["overview", "tickets", "notes", "team", "reports"],
-  PROJECT_LEAD: ["overview", "tickets", "notes", "team", "reports"],
+  ADMIN: ["overview", "tickets", "notes", "team", "reports", "settings"],
+  PROJECT_LEAD: ["overview", "tickets", "notes", "team", "reports", "settings"],
   MEMBER: ["overview", "tickets", "notes"],
 };
 

@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import type { Ticket, TicketStatus, TicketPriority } from "@/lib/mock-tickets";
+import { getTicketDisplayKey } from "@/lib/mock-tickets";
 import type { OnTicketClick } from "@/components/tickets/board-column";
 
 // ── Colours ─────────────────────────────────────────────────────────────────
@@ -332,7 +333,7 @@ function UpcomingDueDates({
                     {t.title}
                   </p>
                   <p className="text-[10px] text-slate-400 dark:text-zinc-600 mt-0.5">
-                    {t.issueKey} · {STATUS_LABEL[t.status]}
+                    {getTicketDisplayKey(t)} · {STATUS_LABEL[t.status]}
                   </p>
                 </div>
                 <div className="flex-shrink-0 text-right">
@@ -380,7 +381,7 @@ function RecentlyCompleted({
                   {t.title}
                 </p>
                 <p className="text-[10px] text-slate-400 dark:text-zinc-600 mt-0.5">
-                  {t.issueKey}
+                  {getTicketDisplayKey(t)}
                 </p>
               </div>
               <div className="flex items-center gap-2 flex-shrink-0">

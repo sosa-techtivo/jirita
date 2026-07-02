@@ -73,7 +73,7 @@ export const PROJECT_TICKETS: Record<string, Ticket[]> = {
   "mobile-banking-app": MY_ACTIVE,
   "client-website-redesign": [
     {
-      id: "cwd-homepage-review", issueKey: "CWD-1",
+      id: "cwd-homepage-review", projectSlug: "client-website-redesign", ticketNumber: 1,
       title: "Homepage redesign review",
       description: "Review the updated homepage layout against brand guidelines before handoff.",
       status: "review", priority: "high",
@@ -82,7 +82,7 @@ export const PROJECT_TICKETS: Record<string, Ticket[]> = {
       hours: 6, dueDate: "Jul 10", updatedAt: "Updated 1 day ago",
     },
     {
-      id: "cwd-cms-audit", issueKey: "CWD-2",
+      id: "cwd-cms-audit", projectSlug: "client-website-redesign", ticketNumber: 2,
       title: "CMS migration content audit",
       description: "Audit legacy CMS content before migrating to the new platform.",
       status: "to-do", priority: "normal",
@@ -93,7 +93,7 @@ export const PROJECT_TICKETS: Record<string, Ticket[]> = {
   ],
   "internal-platform-migration": [
     {
-      id: "ipm-db-export-lead", issueKey: "IPM-1",
+      id: "ipm-db-export-lead", projectSlug: "internal-platform-migration", ticketNumber: 1,
       title: "Legacy database export",
       description: "Export the legacy monolith database ahead of platform cutover.",
       status: "in-progress", priority: "high",
@@ -102,7 +102,7 @@ export const PROJECT_TICKETS: Record<string, Ticket[]> = {
       hours: 16, dueDate: "Jul 5", updatedAt: "Updated 4h ago",
     },
     {
-      id: "ipm-cutover-plan-lead", issueKey: "IPM-2",
+      id: "ipm-cutover-plan-lead", projectSlug: "internal-platform-migration", ticketNumber: 2,
       title: "Migration cutover plan",
       description: "Finalize the staged cutover plan and rollback runbook.",
       status: "review", priority: "high",
@@ -111,7 +111,7 @@ export const PROJECT_TICKETS: Record<string, Ticket[]> = {
       hours: 8, dueDate: "Jul 1", updatedAt: "Updated 1 day ago",
     },
     {
-      id: "ipm-read-replicas-lead", issueKey: "IPM-3",
+      id: "ipm-read-replicas-lead", projectSlug: "internal-platform-migration", ticketNumber: 3,
       title: "Provision new read replicas",
       description: "Provision read replicas for the new platform's database layer.",
       status: "to-do", priority: "normal",

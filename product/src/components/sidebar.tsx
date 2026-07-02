@@ -56,7 +56,7 @@ const NAV_LINK: Record<MainNavKey, { href: string; label: string; icon: ReactNod
     ),
   },
   "time-tracking": {
-    href: "/settings/time-tracking",
+    href: "/time-tracking",
     label: "Time Tracking",
     icon: (
       <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
@@ -93,7 +93,7 @@ export function Sidebar({
   activePage,
 }: {
   activeSlug?: string;
-  activeSection?: "overview" | "tickets" | "notes" | "team" | "reports";
+  activeSection?: "overview" | "tickets" | "notes" | "team" | "reports" | "settings";
   activePage?: string;
 }) {
   const { user } = useCurrentUser();
@@ -222,6 +222,18 @@ export function Sidebar({
                       }
                     >
                       Reports
+                    </Link>
+                  )}
+                  {projectNav.has("settings") && (
+                    <Link
+                      href={`/projects/${project.slug}/settings`}
+                      className={
+                        activeSection === "settings"
+                          ? "block px-2 py-1 rounded-md bg-white text-brand-700 font-semibold text-[13px] shadow-sm shadow-slate-100 dark:bg-zinc-800 dark:text-brand-400"
+                          : "block px-2 py-1 rounded-md text-slate-500 hover:bg-white text-[13px] dark:text-zinc-500 dark:hover:bg-zinc-800/60"
+                      }
+                    >
+                      Settings
                     </Link>
                   )}
                 </div>

@@ -73,7 +73,7 @@ export const MEMBER_WORK: WorkItem[] = [
   {
     project: PROJECTS.mba,
     ticket: {
-      id: "dk-kyc-outage", issueKey: "MBA-8",
+      id: "dk-kyc-outage", projectSlug: "mobile-banking-app", ticketNumber: 8,
       title: "Third-party KYC vendor API outage",
       description: "Vendor integration has been failing intermittently for the past week.",
       status: "blocked", priority: "high",
@@ -85,7 +85,7 @@ export const MEMBER_WORK: WorkItem[] = [
   {
     project: PROJECTS.mba,
     ticket: {
-      id: "dk-regression-ios", issueKey: "MBA-18",
+      id: "dk-regression-ios", projectSlug: "mobile-banking-app", ticketNumber: 18,
       title: "iOS 18 regression suite failing on biometric flow",
       description: "The automated regression suite can't get past the Face ID step on iOS 18 devices.",
       status: "blocked", priority: "high",
@@ -97,7 +97,7 @@ export const MEMBER_WORK: WorkItem[] = [
   {
     project: PROJECTS.cwd,
     ticket: {
-      id: "dk-homepage-review", issueKey: "CWD-1",
+      id: "dk-homepage-review", projectSlug: "client-website-redesign", ticketNumber: 1,
       title: "Homepage redesign review",
       description: "Sign off on the updated homepage layout against brand guidelines before handoff.",
       status: "in-progress", priority: "normal",
@@ -109,7 +109,7 @@ export const MEMBER_WORK: WorkItem[] = [
   {
     project: PROJECTS.cwd,
     ticket: {
-      id: "dk-cms-audit", issueKey: "CWD-2",
+      id: "dk-cms-audit", projectSlug: "client-website-redesign", ticketNumber: 2,
       title: "CMS migration content audit",
       description: "Audit legacy CMS content before migrating to the new platform.",
       status: "to-do", priority: "high",
@@ -121,7 +121,7 @@ export const MEMBER_WORK: WorkItem[] = [
   {
     project: PROJECTS.mba,
     ticket: {
-      id: "dk-a11y-audit", issueKey: "MBA-12",
+      id: "dk-a11y-audit", projectSlug: "mobile-banking-app", ticketNumber: 12,
       title: "Accessibility audit and WCAG 2.1 fixes",
       description: "Ensure VoiceOver and TalkBack compatibility for WCAG 2.1 AA compliance.",
       status: "in-progress", priority: "normal",
@@ -133,7 +133,7 @@ export const MEMBER_WORK: WorkItem[] = [
   {
     project: PROJECTS.ipm,
     ticket: {
-      id: "dk-db-export-qa", issueKey: "IPM-4",
+      id: "dk-db-export-qa", projectSlug: "internal-platform-migration", ticketNumber: 4,
       title: "Legacy database export QA verification",
       description: "Verify row counts and integrity checksums on the exported legacy database.",
       status: "to-do", priority: "low",
@@ -145,7 +145,7 @@ export const MEMBER_WORK: WorkItem[] = [
   {
     project: PROJECTS.mba,
     ticket: {
-      id: "dk-api-rate-review", issueKey: "MBA-7",
+      id: "dk-api-rate-review", projectSlug: "mobile-banking-app", ticketNumber: 7,
       title: "API rate limiting — QA sign-off",
       description: "Final verification pass on per-client rate limits before release.",
       status: "review", priority: "normal",

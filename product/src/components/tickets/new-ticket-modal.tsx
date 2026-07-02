@@ -2,9 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { Ticket, TicketStatus, TicketPriority } from "@/lib/mock-tickets";
-import { tickets as ALL_TICKETS } from "@/lib/mock-tickets";
+import { tickets as ALL_TICKETS, getTicketDisplayKey } from "@/lib/mock-tickets";
 import { StatusBadge, STATUS_LABEL } from "@/components/tickets/ticket-ui";
-import { registerTicket, nextIssueKey, titleToTicketId } from "@/lib/pending-tickets";
+import { registerTicket, nextTicketNumber, titleToTicketId } from "@/lib/pending-tickets";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -311,8 +311,9 @@ export function NewTicketModal({
       ?? { name: "Unassigned", avatar: "https://i.pravatar.cc/64?img=0" };
     const filledCriteria = criteria.filter((c) => c.trim().length > 0);
     return {
-      id:          titleToTicketId(title),
-      issueKey:    nextIssueKey(),
+      id:           titleToTicketId(title),
+      projectSlug:  slug,
+      ticketNumber: nextTicketNumber(slug),
       title:       title.trim(),
       description: description.trim(),
       status,
@@ -586,7 +587,7 @@ export function NewTicketModal({
                       className="w-full flex items-center gap-2.5 px-3.5 py-2.5 hover:bg-amber-100/60 dark:hover:bg-amber-950/30 transition-colors text-left"
                     >
                       <span className="font-mono text-[10px] font-semibold text-amber-700 dark:text-amber-500 flex-shrink-0">
-                        {t.issueKey}
+                        {getTicketDisplayKey(t)}
                       </span>
                       <StatusBadge status={t.status} />
                       <span className="text-[12px] text-slate-700 dark:text-zinc-300 truncate min-w-0">

@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect, type KeyboardEvent, type ReactNode } from "react";
 import Link from "next/link";
 import type { Ticket, TicketStatus, TicketPriority } from "@/lib/mock-tickets";
-import { tickets as ALL_TICKETS } from "@/lib/mock-tickets";
+import { tickets as ALL_TICKETS, getTicketDisplayKey } from "@/lib/mock-tickets";
 import {
   StatusBadge,
   PriorityBadge,
@@ -725,7 +725,7 @@ function RelatedTicketCard({
       >
         <div className="flex items-center gap-1 mb-1 pr-3">
           <span className="font-mono text-[9px] font-semibold text-slate-400 dark:text-zinc-600 flex-shrink-0">
-            {ticket.issueKey}
+            {getTicketDisplayKey(ticket)}
           </span>
           <div className="flex-shrink-0">
             <StatusBadge status={ticket.status} />
@@ -803,7 +803,7 @@ function RelatedTicketsSection({
     (t) =>
       t.id !== currentTicketId &&
       !linkedIds.has(t.id) &&
-      (t.title.toLowerCase().includes(q) || t.issueKey.toLowerCase().includes(q))
+      (t.title.toLowerCase().includes(q) || getTicketDisplayKey(t).toLowerCase().includes(q))
   );
 
   const addLink = (ticketId: string) => {
@@ -879,7 +879,7 @@ function RelatedTicketsSection({
                 >
                   <div className="flex items-center gap-1 mb-0.5">
                     <span className="font-mono text-[9px] font-semibold text-slate-400 dark:text-zinc-600 flex-shrink-0">
-                      {t.issueKey}
+                      {getTicketDisplayKey(t)}
                     </span>
                     <StatusBadge status={t.status} />
                   </div>
@@ -2208,7 +2208,7 @@ export function TicketDetailScreen({
             <header>
               <div className="flex items-center gap-2.5 mb-3">
                 <span className="font-mono text-[12px] font-semibold tracking-wider text-slate-400 dark:text-zinc-500">
-                  {ticket.issueKey}
+                  {getTicketDisplayKey(ticket)}
                 </span>
                 <EditableStatusBadge
                   value={ticket.status}

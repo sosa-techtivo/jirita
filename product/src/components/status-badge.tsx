@@ -1,25 +1,25 @@
-import type { ProjectHealth, ProjectPriority, ProjectStatus } from "@/lib/mock-projects";
+import type { ProjectCategory, ProjectHealth, ProjectPriority, ProjectStatus } from "@/lib/mock-projects";
 
 export const statusMeta: Record<ProjectStatus, { label: string; dot: string; text: string }> = {
+  planning: {
+    label: "Planning",
+    dot: "bg-sky-500",
+    text: "text-sky-700 dark:text-sky-400",
+  },
   active: {
     label: "Active",
     dot: "bg-emerald-500",
     text: "text-emerald-700 dark:text-emerald-400",
   },
-  "on-track": {
-    label: "On Track",
-    dot: "bg-emerald-500",
-    text: "text-emerald-600 dark:text-emerald-400",
-  },
-  "at-risk": {
-    label: "At Risk",
-    dot: "bg-red-500",
-    text: "text-red-600 dark:text-red-400",
-  },
   "on-hold": {
     label: "On Hold",
     dot: "bg-amber-500",
     text: "text-amber-700 dark:text-amber-400",
+  },
+  completed: {
+    label: "Completed",
+    dot: "bg-violet-500",
+    text: "text-violet-700 dark:text-violet-400",
   },
   archived: {
     label: "Archived",
@@ -90,6 +90,31 @@ export const healthMeta: Record<ProjectHealth, { label: string; className: strin
     className: "bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-400",
   },
 };
+
+// Set in Project Settings → Billing. Determines whether a project requires a
+// client/rate and whether its time entries default to Billable, and whether
+// it's included in Billing/Finance reports (see mock-projects.ts).
+export const projectCategoryMeta: Record<ProjectCategory, { label: string; className: string }> = {
+  client: {
+    label: "Client Project",
+    className: "bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-400",
+  },
+  internal: {
+    label: "Internal Project",
+    className: "bg-slate-100 text-slate-600 dark:bg-zinc-800 dark:text-zinc-400",
+  },
+};
+
+export function ProjectCategoryBadge({ category }: { category: ProjectCategory }) {
+  const meta = projectCategoryMeta[category];
+  return (
+    <span
+      className={`inline-flex items-center flex-shrink-0 whitespace-nowrap text-[11px] font-medium px-1.5 py-0.5 rounded ${meta.className}`}
+    >
+      {meta.label}
+    </span>
+  );
+}
 
 // Distinct from StatusBadge (plain dot + text) on purpose — a pulse icon inside a
 // filled pill so "health" never reads as just another status at a glance.

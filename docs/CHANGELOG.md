@@ -4,6 +4,214 @@ This changelog follows a sprint-oriented approach instead of individual commits,
 
 ---
 
+# Notes — Detail & Edit Modal
+
+## Overview
+
+Added a full note detail view with inline editing to the per-project Notes page. Also expanded the mock ticket dataset with a new "Internal Platform Migration" workstream used to exercise the Member dashboard's multi-project views.
+
+---
+
+## What Changed
+
+### New: `src/components/note-detail-modal.tsx`
+
+Centered modal (not a side panel) with a view/edit mode toggle.
+
+- **View mode:** title, author avatar + name, updated timestamp, tag badge, full body text, and a "⋯" menu (Edit / Duplicate / Delete — Duplicate and Delete are visual stubs)
+- **Edit mode:** editable title (required), tag picker (toggleable chips from `TAG_OPTIONS`), body textarea
+- Save sets `updatedAt` to `"Just now"` and returns to view mode; Cancel discards edits
+- Entry animation (fade + scale from 98%), ESC-to-close, `document.body.style.overflow = "hidden"` while open
+
+### New: `src/components/notes-shared.tsx`
+
+Extracted `TAG_OPTIONS`, `TAG_CLASS`, `TagBadge`, `INPUT`, and `FIELD_LABEL` out of `notes-screen.tsx` so the new detail modal and the notes list render identical tag styling without duplication.
+
+### Modified: `src/components/notes-screen.tsx`
+
+- Note cards are now clickable (`role="button"`, keyboard-accessible) and open `NoteDetailModal` in view mode
+- New `activeNote` / `activeNoteEditMode` state wires the modal open/close and save-back-into-list flow
+
+### Modified: `src/lib/mock-tickets.ts`
+
+Added four tickets (`IPM-1`–`IPM-4`) under a new "Platform Cutover" milestone/workstream (Legacy database export, Provision read replicas, Migration cutover plan, Route admin panels to new platform), assigned across Jordan Wu and Marcus Lee — used to give the Member dashboard's multi-project sections realistic cross-project data.
+
+---
+
+# Role-Based UX — Reports
+
+## Overview
+
+Gave Project Leads a purpose-built Reports screen instead of a permissions-filtered version of the Admin's company-wide Delivery/Finance report.
+
+---
+
+## What Changed
+
+### New: `src/components/project-lead-reports-screen.tsx`
+
+Delivery + Team tabs, scoped entirely to the Lead's own projects and team members — no company-wide data.
+
+### New: `src/components/reports-shared.tsx`
+
+Extracted the shared KPI card, section container, status bar, and progress-bar primitives so `reports-screen.tsx` and `project-lead-reports-screen.tsx` reuse the same building blocks without importing from each other.
+
+### Modified: `src/components/reports-screen.tsx`
+
+- `/reports` now branches on `user.role`: `PROJECT_LEAD` renders `<ProjectLeadReportsScreen />`; `ADMIN` (and default) renders the existing company-wide view
+- Reworked internals to consume the new `reports-shared.tsx` primitives instead of local duplicates
+
+### Modified: `src/components/project-lead-dashboard.tsx`
+
+Minor follow-on adjustment after extracting shared reports primitives.
+
+---
+
+# Role-Based UX — Projects
+
+## Overview
+
+Tailored the Projects page to each role's actual responsibilities instead of showing one permissions-filtered table to everyone.
+
+---
+
+## What Changed
+
+### New: `src/components/member-projects-screen.tsx`
+
+Dedicated "My Projects" screen for the Member role — shows only projects the Member is staffed on, who leads each one, and what's assigned to them within it. Not a filtered version of the Admin/Lead table.
+
+### Modified: `src/components/projects-list-screen.tsx`
+
+- `/projects` now branches by role: `MEMBER` renders `<MemberProjectsScreen />`; `PROJECT_LEAD` renders a scoped, block-organized layout (own projects only via `LEAD_PROJECT_SLUGS`, archived status excluded, team/health context per project, `+ New Ticket` in place of `+ Create Project`); `ADMIN` keeps the full workspace table
+- `ProjectMenu` gained an `isProjectLead` prop to show a reduced action set for Leads vs. the full Admin action set
+
+### Modified: `src/components/status-badge.tsx`
+
+Expanded to support the additional status/health states needed by the Project Lead's block-organized project view.
+
+### Modified: `src/lib/mock-projects.ts`
+
+Added fields needed for role-scoped project views (ownership/lead mapping used by `LEAD_PROJECT_SLUGS` filtering).
+
+### Modified: `src/components/member-dashboard.tsx`, `src/lib/nav-config.ts`
+
+Minor follow-on adjustments to keep the Member dashboard and nav config consistent with the new Member Projects screen.
+
+---
+
+# Role-Based UX — Member Dashboard
+
+## Overview
+
+Gave the Member role (Engineer / QA / Designer) a personal cross-project work-queue dashboard instead of a filtered project-management view, and fixed a dark-mode bug uncovered while building its hero card.
+
+---
+
+## What Changed
+
+### New: `src/components/member-dashboard.tsx`
+
+A dashboard scoped to the signed-in Member's own ticket queue across all their projects, reusing existing ticket/status components rather than introducing new ones.
+
+- **Recommended Next** — hero card surfacing the single most important next ticket
+- **Active Work** — priority-first ticket list
+- **Time Today** — hours logged today, broken down per project
+- **Needs Your Attention** — actionable-only events (blocked tickets, overdue items, mentions) — filtered to exclude passive/informational activity
+- **Upcoming Work** — tickets due soon
+
+### Modified: `src/components/dashboard-shared.tsx`
+
+Extracted shared `HERO_CARD_CLASS` / `HERO_LABEL_CLASS` / etc. so the Project Lead's "Current Delivery" hero card and the Member's "Recommended Next" hero card share one dark-mode-safe treatment.
+
+**Bug fix:** the previous hero card classes referenced `dark:` shades of `brand-300/400/900/950` that don't exist in the Tailwind theme, so dark mode silently fell back to the light gradient. Same root cause fixed on the Admin dashboard's "Hours Burn" KPI card — all four Admin KPI cards now share one correct dark background instead of one looking washed out.
+
+### Modified: `src/components/tickets/ticket-card.tsx`
+
+Added an optional `projectBadge` slot to `TicketListRow` / `ActiveTicketRow` so multi-project ticket rows (used by the Member dashboard) can show which project a ticket belongs to, without affecting other callers that don't pass it.
+
+### Modified: `src/components/sidebar.tsx`, `src/lib/nav-config.ts`
+
+Sidebar now renders each role's main nav links in the exact order returned by `mainNavForRole(role)` (a `Set`, so insertion order is preserved) instead of a single hardcoded sequence. Member's order was changed to Dashboard, My Work, Time Tracking, Projects; Admin and Project Lead order is unchanged.
+
+### Modified: `src/components/dashboard-screen.tsx`, `src/components/project-lead-dashboard.tsx`
+
+Wired the `MEMBER` branch to render `<MemberDashboard />`; minor adjustments to keep the Project Lead dashboard consistent with the shared hero-card classes.
+
+---
+
+# Role-Based UX Foundation
+
+## Overview
+
+Introduced a mock role-based identity layer — Admin, Project Lead, and Member — and rebuilt the Project Lead's dashboard from first principles instead of reusing a filtered Admin view. Also ran an MVP terminology pass to align live UI copy with the product's Delivery/Capacity/Hours vocabulary.
+
+No real authentication or server-side permissions exist yet; this only drives what renders in the UI.
+
+---
+
+## What Changed
+
+### New: `src/lib/current-user.ts`
+
+Defines `Role = "ADMIN" | "PROJECT_LEAD" | "MEMBER"` and `Discipline = "Engineer" | "QA" | "Designer" | "Product" | "DevOps"`. `MOCK_USERS` provides one mock user per role (Priya Patel / Admin, Sarah Chen / Project Lead, David Kim / Member) so switching roles also swaps name/avatar/discipline. `DEFAULT_ROLE = "PROJECT_LEAD"`. `canManage(role)` gates management actions to Admin and Project Lead.
+
+### New: `src/lib/nav-config.ts`
+
+Centralizes which main-nav (`MainNavKey`) and per-project-nav (`ProjectNavKey`) items each role sees, and in what order. `mainNavForRole()` / `projectNavForRole()` return ordered `Set`s consumed by the sidebar.
+
+### New: `src/components/current-user-provider.tsx`
+
+React context provider holding the active mock user/role for the whole app.
+
+### New: `src/components/role-switcher.tsx`
+
+Dev-only control in the header bar to switch the active role live, for testing how the app reshapes itself per role.
+
+### New: `src/components/dashboard-shared.tsx`
+
+Shared KPI card / section / hero-card style primitives factored out ahead of the Project Lead and Member dashboard rebuilds.
+
+### New: `src/components/project-lead-dashboard.tsx`
+
+Rebuilt the Project Lead's dashboard from scratch rather than reusing a filtered Admin view:
+
+- **Project Context selector** — scope the whole dashboard to one owned project or aggregate across all owned projects (delivery, capacity, activity, and deadlines all merge accordingly)
+- Delivery Health hero card
+- Attention Required section
+- Team Capacity list — clickable, opens the real Team Member modal
+- Recent Activity
+- Upcoming Deadlines
+
+### Modified: `src/components/dashboard-screen.tsx`
+
+Branches on `user.role`: `PROJECT_LEAD` renders `<ProjectLeadDashboard />`; other roles keep the existing dashboard for now (Member gets its own dashboard in the following change).
+
+### Modified: `src/components/sidebar.tsx`, `src/components/header-bar.tsx`, `src/app/layout.tsx`
+
+Sidebar and quick actions across the app (Settings, Team, Tickets, Projects, Dashboard) now gate on the current role via `nav-config.ts` and `canManage()`. Header bar hosts the new `RoleSwitcher`. Layout wraps the app in `CurrentUserProvider`.
+
+### Modified: `src/components/settings-section-screen.tsx`, `src/app/settings/[section]/page.tsx`
+
+Adjusted for role gating (Settings is Admin/Project Lead only).
+
+### MVP Terminology Pass
+
+Removed Sprint / Milestone / Backlog / Story Points language from the live UI in favor of the Delivery / Capacity / Hours vocabulary the product is standardizing on:
+
+- `src/components/project-reports-screen.tsx` — "Velocity Snapshot" → "Delivery Snapshot"
+- Story Points dropped from the ticket sidebar (`ticket-detail-screen.tsx`), preview panel (`ticket-preview-panel.tsx`), and filters (`filter-bar.tsx`)
+
+### Modified: `src/components/project-overview.tsx`, `src/components/projects-list-screen.tsx`, `src/components/team-screen.tsx`, `src/components/tickets-screen.tsx`
+
+Adjusted quick actions and visible sections per the current role.
+
+### Modified: `src/lib/mock-notes.ts`, `src/lib/mock-team.ts`
+
+Minor data adjustments to support role-scoped views.
+
+---
+
 # Settings
 
 ## Overview

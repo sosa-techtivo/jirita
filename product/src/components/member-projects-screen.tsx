@@ -2,6 +2,8 @@
 
 import { useRouter } from "next/navigation";
 import { getProjectBySlug } from "@/lib/mock-projects";
+import type { ProjectCategory } from "@/lib/mock-projects";
+import { ProjectCategoryBadge } from "@/components/status-badge";
 import { MEMBER_WORK } from "@/components/member-dashboard";
 import type { WorkItem } from "@/components/member-dashboard";
 
@@ -39,6 +41,7 @@ interface MemberProjectCard {
   slug: string;
   name: string;
   description: string;
+  category: ProjectCategory;
   leadName: string;
   leadAvatar: string;
   assignedCount: number;
@@ -61,6 +64,7 @@ function buildMemberProjectCards(work: WorkItem[]): MemberProjectCard[] {
         slug,
         name: items[0].project.name,
         description: project?.description ?? "",
+        category: project?.category ?? "internal",
         leadName: project?.owner.name ?? "Unassigned",
         leadAvatar: project?.owner.avatar ?? "",
         assignedCount: items.length,
@@ -114,7 +118,10 @@ function MemberProjectCardRow({ card }: { card: MemberProjectCard }) {
     >
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <h3 className="text-base font-semibold text-slate-900 dark:text-zinc-50 truncate">{card.name}</h3>
+          <div className="flex items-center gap-2 flex-wrap">
+            <h3 className="text-base font-semibold text-slate-900 dark:text-zinc-50 truncate">{card.name}</h3>
+            <ProjectCategoryBadge category={card.category} />
+          </div>
           <p className="text-sm text-slate-500 dark:text-zinc-400 mt-1">{card.description}</p>
         </div>
 

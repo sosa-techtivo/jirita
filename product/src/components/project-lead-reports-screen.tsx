@@ -80,7 +80,7 @@ function buildStatusItems(): StatusItem[] {
     });
   }
 
-  const onTrackCount = MY_PROJECTS.filter((p) => p.status === "active" || p.status === "on-track").length;
+  const onTrackCount = MY_PROJECTS.filter((p) => p.status === "active").length;
   items.push({ id: "on-track", level: "ok", text: `${onTrackCount} of ${MY_PROJECTS.length} projects on track` });
 
   return items.slice(0, 3);
@@ -101,10 +101,10 @@ const ASSIGNEE_GROUPS: DropdownGroup[] = [
 const STATUS_GROUPS: DropdownGroup[] = [
   {
     options: [
+      { value: "planning", label: "Planning" },
       { value: "active", label: "Active" },
-      { value: "on-track", label: "On Track" },
-      { value: "at-risk", label: "At Risk" },
       { value: "on-hold", label: "On Hold" },
+      { value: "completed", label: "Completed" },
     ],
   },
 ];

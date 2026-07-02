@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { Ticket } from "@/lib/mock-tickets";
+import { getTicketDisplayKey } from "@/lib/mock-tickets";
 
 const LABEL_COLORS: Record<string, string> = {
   Security:      "bg-red-50    text-red-600    dark:bg-red-500/10    dark:text-red-400",
@@ -81,7 +82,7 @@ export function KanbanCard({ ticket, slug }: { ticket: Ticket; slug: string }) {
 
       {/* Issue key */}
       <p className="text-[11px] font-mono font-medium text-slate-400 dark:text-zinc-500 mb-1 leading-none">
-        {ticket.issueKey}
+        {getTicketDisplayKey(ticket)}
       </p>
 
       {/* Title */}

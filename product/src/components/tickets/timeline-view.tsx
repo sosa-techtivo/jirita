@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import type { Ticket } from "@/lib/mock-tickets";
+import { getTicketDisplayKey } from "@/lib/mock-tickets";
 import type { OnTicketClick } from "@/components/tickets/board-column";
 
 // ── Date utilities ──────────────────────────────────────────────────────────
@@ -284,7 +285,7 @@ export function TimelineView({
                   {clampedWidth > 0 && (
                     <button
                       type="button"
-                      title={`${ticket.issueKey} · ${ticket.title}`}
+                      title={`${getTicketDisplayKey(ticket)} · ${ticket.title}`}
                       onClick={() => onTicketClick(ticket)}
                       className={[
                         "absolute z-20 rounded-md flex items-center gap-1.5 px-2 overflow-hidden",
@@ -301,7 +302,7 @@ export function TimelineView({
                       }}
                     >
                       <span className={`text-[10px] font-semibold flex-shrink-0 opacity-70 leading-none ${textClass(ticket)}`}>
-                        {ticket.issueKey}
+                        {getTicketDisplayKey(ticket)}
                       </span>
                       <span className={`text-[10px] opacity-40 flex-shrink-0 leading-none ${textClass(ticket)}`}>·</span>
                       <span className={`text-[11px] font-medium truncate leading-none ${textClass(ticket)}`}>

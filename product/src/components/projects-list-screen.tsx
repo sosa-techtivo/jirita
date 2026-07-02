@@ -5,7 +5,7 @@ import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { projects as allProjects } from "@/lib/mock-projects";
 import type { ProjectPriority, ProjectStatus, ProjectSummary } from "@/lib/mock-projects";
-import { StatusBadge, PriorityBadge, HealthBadge, statusMeta, priorityMeta } from "@/components/status-badge";
+import { StatusBadge, PriorityBadge, HealthBadge, ProjectCategoryBadge, statusMeta, priorityMeta } from "@/components/status-badge";
 import { FilterDropdown } from "@/components/tickets/filter-dropdown";
 import type { DropdownGroup } from "@/components/tickets/filter-dropdown";
 import { useCurrentUser } from "@/components/current-user-provider";
@@ -14,7 +14,7 @@ import { getTeamByProjectSlug } from "@/lib/mock-team";
 import { LEAD_PROJECT_SLUGS, aggregateTeam } from "@/components/project-lead-dashboard";
 import { MemberProjectsScreen } from "@/components/member-projects-screen";
 
-const STATUS_ORDER: ProjectStatus[] = ["active", "on-track", "at-risk", "on-hold", "archived"];
+const STATUS_ORDER: ProjectStatus[] = ["planning", "active", "on-hold", "completed", "archived"];
 const PRIORITY_ORDER: ProjectPriority[] = ["critical", "high", "medium", "low"];
 const MONTH_ORDER = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -116,12 +116,14 @@ function ManagedProjectsScreen() {
       { label: "Total Projects", value: baseProjects.length },
       {
         label: "Active",
-        value: baseProjects.filter((p) => p.status === "active" || p.status === "on-track").length,
+        value: baseProjects.filter((p) => p.status === "active").length,
         className: "text-emerald-600 dark:text-emerald-400",
       },
       {
+        // Risk assessment lives on health now, not status — "at risk" means
+        // critical health regardless of lifecycle phase.
         label: "At Risk",
-        value: baseProjects.filter((p) => p.status === "at-risk").length,
+        value: baseProjects.filter((p) => p.health === "critical").length,
         className: "text-red-600 dark:text-red-400",
       },
       {
@@ -298,6 +300,7 @@ function ProjectRow({ project }: { project: ProjectSummary }) {
           </h3>
           <StatusBadge status={project.status} />
           <PriorityBadge priority={project.priority} />
+          <ProjectCategoryBadge category={project.category} />
         </div>
         <p className="text-sm text-slate-500 dark:text-zinc-400 truncate mt-0.5">{project.description}</p>
         <div className="mt-2 flex items-center gap-2">
@@ -389,6 +392,7 @@ function LeadProjectRow({ project }: { project: ProjectSummary }) {
             </h3>
             <StatusBadge status={project.status} />
             <PriorityBadge priority={project.priority} variant="badge" />
+            <ProjectCategoryBadge category={project.category} />
           </div>
           <p className="text-sm text-slate-500 dark:text-zinc-400 truncate mt-0.5">{project.description}</p>
         </div>

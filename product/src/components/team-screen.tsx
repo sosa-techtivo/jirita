@@ -5,7 +5,7 @@ import type { MouseEvent as ReactMouseEvent } from "react";
 import { useRouter } from "next/navigation";
 import { getTeamByProjectSlug } from "@/lib/mock-team";
 import type { AvailabilityStatus, TeamMember } from "@/lib/mock-team";
-import { getTicketById } from "@/lib/mock-tickets";
+import { getTicketById, getTicketDisplayKey } from "@/lib/mock-tickets";
 import type { Ticket } from "@/lib/mock-tickets";
 import { StatusBadge as TicketStatusBadge, PriorityBadge } from "@/components/tickets/ticket-ui";
 import { TicketPreviewPanel } from "@/components/tickets/ticket-preview-panel";
@@ -417,7 +417,7 @@ export function MemberModal({ member, slug, onClose }: { member: TeamMember; slu
                       className="w-full flex items-center gap-3 py-2.5 px-2 -mx-2 rounded-lg text-left hover:bg-slate-50 dark:hover:bg-zinc-800/50 transition-colors"
                     >
                       <span className="text-xs font-mono text-slate-400 dark:text-zinc-500 flex-shrink-0 w-14">
-                        {ticket.issueKey}
+                        {getTicketDisplayKey(ticket)}
                       </span>
                       <span className="flex-1 min-w-0 text-sm text-slate-700 dark:text-zinc-300 truncate">
                         {ticket.title}

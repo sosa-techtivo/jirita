@@ -22,7 +22,8 @@ const CURRENT_USER = {
 const MY_TICKETS: Ticket[] = [
   {
     id: "mw-pci",
-    issueKey: "MBA-1",
+    projectSlug: "mobile-banking-app",
+    ticketNumber: 1,
     title: "Resolve PCI compliance gap in card storage",
     description: "Card storage flow needs to meet updated PCI-DSS encryption requirements.",
     status: "blocked",
@@ -38,7 +39,8 @@ const MY_TICKETS: Ticket[] = [
   },
   {
     id: "mw-kyc",
-    issueKey: "MBA-8",
+    projectSlug: "mobile-banking-app",
+    ticketNumber: 8,
     title: "Third-party KYC vendor API outage response plan",
     description: "Vendor integration has been failing intermittently. Need contingency plan and escalation.",
     status: "blocked",
@@ -54,7 +56,8 @@ const MY_TICKETS: Ticket[] = [
   },
   {
     id: "mw-pagination",
-    issueKey: "MBA-4",
+    projectSlug: "mobile-banking-app",
+    ticketNumber: 4,
     title: "Implement transaction history pagination",
     description: "Paginate the transaction list to keep load times fast for high-volume accounts.",
     status: "in-progress",
@@ -70,7 +73,8 @@ const MY_TICKETS: Ticket[] = [
   },
   {
     id: "mw-push",
-    issueKey: "MBA-3",
+    projectSlug: "mobile-banking-app",
+    ticketNumber: 3,
     title: "Push notification setup for transaction alerts",
     description: "Wire up push notification delivery for transaction and security alerts.",
     status: "in-progress",
@@ -86,7 +90,8 @@ const MY_TICKETS: Ticket[] = [
   },
   {
     id: "mw-offline",
-    issueKey: "MBA-15",
+    projectSlug: "mobile-banking-app",
+    ticketNumber: 15,
     title: "Offline mode for balance viewing",
     description: "Allow users to view their last cached balance and recent transactions without a network connection.",
     status: "in-progress",
@@ -102,7 +107,8 @@ const MY_TICKETS: Ticket[] = [
   },
   {
     id: "mw-session",
-    issueKey: "MBA-13",
+    projectSlug: "mobile-banking-app",
+    ticketNumber: 13,
     title: "Configurable session timeout settings",
     description: "Let users choose how long before the app locks after inactivity.",
     status: "to-do",
@@ -118,7 +124,8 @@ const MY_TICKETS: Ticket[] = [
   },
   {
     id: "mw-dark",
-    issueKey: "MBA-14",
+    projectSlug: "mobile-banking-app",
+    ticketNumber: 14,
     title: "Dark mode for spend analytics charts",
     description: "Update chart color palette so graphs look polished in dark mode.",
     status: "to-do",
@@ -133,7 +140,8 @@ const MY_TICKETS: Ticket[] = [
   },
   {
     id: "mw-api",
-    issueKey: "MBA-7",
+    projectSlug: "mobile-banking-app",
+    ticketNumber: 7,
     title: "API rate limiting implementation",
     description: "Add per-client rate limits to protect the transfers API from abuse.",
     status: "review",
@@ -148,7 +156,8 @@ const MY_TICKETS: Ticket[] = [
   },
   {
     id: "mw-a11y",
-    issueKey: "MBA-12",
+    projectSlug: "mobile-banking-app",
+    ticketNumber: 12,
     title: "Accessibility audit and WCAG 2.1 fixes",
     description: "Ensure VoiceOver and TalkBack compatibility for WCAG 2.1 AA compliance.",
     status: "review",
@@ -164,7 +173,8 @@ const MY_TICKETS: Ticket[] = [
   },
   {
     id: "mw-biometric",
-    issueKey: "MBA-6",
+    projectSlug: "mobile-banking-app",
+    ticketNumber: 6,
     title: "Fix biometric login crash on iOS 18",
     description: "Face ID login intermittently crashes the app on iOS 18 devices.",
     status: "done",
@@ -180,7 +190,8 @@ const MY_TICKETS: Ticket[] = [
   },
   {
     id: "mw-mfa",
-    issueKey: "MBA-5",
+    projectSlug: "mobile-banking-app",
+    ticketNumber: 5,
     title: "Add MFA onboarding step",
     description: "Guide new users through enabling multi-factor authentication on first login.",
     status: "done",

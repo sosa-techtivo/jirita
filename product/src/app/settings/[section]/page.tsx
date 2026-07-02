@@ -32,11 +32,10 @@ export default async function SettingsSectionPage({
 }) {
   const { section } = await params;
   const title = SECTION_TITLES[section] ?? "Settings";
-  const activePage = section === "time-tracking" ? "time-tracking" : "settings";
 
   return (
     <AppShell
-      activePage={activePage}
+      activePage="settings"
       breadcrumb={<SettingsBreadcrumb section={section} title={title} />}
     >
       <SettingsSectionScreen section={section} />

@@ -35,7 +35,7 @@ export const HERO_BORDER_CLASS = "border-brand-100 dark:border-violet-800/40";
 // same underlying data for every role that has assigned work.
 export const MY_ACTIVE: Ticket[] = [
   {
-    id: "d-pci",  issueKey: "MBA-1",
+    id: "d-pci",  projectSlug: "mobile-banking-app", ticketNumber: 1,
     title: "Resolve PCI compliance gap in card storage",
     description: "Card storage flow needs to meet updated PCI-DSS encryption requirements.",
     status: "blocked", priority: "high",
@@ -44,7 +44,7 @@ export const MY_ACTIVE: Ticket[] = [
     hours: 24, dueDate: "Jun 28", updatedAt: "Updated 2h ago",
   },
   {
-    id: "d-kyc",  issueKey: "MBA-8",
+    id: "d-kyc",  projectSlug: "mobile-banking-app", ticketNumber: 8,
     title: "KYC vendor API outage response plan",
     description: "Vendor integration has been failing intermittently.",
     status: "blocked", priority: "high",
@@ -53,7 +53,7 @@ export const MY_ACTIVE: Ticket[] = [
     hours: 16, dueDate: "Jul 1", updatedAt: "Updated 1 day ago",
   },
   {
-    id: "d-api",  issueKey: "MBA-7",
+    id: "d-api",  projectSlug: "mobile-banking-app", ticketNumber: 7,
     title: "API rate limiting implementation",
     description: "Add per-client rate limits to protect the transfers API.",
     status: "review", priority: "high",
@@ -62,7 +62,7 @@ export const MY_ACTIVE: Ticket[] = [
     hours: 4, dueDate: "Jul 3", updatedAt: "Updated 3h ago",
   },
   {
-    id: "d-page", issueKey: "MBA-4",
+    id: "d-page", projectSlug: "mobile-banking-app", ticketNumber: 4,
     title: "Implement transaction history pagination",
     description: "Paginate the transaction list to keep load times fast for high-volume accounts.",
     status: "in-progress", priority: "normal",
@@ -71,7 +71,7 @@ export const MY_ACTIVE: Ticket[] = [
     hours: 8, dueDate: "Jul 2", updatedAt: "Updated yesterday",
   },
   {
-    id: "d-push", issueKey: "MBA-3",
+    id: "d-push", projectSlug: "mobile-banking-app", ticketNumber: 3,
     title: "Push notification setup for transaction alerts",
     description: "Wire up push notification delivery for transaction and security alerts.",
     status: "in-progress", priority: "normal",

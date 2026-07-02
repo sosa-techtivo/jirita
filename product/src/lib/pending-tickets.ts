@@ -16,26 +16,25 @@ export function getRegisteredTicket(id: string): Ticket | undefined {
   return registry.get(id);
 }
 
-// ── Issue key counter ─────────────────────────────────────────────────────────
+// ── Ticket number counter ─────────────────────────────────────────────────────
+// Scoped per project — each project's visible IDs (MBA-1, CSP-1, …) run their
+// own sequence, driven by whatever Project Code is set in Project Settings →
+// General (see getTicketDisplayKey in mock-tickets.ts). Never hardcode a prefix here.
 
-let _counter: number | null = null;
+const counters = new Map<string, number>();
 
-function getCounter(): number {
-  if (_counter === null) {
-    _counter = Math.max(
-      0,
-      ...tickets.map((t) => {
-        const n = parseInt(t.issueKey.split("-")[1] ?? "0", 10);
-        return isNaN(n) ? 0 : n;
-      })
-    );
-  }
-  return _counter;
+function maxTicketNumberForProject(projectSlug: string): number {
+  return Math.max(
+    0,
+    ...tickets.filter((t) => t.projectSlug === projectSlug).map((t) => t.ticketNumber)
+  );
 }
 
-export function nextIssueKey(): string {
-  _counter = getCounter() + 1;
-  return `MBA-${_counter}`;
+export function nextTicketNumber(projectSlug: string): number {
+  const current = counters.get(projectSlug) ?? maxTicketNumberForProject(projectSlug);
+  const next = current + 1;
+  counters.set(projectSlug, next);
+  return next;
 }
 
 // ── ID from title ─────────────────────────────────────────────────────────────

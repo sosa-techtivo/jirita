@@ -1,4 +1,4 @@
-> Last Updated: June 30, 2026
+> Last Updated: July 1, 2026
 
 ---
 
@@ -8,7 +8,7 @@
 
 JIRITA is currently in the UI/UX MVP phase.
 
-The application now includes the full shell, projects listing, project overview, a five-view Tickets experience, Quick Ticket Preview, Full Ticket Detail with Time Tracking, a cross-project Dashboard, a personal My Work workspace, a Reports module, and a Settings section. All implemented screens are navigable and connected using mock data.
+The application now includes the full shell, a role-based UX layer (Admin / Project Lead / Member), projects listing, project overview, a five-view Tickets experience, Quick Ticket Preview, Full Ticket Detail with Time Tracking, role-specific Dashboards, role-specific Projects and Reports screens, a personal My Work workspace, an editable Notes experience, and a Settings section. All implemented screens are navigable and connected using mock data.
 
 The current objective is to complete the remaining frontend experience before integrating a real backend.
 
@@ -28,6 +28,20 @@ The current objective is to complete the remaining frontend experience before in
 
 ## Completed
 
+### Role-Based UX
+
+Completed.
+
+A mock identity layer (`src/lib/current-user.ts`) defines three roles — **Admin**, **Project Lead**, and **Member** — each with its own name/avatar/discipline. No real auth or permissions exist yet; this only drives what renders.
+
+- `CurrentUserProvider` (`src/components/current-user-provider.tsx`) holds the active role in React context
+- A dev-only `RoleSwitcher` in the header bar lets any tester swap roles live to see the app reshape itself
+- `src/lib/nav-config.ts` centralizes which main-nav and per-project-nav items each role sees, and in what order (sidebar renders in array order, not a hardcoded sequence)
+- `canManage(role)` gates workspace/project management actions (New Project, New Ticket, Add Member, etc.) to Admin and Project Lead
+- Dashboard, Projects, and Reports each render a **different, purpose-built screen per role** rather than a permissions-filtered version of one shared screen (see below)
+- Settings and per-project Team are Admin/Project Lead only; Member's sidebar omits them
+- MVP terminology pass: "Sprint / Milestone / Backlog / Story Points" language removed from live UI copy (e.g. Project Reports' "Velocity Snapshot" → "Delivery Snapshot") in favor of Delivery / Capacity / Hours vocabulary. Story Points is dropped from the ticket sidebar, preview panel, and filters.
+
 ### Application Foundation
 
 - Next.js application configured (in `/product/`)
@@ -39,16 +53,30 @@ The current objective is to complete the remaining frontend experience before in
 
 ### Projects
 
-Completed.
+Completed. Route: `/projects`. `ProjectsListScreen` now branches by role rather than showing a permissions-filtered version of one table.
 
-Includes:
+#### Admin
 
-- Project listing
+- Full workspace projects table
 - Search input (UI only, not wired)
 - Filter chips (UI only, not wired)
-- Project cards
-- Empty states
+- Project cards / rows, empty states
 - Navigation into Project Details
+
+#### Project Lead
+
+- Scoped to the Lead's own owned projects (`LEAD_PROJECT_SLUGS`), block-organized instead of a flat table
+- Team and health context surfaced per project
+- Quick actions (`+ New Ticket` instead of `+ Create Project`)
+- Archived status excluded from the status filter set
+
+#### Member — `member-projects-screen.tsx` (new)
+
+A dedicated "My Projects" screen, not a filtered Admin/Lead table.
+
+- Shows only projects the Member is staffed on
+- Surfaces who leads each project
+- Surfaces what's assigned to the Member within each project
 
 ### Project Details
 
@@ -195,11 +223,9 @@ Includes:
 
 ### Dashboard
 
-Completed.
+Completed. Route: `/` (root). The root no longer redirects to `/projects`. `DashboardScreen` now branches by role — Admin, Project Lead, and Member each see a distinct, purpose-built dashboard rather than a filtered version of one screen. Shared building blocks (KPI card, hero card styles, section container) live in `dashboard-shared.tsx`.
 
-Route: `/` (root). The root no longer redirects to `/projects`.
-
-Includes:
+#### Admin (default company-wide view)
 
 - Header: "Good morning, Marcus 👋" + date
 - Quick actions: `+ New Ticket`, `Projects`, `Reports`
@@ -209,6 +235,31 @@ Includes:
   - Left: My Active Work (5 tickets, click-to-preview) + Recent Activity
   - Right: Projects at Risk + Team Workload (progress bars) + Upcoming Deadlines
 - Ticket quick-preview panel on row click (reuses `TicketPreviewPanel`)
+
+#### Project Lead — `project-lead-dashboard.tsx`
+
+Built from first principles, not a filtered Admin view.
+
+- **Project Context selector**: scope the whole dashboard to one owned project, or aggregate across all owned projects
+- Delivery Health hero card
+- Attention Required section
+- Team Capacity list — clickable, opens the real Team Member modal
+- Recent Activity
+- Upcoming Deadlines
+- Delivery, capacity, activity, and deadlines all merge correctly when scoped to "all projects"
+
+#### Member — `member-dashboard.tsx`
+
+A personal cross-project work-queue rather than a project-management view.
+
+- Recommended Next (hero card)
+- Active Work — priority-first, reuses ticket/status components
+- Time Today — with per-project breakdown
+- Needs Your Attention — actionable-only events (no passive noise)
+- Upcoming Work
+- `TicketListRow` / `ActiveTicketRow` gained an optional `projectBadge` slot so multi-project rows can show which project a ticket belongs to
+
+Along the way, fixed a dark-mode bug where the Project Lead's and Member's hero cards (and the Admin "Hours Burn" KPI card) referenced `brand-300/400/900/950` shades that don't exist in the theme, silently falling back to the light gradient in dark mode.
 
 ### My Work
 
@@ -227,17 +278,24 @@ Includes:
 
 ### Reports
 
-Completed.
+Completed. Route: `/reports`, branches by role. Shared primitives (KPI card, section, status bar, progress bar) extracted into `reports-shared.tsx` so role-specific screens reuse the same building blocks without importing from each other.
 
-Route: `/reports`.
+#### Admin — `reports-screen.tsx`
 
-Includes:
+Company-wide Delivery/Finance view.
 
 - KPI summary row: Projects, Active Tickets, Estimated Hours, Completed Hours, Blocked, Completed This Month, Overdue
 - Hours by Person: horizontal bar chart with avatars
 - Project Health table: status badges, progress bars, ticket counts
 - Team Workload: capacity bars per member
 - Insights band reused from `ReportStatusBar`
+
+#### Project Lead — `project-lead-reports-screen.tsx` (new)
+
+A purpose-built Reports screen scoped to only the Lead's own projects and team — not the Admin's company-wide view.
+
+- **Delivery** tab
+- **Team** tab
 
 ### Settings
 
@@ -263,6 +321,22 @@ Navigation:
 
 ---
 
+### Notes — Detail & Edit Modal
+
+Completed.
+
+Route: `/projects/[slug]/notes`.
+
+Added a `NoteDetailModal` (`src/components/note-detail-modal.tsx`) opened by clicking a note card:
+
+- **View mode**: full title, author, updated timestamp, tag badge, full body text
+- **Edit mode**: editable title, tag picker, body textarea; entered via a per-note "⋯" menu (Edit / Duplicate / Delete — Duplicate and Delete are visual-only stubs)
+- Save appends `"Just now"` as the updated timestamp and returns to view mode
+- Shared primitives (`TAG_OPTIONS`, `TagBadge`, `INPUT`, `FIELD_LABEL`) extracted into `notes-shared.tsx` so the modal and the notes list use identical tag styling
+- Modal animation: fade + scale-in backdrop, ESC-to-close, `overflow: hidden` on `document.body` while open
+
+---
+
 # In Progress
 
 Nothing currently in progress.
@@ -280,16 +354,11 @@ The following features are documented as planned but do not exist in the codebas
 - Forgot Password screen
 - Session persistence
 
-### Sidebar Navigation (Remaining Dead Links)
+### Sidebar Navigation
 
-The following sidebar items are visible but point to `href="#"` (dead links):
+No known dead links remain. Milestones was removed from the UI entirely for MVP. Per-project Notes, Team, and Reports are real, functional routes (`/projects/[slug]/notes`, `/team`, `/reports`), gated per role via `nav-config.ts` rather than hardcoded.
 
-- Milestones (per-project)
-- Notes (per-project)
-- Reports (per-project)
-- Team (per-project)
-
-All top-level navigation items (Dashboard, My Work, Projects, Reports, Settings) are now functional.
+All top-level navigation items (Dashboard, My Work, Projects, Reports, Settings) are functional, and each renders a role-specific screen where applicable (Dashboard, Projects, Reports).
 
 ---
 
@@ -370,13 +439,16 @@ Every new feature must be integrated into the application's navigation so that a
 
 Current working routes:
 
-- `/` → redirects to `/` (Dashboard)
+- `/` — Dashboard (role-specific: Admin / Project Lead / Member)
 - `/my-work`
-- `/projects`
+- `/projects` — role-specific (Admin full table / Project Lead scoped blocks / Member "My Projects")
 - `/projects/[slug]`
 - `/projects/[slug]/tickets`
 - `/projects/[slug]/tickets/[ticketId]`
-- `/reports`
+- `/projects/[slug]/notes`
+- `/projects/[slug]/team`
+- `/projects/[slug]/reports`
+- `/reports` — role-specific (Admin company-wide / Project Lead scoped Delivery+Team / Member: no access)
 - `/settings` → redirects to `/settings/general`
 - `/settings/general`
 - `/settings/people`
@@ -459,7 +531,8 @@ Current known items:
 - `kanban-board.tsx`, `kanban-column.tsx`, `kanban-card.tsx` are dead code (superseded by the `tickets/` component set).
 - `settings-screen.tsx` (`SettingsScreen` hub component) is retained but no longer rendered — `/settings` redirects directly to `/settings/general`.
 - Settings toggles and fields are visual only; no state persists between page loads.
-- Per-project sidebar links (Milestones, Notes, Reports, Team) use `href="#"` and are non-functional.
+- Role-based UX (`current-user.ts`, `nav-config.ts`) is a mock identity layer only — no real auth or server-side permission enforcement exists. The `RoleSwitcher` in the header is a dev-only affordance and should be removed or gated before any real backend integration.
+- Note "Duplicate" and "Delete" menu actions in `NoteDetailModal` are visual stubs with no effect.
 
 Planned future work:
 

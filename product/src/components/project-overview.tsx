@@ -8,6 +8,7 @@ import { tickets as ALL_MOCK_TICKETS } from "@/lib/mock-tickets";
 import type { Ticket } from "@/lib/mock-tickets";
 import { useCurrentUser } from "@/components/current-user-provider";
 import { canManage } from "@/lib/current-user";
+import { ProjectCategoryBadge } from "@/components/status-badge";
 
 const MOCK_ESTIMATED_HOURS = ALL_MOCK_TICKETS.reduce((sum, t) => sum + (t.hours ?? 0), 0);
 
@@ -253,6 +254,7 @@ export function ProjectOverview({ slug = "mobile-banking-app" }: { slug?: string
               <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700 dark:text-emerald-400">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> Active
               </span>
+              <ProjectCategoryBadge category="client" />
             </div>
             <p className="text-sm text-slate-500 mt-1 max-w-xl dark:text-zinc-400">
               iOS and Android banking experience for Meridian Bank — redesign of onboarding, transfers, and
