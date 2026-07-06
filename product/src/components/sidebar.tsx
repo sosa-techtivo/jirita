@@ -15,7 +15,7 @@ const pinnedProjects = projects.slice(0, 3);
 // what renders where — the sidebar no longer hardcodes link order itself.
 const NAV_LINK: Record<MainNavKey, { href: string; label: string; icon: ReactNode }> = {
   dashboard: {
-    href: "/",
+    href: "/dashboard",
     label: "Dashboard",
     icon: (
       <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">

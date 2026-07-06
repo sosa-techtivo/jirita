@@ -3,11 +3,9 @@
 import type { ReactNode } from "react";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { RoleSwitcher } from "@/components/role-switcher";
-import { useCurrentUser } from "@/components/current-user-provider";
+import { AccountMenu } from "@/components/account-menu";
 
 export function HeaderBar({ breadcrumb }: { breadcrumb: ReactNode }) {
-  const { user } = useCurrentUser();
-
   return (
     <header className="h-14 flex items-center justify-between px-8 border-b border-slate-200 bg-white flex-shrink-0 dark:border-zinc-800 dark:bg-[var(--background)]">
       <div className="flex items-center gap-1.5 text-sm text-slate-500 dark:text-zinc-400 min-w-0 overflow-x-auto whitespace-nowrap">
@@ -22,8 +20,7 @@ export function HeaderBar({ breadcrumb }: { breadcrumb: ReactNode }) {
             <path d="M13.7 21a2 2 0 01-3.4 0" />
           </svg>
         </button>
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={user.avatar} alt={user.name} className="w-7 h-7 rounded-full" />
+        <AccountMenu />
       </div>
     </header>
   );

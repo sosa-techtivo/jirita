@@ -14,6 +14,7 @@ import { InsightsView } from "@/components/tickets/insights-view";
 import { TicketPreviewPanel } from "@/components/tickets/ticket-preview-panel";
 import { useCurrentUser } from "@/components/current-user-provider";
 import { canManage } from "@/lib/current-user";
+import { getDefaultTicketView } from "@/lib/user-preferences";
 
 // ── Persisted state shape ─────────────────────────────────────────────────────
 
@@ -73,7 +74,7 @@ export function TicketsScreen({ slug, projectName }: { slug: string; projectName
   const saved = useMemo(() => readSaved(slug), []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [ticketList, setTicketList] = useState<Ticket[]>(tickets);
-  const [view, setView] = useState<ViewMode>(saved?.view ?? "board");
+  const [view, setView] = useState<ViewMode>(saved?.view ?? getDefaultTicketView());
   const [previewTicket, setPreviewTicket] = useState<Ticket | null>(() => {
     if (!saved?.previewTicketId) return null;
     return tickets.find((t) => t.id === saved.previewTicketId) ?? null;
