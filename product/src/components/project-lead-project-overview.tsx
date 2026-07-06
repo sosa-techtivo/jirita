@@ -33,7 +33,7 @@ const avatar = (id: number) => `https://i.pravatar.cc/64?img=${id}`;
 const team: TeamMember[] = [
   { id: "team-sarah", name: "Sarah Chen", role: "Project Lead", avatar: avatar(47), available: true },
   { id: "team-marcus", name: "Marcus Lee", role: "Engineer", avatar: avatar(12), available: true },
-  { id: "team-priya", name: "Priya Patel", role: "Engineer", avatar: avatar(33), available: true },
+  { id: "team-priya", name: "Alejo Cadavid", role: "Admin", avatar: avatar(33), available: true },
   { id: "team-david", name: "David Kim", role: "QA Engineer", avatar: avatar(22), available: true },
   { id: "team-elena", name: "Elena Rossi", role: "Designer", avatar: avatar(5), available: true },
 ];

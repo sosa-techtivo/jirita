@@ -41,7 +41,7 @@ const WORKLOAD = [
   { id: "marcus", name: "Marcus Lee",  avatar: av(12), hours: 112, capacity: 120 },
   { id: "sarah",  name: "Sarah Chen",  avatar: av(47), hours: 84,  capacity: 100 },
   { id: "david",  name: "David Kim",   avatar: av(22), hours: 52,  capacity: 80  },
-  { id: "priya",  name: "Priya Patel", avatar: av(33), hours: 44,  capacity: 80  },
+  { id: "priya",  name: "Alejo Cadavid", avatar: av(33), hours: 44,  capacity: 80  },
   { id: "elena",  name: "Elena Rossi", avatar: av(5),  hours: 28,  capacity: 60  },
 ];
 

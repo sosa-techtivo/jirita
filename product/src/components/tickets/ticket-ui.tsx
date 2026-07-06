@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import type { Ticket, TicketStatus, TicketPriority, TicketType } from "@/lib/mock-tickets";
 import { TICKET_TYPE_LABEL } from "@/lib/mock-tickets";
 
@@ -225,13 +226,17 @@ export interface MockComment {
 export interface MockActivity {
   label: string;
   timeAgo: string;
+  /** Optional self-contained icon badge (e.g. a small colored circle+glyph)
+   *  shown in place of the plain timeline dot. Callers that don't need
+   *  per-event icons (ticket activity) omit it and get the original dot. */
+  icon?: ReactNode;
 }
 
 const MOCK_COMMENTERS = [
   { name: "Marcus Lee",  avatar: "https://i.pravatar.cc/64?img=12" },
   { name: "Elena Rossi", avatar: "https://i.pravatar.cc/64?img=5"  },
   { name: "Sarah Chen",  avatar: "https://i.pravatar.cc/64?img=47" },
-  { name: "Priya Patel", avatar: "https://i.pravatar.cc/64?img=33" },
+  { name: "Alejo Cadavid", avatar: "https://i.pravatar.cc/64?img=33" },
   { name: "David Kim",   avatar: "https://i.pravatar.cc/64?img=22" },
 ];
 
@@ -277,7 +282,9 @@ export function ActivityTimeline({ events, ringClass }: { events: MockActivity[]
         return (
           <div key={i} className="flex gap-3.5">
             <div className="flex flex-col items-center w-4 flex-shrink-0">
-              <div className={`w-2 h-2 rounded-full bg-slate-300 dark:bg-zinc-600 mt-1.5 flex-shrink-0 ring-2 ${ringClass}`} />
+              {a.icon ?? (
+                <div className={`w-2 h-2 rounded-full bg-slate-300 dark:bg-zinc-600 mt-1.5 flex-shrink-0 ring-2 ${ringClass}`} />
+              )}
               {!isLast && (
                 <div className="w-px flex-1 bg-slate-200 dark:bg-zinc-800 mt-1 min-h-[20px]" />
               )}

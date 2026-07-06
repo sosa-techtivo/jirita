@@ -1,13 +1,15 @@
 import type { Role } from "@/lib/current-user";
 
-export type MainNavKey = "dashboard" | "projects" | "my-work" | "reports" | "time-tracking" | "settings";
+export type MainNavKey = "dashboard" | "projects" | "my-work" | "reports" | "time-tracking" | "users" | "settings";
 export type ProjectNavKey = "overview" | "tickets" | "notes" | "team" | "reports" | "settings";
 
 // Order matters: the sidebar renders each role's main nav in this exact
 // sequence (a JS Set preserves insertion order), so reordering a role's
 // array here reorders its sidebar links too.
+// "users" (workspace-wide account management) is Admin-only, same as
+// "settings" — Project Lead and Member never see it.
 const MAIN_NAV_BY_ROLE: Record<Role, MainNavKey[]> = {
-  ADMIN: ["dashboard", "projects", "my-work", "reports", "time-tracking", "settings"],
+  ADMIN: ["dashboard", "projects", "my-work", "reports", "time-tracking", "users", "settings"],
   PROJECT_LEAD: ["dashboard", "projects", "my-work", "reports", "time-tracking"],
   MEMBER: ["dashboard", "my-work", "projects"],
 };

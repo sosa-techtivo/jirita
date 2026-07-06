@@ -108,7 +108,7 @@ export const RECENT_ACTIVITY: Array<{
    *  about a specific ticket (e.g. project-level events) — those render as a
    *  plain sentence with no ticket-reference line. */
   ticketId?: string;
-  /** Extra context shown in the meta line, e.g. "8h → 12h" or "to Priya Patel". */
+  /** Extra context shown in the meta line, e.g. "8h → 12h" or "to Alejo Cadavid". */
   detail?: ReactNode;
   project: string;
   time: string;
@@ -131,11 +131,11 @@ export const RECENT_ACTIVITY: Array<{
   {
     id: "a8", type: "assigned", avatar: av(22), name: "David Kim",
     verb: "reassigned", ticketId: "push-notification-setup",
-    detail: <>to <span className="font-medium">Priya Patel</span></>,
+    detail: <>to <span className="font-medium">Alejo Cadavid</span></>,
     project: "Mobile Banking App", time: "5h ago",
   },
   {
-    id: "a3", type: "hours", avatar: av(33), name: "Priya Patel",
+    id: "a3", type: "hours", avatar: av(33), name: "Alejo Cadavid",
     verb: "updated the estimate on", ticketId: "accessibility-audit",
     detail: <span className="font-medium">8h → 12h</span>,
     project: "Mobile Banking App", time: "6h ago",

@@ -25,7 +25,7 @@ const TEAM_MEMBERS = [
   { name: "Marcus Lee",  avatar: "https://i.pravatar.cc/64?img=12" },
   { name: "Elena Rossi", avatar: "https://i.pravatar.cc/64?img=5"  },
   { name: "Sarah Chen",  avatar: "https://i.pravatar.cc/64?img=47" },
-  { name: "Priya Patel", avatar: "https://i.pravatar.cc/64?img=33" },
+  { name: "Alejo Cadavid", avatar: "https://i.pravatar.cc/64?img=33" },
   { name: "David Kim",   avatar: "https://i.pravatar.cc/64?img=22" },
 ];
 

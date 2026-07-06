@@ -113,7 +113,7 @@ const HOURS_BY_PERSON: PersonRow[] = [
   { id: "marcus", name: "Marcus Lee",  avatar: av(12), assignedTickets: 14, estimatedHours: 112, completedHours: 68, blockedHours: 24, capacity: 104 },
   { id: "sarah",  name: "Sarah Chen",  avatar: av(47), assignedTickets: 11, estimatedHours: 84,  completedHours: 52, blockedHours: 0,  capacity: 89  },
   { id: "david",  name: "David Kim",   avatar: av(22), assignedTickets: 9,  estimatedHours: 52,  completedHours: 31, blockedHours: 16, capacity: 72  },
-  { id: "priya",  name: "Priya Patel", avatar: av(33), assignedTickets: 8,  estimatedHours: 44,  completedHours: 38, blockedHours: 0,  capacity: 65  },
+  { id: "priya",  name: "Alejo Cadavid", avatar: av(33), assignedTickets: 8,  estimatedHours: 44,  completedHours: 38, blockedHours: 0,  capacity: 65  },
   { id: "elena",  name: "Elena Rossi", avatar: av(5),  assignedTickets: 6,  estimatedHours: 28,  completedHours: 18, blockedHours: 8,  capacity: 45  },
 ];
 
@@ -222,7 +222,7 @@ const BILLING_BY_MEMBER: MemberBillingRow[] = [
   { id: "marcus", name: "Marcus Lee",  avatar: av(12), billableHours: 64, nonBillableHours: 6, avgRate: 105 },
   { id: "sarah",  name: "Sarah Chen",  avatar: av(47), billableHours: 48, nonBillableHours: 6, avgRate: 115 },
   { id: "david",  name: "David Kim",   avatar: av(22), billableHours: 26, nonBillableHours: 6, avgRate: 80  },
-  { id: "priya",  name: "Priya Patel", avatar: av(33), billableHours: 32, nonBillableHours: 8, avgRate: 90  },
+  { id: "priya",  name: "Alejo Cadavid", avatar: av(33), billableHours: 32, nonBillableHours: 8, avgRate: 90  },
   { id: "elena",  name: "Elena Rossi", avatar: av(5),  billableHours: 8,  nonBillableHours: 8, avgRate: 100 },
 ];
 
@@ -247,7 +247,7 @@ const WORKLOAD: WorkloadEntry[] = [
   { id: "marcus", name: "Marcus Lee",  avatar: av(12), hours: 112, sprintCapacity: 120, weekDelta: +18, capacity: 104 },
   { id: "sarah",  name: "Sarah Chen",  avatar: av(47), hours: 84,  sprintCapacity: 100, weekDelta: -6,  capacity: 89  },
   { id: "david",  name: "David Kim",   avatar: av(22), hours: 52,  sprintCapacity: 80,  weekDelta: +4,  capacity: 72  },
-  { id: "priya",  name: "Priya Patel", avatar: av(33), hours: 44,  sprintCapacity: 80,  weekDelta: +2,  capacity: 65  },
+  { id: "priya",  name: "Alejo Cadavid", avatar: av(33), hours: 44,  sprintCapacity: 80,  weekDelta: +2,  capacity: 65  },
   { id: "elena",  name: "Elena Rossi", avatar: av(5),  hours: 28,  sprintCapacity: 60,  weekDelta: -2,  capacity: 45  },
 ];
 
@@ -270,7 +270,7 @@ const ACTIVITY_GROUPS = [
 const RECENT_CHANGES: ActivityEntry[] = [
   {
     id: "rc-1",
-    name: "Priya Patel",
+    name: "Alejo Cadavid",
     avatar: av(33),
     action: <>changed Hours — <span className="font-medium">8h → 12h</span></>,
     time: "2 hours ago",
@@ -352,7 +352,7 @@ const ASSIGNEE_GROUPS: DropdownGroup[] = [{
     { value: "marcus", label: "Marcus Lee",  avatar: av(12) },
     { value: "sarah",  label: "Sarah Chen",  avatar: av(47) },
     { value: "david",  label: "David Kim",   avatar: av(22) },
-    { value: "priya",  label: "Priya Patel", avatar: av(33) },
+    { value: "priya",  label: "Alejo Cadavid", avatar: av(33) },
     { value: "elena",  label: "Elena Rossi", avatar: av(5)  },
   ],
 }];

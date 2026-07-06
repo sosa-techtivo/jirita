@@ -23,7 +23,7 @@ const ASSIGNED_GROUPS: DropdownGroup[] = [
       { value: "marcus", label: "Marcus Lee",  displayLabel: "Marcus", avatar: avatar(12) },
       { value: "elena",  label: "Elena Rossi", displayLabel: "Elena",  avatar: avatar(5)  },
       { value: "david",  label: "David Kim",   displayLabel: "David",  avatar: avatar(22) },
-      { value: "priya",  label: "Priya Patel", displayLabel: "Priya",  avatar: avatar(33) },
+      { value: "priya",  label: "Alejo Cadavid", displayLabel: "Priya",  avatar: avatar(33) },
     ],
   },
 ];

@@ -75,9 +75,9 @@ export const timesheetRows: TimesheetRow[] = [
   },
   {
     id: "tt-priya",
-    name: "Priya Patel",
+    name: "Alejo Cadavid",
     avatar: avatar(33),
-    role: "Engineer",
+    role: "Admin",
     projectSlugs: ["mobile-banking-app", "data-warehouse-revamp"],
     client: "Meridian Bank",
     hoursYesterday: 6.5,

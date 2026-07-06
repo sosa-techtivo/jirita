@@ -61,7 +61,7 @@ const INITIAL_ACTIVITY: ActivityEntry[] = [
   {
     id: "activity-3",
     avatar: avatar(33),
-    name: "Priya Patel",
+    name: "Alejo Cadavid",
     message: <>moved to <span className="text-violet-600 dark:text-violet-400 font-medium">Review</span></>,
     time: "3 hours ago",
     ticket: getTicketById("api-rate-limiting"),
@@ -79,7 +79,7 @@ const INITIAL_ACTIVITY: ActivityEntry[] = [
 const team: TeamMember[] = [
   { id: "team-sarah", name: "Sarah Chen", role: "Project Lead", avatar: avatar(47) },
   { id: "team-marcus", name: "Marcus Lee", role: "Engineer", avatar: avatar(12) },
-  { id: "team-priya", name: "Priya Patel", role: "Engineer", avatar: avatar(33) },
+  { id: "team-priya", name: "Alejo Cadavid", role: "Admin", avatar: avatar(33) },
   { id: "team-david", name: "David Kim", role: "QA Engineer", avatar: avatar(22) },
   { id: "team-elena", name: "Elena Rossi", role: "Designer", avatar: avatar(5) },
 ];

@@ -255,7 +255,7 @@ const RECENT_ACTIVITY: ActivityEntry[] = [
   },
   {
     id: "ra-2",
-    name: "Priya Patel",
+    name: "Alejo Cadavid",
     avatar: av(33),
     action: <>changed Hours — <span className="font-medium">8h → 12h</span></>,
     time: "5 hours ago",

@@ -44,9 +44,9 @@ export const teamMembers: TeamMember[] = [
   {
     id: "team-mba-priya",
     projectSlug: "mobile-banking-app",
-    name: "Priya Patel",
-    role: "Engineer",
-    email: "priya.patel@techtivo.com",
+    name: "Alejo Cadavid",
+    role: "Admin",
+    email: "alejo@techtivo.com",
     avatar: avatar(33),
     status: "Available",
     weeklyCapacity: 40,

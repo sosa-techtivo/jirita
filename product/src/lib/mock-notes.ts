@@ -49,7 +49,7 @@ export const notes: ProjectNote[] = [
       "Card storage must stay tokenized end-to-end — no raw PAN ever touches our database. Compliance team confirmed scope reduction is possible if we route storage entirely through the processor's vault API.",
     tag: "Compliance",
     updatedAt: "1 week ago",
-    author: { name: "Priya Patel", avatar: avatar(33) },
+    author: { name: "Alejo Cadavid", avatar: avatar(33) },
   },
   {
     id: "note-platform-migration-plan",

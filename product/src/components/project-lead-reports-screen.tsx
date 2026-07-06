@@ -33,7 +33,7 @@ const TEAM = aggregateTeam(LEAD_PROJECT_SLUGS);
 const BLOCKED_HOURS_BY_MEMBER: Record<string, number> = {
   "Sarah Chen": 4,
   "Marcus Lee": 10,
-  "Priya Patel": 0,
+  "Alejo Cadavid": 0,
   "David Kim": 2,
   "Elena Rossi": 6,
   "Jordan Wu": 0,

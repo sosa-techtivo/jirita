@@ -3,7 +3,6 @@ import { SettingsSectionScreen, SettingsBreadcrumb } from "@/components/settings
 
 const SECTION_TITLES: Record<string, string> = {
   "general":       "General",
-  "people":        "People",
   "projects":      "Projects",
   "time-tracking": "Time Tracking",
   "notifications": "Notifications",
