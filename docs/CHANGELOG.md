@@ -4,6 +4,52 @@ This changelog follows a sprint-oriented approach instead of individual commits,
 
 ---
 
+# Users — Dedicated Admin Account Management Module
+
+## Overview
+
+Promoted user account management out of Settings → People (a static card list with a non-functional invite button and kebab menu) into its own top-level, Admin-only module at `/users` — a real management table with working filters, row actions, and an invite/edit flow, backed by a proper org-wide user dataset instead of a hardcoded 5-person array.
+
+---
+
+## What Changed
+
+### New: `src/lib/mock-users.ts`
+
+An org-wide `User` type (id, first/last name, email, avatar, role, status, weekly capacity, project slugs, last login) and `users[]` array — 9 accounts covering all three roles and all three statuses (Active/Invited/Disabled). Deliberately distinct from `mock-team.ts`'s `TeamMember`: a `TeamMember` is one row per person *per project* (that project's workload/capacity), while a `User` is the single canonical account record for that person across the whole workspace. Project assignments were cross-referenced against `mock-projects.ts` ownership and `mock-team.ts` rosters so the two datasets tell a consistent story about who's staffed where.
+
+### New: `src/components/users-screen.tsx`
+
+The `/users` page. Header ("Users" / "Manage user accounts, access and permissions." / "+ Invite User"), Search + Role/Status/Project filters (`FilterDropdown`, the same component Tickets/Team/Time Tracking already use), and a management table:
+
+- Columns: Avatar + Name, Email, Role, Status, Projects (count — clicking it opens the Projects tab directly), Weekly Capacity, Last Login, Actions
+- Row actions (⋯): View Profile, Edit User, Reset Password, Resend Invitation (Invited only), Disable/Enable User (status-dependent), Delete User (confirmation modal, not a bare click)
+- Mock actions with no real backend (Reset Password, Resend Invitation) surface a brief toast instead of silently doing nothing
+- Renders "Admins only" if a non-Admin somehow lands on the page directly (defense in depth beyond the sidebar hiding the link)
+
+### New: `src/components/invite-user-modal.tsx`
+
+The Invite User modal: First/Last Name, Email, Role, Weekly Capacity, Assign Projects (checkbox list), "Send invitation immediately" toggle. Also reused for **Edit User** via an optional `editingUser` prop — same form, pre-filled, invite toggle hidden, "Save Changes" instead of "Send Invitation" — one component instead of two near-duplicates.
+
+### Modified: `src/components/member-profile-modal.tsx`
+
+Reused rather than replaced. `MemberProfileModal` now accepts an optional `user` prop (org-wide `User`) alongside the existing `member`/`slug` (per-project `TeamMember`) props:
+
+- **No `user` prop** (every existing call site, unchanged): renders exactly as before — single view, no tab bar, byte-for-byte the same output.
+- **`user` prop present** (only the Users page): renders a Profile / Projects / Permissions / Security / Activity tab bar. Profile shows account-level stats (capacity, project count, last login, member-since); Projects cross-references `mock-team.ts` for per-project role/workload where it exists; Permissions shows the role and a plain-language description; Security offers a mock "Reset Password" action; Activity reuses the existing `ActivityTimeline` component from `ticket-ui.tsx`. An `initialTab` prop lets callers (e.g. the table's "Projects" count cell) deep-link straight to a specific tab.
+
+### Modified: `src/lib/nav-config.ts`, `src/components/sidebar.tsx`
+
+Added `"users"` as a new `MainNavKey`, Admin-only (same as `"settings"`) — Project Lead and Member never see the link.
+
+### Removed: Settings → People
+
+- `src/components/settings-section-screen.tsx` — deleted `PeopleContent` and its dispatch case; moved its "Defaults" group (Default Role, Default Capacity) into `GeneralContent`, since those are invite-time policy that now belongs next to the page that does the inviting.
+- `src/components/settings-screen.tsx` — removed the `people` entry from `SETTINGS_SECTIONS` (now 6 sections).
+- `src/app/settings/[section]/page.tsx` — removed `"people"` from `SECTION_TITLES`.
+
+---
+
 # Project Overview — Actionable Project Health & a Member Personal Workspace
 
 ## Overview
@@ -375,7 +421,7 @@ No real authentication or server-side permissions exist yet; this only drives wh
 
 ### New: `src/lib/current-user.ts`
 
-Defines `Role = "ADMIN" | "PROJECT_LEAD" | "MEMBER"` and `Discipline = "Engineer" | "QA" | "Designer" | "Product" | "DevOps"`. `MOCK_USERS` provides one mock user per role (Priya Patel / Admin, Sarah Chen / Project Lead, David Kim / Member) so switching roles also swaps name/avatar/discipline. `DEFAULT_ROLE = "PROJECT_LEAD"`. `canManage(role)` gates management actions to Admin and Project Lead.
+Defines `Role = "ADMIN" | "PROJECT_LEAD" | "MEMBER"` and `Discipline = "Engineer" | "QA" | "Designer" | "Product" | "DevOps"`. `MOCK_USERS` provides one mock user per role (Alejo Cadavid / Admin, Sarah Chen / Project Lead, David Kim / Member) so switching roles also swaps name/avatar/discipline. `DEFAULT_ROLE = "PROJECT_LEAD"`. `canManage(role)` gates management actions to Admin and Project Lead.
 
 ### New: `src/lib/nav-config.ts`
 
