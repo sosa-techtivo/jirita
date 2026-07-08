@@ -37,6 +37,24 @@ The platform should feel:
 - Pleasant to use
 
 ---
+# Project Scope
+
+This directory (/src) is the active implementation project.
+
+Rules:
+
+- All development happens only inside this directory.
+- Never modify files outside this directory.
+- Do not read, edit, delete or refactor anything under:
+
+  ../product
+  ../prototypes
+
+Those directories are read-only references.
+
+If a requested change would require modifying them, stop and explain why instead of making the change.
+
+---
 
 # Source of Truth Documents
 

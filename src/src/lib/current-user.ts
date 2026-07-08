@@ -1,0 +1,79 @@
+// Mock role-based identity layer for the frontend UX prototype.
+// No backend permissions exist yet — this only drives what nav/actions render.
+
+export type Role = "ADMIN" | "PROJECT_LEAD" | "MEMBER";
+
+export type Discipline = "Engineer" | "QA" | "Designer" | "Product" | "DevOps" | "Admin";
+
+export interface CurrentUser {
+  firstName: string;
+  lastName: string;
+  name: string;
+  email: string;
+  role: Role;
+  discipline: Discipline;
+  avatar: string;
+  /** Total hours/week this person is available for — read-only in the Profile page. */
+  weeklyCapacity: number;
+  /** Display string, read-only in the Profile page's Account section. */
+  memberSince: string;
+  /** Display string, read-only in the Profile page's Account section. */
+  lastLogin: string;
+}
+
+const avatar = (id: number) => `https://i.pravatar.cc/64?img=${id}`;
+
+// One mock user per role so switching roles during development also swaps
+// name/avatar/discipline to something plausible for that role.
+export const MOCK_USERS: Record<Role, CurrentUser> = {
+  ADMIN: {
+    firstName: "Alejo",
+    lastName: "Cadavid",
+    name: "Alejo Cadavid",
+    email: "alejo@techtivo.com",
+    role: "ADMIN",
+    discipline: "Admin",
+    avatar: avatar(33),
+    weeklyCapacity: 40,
+    memberSince: "Jan 8, 2025",
+    lastLogin: "Just now",
+  },
+  PROJECT_LEAD: {
+    firstName: "Sarah",
+    lastName: "Chen",
+    name: "Sarah Chen",
+    email: "sarah.chen@techtivo.com",
+    role: "PROJECT_LEAD",
+    discipline: "Product",
+    avatar: avatar(47),
+    weeklyCapacity: 40,
+    memberSince: "Mar 3, 2025",
+    lastLogin: "2 hours ago",
+  },
+  MEMBER: {
+    firstName: "David",
+    lastName: "Kim",
+    name: "David Kim",
+    email: "david.kim@techtivo.com",
+    role: "MEMBER",
+    discipline: "QA",
+    avatar: avatar(22),
+    weeklyCapacity: 32,
+    memberSince: "Jun 2, 2025",
+    lastLogin: "3 hours ago",
+  },
+};
+
+export const DEFAULT_ROLE: Role = "PROJECT_LEAD";
+
+export const ROLE_LABELS: Record<Role, string> = {
+  ADMIN: "Admin",
+  PROJECT_LEAD: "Project Lead",
+  MEMBER: "Member",
+};
+
+// Roles allowed to see project/workspace management actions
+// (New Project, New Ticket, Add Member, etc).
+export function canManage(role: Role): boolean {
+  return role === "ADMIN" || role === "PROJECT_LEAD";
+}

@@ -1,22 +1,13 @@
-# Jirita
+⚠️
 
-Modern project operations platform focused on simplicity, visibility and execution.
+THIS DIRECTORY IS THE DESIGN REFERENCE.
 
-## Current Status
+DO NOT DEVELOP HERE.
 
-- Phase: Product Discovery & UX Validation
-- Active Screen: Project Overview
-- Deployment: https://jirita.vercel.app
+DO NOT IMPLEMENT FEATURES HERE.
 
-## Vision
+DO NOT MODIFY ANYTHING HERE.
 
-Jirita is not intended to be another Jira, Asana or ClickUp clone.
+The active implementation lives in:
 
-The goal is to create a calm, focused project operations platform centered around:
-
-- Projects
-- Milestones
-- Work
-- Team visibility
-
-while avoiding unnecessary complexity and management overhead.
+../src

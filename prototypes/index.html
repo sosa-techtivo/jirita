@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full antialiased">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Jirita — Frozen UI Prototype</title>
+<link rel="stylesheet" href="assets/app.css">
+<style>body{font-family:'Inter',ui-sans-serif,system-ui,sans-serif;}</style>
+</head>
+<body class="min-h-full flex flex-col bg-slate-50 text-slate-900 antialiased">
+
+<main class="flex-1 flex items-center justify-center px-4 py-16">
+  <div class="w-full max-w-lg">
+    <div class="flex flex-col items-center mb-8">
+      <img alt="Techtivo" width="217" height="47" class="h-8 w-auto" src="assets/img/jirita-logo.png">
+      <p class="mt-2 text-[11px] font-semibold uppercase tracking-wide text-brand-600/70">Jirita</p>
+    </div>
+
+    <div class="bg-white rounded-2xl border border-slate-200 shadow-2xl shadow-black/10 px-6 py-7 sm:px-8 sm:py-8">
+      <h1 class="text-[19px] font-semibold text-slate-900 tracking-tight mb-1.5">Frozen UI Prototype</h1>
+      <p class="text-[13px] text-slate-500 mb-6">
+        A navigable, static snapshot of the current Jirita UI, captured per role. No backend, no live data —
+        just the frozen screens with simple links between them.
+      </p>
+
+      <div class="space-y-2.5">
+        <a href="admin/index.html" class="flex items-center justify-between gap-3 rounded-lg border border-slate-200 px-4 py-3 hover:bg-slate-50 hover:border-brand-200 transition-colors">
+          <span>
+            <span class="block text-[13px] font-semibold text-slate-800">Admin</span>
+            <span class="block text-[12px] text-slate-400 mt-0.5">Dashboard, Projects, Users, Settings</span>
+          </span>
+          <svg class="w-4 h-4 text-slate-400 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </a>
+        <a href="project-lead/index.html" class="flex items-center justify-between gap-3 rounded-lg border border-slate-200 px-4 py-3 hover:bg-slate-50 hover:border-brand-200 transition-colors">
+          <span>
+            <span class="block text-[13px] font-semibold text-slate-800">Project Lead</span>
+            <span class="block text-[12px] text-slate-400 mt-0.5">Dashboard, Projects, Reports, Time Tracking</span>
+          </span>
+          <svg class="w-4 h-4 text-slate-400 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </a>
+        <a href="member/index.html" class="flex items-center justify-between gap-3 rounded-lg border border-slate-200 px-4 py-3 hover:bg-slate-50 hover:border-brand-200 transition-colors">
+          <span>
+            <span class="block text-[13px] font-semibold text-slate-800">Member</span>
+            <span class="block text-[12px] text-slate-400 mt-0.5">Dashboard, My Work, Projects</span>
+          </span>
+          <svg class="w-4 h-4 text-slate-400 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </a>
+      </div>
+    </div>
+  </div>
+</main>
+
+</body>
+</html>
