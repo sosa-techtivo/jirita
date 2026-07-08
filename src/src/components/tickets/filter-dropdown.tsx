@@ -138,6 +138,7 @@ export function FilterDropdown({
       const id = setTimeout(() => searchRef.current?.focus(), 10);
       return () => clearTimeout(id);
     }
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: clears the search field the instant the popover closes
     if (!isOpen) setSearch("");
   }, [isOpen, searchable]);
 

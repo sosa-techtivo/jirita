@@ -47,6 +47,7 @@ export function TicketPreviewPanel({
   useEffect(() => {
     if (ticket.id === displayedTicket.id) return;
     if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: starts the fade-out the instant a different ticket is selected
     setContentFaded(true);
     fadeTimerRef.current = setTimeout(() => {
       setDisplayedTicket(ticket);

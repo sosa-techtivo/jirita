@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Ticket, TicketStatus, TicketPriority, TicketType } from "@/lib/mock-tickets";
 import { tickets as ALL_TICKETS, getTicketDisplayKey } from "@/lib/mock-tickets";
 import { StatusBadge, STATUS_LABEL, TicketTypeIcon, TicketTypeSelect } from "@/components/tickets/ticket-ui";
@@ -192,7 +192,7 @@ function LabelPicker({
           <div className="max-h-44 overflow-y-auto py-1 bg-white dark:bg-zinc-950">
             {filtered.length === 0 ? (
               <p className="px-3 py-3 text-[12px] text-slate-400 dark:text-zinc-600">
-                No labels match "{search}"
+                No labels match &quot;{search}&quot;
               </p>
             ) : (
               filtered.map((l) => {
@@ -338,7 +338,9 @@ export function NewTicketModal({
   };
 
   const submitRef = useRef(handleSubmit);
-  submitRef.current = handleSubmit;
+  useLayoutEffect(() => {
+    submitRef.current = handleSubmit;
+  });
 
   const handleClose = () => {
     setVisible(false);

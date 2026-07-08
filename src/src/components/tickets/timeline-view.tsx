@@ -164,6 +164,20 @@ export function TimelineView({
 
   const rows = buildRows(tickets);
 
+  // Smooth scroll so Today lands ~1/3 from the left on mount.
+  // Called unconditionally (rules-of-hooks) — guards internally on the
+  // empty-rows case that the early return below also handles.
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el || rows.length === 0) return;
+    const { rangeStart, totalDays } = buildRange(rows);
+    const todayPct = (daysBetween(rangeStart, today) / totalDays) * 100;
+    const gridW = el.scrollWidth - LABEL_W;
+    const todayX = LABEL_W + (todayPct / 100) * gridW;
+    el.scrollTo({ left: Math.max(0, todayX - el.clientWidth * 0.33), behavior: "smooth" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   if (rows.length === 0) {
     return (
       <div className="flex-1 flex items-center justify-center">
@@ -180,16 +194,6 @@ export function TimelineView({
   function toPct(d: Date) {
     return (daysBetween(rangeStart, d) / totalDays) * 100;
   }
-
-  // Smooth scroll so Today lands ~1/3 from the left on mount
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const gridW = el.scrollWidth - LABEL_W;
-    const todayX = LABEL_W + (todayPct / 100) * gridW;
-    el.scrollTo({ left: Math.max(0, todayX - el.clientWidth * 0.33), behavior: "smooth" });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   const minInnerW = LABEL_W + totalDays * PX_PER_DAY;
 
