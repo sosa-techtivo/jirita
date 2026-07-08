@@ -1,4 +1,4 @@
-> Last Updated: July 8, 2026
+> Last Updated: July 11, 2026
 
 ---
 
@@ -8,9 +8,9 @@
 
 JIRITA is currently in the UI/UX MVP phase.
 
-The application now includes the full shell, a role-based UX layer (Admin / Project Lead / Member), projects listing, role-specific project overviews, a five-view Tickets experience with Task/Bug ticket types, Quick Ticket Preview, Full Ticket Detail with Time Tracking, role-specific Dashboards, role-specific Projects/Reports/Time Tracking screens, a personal My Work workspace, an editable Notes experience, a Settings section, a dedicated Admin-only Users management module, a mock authentication flow (Login/Forgot/Reset/Change Password) with a Profile page, and a single shared Member Profile Modal used everywhere a person is referenced. All implemented screens are navigable and connected using mock data.
+The application now includes the full shell, a role-based UX layer (Admin / Project Lead / Member), projects listing, role-specific project overviews, a five-view Tickets experience with Task/Bug ticket types, Quick Ticket Preview, Full Ticket Detail with Time Tracking, role-specific Dashboards, role-specific Projects/Reports/Time Tracking screens, a personal My Work workspace, an editable Notes experience, a Settings section, a dedicated Admin-only Users management module, a real Supabase Auth flow (Login/Logout/Forgot/Reset/Change Password) with a Profile page that saves real data, and a single shared Member Profile Modal used everywhere a person is referenced. All implemented screens are navigable and connected using mock data, except Auth/Profile which are now backed by a live Supabase project — see Architecture Status.
 
-The current objective is to complete the remaining frontend experience before connecting a real backend. Backend groundwork has started in parallel: an MVP Supabase schema and initial migration are designed but not yet applied, and a Supabase browser client exists but nothing calls it yet — see Architecture Status.
+The current objective is to complete the remaining frontend experience while continuing backend integration. Auth, profile/organization-membership data, avatar upload, and change password are confirmed working end-to-end against a live Supabase project; projects, tickets, dashboard, reports, users, and settings are still mock data — see Architecture Status.
 
 ---
 
@@ -36,10 +36,10 @@ The current objective is to complete the remaining frontend experience before co
 
 Completed.
 
-A mock identity layer (`src/lib/current-user.ts`) defines three roles — **Admin**, **Project Lead**, and **Member** — each with its own name/avatar/discipline. No real auth or permissions exist yet; this only drives what renders.
+Role comes from a real Supabase `organization_membership` when the signed-in user has one (Admin / Project Lead / Member, per `docs/SUPABASE_MVP_SCHEMA.md`'s `org_role` enum). `src/lib/current-user.ts`'s three mock identities now serve only as a dev-only fallback — used automatically outside production builds when no real profile/membership exists yet, so local dev isn't blocked on seeded data. No real server-side permission enforcement (RLS on `projects`/`tickets`/etc.) is wired into the UI yet; role only drives what renders.
 
-- `CurrentUserProvider` (`src/components/current-user-provider.tsx`) holds the active role in React context
-- A dev-only `RoleSwitcher` in the header bar lets any tester swap roles live to see the app reshape itself
+- `CurrentUserProvider` (`src/components/current-user-provider.tsx`) holds the active `CurrentUser` (real or dev-fallback) in React context, refetched from Supabase after every profile save
+- A dev-only `RoleSwitcher` in the header bar (now only rendered alongside a visible "Dev fallback" badge, and only when no real membership is loaded) lets a tester swap roles live to see the app reshape itself
 - `src/lib/nav-config.ts` centralizes which main-nav and per-project-nav items each role sees, and in what order (sidebar renders in array order, not a hardcoded sequence)
 - `canManage(role)` gates workspace/project management actions (New Project, New Ticket, Add Member, etc.) to Admin and Project Lead
 - Dashboard, Projects, and Reports each render a **different, purpose-built screen per role** rather than a permissions-filtered version of one shared screen (see below)
@@ -403,23 +403,26 @@ The existing Member Profile Modal (previously wired independently into three scr
 
 ### Authentication & Profile
 
-Completed. Routes: `/login`, `/forgot-password`, `/reset-password`, `/change-password`, `/profile`.
+Completed, and backed by real Supabase Auth end-to-end (confirmed working against a live project — not just implemented). Routes: `/login`, `/forgot-password`, `/reset-password`, `/change-password`, `/profile`.
 
-A full mock authentication flow, backed by `src/lib/mock-auth.ts` (a single demo password shared by all mock accounts, exposed via `DEMO_CREDENTIALS` and a "Use demo account" button) and gated by `AuthGuard` (`src/components/auth-guard.tsx`), which redirects every `AppShell`-wrapped route to `/login` when no mock session exists in `localStorage`.
+Gated by `AuthGuard` (`src/components/auth-guard.tsx`), which redirects every `AppShell`-wrapped route to `/login` when no real Supabase session exists, and shows a dedicated `MembershipErrorScreen` (not the app shell) if a signed-in user has no organization membership in production.
 
-- **Login** (`login-screen.tsx`): email/password form with inline validation, "Remember me", a "Use demo account" shortcut, and a link to Forgot Password
-- **Forgot Password** (`forgot-password-screen.tsx`) → **Reset Password** (`reset-password-screen.tsx`): always resolves successfully (mirrors a real backend never revealing whether an email has an account); the reset screen includes a live password-strength meter
-- **Change Password** (`change-password-screen.tsx`): current-password verification (against the shared mock password), new password, and strength meter — reachable from the Profile page's Security section
-- **Profile** (`profile-screen.tsx`): Profile Information (name, email, role, weekly capacity), Preferences (Theme, Default Ticket View), Account (Member Since, Last Login), and Security (Change Password link)
-- Shared building blocks in `src/components/auth/` (`AuthCard`, `AuthTextField`, `AuthPasswordField`, `AuthSubmitButton`, `PasswordStrengthMeter`, `CopyableValue`) so all four auth screens share identical field/button styling
+- **Login** (`login-screen.tsx`): email/password form with inline validation and "Remember me", authenticating via `src/lib/auth.ts`'s `login()` (`supabase.auth.signInWithPassword`). The old "Use demo account" shortcut/mock credentials box is gone — there's no seeded demo account against the real backend.
+- **Logout**: `src/lib/auth.ts`'s `logout()` (`supabase.auth.signOut`), wired from the account menu.
+- **Forgot Password** (`forgot-password-screen.tsx`) → **Reset Password** (`reset-password-screen.tsx`): real `supabase.auth.resetPasswordForEmail()` / `updateUser()`, still always resolves successfully on the request step (mirrors a real backend never revealing whether an email has an account); the reset screen includes a live password-strength meter.
+- **Change Password** (`change-password-screen.tsx`): real current-password verification via `src/lib/auth.ts`'s `changePassword()` — re-authenticates with `signInWithPassword` against the real signed-in user's email (never a manual string comparison), then calls `supabase.auth.updateUser()`. Reachable from the Profile page's Security section.
+- **Profile** (`profile-screen.tsx`): Profile Information (name, email — read-only, role — read-only, weekly capacity) all load from and save to the real `profiles` + `organization_memberships` rows (`src/lib/membership.ts`); Preferences (Theme, Default Ticket View) unchanged/local; Account (Member Since, Last Login) now reflects real Supabase data; Security (Change Password link).
+- **Avatar**: click-to-upload or drag & drop on the Profile avatar (`AvatarPicker` in `profile-screen.tsx`) — validates type/size, center-crops and resizes to a square JPEG via Canvas, uploads to the `avatars` Supabase Storage bucket (`src/lib/avatar-upload.ts`), and saves the storage *path* (never a URL) to `profiles.avatar_url`. Sidebar and Header pick up the new photo automatically via the shared `CurrentUserProvider` context — no per-component wiring needed.
+- **Dev-only fallback**: if no real profile/membership exists (or the lookup errors), and only outside a production build, the app falls back to the old mock identity so local dev isn't blocked — visibly flagged with a "Dev fallback" badge in the header. Never engages in production.
+- Shared building blocks in `src/components/auth/` (`AuthCard`, `AuthTextField`, `AuthPasswordField`, `AuthSubmitButton`, `PasswordStrengthMeter`) so all auth screens share identical field/button styling.
 
-No real backend or server-verified session exists yet — see Architecture Status.
+See Architecture Status for the full list of applied migrations.
 
 ---
 
 # In Progress
 
-Supabase backend groundwork: MVP schema designed (`docs/SUPABASE_MVP_SCHEMA.md`), initial migration written (`supabase/migrations/20260708000000_mvp_schema.sql`), and a Supabase browser client scaffolded (`src/lib/supabase-client.ts`) — none of it connected to the running app yet. The Unfuddle → Jirita import is specified (`docs/UNFUDDLE_IMPORT_SPECIFICATION.md`) but no importer code exists yet.
+Nothing currently in progress. Auth/profile/avatar backend integration (see Current Sprint → Completed → Authentication & Profile) is done and confirmed working. Next candidate is wiring Projects/Tickets to the same Supabase schema — see Next Recommended Feature. The Unfuddle → Jirita import is specified (`docs/UNFUDDLE_IMPORT_SPECIFICATION.md`) but no importer code exists yet.
 
 ---
 
@@ -429,10 +432,10 @@ The following features are documented as planned but do not exist in the codebas
 
 ### Authentication
 
-- Register / Sign Up screen (no self-service account creation — all accounts are pre-seeded mock users)
-- Real, server-verified session persistence (today's "session" is a mock `localStorage` flag — see Architecture Status)
+- Register / Sign Up screen (no self-service account creation — accounts are provisioned directly in Supabase; see `docs/UNFUDDLE_IMPORT_SPECIFICATION.md` for the eventual bulk-provisioning path)
+- Invitations (inviting a new user to an organization)
 
-Login, Forgot Password, Reset Password, and Change Password are implemented — see Current Sprint → Completed → Authentication & Profile.
+Login, Logout, Forgot Password, Reset Password, Change Password, and real server-verified session persistence (a real Supabase session, not a mock `localStorage` flag) are implemented — see Current Sprint → Completed → Authentication & Profile.
 
 ### Sidebar Navigation
 
@@ -444,9 +447,9 @@ All top-level navigation items (Dashboard, My Work, Projects, Reports, Settings)
 
 # Next Recommended Feature
 
-Ticket editing — inline status, assignee, and priority changes directly in the ticket detail page. (Authentication, previously recommended here, is now complete — see Current Sprint → Completed → Authentication & Profile.)
+Ticket editing — inline status, assignee, and priority changes directly in the ticket detail page. (Authentication, previously recommended here, is now complete and confirmed working against a live Supabase project — see Current Sprint → Completed → Authentication & Profile.)
 
-Alternatively: continue the Supabase backend work already underway — apply the prepared migration to a real project and wire the first real query in behind the existing mock-data seam. See Architecture Status.
+Alternatively: continue the Supabase backend work already underway — Projects is the natural next mock-to-real seam to wire, following the same pattern established for profiles/organization_memberships (real query + minimum-privilege grants + RLS, with a dev-only mock fallback until it's fully connected). See Architecture Status.
 
 ---
 
@@ -483,7 +486,7 @@ Milestones, Versions, and Components were evaluated and explicitly decided again
 
 # Architecture Status
 
-Current architecture follows a frontend-first approach.
+Current architecture follows a frontend-first approach, with Auth/Profile now a real exception — see below.
 
 Current stack:
 
@@ -491,7 +494,7 @@ Current stack:
 - React 19
 - TypeScript
 - TailwindCSS v4
-- `@supabase/supabase-js` (installed; not yet used by any screen — see below)
+- `@supabase/supabase-js` — used by `src/lib/auth.ts`, `src/lib/membership.ts`, and `src/lib/avatar-upload.ts`
 
 Not installed:
 
@@ -499,16 +502,20 @@ Not installed:
 
 Current data source:
 
-- Mock data only (`src/lib/mock-projects.ts`, `src/lib/mock-tickets.ts`, and the other `src/lib/mock-*.ts` files; module-level constants in screen components)
+- **Real Supabase**: authentication/session, `profiles`, `organization_memberships`, `organizations`, and the `avatars` Storage bucket — confirmed working end-to-end against a live project.
+- **Mock data** (everything else): `src/lib/mock-projects.ts`, `src/lib/mock-tickets.ts`, and the other `src/lib/mock-*.ts` files; module-level constants in screen components.
 
-Backend integration is being prepared but not yet connected:
+Backend integration, connected and confirmed working:
 
-- `src/lib/supabase-client.ts` — a lazy Supabase browser client; no screen imports it yet
-- `docs/SUPABASE_MVP_SCHEMA.md` — the target MVP database schema
-- `supabase/migrations/20260708000000_mvp_schema.sql` — implements that schema; not yet applied to any Supabase project (see `docs/SUPABASE_SETUP.md`)
-- `docs/UNFUDDLE_IMPORT_SPECIFICATION.md` — how the Techtivo Unfuddle backup will map onto that schema; no importer code exists yet
+- `src/lib/supabase-client.ts` — the lazy Supabase browser client, now imported by `auth.ts`/`membership.ts`/`avatar-upload.ts`
+- `src/lib/auth.ts` — login, logout, session (`onAuthStateChange`), forgot/reset password, and change password (verified via re-authentication, never a manual password comparison)
+- `src/lib/membership.ts` — loads a signed-in user's `profiles` + active `organization_memberships` + `organizations` row, and writes real updates (name, weekly capacity via a security-definer RPC, avatar path)
+- `src/lib/avatar-upload.ts` — client-side validate/resize (Canvas, no new dependency)/upload to Supabase Storage
+- `src/components/current-user-provider.tsx` / `src/components/auth-guard.tsx` — real membership drives `CurrentUser` and route gating, with a dev-only mock fallback (never in production) so local dev isn't blocked on seeded data
+- Applied migrations, in order: `20260708000000_mvp_schema.sql` (base schema + RLS), `20260708010000_grant_authenticated_membership_read.sql` (SELECT grants — RLS alone doesn't grant table privileges), `20260709000000_profile_self_service_updates.sql` (self-service name/capacity writes), `20260710000000_avatars_storage.sql` + `20260711000000_fix_avatars_storage_policies.sql` (the `avatars` bucket and its RLS policies — first pass had a policy bug blocking uploads, fixed in the second file). See `docs/SUPABASE_SETUP.md` for how to apply migrations to a new project.
+- `docs/UNFUDDLE_IMPORT_SPECIFICATION.md` — how the Techtivo Unfuddle backup will map onto the schema; no importer code exists yet
 
-The UI still runs entirely on mock data and mock auth until this is wired up.
+Everything except Auth/Profile/Avatar still runs entirely on mock data — projects, tickets, dashboard, reports, users, and settings are not connected.
 
 ---
 
@@ -617,12 +624,12 @@ Current known items:
 - Ticket Detail page fields are mostly read-only; no inline editing is implemented beyond status transitions.
 - `settings-screen.tsx` (`SettingsScreen` hub component) is retained but no longer rendered — `/settings` redirects directly to `/settings/general`.
 - Settings toggles and fields are visual only; no state persists between page loads.
-- Role-based UX (`current-user.ts`, `nav-config.ts`) is a mock identity layer only — no real auth or server-side permission enforcement exists. The `RoleSwitcher` in the header is a dev-only affordance and should be removed or gated before any real backend integration. (The Supabase migration's RLS policies, per `docs/SUPABASE_MVP_SCHEMA.md`, mirror this same three-role model as the intended real enforcement layer — not yet applied.)
+- Role now comes from a real `organization_membership` when one exists; `current-user.ts`'s mock identities are a dev-only fallback (never in production) rather than the only source of truth. **Resolved**: the `RoleSwitcher` is now gated behind `isDevFallback` (only renders, with a visible "Dev fallback" badge, when there's no real membership) instead of always showing. No real server-side permission enforcement is wired into the UI yet for projects/tickets/etc. — the RLS policies in `supabase/migrations/20260708000000_mvp_schema.sql` are applied and enforce tenant isolation at the DB layer, but the UI doesn't call any of those tables yet.
 - Note "Duplicate" and "Delete" menu actions in `NoteDetailModal` are visual stubs with no effect.
 
 Planned future work:
 
-- Backend integration (Supabase schema + migration prepared, not yet applied or connected — see `docs/SUPABASE_MVP_SCHEMA.md`, `docs/SUPABASE_SETUP.md`)
+- Backend integration for Projects/Tickets/Dashboard/Reports/Users/Settings (Auth/Profile/Avatar are done — see Architecture Status; schema for the rest is designed in `docs/SUPABASE_MVP_SCHEMA.md` and applied via `supabase/migrations/20260708000000_mvp_schema.sql`, just not queried by the UI yet)
 - API layer
 - Real drag & drop (Kanban)
 - Real-time updates

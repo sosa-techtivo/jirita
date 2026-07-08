@@ -286,32 +286,61 @@ However, simplicity must remain the defining characteristic of the platform.
 
 # Backend Integration Status
 
-Supabase Auth is connected for login/logout/session — everything else still
-runs entirely on mock data.
+Supabase Auth + real profile/organization-membership data are connected and
+confirmed working end-to-end against a live Supabase project. Projects,
+tickets, dashboard, reports, users, and settings are all still unconnected
+mock data.
 
-- `src/lib/auth.ts` wraps `src/lib/supabase-client.ts` for real
-  login/logout/session (`login`, `logout`, `onAuthStateChange`,
-  `requestPasswordReset`, `confirmPasswordReset`). `AuthGuard`
-  (`src/components/auth-guard.tsx`) gates every `AppShell`-wrapped route on
-  a real Supabase session instead of a `localStorage` flag.
-- `src/lib/mock-auth.ts` now only covers Change Password (`mockChangePassword`,
-  still mock — out of scope for the Auth pass) and the shared
-  password-strength helpers used by both the mock and real auth screens.
-- Role (Admin / Project Lead / Member) is still assigned by the mock
-  `current-user.ts` / `CurrentUserProvider` fallback (localStorage +
-  `RoleSwitcher`), not by any real Supabase membership — that mapping is
-  unchanged and intentionally still mock until org/project memberships are
-  connected.
-- Projects, tickets, dashboard, reports, users, and settings are all still
-  unconnected mock data (`src/lib/mock-*.ts`) — do not assume otherwise.
-- `docs/SUPABASE_MVP_SCHEMA.md` defines the MVP database schema
-  (organizations, profiles, organization memberships, projects, project
-  memberships, tickets, ticket comments, ticket activity), and
-  `supabase/migrations/20260708000000_mvp_schema.sql` implements it — but
-  that migration has not been applied to any Supabase project from this
-  repo. See `docs/SUPABASE_SETUP.md` for how to apply it.
+## Confirmed working (login/logout, profile, avatar, change password)
+
+- `src/lib/auth.ts` — real login/logout/session (`login`, `logout`,
+  `onAuthStateChange`, `requestPasswordReset`, `confirmPasswordReset`) and
+  real Change Password (`changePassword`): verifies the current password by
+  re-authenticating with `signInWithPassword` (never a manual string
+  comparison), then calls `supabase.auth.updateUser()`. `mock-auth.ts` no
+  longer has any login/session/change-password logic — it only holds
+  `AuthError` and the shared password-strength helpers.
+- `src/lib/membership.ts` — loads the signed-in user's `profiles` row +
+  active `organization_memberships` row + `organizations` row
+  (`loadMembership`), and writes real updates: `updateProfileNames`
+  (first/last name), `updateOwnWeeklyCapacity` (via a security-definer RPC,
+  since org role/status stay admin-managed), `updateProfileAvatarPath`
+  (stores a Storage *path*, never a URL — `resolveAvatarUrl` turns it back
+  into a public URL for display, with `updated_at` as a cache-busting
+  query param).
+- `src/lib/avatar-upload.ts` — validates (JPG/PNG/WEBP, ≤8MB), center-crops
+  and resizes to a 320×320 JPEG via Canvas (no new dependency), uploads to
+  the `avatars` Supabase Storage bucket at `<uid>/avatar.jpg` (upsert).
+- `src/components/current-user-provider.tsx` — `CurrentUser` (role,
+  name, avatar, weekly capacity, etc.) now comes from the real membership
+  when one exists, refetched after every save so Sidebar/Header/Profile
+  stay in sync. **Dev-only fallback:** if no real profile/membership is
+  found (or the lookup errors), and only outside a production build, it
+  falls back to the old mock `current-user.ts` identity so local dev isn't
+  blocked on seeded data — visibly flagged with a "Dev fallback" badge next
+  to the (also fallback-only) `RoleSwitcher` in the header. This fallback
+  can never engage in a production build. In production, a signed-in user
+  with no membership sees `MembershipErrorScreen` instead of the app shell,
+  not a fake role.
+- Applied migrations (all confirmed against the live project):
+  `20260708000000_mvp_schema.sql` (base schema — organizations, profiles,
+  organization_memberships, projects, project_memberships, tickets, ticket
+  comments, ticket activity, RLS policies),
+  `20260708010000_grant_authenticated_membership_read.sql` (SELECT grants —
+  RLS alone isn't enough, Postgres checks table privileges first),
+  `20260709000000_profile_self_service_updates.sql` (column-scoped UPDATE
+  grant for first/last name + the weekly-capacity RPC),
+  `20260710000000_avatars_storage.sql` + `20260711000000_fix_avatars_storage_policies.sql`
+  (the `avatars` Storage bucket and its RLS policies — the first pass had a
+  bug that blocked uploads, fixed in the second file). See
+  `docs/SUPABASE_SETUP.md` for how to apply migrations to a new project.
+
+## Still mock
+
+- Projects, tickets, dashboard, reports, users, and settings all still read
+  from `src/lib/mock-*.ts` — do not assume otherwise.
 - `docs/UNFUDDLE_IMPORT_SPECIFICATION.md` defines how Techtivo's Unfuddle
-  backup maps onto that schema for the eventual data migration. No importer
+  backup maps onto the schema for the eventual data migration. No importer
   code exists yet, and it leaves several product decisions (orphaned
   tickets, the priority mapping, ticket-type classification) explicitly
   unresolved.
