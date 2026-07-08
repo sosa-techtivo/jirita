@@ -1,26 +1,8 @@
-// Login/logout/session now go through real Supabase Auth — see lib/auth.ts.
-// Change Password remains mock (out of scope for that pass) until it's
-// wired to supabase.auth.updateUser() too; the password-strength helpers
-// below are shared by both the mock and real auth screens.
-
-const MOCK_LATENCY_MS = 900;
-const MOCK_PASSWORD = "password123";
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
+// Login/logout/session/change-password now all go through real Supabase
+// Auth — see lib/auth.ts. Only the password-strength helpers (shared by
+// every auth screen) remain here.
 
 export class AuthError extends Error {}
-
-// Every mock account shares this same password, so "current password"
-// verification just checks against that one constant.
-export async function mockChangePassword(currentPassword: string, newPassword: string): Promise<void> {
-  await delay(MOCK_LATENCY_MS);
-  void newPassword;
-  if (currentPassword !== MOCK_PASSWORD) {
-    throw new AuthError("Current password is incorrect.");
-  }
-}
 
 export type PasswordStrength = 0 | 1 | 2 | 3 | 4;
 

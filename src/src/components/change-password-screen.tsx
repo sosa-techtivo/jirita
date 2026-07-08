@@ -5,7 +5,8 @@ import Link from "next/link";
 import { AuthPasswordField } from "@/components/auth/password-field";
 import { PasswordStrengthMeter } from "@/components/auth/password-strength-meter";
 import { AuthSubmitButton } from "@/components/auth/auth-button";
-import { AuthError, getPasswordStrength, mockChangePassword } from "@/lib/mock-auth";
+import { getPasswordStrength } from "@/lib/mock-auth";
+import { AuthError, changePassword } from "@/lib/auth";
 
 interface FieldErrors {
   currentPassword?: string;
@@ -46,7 +47,7 @@ export function ChangePasswordScreen() {
 
     setLoading(true);
     try {
-      await mockChangePassword(currentPassword, newPassword);
+      await changePassword(currentPassword, newPassword);
       setLoading(false);
       setDone(true);
     } catch (err) {

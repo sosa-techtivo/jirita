@@ -1,8 +1,7 @@
-// Real Supabase Auth for login/logout/session — the one part of the backend
-// that's actually wired up. Everything else (projects, tickets, dashboard,
-// reports, users, settings) still reads from the mock-*.ts data modules; see
-// CLAUDE.md's Backend Integration Status. Change Password stays mock for now
-// (see mock-auth.ts) since it's out of scope for this pass.
+// Real Supabase Auth for login/logout/session/change-password — the one
+// part of the backend that's actually wired up. Everything else (projects,
+// tickets, dashboard, reports, users, settings) still reads from the
+// mock-*.ts data modules; see CLAUDE.md's Backend Integration Status.
 
 import type { Session } from "@supabase/supabase-js";
 import { getSupabaseBrowserClient } from "./supabase-client";
@@ -69,4 +68,28 @@ export async function requestPasswordReset(email: string): Promise<void> {
 export async function confirmPasswordReset(newPassword: string): Promise<void> {
   const { error } = await getSupabaseBrowserClient().auth.updateUser({ password: newPassword });
   if (error) throw new AuthError(error.message);
+}
+
+// Supabase has no dedicated "verify current password" call, so the current
+// password is verified by re-authenticating with it (signInWithPassword)
+// against the real signed-in user's email — never a manual string
+// comparison. Only proceeds to updateUser() if that re-auth succeeds.
+export async function changePassword(currentPassword: string, newPassword: string): Promise<void> {
+  const supabase = getSupabaseBrowserClient();
+
+  const { data: { user }, error: userError } = await supabase.auth.getUser();
+  if (userError || !user?.email) {
+    throw new AuthError("Could not verify your account. Please sign in again.");
+  }
+
+  const { error: reauthError } = await supabase.auth.signInWithPassword({
+    email: user.email,
+    password: currentPassword,
+  });
+  if (reauthError) {
+    throw new AuthError("Current password is incorrect.");
+  }
+
+  const { error: updateError } = await supabase.auth.updateUser({ password: newPassword });
+  if (updateError) throw new AuthError(updateError.message);
 }

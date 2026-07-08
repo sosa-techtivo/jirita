@@ -51,6 +51,19 @@ interface ProfileRow {
   email: string | null;
   avatar_url: string | null;
   created_at: string;
+  updated_at: string;
+}
+
+// profiles.avatar_url stores a Storage *path* ("<uid>/avatar.jpg"), never a
+// URL — see avatar-upload.ts. This turns that path into the public object
+// URL the <img> tags actually need, with a cache-busting query param so a
+// re-upload (same path, upsert) doesn't keep showing a stale cached image.
+// profiles.updated_at already bumps on any column change via the
+// set_updated_at trigger, so it's a free, always-current cache-bust key.
+function resolveAvatarUrl(path: string | null, updatedAt: string): string | null {
+  if (!path) return null;
+  const { data } = getSupabaseBrowserClient().storage.from("avatars").getPublicUrl(path);
+  return `${data.publicUrl}?v=${encodeURIComponent(updatedAt)}`;
 }
 
 interface OrganizationRow {
@@ -78,7 +91,7 @@ export async function loadMembership(userId: string): Promise<MembershipResult> 
 
   const { data: profileRow, error: profileError } = await supabase
     .from("profiles")
-    .select("id, first_name, last_name, email, avatar_url, created_at")
+    .select("id, first_name, last_name, email, avatar_url, created_at, updated_at")
     .eq("id", userId)
     .maybeSingle<ProfileRow>();
 
@@ -143,7 +156,7 @@ export async function loadMembership(userId: string): Promise<MembershipResult> 
         firstName: profileRow.first_name ?? "",
         lastName: profileRow.last_name ?? "",
         email: profileRow.email ?? "",
-        avatarUrl: profileRow.avatar_url,
+        avatarUrl: resolveAvatarUrl(profileRow.avatar_url, profileRow.updated_at),
         createdAt: profileRow.created_at,
       },
       organization,
@@ -151,4 +164,74 @@ export async function loadMembership(userId: string): Promise<MembershipResult> 
       weeklyCapacity: membershipRow.weekly_capacity,
     },
   };
+}
+
+export type WriteResult = { status: "success" } | { status: "error"; message: string };
+
+// Writes only first_name/last_name — email/unfuddle_id stay off-limits,
+// backed by the column-scoped GRANT in
+// 20260709000000_profile_self_service_updates.sql, not just by this
+// function never sending those columns. avatar_url has its own writer
+// below (updateProfileAvatarPath), granted separately.
+export async function updateProfileNames(
+  userId: string,
+  fields: { firstName: string; lastName: string }
+): Promise<WriteResult> {
+  const supabase = getSupabaseBrowserClient();
+  const { data, error } = await supabase
+    .from("profiles")
+    .update({ first_name: fields.firstName, last_name: fields.lastName })
+    .eq("id", userId)
+    .select("id")
+    .maybeSingle();
+
+  if (error) {
+    logDev("profiles update failed", error);
+    return { status: "error", message: error.message };
+  }
+  if (!data) {
+    logDev("profiles update matched no row for", userId);
+    return { status: "error", message: "Could not save — your profile couldn't be found." };
+  }
+  return { status: "success" };
+}
+
+// Goes through the update_own_weekly_capacity RPC rather than a direct
+// table update — organization_memberships' own update policy is
+// admin-only by design (role/status are org-admin-managed), so this uses
+// the narrow security-definer function from the same migration that can
+// only ever touch weekly_capacity on the caller's own active membership.
+export async function updateOwnWeeklyCapacity(weeklyCapacity: number): Promise<WriteResult> {
+  const supabase = getSupabaseBrowserClient();
+  const { error } = await supabase.rpc("update_own_weekly_capacity", { new_capacity: weeklyCapacity });
+
+  if (error) {
+    logDev("update_own_weekly_capacity rpc failed", error);
+    return { status: "error", message: error.message };
+  }
+  return { status: "success" };
+}
+
+// Stores the Storage *path* returned by avatar-upload.ts's uploadAvatarBlob
+// — never a URL (see resolveAvatarUrl above, which turns it back into one
+// on read). Granted separately from names in
+// 20260710000000_avatars_storage.sql.
+export async function updateProfileAvatarPath(userId: string, path: string): Promise<WriteResult> {
+  const supabase = getSupabaseBrowserClient();
+  const { data, error } = await supabase
+    .from("profiles")
+    .update({ avatar_url: path })
+    .eq("id", userId)
+    .select("id")
+    .maybeSingle();
+
+  if (error) {
+    logDev("profiles avatar_url update failed", error);
+    return { status: "error", message: error.message };
+  }
+  if (!data) {
+    logDev("profiles avatar_url update matched no row for", userId);
+    return { status: "error", message: "Could not save — your profile couldn't be found." };
+  }
+  return { status: "success" };
 }
