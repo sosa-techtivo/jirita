@@ -13,13 +13,14 @@ function Spinner() {
 
 export const AuthSubmitButton = forwardRef<
   HTMLButtonElement,
-  { loading?: boolean; disabled?: boolean; children: ReactNode }
->(function AuthSubmitButton({ loading = false, disabled = false, children }, ref) {
+  { loading?: boolean; disabled?: boolean; type?: "submit" | "button"; onClick?: () => void; children: ReactNode }
+>(function AuthSubmitButton({ loading = false, disabled = false, type = "submit", onClick, children }, ref) {
   const isDisabled = disabled || loading;
   return (
     <button
       ref={ref}
-      type="submit"
+      type={type}
+      onClick={onClick}
       disabled={isDisabled}
       className={
         "w-full inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-[13px] font-semibold transition-all " +

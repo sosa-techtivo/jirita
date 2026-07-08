@@ -282,6 +282,40 @@ Future capabilities may include:
 
 However, simplicity must remain the defining characteristic of the platform.
 
+---
+
+# Backend Integration Status
+
+Supabase Auth is connected for login/logout/session — everything else still
+runs entirely on mock data.
+
+- `src/lib/auth.ts` wraps `src/lib/supabase-client.ts` for real
+  login/logout/session (`login`, `logout`, `onAuthStateChange`,
+  `requestPasswordReset`, `confirmPasswordReset`). `AuthGuard`
+  (`src/components/auth-guard.tsx`) gates every `AppShell`-wrapped route on
+  a real Supabase session instead of a `localStorage` flag.
+- `src/lib/mock-auth.ts` now only covers Change Password (`mockChangePassword`,
+  still mock — out of scope for the Auth pass) and the shared
+  password-strength helpers used by both the mock and real auth screens.
+- Role (Admin / Project Lead / Member) is still assigned by the mock
+  `current-user.ts` / `CurrentUserProvider` fallback (localStorage +
+  `RoleSwitcher`), not by any real Supabase membership — that mapping is
+  unchanged and intentionally still mock until org/project memberships are
+  connected.
+- Projects, tickets, dashboard, reports, users, and settings are all still
+  unconnected mock data (`src/lib/mock-*.ts`) — do not assume otherwise.
+- `docs/SUPABASE_MVP_SCHEMA.md` defines the MVP database schema
+  (organizations, profiles, organization memberships, projects, project
+  memberships, tickets, ticket comments, ticket activity), and
+  `supabase/migrations/20260708000000_mvp_schema.sql` implements it — but
+  that migration has not been applied to any Supabase project from this
+  repo. See `docs/SUPABASE_SETUP.md` for how to apply it.
+- `docs/UNFUDDLE_IMPORT_SPECIFICATION.md` defines how Techtivo's Unfuddle
+  backup maps onto that schema for the eventual data migration. No importer
+  code exists yet, and it leaves several product decisions (orphaned
+  tickets, the priority mapping, ticket-type classification) explicitly
+  unresolved.
+
 ## Documentation Loading Strategy
 
 At the beginning of every new session, only read:
@@ -289,6 +323,10 @@ At the beginning of every new session, only read:
 - PROJECT_STATUS.md
 - CHANGELOG.md
 
-Consult additional documentation under /docs only when it is relevant to the specific task being implemented.
+Consult additional documentation under /docs only when it is relevant to the specific task being implemented:
+
+- `docs/SUPABASE_MVP_SCHEMA.md` — target database schema for backend work
+- `docs/SUPABASE_SETUP.md` — how to apply the migration to a real Supabase project
+- `docs/UNFUDDLE_IMPORT_SPECIFICATION.md` — the Unfuddle → Jirita migration spec
 
 Do not read the entire documentation set unless explicitly requested.

@@ -6,7 +6,8 @@ import { AuthCard } from "@/components/auth/auth-card";
 import { AuthPasswordField } from "@/components/auth/password-field";
 import { AuthSubmitButton } from "@/components/auth/auth-button";
 import { PasswordStrengthMeter } from "@/components/auth/password-strength-meter";
-import { getPasswordStrength, mockResetPassword } from "@/lib/mock-auth";
+import { getPasswordStrength } from "@/lib/mock-auth";
+import { AuthError, confirmPasswordReset } from "@/lib/auth";
 
 interface FieldErrors {
   password?: string;
@@ -29,19 +30,26 @@ export function ResetPasswordScreen() {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
+  const [formError, setFormError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [done, setDone] = useState(false);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
+    setFormError(null);
     const errors = validate(password, confirmPassword);
     setFieldErrors(errors);
     if (Object.keys(errors).length > 0) return;
 
     setLoading(true);
-    await mockResetPassword(password);
-    setLoading(false);
-    setDone(true);
+    try {
+      await confirmPasswordReset(password);
+      setLoading(false);
+      setDone(true);
+    } catch (err) {
+      setFormError(err instanceof AuthError ? err.message : "Something went wrong. Please try again.");
+      setLoading(false);
+    }
   }
 
   if (done) {
@@ -69,6 +77,19 @@ export function ResetPasswordScreen() {
   return (
     <AuthCard title="Reset your password" subtitle="Choose a new password for your account.">
       <form onSubmit={handleSubmit} noValidate className="space-y-4">
+        {formError && (
+          <div
+            role="alert"
+            className="flex items-start gap-2 rounded-lg border border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/10 px-3 py-2.5 text-[12.5px] text-red-700 dark:text-red-400"
+          >
+            <svg className="w-4 h-4 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+              <circle cx="12" cy="12" r="9" />
+              <path d="M12 8v5M12 16h.01" strokeLinecap="round" />
+            </svg>
+            <span>{formError}</span>
+          </div>
+        )}
+
         <div>
           <AuthPasswordField
             label="New password"

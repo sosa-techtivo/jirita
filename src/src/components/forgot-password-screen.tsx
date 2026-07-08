@@ -5,7 +5,7 @@ import Link from "next/link";
 import { AuthCard } from "@/components/auth/auth-card";
 import { AuthTextField } from "@/components/auth/text-field";
 import { AuthSubmitButton, AuthSecondaryButton } from "@/components/auth/auth-button";
-import { isValidEmail, mockRequestPasswordReset } from "@/lib/mock-auth";
+import { isValidEmail, requestPasswordReset } from "@/lib/auth";
 
 export function ForgotPasswordScreen() {
   const [email, setEmail] = useState("");
@@ -26,14 +26,14 @@ export function ForgotPasswordScreen() {
     }
     setEmailError(null);
     setLoading(true);
-    await mockRequestPasswordReset(email);
+    await requestPasswordReset(email);
     setLoading(false);
     setSent(true);
   }
 
   async function handleResend() {
     setResending(true);
-    await mockRequestPasswordReset(email);
+    await requestPasswordReset(email);
     setResending(false);
   }
 

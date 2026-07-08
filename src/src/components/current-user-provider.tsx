@@ -1,10 +1,34 @@
 "use client";
 
-import { createContext, useCallback, useContext, useReducer, useSyncExternalStore, type ReactNode } from "react";
-import { DEFAULT_ROLE, MOCK_USERS, type CurrentUser, type Role } from "@/lib/current-user";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useReducer,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from "react";
+import {
+  DEFAULT_ROLE,
+  FALLBACK_AVATAR,
+  MOCK_USERS,
+  ROLE_LABELS,
+  type CurrentUser,
+  type Role,
+} from "@/lib/current-user";
+import { onAuthStateChange, type AuthUser } from "@/lib/auth";
+import { loadMembership, type Membership } from "@/lib/membership";
 
-const STORAGE_KEY = "jirita:mock-role";
 const OVERRIDES_STORAGE_KEY = "jirita:profile-overrides";
+const DEV_ROLE_STORAGE_KEY = "jirita:mock-role";
+
+// Gate for the dev-only mock fallback below — never true in a production
+// build, so a missing/empty membership can never render a fake role as if
+// it were real production data (see CLAUDE.md Backend Integration Status).
+const DEV_FALLBACK_ALLOWED = process.env.NODE_ENV !== "production";
 
 interface ProfileOverride {
   firstName: string;
@@ -13,10 +37,22 @@ interface ProfileOverride {
 
 type ProfileOverrides = Partial<Record<Role, ProfileOverride>>;
 
+// What AuthGuard actually gates rendering on. "ready" covers both a real
+// membership and the dev fallback — callers that only care "can I render
+// the app shell now" don't need to know which.
+export type MembershipStatus = "loading" | "unauthenticated" | "ready" | "no-membership" | "error";
+
 interface CurrentUserContextValue {
+  status: MembershipStatus;
   user: CurrentUser;
+  organization: { id: string; name: string; slug: string } | null;
+  /** True when `user` is the dev-only mock fallback, not a real Supabase membership. */
+  isDevFallback: boolean;
+  /** Set only when status is "error" (or the dev fallback masked one) — the raw Supabase error message. */
+  errorMessage: string | null;
   setRole: (role: Role) => void;
   updateProfile: (fields: ProfileOverride) => void;
+  retry: () => void;
 }
 
 const CurrentUserContext = createContext<CurrentUserContextValue | null>(null);
@@ -35,12 +71,14 @@ function useMounted(): boolean {
   return useSyncExternalStore(emptySubscribe, () => true, () => false);
 }
 
-function readRole(): Role {
-  const stored = window.localStorage.getItem(STORAGE_KEY);
+function readDevRole(): Role {
+  if (typeof window === "undefined") return DEFAULT_ROLE;
+  const stored = window.localStorage.getItem(DEV_ROLE_STORAGE_KEY);
   return isRole(stored) ? stored : DEFAULT_ROLE;
 }
 
 function readOverrides(): ProfileOverrides {
+  if (typeof window === "undefined") return {};
   try {
     const raw = window.localStorage.getItem(OVERRIDES_STORAGE_KEY);
     return raw ? (JSON.parse(raw) as ProfileOverrides) : {};
@@ -49,35 +87,147 @@ function readOverrides(): ProfileOverrides {
   }
 }
 
+function applyOverride(base: CurrentUser, overrides: ProfileOverrides): CurrentUser {
+  const override = overrides[base.role];
+  if (!override) return base;
+  const firstName = override.firstName || base.firstName;
+  const lastName = override.lastName || base.lastName;
+  return { ...base, firstName, lastName, name: `${firstName} ${lastName}` };
+}
+
+function devFallbackUser(role: Role): CurrentUser {
+  return { ...MOCK_USERS[role] };
+}
+
+function formatDate(iso: string): string {
+  try {
+    return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  } catch {
+    return "—";
+  }
+}
+
+// Maps a real Supabase profile + org membership onto the same CurrentUser
+// shape the mock layer used, so every existing consumer (Sidebar,
+// AccountMenu, ProfileScreen, RoleSwitcher, etc.) keeps working unchanged.
+// `discipline` has no real column (see current-user.ts) — a real member's
+// discipline is just their role label.
+function realUser(membership: Membership, lastSignInAt: string | null): CurrentUser {
+  const { profile, role, weeklyCapacity } = membership;
+  const emailHandle = profile.email.split("@")[0] || profile.email;
+  const firstName = profile.firstName.trim() || emailHandle;
+  const lastName = profile.lastName.trim();
+  const name = [firstName, lastName].filter(Boolean).join(" ") || profile.email;
+  return {
+    firstName,
+    lastName,
+    name,
+    email: profile.email,
+    role,
+    discipline: ROLE_LABELS[role],
+    avatar: profile.avatarUrl || FALLBACK_AVATAR,
+    weeklyCapacity: weeklyCapacity ?? 0,
+    memberSince: formatDate(profile.createdAt),
+    lastLogin: lastSignInAt ? formatDate(lastSignInAt) : "—",
+  };
+}
+
+// Tagged with the user id it was fetched for, so "loading" can be *derived*
+// (fetchState is missing or stale for the current authUser) instead of set
+// synchronously in an effect — the only setState call below happens inside
+// loadMembership's .then() callback, a genuine async continuation.
+type FetchState =
+  | { status: "ready"; forUserId: string; membership: Membership }
+  | { status: "no-membership"; forUserId: string }
+  | { status: "error"; forUserId: string; message: string };
+
 export function CurrentUserProvider({ children }: { children: ReactNode }) {
+  // undefined = auth state not yet known, null = known signed-out.
+  const [authUser, setAuthUser] = useState<AuthUser | null | undefined>(undefined);
+  const [fetchState, setFetchState] = useState<FetchState | null>(null);
+  const requestIdRef = useRef(0);
+
   const mounted = useMounted();
-  // Writes to localStorage don't re-render on their own — bump this from
-  // the click handlers below (setRole/updateProfile), never from an effect.
+  const devRole = mounted ? readDevRole() : DEFAULT_ROLE;
   const [, forceUpdate] = useReducer((n: number) => n + 1, 0);
 
-  const role = mounted ? readRole() : DEFAULT_ROLE;
-  const overrides = mounted ? readOverrides() : {};
+  useEffect(() => onAuthStateChange(setAuthUser), []);
+
+  const runFetch = useCallback((userId: string) => {
+    const requestId = ++requestIdRef.current;
+    loadMembership(userId).then((result) => {
+      if (requestIdRef.current !== requestId) return; // superseded by a newer session/retry
+      setFetchState({ ...result, forUserId: userId });
+    });
+  }, []);
+
+  useEffect(() => {
+    if (authUser === undefined) return;
+    if (authUser === null) {
+      requestIdRef.current++; // invalidate any in-flight fetch from a prior session
+      return;
+    }
+    runFetch(authUser.id);
+  }, [authUser, runFetch]);
+
+  const retry = useCallback(() => {
+    if (authUser) runFetch(authUser.id);
+  }, [authUser, runFetch]);
 
   const setRole = useCallback((next: Role) => {
-    window.localStorage.setItem(STORAGE_KEY, next);
+    window.localStorage.setItem(DEV_ROLE_STORAGE_KEY, next);
     forceUpdate();
   }, []);
 
-  const updateProfile = useCallback((forRole: Role, fields: ProfileOverride) => {
-    const next = { ...readOverrides(), [forRole]: fields };
-    window.localStorage.setItem(OVERRIDES_STORAGE_KEY, JSON.stringify(next));
-    forceUpdate();
-  }, []);
+  const updateProfile = useCallback(
+    (forRole: Role, fields: ProfileOverride) => {
+      const next = { ...readOverrides(), [forRole]: fields };
+      window.localStorage.setItem(OVERRIDES_STORAGE_KEY, JSON.stringify(next));
+      forceUpdate();
+    },
+    []
+  );
 
-  const base = MOCK_USERS[role];
-  const override = overrides[role];
-  const firstName = override?.firstName ?? base.firstName;
-  const lastName = override?.lastName ?? base.lastName;
+  // fetchState only counts once it's actually for the signed-in user —
+  // otherwise (null, or still tagged with a previous user's id) it's
+  // treated as "loading" rather than reset via an effect.
+  const currentFetch = authUser && fetchState?.forUserId === authUser.id ? fetchState : null;
+
+  // Raw status from auth + the Supabase lookup, before any dev fallback.
+  const rawStatus: MembershipStatus =
+    authUser === undefined
+      ? "loading"
+      : authUser === null
+        ? "unauthenticated"
+        : (currentFetch?.status ?? "loading");
+
+  // Only "no-membership" or "error" ever fall back — and only outside
+  // production. A real "ready" membership always wins; a signed-out/loading
+  // state is never masked.
+  const isDevFallback =
+    DEV_FALLBACK_ALLOWED && (rawStatus === "no-membership" || rawStatus === "error");
+
+  const status: MembershipStatus = isDevFallback ? "ready" : rawStatus;
+
+  const overrides = readOverrides();
+  const baseUser =
+    currentFetch?.status === "ready"
+      ? realUser(currentFetch.membership, authUser?.lastSignInAt ?? null)
+      : devFallbackUser(devRole);
+  const user = applyOverride(baseUser, overrides);
+
+  const organization = currentFetch?.status === "ready" ? currentFetch.membership.organization : null;
+  const errorMessage = currentFetch?.status === "error" ? currentFetch.message : null;
 
   const value: CurrentUserContextValue = {
-    user: { ...base, firstName, lastName, name: `${firstName} ${lastName}` },
+    status,
+    user,
+    organization,
+    isDevFallback,
+    errorMessage,
     setRole,
-    updateProfile: (fields: ProfileOverride) => updateProfile(role, fields),
+    updateProfile: (fields: ProfileOverride) => updateProfile(user.role, fields),
+    retry,
   };
 
   return <CurrentUserContext.Provider value={value}>{children}</CurrentUserContext.Provider>;

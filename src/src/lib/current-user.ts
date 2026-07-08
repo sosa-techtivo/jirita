@@ -3,7 +3,11 @@
 
 export type Role = "ADMIN" | "PROJECT_LEAD" | "MEMBER";
 
-export type Discipline = "Engineer" | "QA" | "Designer" | "Product" | "DevOps" | "Admin";
+// Widened to `string`: the real schema (organization_memberships) has no
+// discipline/job-title column, so a real membership's discipline is derived
+// from its role label instead of one of these fixed mock professions — see
+// current-user-provider.tsx.
+export type Discipline = "Engineer" | "QA" | "Designer" | "Product" | "DevOps" | "Admin" | (string & {});
 
 export interface CurrentUser {
   firstName: string;
@@ -22,6 +26,17 @@ export interface CurrentUser {
 }
 
 const avatar = (id: number) => `https://i.pravatar.cc/64?img=${id}`;
+
+// Neutral placeholder for real members with no `avatar_url` on their
+// profile row — an inline data URI so it never depends on a fake mock photo
+// or an extra network request.
+const FALLBACK_AVATAR_SVG =
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">' +
+  '<rect width="64" height="64" rx="32" fill="#CBD5E1"/>' +
+  '<circle cx="32" cy="25" r="12" fill="#FFFFFF"/>' +
+  '<path d="M10 56c0-13 9.8-22 22-22s22 9 22 22" fill="#FFFFFF"/>' +
+  "</svg>";
+export const FALLBACK_AVATAR = `data:image/svg+xml;utf8,${encodeURIComponent(FALLBACK_AVATAR_SVG)}`;
 
 // One mock user per role so switching roles during development also swaps
 // name/avatar/discipline to something plausible for that role.

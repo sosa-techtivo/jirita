@@ -1,4 +1,4 @@
-> Last Updated: July 2, 2026
+> Last Updated: July 8, 2026
 
 ---
 
@@ -8,19 +8,23 @@
 
 JIRITA is currently in the UI/UX MVP phase.
 
-The application now includes the full shell, a role-based UX layer (Admin / Project Lead / Member), projects listing, role-specific project overviews, a five-view Tickets experience with Task/Bug ticket types, Quick Ticket Preview, Full Ticket Detail with Time Tracking, role-specific Dashboards, role-specific Projects/Reports/Time Tracking screens, a personal My Work workspace, an editable Notes experience, a Settings section, a dedicated Admin-only Users management module, and a single shared Member Profile Modal used everywhere a person is referenced. All implemented screens are navigable and connected using mock data.
+The application now includes the full shell, a role-based UX layer (Admin / Project Lead / Member), projects listing, role-specific project overviews, a five-view Tickets experience with Task/Bug ticket types, Quick Ticket Preview, Full Ticket Detail with Time Tracking, role-specific Dashboards, role-specific Projects/Reports/Time Tracking screens, a personal My Work workspace, an editable Notes experience, a Settings section, a dedicated Admin-only Users management module, a mock authentication flow (Login/Forgot/Reset/Change Password) with a Profile page, and a single shared Member Profile Modal used everywhere a person is referenced. All implemented screens are navigable and connected using mock data.
 
-The current objective is to complete the remaining frontend experience before integrating a real backend.
+The current objective is to complete the remaining frontend experience before connecting a real backend. Backend groundwork has started in parallel: an MVP Supabase schema and initial migration are designed but not yet applied, and a Supabase browser client exists but nothing calls it yet — see Architecture Status.
 
 ---
 
 # Repository Structure
 
 ```
-/product/       — Next.js application (the actual codebase)
-/docs/          — Product documentation
-/prototypes/    — Standalone HTML prototype files
+/src/           — Next.js application (the active codebase — all development happens here)
+/product/       — Read-only reference copy of a prior implementation snapshot
+/prototypes/    — Read-only standalone HTML prototype files
 ```
+
+`/src/docs/` holds implementation-facing documentation for backend work
+(`SUPABASE_MVP_SCHEMA.md`, `SUPABASE_SETUP.md`, `UNFUDDLE_IMPORT_SPECIFICATION.md`)
+— distinct from this file and `CHANGELOG.md`, which live at the `/src` root.
 
 ---
 
@@ -44,7 +48,7 @@ A mock identity layer (`src/lib/current-user.ts`) defines three roles — **Admi
 
 ### Application Foundation
 
-- Next.js application configured (in `/product/`)
+- Next.js application configured (in `/src/`)
 - Light Mode
 - Dark Mode
 - Global layout (`AppShell` component)
@@ -397,9 +401,25 @@ The existing Member Profile Modal (previously wired independently into three scr
 
 ---
 
+### Authentication & Profile
+
+Completed. Routes: `/login`, `/forgot-password`, `/reset-password`, `/change-password`, `/profile`.
+
+A full mock authentication flow, backed by `src/lib/mock-auth.ts` (a single demo password shared by all mock accounts, exposed via `DEMO_CREDENTIALS` and a "Use demo account" button) and gated by `AuthGuard` (`src/components/auth-guard.tsx`), which redirects every `AppShell`-wrapped route to `/login` when no mock session exists in `localStorage`.
+
+- **Login** (`login-screen.tsx`): email/password form with inline validation, "Remember me", a "Use demo account" shortcut, and a link to Forgot Password
+- **Forgot Password** (`forgot-password-screen.tsx`) → **Reset Password** (`reset-password-screen.tsx`): always resolves successfully (mirrors a real backend never revealing whether an email has an account); the reset screen includes a live password-strength meter
+- **Change Password** (`change-password-screen.tsx`): current-password verification (against the shared mock password), new password, and strength meter — reachable from the Profile page's Security section
+- **Profile** (`profile-screen.tsx`): Profile Information (name, email, role, weekly capacity), Preferences (Theme, Default Ticket View), Account (Member Since, Last Login), and Security (Change Password link)
+- Shared building blocks in `src/components/auth/` (`AuthCard`, `AuthTextField`, `AuthPasswordField`, `AuthSubmitButton`, `PasswordStrengthMeter`, `CopyableValue`) so all four auth screens share identical field/button styling
+
+No real backend or server-verified session exists yet — see Architecture Status.
+
+---
+
 # In Progress
 
-Nothing currently in progress.
+Supabase backend groundwork: MVP schema designed (`docs/SUPABASE_MVP_SCHEMA.md`), initial migration written (`supabase/migrations/20260708000000_mvp_schema.sql`), and a Supabase browser client scaffolded (`src/lib/supabase-client.ts`) — none of it connected to the running app yet. The Unfuddle → Jirita import is specified (`docs/UNFUDDLE_IMPORT_SPECIFICATION.md`) but no importer code exists yet.
 
 ---
 
@@ -409,10 +429,10 @@ The following features are documented as planned but do not exist in the codebas
 
 ### Authentication
 
-- Login screen
-- Register screen
-- Forgot Password screen
-- Session persistence
+- Register / Sign Up screen (no self-service account creation — all accounts are pre-seeded mock users)
+- Real, server-verified session persistence (today's "session" is a mock `localStorage` flag — see Architecture Status)
+
+Login, Forgot Password, Reset Password, and Change Password are implemented — see Current Sprint → Completed → Authentication & Profile.
 
 ### Sidebar Navigation
 
@@ -424,11 +444,9 @@ All top-level navigation items (Dashboard, My Work, Projects, Reports, Settings)
 
 # Next Recommended Feature
 
-Authentication.
+Ticket editing — inline status, assignee, and priority changes directly in the ticket detail page. (Authentication, previously recommended here, is now complete — see Current Sprint → Completed → Authentication & Profile.)
 
-A login screen at `/login` that allows users to sign in. Since the app uses mock data, this can be a mock authentication flow with hardcoded credentials, setting the foundation for real auth later.
-
-Alternatively: Ticket editing — inline status, assignee, and priority changes directly in the ticket detail page.
+Alternatively: continue the Supabase backend work already underway — apply the prepared migration to a real project and wire the first real query in behind the existing mock-data seam. See Architecture Status.
 
 ---
 
@@ -439,9 +457,8 @@ Alternatively: Ticket editing — inline status, assignee, and priority changes 
 - Backlog
 - Sprint Planning
 - Releases
-- Milestones
-- Versions
-- Components
+
+Milestones, Versions, and Components were evaluated and explicitly decided against as first-class Jirita entities — see `docs/SUPABASE_MVP_SCHEMA.md` and `docs/UNFUDDLE_IMPORT_SPECIFICATION.md` for the reasoning. Milestone-equivalent grouping stays a free-text field on tickets, not a table.
 
 ## Collaboration
 
@@ -474,6 +491,7 @@ Current stack:
 - React 19
 - TypeScript
 - TailwindCSS v4
+- `@supabase/supabase-js` (installed; not yet used by any screen — see below)
 
 Not installed:
 
@@ -481,9 +499,16 @@ Not installed:
 
 Current data source:
 
-- Mock data only (`/product/src/lib/mock-projects.ts`, `/product/src/lib/mock-tickets.ts`, module-level constants in screen components)
+- Mock data only (`src/lib/mock-projects.ts`, `src/lib/mock-tickets.ts`, and the other `src/lib/mock-*.ts` files; module-level constants in screen components)
 
-Backend integration will happen after the UI reaches MVP completeness.
+Backend integration is being prepared but not yet connected:
+
+- `src/lib/supabase-client.ts` — a lazy Supabase browser client; no screen imports it yet
+- `docs/SUPABASE_MVP_SCHEMA.md` — the target MVP database schema
+- `supabase/migrations/20260708000000_mvp_schema.sql` — implements that schema; not yet applied to any Supabase project (see `docs/SUPABASE_SETUP.md`)
+- `docs/UNFUDDLE_IMPORT_SPECIFICATION.md` — how the Techtivo Unfuddle backup will map onto that schema; no importer code exists yet
+
+The UI still runs entirely on mock data and mock auth until this is wired up.
 
 ---
 
@@ -590,22 +615,20 @@ Current known items:
 - `ProjectOverview`'s Member-role variant (the original, unmodified page) has hardcoded "Mobile Banking App" data; it does not dynamically load project data based on slug. The Admin and Project Lead rebuilds (`admin-project-overview.tsx`, `project-lead-project-overview.tsx`) correctly key off `slug`.
 - Filter chips and search inputs on the Tickets page are UI-only; chips toggle visually but do not filter the ticket list.
 - Ticket Detail page fields are mostly read-only; no inline editing is implemented beyond status transitions.
-- `kanban-board.tsx`, `kanban-column.tsx`, `kanban-card.tsx` are dead code (superseded by the `tickets/` component set).
 - `settings-screen.tsx` (`SettingsScreen` hub component) is retained but no longer rendered — `/settings` redirects directly to `/settings/general`.
 - Settings toggles and fields are visual only; no state persists between page loads.
-- Role-based UX (`current-user.ts`, `nav-config.ts`) is a mock identity layer only — no real auth or server-side permission enforcement exists. The `RoleSwitcher` in the header is a dev-only affordance and should be removed or gated before any real backend integration.
+- Role-based UX (`current-user.ts`, `nav-config.ts`) is a mock identity layer only — no real auth or server-side permission enforcement exists. The `RoleSwitcher` in the header is a dev-only affordance and should be removed or gated before any real backend integration. (The Supabase migration's RLS policies, per `docs/SUPABASE_MVP_SCHEMA.md`, mirror this same three-role model as the intended real enforcement layer — not yet applied.)
 - Note "Duplicate" and "Delete" menu actions in `NoteDetailModal` are visual stubs with no effect.
 
 Planned future work:
 
-- Backend integration
-- Authentication
-- Database
+- Backend integration (Supabase schema + migration prepared, not yet applied or connected — see `docs/SUPABASE_MVP_SCHEMA.md`, `docs/SUPABASE_SETUP.md`)
 - API layer
 - Real drag & drop (Kanban)
 - Real-time updates
 - Notifications
 - File uploads
+- Unfuddle data import (spec complete — see `docs/UNFUDDLE_IMPORT_SPECIFICATION.md`; importer not yet built)
 
 ---
 
@@ -613,9 +636,9 @@ Planned future work:
 
 Expected high-change areas:
 
-- `product/src/app/`
-- `product/src/components/`
-- `product/src/lib/`
+- `src/app/`
+- `src/components/`
+- `src/lib/`
 
 ---
 
@@ -625,10 +648,11 @@ Complete every major screen required for a usable project management platform be
 
 Remaining priority order:
 
-1. Authentication
-2. Ticket editing (inline status, assignee, priority changes)
-3. Backlog / Sprint Planning
-4. Per-project Reports, Milestones, Notes, Team pages
+1. Ticket editing (inline status, assignee, priority changes)
+2. Backlog / Sprint Planning
+3. Per-project Reports, Notes, Team pages refinements
+
+(Authentication, previously first on this list, is now complete.)
 
 ---
 

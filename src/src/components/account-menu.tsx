@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { clearAuthSession } from "@/lib/mock-auth";
+import { logout } from "@/lib/auth";
 import { useCurrentUser } from "@/components/current-user-provider";
 
 // Header avatar → small account popover with a Logout action. Modeled on
@@ -33,8 +33,8 @@ export function AccountMenu() {
     };
   }, [isOpen]);
 
-  function handleLogout() {
-    clearAuthSession();
+  async function handleLogout() {
+    await logout();
     router.push("/login");
   }
 

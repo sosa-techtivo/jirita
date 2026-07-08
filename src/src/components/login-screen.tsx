@@ -1,14 +1,13 @@
 "use client";
 
-import { useRef, useState, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AuthCard } from "@/components/auth/auth-card";
 import { AuthTextField } from "@/components/auth/text-field";
 import { AuthPasswordField } from "@/components/auth/password-field";
-import { AuthSubmitButton, AuthSecondaryButton } from "@/components/auth/auth-button";
-import { CopyableValue } from "@/components/auth/copy-value";
-import { AuthError, DEMO_CREDENTIALS, isValidEmail, mockLogin, saveAuthSession } from "@/lib/mock-auth";
+import { AuthSubmitButton } from "@/components/auth/auth-button";
+import { AuthError, isValidEmail, login } from "@/lib/auth";
 
 interface FieldErrors {
   email?: string;
@@ -25,7 +24,6 @@ function validate(email: string, password: string): FieldErrors {
 
 export function LoginScreen() {
   const router = useRouter();
-  const submitButtonRef = useRef<HTMLButtonElement>(null);
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -33,14 +31,6 @@ export function LoginScreen() {
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-
-  function handleUseDemoAccount() {
-    setEmail(DEMO_CREDENTIALS.email);
-    setPassword(DEMO_CREDENTIALS.password);
-    setFieldErrors({});
-    setFormError(null);
-    submitButtonRef.current?.focus();
-  }
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -52,9 +42,8 @@ export function LoginScreen() {
 
     setLoading(true);
     try {
-      const user = await mockLogin(email, password);
+      await login(email, password);
       window.localStorage.setItem("jirita:remember-me", rememberMe ? "true" : "false");
-      saveAuthSession(user);
       router.push("/dashboard");
     } catch (err) {
       setFormError(err instanceof AuthError ? err.message : "Something went wrong. Please try again.");
@@ -138,25 +127,10 @@ export function LoginScreen() {
           <span className="text-[13px] text-slate-600 dark:text-zinc-400">Remember me</span>
         </label>
 
-        <AuthSubmitButton ref={submitButtonRef} loading={loading}>
+        <AuthSubmitButton loading={loading}>
           {loading ? "Signing in…" : "Sign In"}
         </AuthSubmitButton>
       </form>
-
-      <div className="mt-6 pt-5 border-t border-slate-100 dark:border-zinc-800">
-        <div className="rounded-xl border border-slate-200 dark:border-zinc-800 bg-slate-50/60 dark:bg-zinc-900/40 p-3.5">
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-zinc-400 mb-2.5">
-            Prototype credentials
-          </p>
-          <div className="space-y-2">
-            <CopyableValue label="Email" value={DEMO_CREDENTIALS.email} />
-            <CopyableValue label="Password" value={DEMO_CREDENTIALS.password} />
-          </div>
-          <div className="mt-3">
-            <AuthSecondaryButton onClick={handleUseDemoAccount}>Use demo account</AuthSecondaryButton>
-          </div>
-        </div>
-      </div>
     </AuthCard>
   );
 }
