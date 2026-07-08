@@ -32,9 +32,15 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
 
 # vercel
 .vercel
+
+# supabase CLI local state (project link cache — machine-local, not a secret
+# but not something to track either)
+supabase/.temp
+supabase/.branches
 
 # typescript
 *.tsbuildinfo
