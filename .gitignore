@@ -1,0 +1,10 @@
+# Local migration files
+unfuddle - migrations/
+
+# Backup files
+backup.xml
+*.tar.gz
+*.tar.gz.*
+
+# OS files
+.DS_Store
