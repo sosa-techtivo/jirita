@@ -286,10 +286,13 @@ However, simplicity must remain the defining characteristic of the platform.
 
 # Backend Integration Status
 
-Supabase Auth + real profile/organization-membership data are connected and
-confirmed working end-to-end against a live Supabase project. Projects,
-tickets, dashboard, reports, users, and settings are all still unconnected
-mock data.
+Supabase Auth, real profile/organization-membership data, and Projects
+(Sidebar, the `/projects` list, and Project Settings) are connected and
+confirmed working end-to-end against a live Supabase project. Tickets,
+Dashboard, Reports, Users, and the rest of Settings are still unconnected
+mock data — see "Still mock" below for the exact boundary within Projects
+itself (Project Overview/Tickets/Notes/Team/per-project Reports are not
+part of this).
 
 ## Confirmed working (login/logout, profile, avatar, change password)
 
@@ -335,10 +338,86 @@ mock data.
   bug that blocked uploads, fixed in the second file). See
   `docs/SUPABASE_SETUP.md` for how to apply migrations to a new project.
 
+## Confirmed working (Projects — Sidebar, `/projects` list, Project Settings)
+
+Scoped narrowly: only the Sidebar's pinned project list, the `/projects`
+page, and `/projects/[slug]/settings` read/write real data. Project
+Overview, Tickets, Notes, Team, and per-project Reports still import
+`src/lib/mock-projects.ts` directly and are unaffected — see "Still mock".
+
+- `src/lib/projects.ts` — all real Projects reads/writes:
+  `loadOrganizationProjects` (org-scoped list; RLS alone decides who sees
+  what — Admin sees every org project, Project Lead/Member only see
+  projects they're staffed on via `project_memberships` — so there's no
+  client-side role filtering), `createProject` (name + description only;
+  slug/project_code auto-derived from the name), `updateProject` (the
+  Projects list's Edit modal: name + description only), `archiveProject` /
+  `restoreProject` (status only — nothing is ever deleted), plus, for
+  Project Settings specifically: `loadProjectDetail` + `updateProjectSettings`
+  (name, description, project code, status, category, client, billing
+  rate, project lead — `updateProjectSettings`'s status field is typed to
+  exclude `"archived"`, so that transition is structurally only reachable
+  through `archiveProject`/`restoreProject`, never a parallel path),
+  `loadOrganizationMembers` (Project Lead picker roster), and
+  `loadOrganizationClients` / `createOrganizationClient` (Billing → Client,
+  backed by the `clients` table below).
+- `src/components/organization-projects-provider.tsx` —
+  `OrganizationProjectsProvider`, mounted in `layout.tsx` next to
+  `CurrentUserProvider`, holds the org's project list once so Sidebar and
+  `/projects` always show the exact same data; every write refetches
+  through it afterward, which is also how edits made in Project Settings
+  propagate to Sidebar, `/projects`, and the settings page's own
+  breadcrumb without any extra wiring. **Dev-only fallback:** same pattern
+  as `CurrentUserProvider` — no real organization falls back to the old
+  mock `projects` array (in-memory only, never in production).
+- `src/components/create-project-modal.tsx` — Create *and* Edit Project (an
+  `editingProject` prop switches modes, mirroring `invite-user-modal.tsx`'s
+  `editingUser` pattern).
+- `src/components/archive-project-modal.tsx` — the Archive confirmation
+  modal, reused as-is by both the Projects list row menu and Project
+  Settings' Danger Zone (never duplicated). Restore has no confirmation
+  step — the menu item / Danger Zone button call `restoreProject` directly.
+- `src/components/project-settings-screen.tsx` — real General (Project
+  Name, Description, Project Code, Status, Project Lead) and Billing
+  (Project Category, Client, Billing Rate) editing, plus a real "Save
+  Changes" button (none existed before this). Also exports
+  `ProjectSettingsBreadcrumb`, a client component reading from the shared
+  provider so the breadcrumb never shows a stale server-rendered name.
+- `src/components/settings-ui.tsx` — `SelectField`/`TextField`/
+  `NumberField` gained an optional `onChange` (`SelectField` also gained
+  `options`) to become real controlled inputs; every existing call site
+  that doesn't pass them (the org-wide `/settings/*` pages) keeps its
+  original display-only rendering, unchanged.
+- `src/components/add-client-modal.tsx` — the minimal "+ Add new client"
+  flow from Project Settings' Client selector: name only, created
+  immediately in Supabase and selected in the form, persisted to the
+  project's `client_name` on the next Save like every other field on that
+  screen (no separate/hidden write path).
+- Migrations (in addition to the ones above, all confirmed against the
+  live project): `20260712000000_grant_authenticated_projects_read.sql`,
+  `20260713000000_grant_authenticated_projects_insert.sql`,
+  `20260714000000_fix_projects_select_rls_self_reference.sql` (real bug
+  fix: `projects_select`'s helper function re-queried `projects` from
+  within its own policy, which silently broke `INSERT`/`UPDATE ...
+  RETURNING` — even for a genuine org admin — because Postgres evaluates
+  the RETURNING-time SELECT check against the row being written in the
+  same command, and that self-reference doesn't reliably see it yet;
+  rewritten to check the row's own columns directly instead),
+  `20260715000000_grant_authenticated_projects_update.sql`,
+  `20260716000000_add_clients_table.sql` (new `clients` table —
+  deliberately not a foreign key on `projects`; `client_name` stays free
+  text, this table only supplies a real per-org roster and basic
+  duplicate-by-name prevention).
+
 ## Still mock
 
-- Projects, tickets, dashboard, reports, users, and settings all still read
-  from `src/lib/mock-*.ts` — do not assume otherwise.
+- Tickets, Dashboard, Reports, Users, and the rest of Settings
+  (`/settings/*`) all still read from `src/lib/mock-*.ts` — do not assume
+  otherwise.
+- Within Projects itself: Project Overview (`/projects/[slug]`), Tickets,
+  Notes, Team, and per-project Reports still import
+  `src/lib/mock-projects.ts` directly — only the Sidebar, `/projects`, and
+  `/projects/[slug]/settings` are real (see above).
 - `docs/UNFUDDLE_IMPORT_SPECIFICATION.md` defines how Techtivo's Unfuddle
   backup maps onto the schema for the eventual data migration. No importer
   code exists yet, and it leaves several product decisions (orphaned

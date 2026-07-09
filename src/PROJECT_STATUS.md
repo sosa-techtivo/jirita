@@ -1,4 +1,4 @@
-> Last Updated: July 11, 2026
+> Last Updated: July 16, 2026
 
 ---
 
@@ -8,9 +8,9 @@
 
 JIRITA is currently in the UI/UX MVP phase.
 
-The application now includes the full shell, a role-based UX layer (Admin / Project Lead / Member), projects listing, role-specific project overviews, a five-view Tickets experience with Task/Bug ticket types, Quick Ticket Preview, Full Ticket Detail with Time Tracking, role-specific Dashboards, role-specific Projects/Reports/Time Tracking screens, a personal My Work workspace, an editable Notes experience, a Settings section, a dedicated Admin-only Users management module, a real Supabase Auth flow (Login/Logout/Forgot/Reset/Change Password) with a Profile page that saves real data, and a single shared Member Profile Modal used everywhere a person is referenced. All implemented screens are navigable and connected using mock data, except Auth/Profile which are now backed by a live Supabase project — see Architecture Status.
+The application now includes the full shell, a role-based UX layer (Admin / Project Lead / Member), projects listing, role-specific project overviews, a five-view Tickets experience with Task/Bug ticket types, Quick Ticket Preview, Full Ticket Detail with Time Tracking, role-specific Dashboards, role-specific Projects/Reports/Time Tracking screens, a personal My Work workspace, an editable Notes experience, a Settings section, a per-project Settings screen, a dedicated Admin-only Users management module, a real Supabase Auth flow (Login/Logout/Forgot/Reset/Change Password) with a Profile page that saves real data, and a single shared Member Profile Modal used everywhere a person is referenced. Auth/Profile, and now Projects (Sidebar, the `/projects` list, and per-project Settings), are backed by a live Supabase project; every other screen is still navigable and connected using mock data — see Architecture Status.
 
-The current objective is to complete the remaining frontend experience while continuing backend integration. Auth, profile/organization-membership data, avatar upload, and change password are confirmed working end-to-end against a live Supabase project; projects, tickets, dashboard, reports, users, and settings are still mock data — see Architecture Status.
+The current objective is to complete the remaining frontend experience while continuing backend integration. Auth, profile/organization-membership data, avatar upload, and change password are confirmed working end-to-end against a live Supabase project. Projects has followed the same path: Sidebar, the `/projects` list, and `/projects/[slug]/settings` now read and write real project rows (create, edit, archive/restore, and per-project Settings' General/Billing fields, including a minimal real Clients roster). Project Overview, Tickets, Notes, Team, per-project Reports, Dashboard, company-wide Reports, Users, and the rest of Settings are still mock data — see Architecture Status.
 
 ---
 
@@ -57,30 +57,49 @@ Role comes from a real Supabase `organization_membership` when the signed-in use
 
 ### Projects
 
-Completed. Route: `/projects`. `ProjectsListScreen` now branches by role rather than showing a permissions-filtered version of one table.
+Completed, and now backed by real Supabase data (Sidebar + `/projects` list — see Architecture Status for the full read/write/RLS breakdown). `ProjectsListScreen` still branches by role rather than showing a permissions-filtered version of one table.
 
 #### Admin
 
-- Full workspace projects table
+- Full workspace projects table, sourced from the real `projects` table for the signed-in user's organization
 - Search input (UI only, not wired)
-- Filter chips (UI only, not wired)
+- Filter chips (UI only, not wired) — Status filter now doubles as the only way to bring archived projects back into view (see Archive/Restore below)
 - Project cards / rows, empty states
+- **+ Create Project** opens a real modal (`create-project-modal.tsx`); the row **⋯** menu's **Edit** opens the same modal pre-filled (`editingProject` prop); **Archive**/**Restore** swap based on the project's real status
 - Navigation into Project Details
 
 #### Project Lead
 
-- Scoped to the Lead's own owned projects (`LEAD_PROJECT_SLUGS`), block-organized instead of a flat table
-- Team and health context surfaced per project
+- Real projects scoped by RLS (`project_memberships`) rather than the old client-side `LEAD_PROJECT_SLUGS` filter — the list itself now only ever contains what the query returns, no additional filtering in the component. `LEAD_PROJECT_SLUGS` still exists and is used by `project-lead-dashboard.tsx`/`project-lead-reports-screen.tsx` (still mock, unaffected) and by this screen's own team-capacity summary-cell math — see Technical Debt for the resulting dev-fallback mismatch.
+- Block-organized instead of a flat table; team and health context surfaced per project
 - Quick actions (`+ New Ticket` instead of `+ Create Project`)
-- Archived status excluded from the status filter set
+- Archived status excluded from the status filter set — Project Leads never see archived projects at all, by design
 
-#### Member — `member-projects-screen.tsx` (new)
+#### Member — `member-projects-screen.tsx`
 
 A dedicated "My Projects" screen, not a filtered Admin/Lead table.
 
 - Shows only projects the Member is staffed on
 - Surfaces who leads each project
 - Surfaces what's assigned to the Member within each project
+
+#### Create, Edit, Archive, Restore
+
+- **Create**: `create-project-modal.tsx` — name + optional description; status starts `active`; slug/project code auto-derived from the name
+- **Edit**: the same modal, `editingProject` prop pre-fills name/description
+- **Archive**: `archive-project-modal.tsx` — confirmation modal (project hidden from the active list; tickets/comments/activity/time tracking untouched; restorable later), reused unchanged by both the Projects list row menu and Project Settings' Danger Zone
+- **Restore**: no confirmation — a direct action from the row menu / Danger Zone
+- Sidebar's pinned project list and the `/projects` page share one `OrganizationProjectsProvider` (`src/components/organization-projects-provider.tsx`), so any create/edit/archive/restore is reflected in both immediately
+
+#### Project Settings — `project-settings-screen.tsx`
+
+Route: `/projects/[slug]/settings`, Admin/Project Lead only. Previously a fully mock, non-interactive page (uncontrolled inputs, no Save button at all); now reads and writes the real project.
+
+- **General**: Project Name, Description, Project Code, Status (excludes `archived` — that transition only ever happens via the reused Archive/Restore flow, never a parallel path here), Project Lead (a real picker over the organization's active members)
+- **Billing**: Project Category (Client/Internal toggle), Client (a real per-organization roster — see "+ Add new client" below), Billing Rate. The Billable/Non-Billable-by-default note stays derived from Category, not a stored field
+- A single **Save Changes** button (didn't exist before) persists only the fields this screen manages; the breadcrumb (`ProjectSettingsBreadcrumb`) reads the live project name from the same shared provider Sidebar/`/projects` use, so a rename shows up there immediately too
+- **+ Add new client** (`add-client-modal.tsx`): minimal name-only creation, backed by a new `clients` table (see Architecture Status) — created immediately and selected in the form; persisted to the project on the next Save like any other field. Basic per-organization duplicate names are rejected.
+- Danger Zone's Archive/Restore reuses `archive-project-modal.tsx`/`restoreProject` exactly as on the Projects list — no separate implementation
 
 ### Project Overview
 
@@ -422,7 +441,7 @@ See Architecture Status for the full list of applied migrations.
 
 # In Progress
 
-Nothing currently in progress. Auth/profile/avatar backend integration (see Current Sprint → Completed → Authentication & Profile) is done and confirmed working. Next candidate is wiring Projects/Tickets to the same Supabase schema — see Next Recommended Feature. The Unfuddle → Jirita import is specified (`docs/UNFUDDLE_IMPORT_SPECIFICATION.md`) but no importer code exists yet.
+Nothing currently in progress. Auth/profile/avatar and Projects (Sidebar, `/projects`, per-project Settings) backend integration are done and confirmed working — see Current Sprint → Completed → Authentication & Profile / Projects / Project Settings. Next candidate is wiring Tickets to the same Supabase schema — see Next Recommended Feature. The Unfuddle → Jirita import is specified (`docs/UNFUDDLE_IMPORT_SPECIFICATION.md`) but no importer code exists yet.
 
 ---
 
@@ -449,7 +468,7 @@ All top-level navigation items (Dashboard, My Work, Projects, Reports, Settings)
 
 Ticket editing — inline status, assignee, and priority changes directly in the ticket detail page. (Authentication, previously recommended here, is now complete and confirmed working against a live Supabase project — see Current Sprint → Completed → Authentication & Profile.)
 
-Alternatively: continue the Supabase backend work already underway — Projects is the natural next mock-to-real seam to wire, following the same pattern established for profiles/organization_memberships (real query + minimum-privilege grants + RLS, with a dev-only mock fallback until it's fully connected). See Architecture Status.
+Alternatively: continue the Supabase backend work already underway — Tickets is the natural next mock-to-real seam to wire, following the same pattern established for profiles/organization_memberships and now Projects (real query + minimum-privilege grants + RLS, with a dev-only mock fallback until it's fully connected). Wiring Tickets would also let Project Overview/per-project Reports/Dashboard pick up real numbers instead of the `openTickets`/`blockedTickets`/`progress`/etc. fields Projects' own real data still defaults to 0 (see Architecture Status). See Architecture Status.
 
 ---
 
@@ -486,7 +505,7 @@ Milestones, Versions, and Components were evaluated and explicitly decided again
 
 # Architecture Status
 
-Current architecture follows a frontend-first approach, with Auth/Profile now a real exception — see below.
+Current architecture follows a frontend-first approach, with Auth/Profile and now Projects as real exceptions — see below.
 
 Current stack:
 
@@ -494,7 +513,7 @@ Current stack:
 - React 19
 - TypeScript
 - TailwindCSS v4
-- `@supabase/supabase-js` — used by `src/lib/auth.ts`, `src/lib/membership.ts`, and `src/lib/avatar-upload.ts`
+- `@supabase/supabase-js` — used by `src/lib/auth.ts`, `src/lib/membership.ts`, `src/lib/avatar-upload.ts`, and `src/lib/projects.ts`
 
 Not installed:
 
@@ -502,20 +521,23 @@ Not installed:
 
 Current data source:
 
-- **Real Supabase**: authentication/session, `profiles`, `organization_memberships`, `organizations`, and the `avatars` Storage bucket — confirmed working end-to-end against a live project.
-- **Mock data** (everything else): `src/lib/mock-projects.ts`, `src/lib/mock-tickets.ts`, and the other `src/lib/mock-*.ts` files; module-level constants in screen components.
+- **Real Supabase**: authentication/session, `profiles`, `organization_memberships`, `organizations`, the `avatars` Storage bucket, `projects`, and `clients` — confirmed working end-to-end against a live project. Real coverage of `projects` is scoped to the Sidebar, the `/projects` list, and `/projects/[slug]/settings` only — Project Overview, Tickets, Notes, Team, and per-project Reports still read `mock-projects.ts` directly.
+- **Mock data** (everything else): `src/lib/mock-projects.ts` (still the source for Project Overview/Tickets/Notes/Team/per-project Reports), `src/lib/mock-tickets.ts`, and the other `src/lib/mock-*.ts` files; module-level constants in screen components.
 
 Backend integration, connected and confirmed working:
 
-- `src/lib/supabase-client.ts` — the lazy Supabase browser client, now imported by `auth.ts`/`membership.ts`/`avatar-upload.ts`
+- `src/lib/supabase-client.ts` — the lazy Supabase browser client, now imported by `auth.ts`/`membership.ts`/`avatar-upload.ts`/`projects.ts`
 - `src/lib/auth.ts` — login, logout, session (`onAuthStateChange`), forgot/reset password, and change password (verified via re-authentication, never a manual password comparison)
 - `src/lib/membership.ts` — loads a signed-in user's `profiles` + active `organization_memberships` + `organizations` row, and writes real updates (name, weekly capacity via a security-definer RPC, avatar path)
 - `src/lib/avatar-upload.ts` — client-side validate/resize (Canvas, no new dependency)/upload to Supabase Storage
 - `src/components/current-user-provider.tsx` / `src/components/auth-guard.tsx` — real membership drives `CurrentUser` and route gating, with a dev-only mock fallback (never in production) so local dev isn't blocked on seeded data
-- Applied migrations, in order: `20260708000000_mvp_schema.sql` (base schema + RLS), `20260708010000_grant_authenticated_membership_read.sql` (SELECT grants — RLS alone doesn't grant table privileges), `20260709000000_profile_self_service_updates.sql` (self-service name/capacity writes), `20260710000000_avatars_storage.sql` + `20260711000000_fix_avatars_storage_policies.sql` (the `avatars` bucket and its RLS policies — first pass had a policy bug blocking uploads, fixed in the second file). See `docs/SUPABASE_SETUP.md` for how to apply migrations to a new project.
+- `src/lib/projects.ts` — all real Projects reads/writes: `loadOrganizationProjects` (org-scoped list, RLS decides who sees what — no client-side role filtering), `createProject`/`updateProject` (Projects list Create/Edit modal: name + description), `archiveProject`/`restoreProject` (status only), `loadProjectDetail`/`updateProjectSettings` (Project Settings' General/Billing fields — status writes here structurally exclude `"archived"`), `loadOrganizationMembers` (Project Lead picker), `loadOrganizationClients`/`createOrganizationClient` (Billing → Client roster)
+- `src/components/organization-projects-provider.tsx` — `OrganizationProjectsProvider`, mounted in `layout.tsx` next to `CurrentUserProvider`; Sidebar, `/projects`, and the Project Settings breadcrumb all read the same fetched list, so any write anywhere refetches once and every surface updates together. Dev-only mock fallback, same convention as `CurrentUserProvider`.
+- `src/components/create-project-modal.tsx` / `archive-project-modal.tsx` / `add-client-modal.tsx` — Create/Edit Project, Archive confirmation (reused unchanged by Project Settings' Danger Zone), and the minimal "+ Add new client" flow, respectively
+- Applied migrations, in order: `20260708000000_mvp_schema.sql` (base schema + RLS), `20260708010000_grant_authenticated_membership_read.sql` (SELECT grants — RLS alone doesn't grant table privileges), `20260709000000_profile_self_service_updates.sql` (self-service name/capacity writes), `20260710000000_avatars_storage.sql` + `20260711000000_fix_avatars_storage_policies.sql` (the `avatars` bucket and its RLS policies — first pass had a policy bug blocking uploads, fixed in the second file), `20260712000000_grant_authenticated_projects_read.sql`, `20260713000000_grant_authenticated_projects_insert.sql`, `20260714000000_fix_projects_select_rls_self_reference.sql` (real bug fix — `projects_select`'s helper function re-queried `projects` from within its own policy, which broke `INSERT`/`UPDATE ... RETURNING` specifically because Postgres evaluates the RETURNING-time SELECT check against the row being written in the same command and that self-reference doesn't reliably see it yet; rewritten to check the row's own columns directly), `20260715000000_grant_authenticated_projects_update.sql`, `20260716000000_add_clients_table.sql` (new `clients` table — not a foreign key on `projects`; `client_name` stays free text). See `docs/SUPABASE_SETUP.md` for how to apply migrations to a new project.
 - `docs/UNFUDDLE_IMPORT_SPECIFICATION.md` — how the Techtivo Unfuddle backup will map onto the schema; no importer code exists yet
 
-Everything except Auth/Profile/Avatar still runs entirely on mock data — projects, tickets, dashboard, reports, users, and settings are not connected.
+Everything except Auth/Profile/Avatar and Projects (Sidebar/`/projects`/Project Settings) still runs entirely on mock data — Project Overview, Tickets, Notes, Team, per-project Reports, Dashboard, company-wide Reports, Users, and the rest of Settings are not connected. Note also that Projects' own real rows don't yet populate `openTickets`/`blockedTickets`/`overdueTickets`/`awaitingReviewTickets`/`dueThisWeekTickets`/`progress`/`activeMilestones` — those are derived from `tickets` by design and default to 0 until Tickets is wired (see `docs/SUPABASE_MVP_SCHEMA.md`).
 
 ---
 
@@ -623,13 +645,15 @@ Current known items:
 - Filter chips and search inputs on the Tickets page are UI-only; chips toggle visually but do not filter the ticket list.
 - Ticket Detail page fields are mostly read-only; no inline editing is implemented beyond status transitions.
 - `settings-screen.tsx` (`SettingsScreen` hub component) is retained but no longer rendered — `/settings` redirects directly to `/settings/general`.
-- Settings toggles and fields are visual only; no state persists between page loads.
+- Org-wide Settings (`/settings/*`) toggles and fields are visual only; no state persists between page loads. (Project Settings — `/projects/[slug]/settings` — is the one exception: it's real and persists, see Current Sprint → Completed → Project Settings.)
 - Role now comes from a real `organization_membership` when one exists; `current-user.ts`'s mock identities are a dev-only fallback (never in production) rather than the only source of truth. **Resolved**: the `RoleSwitcher` is now gated behind `isDevFallback` (only renders, with a visible "Dev fallback" badge, when there's no real membership) instead of always showing. No real server-side permission enforcement is wired into the UI yet for projects/tickets/etc. — the RLS policies in `supabase/migrations/20260708000000_mvp_schema.sql` are applied and enforce tenant isolation at the DB layer, but the UI doesn't call any of those tables yet.
 - Note "Duplicate" and "Delete" menu actions in `NoteDetailModal` are visual stubs with no effect.
+- In dev fallback only (no real organization membership — never in production): the Projects list no longer filters by the old `LEAD_PROJECT_SLUGS` array (removed since real data is scoped by RLS instead), so a Project Lead testing without a seeded Supabase project now sees the full mock projects list rather than just their 3 owned slugs, while the summary cells (Blocked Tickets, Due This Week, Team Members Over Capacity) still compute against the `LEAD_PROJECT_SLUGS`-scoped team aggregation — a minor mismatch specific to unauthenticated/dev-fallback local testing, not the real-org path.
+- Projects' real rows don't populate ticket-derived fields (`openTickets`, `blockedTickets`, `overdueTickets`, `awaitingReviewTickets`, `dueThisWeekTickets`, `progress`, `activeMilestones`) — they default to 0 until Tickets is wired to Supabase (by schema design, see `docs/SUPABASE_MVP_SCHEMA.md`), so the Projects list currently shows 0/empty progress bars for real projects on those specific fields.
 
 Planned future work:
 
-- Backend integration for Projects/Tickets/Dashboard/Reports/Users/Settings (Auth/Profile/Avatar are done — see Architecture Status; schema for the rest is designed in `docs/SUPABASE_MVP_SCHEMA.md` and applied via `supabase/migrations/20260708000000_mvp_schema.sql`, just not queried by the UI yet)
+- Backend integration for Tickets/Dashboard/Reports/Users/Settings, and for the still-mock parts of Projects itself (Project Overview, Notes, Team, per-project Reports) (Auth/Profile/Avatar and Projects' Sidebar/`/projects`/Settings are done — see Architecture Status; schema for the rest is designed in `docs/SUPABASE_MVP_SCHEMA.md` and applied via `supabase/migrations/20260708000000_mvp_schema.sql`, just not queried by the UI yet)
 - API layer
 - Real drag & drop (Kanban)
 - Real-time updates
