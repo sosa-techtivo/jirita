@@ -14,6 +14,7 @@ import { getTeamByProjectSlug } from "@/lib/mock-team";
 import { LEAD_PROJECT_SLUGS, aggregateTeam } from "@/components/project-lead-dashboard";
 import { MemberProjectsScreen } from "@/components/member-projects-screen";
 import { CreateProjectModal } from "@/components/create-project-modal";
+import { ArchiveProjectModal } from "@/components/archive-project-modal";
 
 const STATUS_ORDER: ProjectStatus[] = ["planning", "active", "on-hold", "completed", "archived"];
 const PRIORITY_ORDER: ProjectPriority[] = ["critical", "high", "medium", "low"];
@@ -85,7 +86,7 @@ function ProjectsErrorState({ message, onRetry }: { message: string | null; onRe
 
 function ManagedProjectsScreen() {
   const { user } = useCurrentUser();
-  const { projects: allProjects } = useOrganizationProjects();
+  const { projects: allProjects, restoreProject } = useOrganizationProjects();
   const isProjectLead = user.role === "PROJECT_LEAD";
   const canCreateProject = canManage(user.role);
   const [search, setSearch] = useState("");
@@ -95,6 +96,7 @@ function ManagedProjectsScreen() {
   const [sortBy, setSortBy] = useState<string[]>([]);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [editingProject, setEditingProject] = useState<ProjectSummary | null>(null);
+  const [archivingProject, setArchivingProject] = useState<ProjectSummary | null>(null);
   const searchId = useId();
 
   // RLS on `projects` already scopes rows per role (Admin sees the whole
@@ -188,7 +190,12 @@ function ManagedProjectsScreen() {
   const query = search.trim().toLowerCase();
   const filtered = baseProjects
     .filter((project) => {
-      const matchesStatus = statusFilter.length === 0 || statusFilter.includes(project.status);
+      // Archived projects are hidden from the main list by default — same
+      // as the "archived" status never being a selectable filter chip for
+      // Project Lead — but Admin can still bring them back into view via
+      // the Status filter dropdown.
+      const matchesStatus =
+        statusFilter.length === 0 ? project.status !== "archived" : statusFilter.includes(project.status);
       const matchesLead = leadFilter.length === 0 || leadFilter.includes(project.owner.name);
       const matchesPriority = priorityFilter.length === 0 || priorityFilter.includes(project.priority);
       const matchesSearch =
@@ -281,7 +288,13 @@ function ManagedProjectsScreen() {
               isProjectLead ? (
                 <LeadProjectRow key={project.slug} project={project} />
               ) : (
-                <ProjectRow key={project.slug} project={project} onEdit={setEditingProject} />
+                <ProjectRow
+                  key={project.slug}
+                  project={project}
+                  onEdit={setEditingProject}
+                  onArchive={setArchivingProject}
+                  onRestore={(p) => restoreProject(p.slug)}
+                />
               )
             )}
           </div>
@@ -291,6 +304,9 @@ function ManagedProjectsScreen() {
       {showCreateModal && <CreateProjectModal onClose={() => setShowCreateModal(false)} />}
       {editingProject && (
         <CreateProjectModal editingProject={editingProject} onClose={() => setEditingProject(null)} />
+      )}
+      {archivingProject && (
+        <ArchiveProjectModal project={archivingProject} onClose={() => setArchivingProject(null)} />
       )}
     </div>
   );
@@ -313,7 +329,17 @@ function SummaryRow({ cells }: { cells: { label: string; value: number; classNam
 
 const ROW_GRID_COLS = "sm:grid-cols-[minmax(0,1fr)_96px_116px_172px_60px_32px]";
 
-function ProjectRow({ project, onEdit }: { project: ProjectSummary; onEdit: (project: ProjectSummary) => void }) {
+function ProjectRow({
+  project,
+  onEdit,
+  onArchive,
+  onRestore,
+}: {
+  project: ProjectSummary;
+  onEdit: (project: ProjectSummary) => void;
+  onArchive: (project: ProjectSummary) => void;
+  onRestore: (project: ProjectSummary) => void;
+}) {
   const router = useRouter();
 
   return (
@@ -372,7 +398,7 @@ function ProjectRow({ project, onEdit }: { project: ProjectSummary; onEdit: (pro
       <span className="hidden sm:inline text-xs text-slate-400 dark:text-zinc-500">{project.targetDate}</span>
 
       <div className="flex items-center justify-end">
-        <ProjectMenu project={project} isProjectLead={false} onEdit={onEdit} />
+        <ProjectMenu project={project} isProjectLead={false} onEdit={onEdit} onArchive={onArchive} onRestore={onRestore} />
       </div>
     </div>
   );
@@ -483,10 +509,14 @@ function ProjectMenu({
   project,
   isProjectLead,
   onEdit,
+  onArchive,
+  onRestore,
 }: {
   project: ProjectSummary;
   isProjectLead: boolean;
   onEdit?: (project: ProjectSummary) => void;
+  onArchive?: (project: ProjectSummary) => void;
+  onRestore?: (project: ProjectSummary) => void;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -518,8 +548,22 @@ function ProjectMenu({
             onEdit?.(project);
           },
         },
-        { label: "Duplicate", onClick: () => setOpen(false) },
-        { label: "Archive", onClick: () => setOpen(false), danger: true },
+        project.status === "archived"
+          ? {
+              label: "Restore",
+              onClick: () => {
+                setOpen(false);
+                onRestore?.(project);
+              },
+            }
+          : {
+              label: "Archive",
+              onClick: () => {
+                setOpen(false);
+                onArchive?.(project);
+              },
+              danger: true,
+            },
       ];
 
   return (

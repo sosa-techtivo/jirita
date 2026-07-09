@@ -1,10 +1,43 @@
 "use client";
 
-import { useState } from "react";
-import { getProjectBySlug } from "@/lib/mock-projects";
-import type { ProjectCategory } from "@/lib/mock-projects";
+import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
+import { CLIENT_NAMES } from "@/lib/mock-projects";
+import type { ProjectCategory, ProjectStatus } from "@/lib/mock-projects";
 import { statusMeta, ProjectCategoryBadge } from "@/components/status-badge";
 import { SettingGroup, SettingRow, TextField, NumberField, SelectField } from "@/components/settings-ui";
+import { useCurrentUser } from "@/components/current-user-provider";
+import { useOrganizationProjects } from "@/components/organization-projects-provider";
+import { loadProjectDetail, loadOrganizationMembers, loadOrganizationClients, createOrganizationClient } from "@/lib/projects";
+import type { ProjectDetail, OrgMember, EditableProjectStatus, Client } from "@/lib/projects";
+import { ArchiveProjectModal } from "@/components/archive-project-modal";
+import { AddClientModal } from "@/components/add-client-modal";
+
+// Breadcrumb for /projects/[slug]/settings — a client component (rather
+// than the page.tsx Server Component computing it) so it reads the same
+// live project name every other connected surface (Sidebar, /projects)
+// shows, instead of a static server-rendered snapshot. Falls back to the
+// raw slug while the list is still loading.
+export function ProjectSettingsBreadcrumb({ slug }: { slug: string }) {
+  const { projects } = useOrganizationProjects();
+  const projectName = projects.find((p) => p.slug === slug)?.name ?? slug;
+  return (
+    <>
+      <Link href="/projects" className="text-slate-400 hover:text-slate-600 dark:text-zinc-500 dark:hover:text-zinc-300">
+        Projects
+      </Link>
+      <span className="text-slate-300 dark:text-zinc-700">/</span>
+      <Link
+        href={`/projects/${slug}`}
+        className="text-slate-400 hover:text-slate-600 dark:text-zinc-500 dark:hover:text-zinc-300"
+      >
+        {projectName}
+      </Link>
+      <span className="text-slate-300 dark:text-zinc-700">/</span>
+      <span className="text-slate-800 font-medium dark:text-zinc-200">Settings</span>
+    </>
+  );
+}
 
 // Same segmented-pill styling as PeriodSelector/ViewSwitcher elsewhere in the
 // app, repurposed as a two-way toggle. This is the one control on the page
@@ -41,11 +74,144 @@ function CategoryToggle({ value, onChange }: { value: ProjectCategory; onChange:
   );
 }
 
-export function ProjectSettingsScreen({ slug }: { slug: string }) {
-  const project = getProjectBySlug(slug);
-  const [category, setCategory] = useState<ProjectCategory>(project?.category ?? "internal");
+// Status options this screen can write — "archived" is deliberately
+// excluded (see EditableProjectStatus): that transition only ever happens
+// through the Danger Zone's Archive/Restore action below, reusing
+// ArchiveProjectModal/restoreProject exactly as-is, never a parallel path.
+const EDITABLE_STATUSES: EditableProjectStatus[] = ["planning", "active", "on-hold", "completed"];
+const UNASSIGNED_LEAD = "";
+const ADD_NEW_CLIENT = "__add_new_client__";
 
-  if (!project) {
+// Dev-only fallback roster (no real organization to query `clients` from)
+// — seeded from the same placeholder names the Client selector always used
+// before this feature existed, so local dev without Supabase credentials
+// still has something to pick from.
+const DEV_CLIENTS: Client[] = CLIENT_NAMES.map((name) => ({ id: name, name }));
+
+type DetailState =
+  | { status: "loading" }
+  | { status: "ready"; project: ProjectDetail }
+  | { status: "not-found" }
+  | { status: "error"; message: string };
+
+function toDetail(project: ProjectDetail | null): DetailState {
+  return project ? { status: "ready", project } : { status: "not-found" };
+}
+
+export function ProjectSettingsScreen({ slug }: { slug: string }) {
+  const { organization, isDevFallback } = useCurrentUser();
+  const { projects: sharedProjects, updateProjectSettings, restoreProject } = useOrganizationProjects();
+
+  // Dev-only fallback: derived synchronously from the already-reactive mock
+  // list (no fetch involved) — never reached once a real organization
+  // exists. Computed once at mount for the initial state below; refreshed
+  // explicitly (from event handlers, not an effect) via refreshAfterSave.
+  const initialDevProject: ProjectDetail | null = isDevFallback
+    ? (() => {
+        const mock = sharedProjects.find((p) => p.slug === slug);
+        return mock ? { ...mock, ownerProfileId: null } : null;
+      })()
+    : null;
+
+  const [detail, setDetail] = useState<DetailState>(
+    isDevFallback ? toDetail(initialDevProject) : { status: "loading" }
+  );
+  const [members, setMembers] = useState<OrgMember[]>([]);
+  const [clients, setClients] = useState<Client[]>(isDevFallback ? DEV_CLIENTS : []);
+
+  const [name, setName] = useState(initialDevProject?.name ?? "");
+  const [description, setDescription] = useState(initialDevProject?.description ?? "");
+  const [projectCode, setProjectCode] = useState(initialDevProject?.projectCode ?? "");
+  const [status, setStatus] = useState<ProjectStatus>(initialDevProject?.status ?? "active");
+  const [ownerProfileId, setOwnerProfileId] = useState(initialDevProject?.ownerProfileId ?? UNASSIGNED_LEAD);
+  const [category, setCategory] = useState<ProjectCategory>(initialDevProject?.category ?? "internal");
+  const [client, setClient] = useState(initialDevProject?.client ?? "");
+  const [billingRate, setBillingRate] = useState(initialDevProject?.defaultHourlyRate ?? 0);
+
+  const [showArchiveModal, setShowArchiveModal] = useState(false);
+  const [showAddClientModal, setShowAddClientModal] = useState(false);
+  const [restoring, setRestoring] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  const requestIdRef = useRef(0);
+
+  const applyProject = useCallback((project: ProjectDetail) => {
+    setName(project.name);
+    setDescription(project.description);
+    setProjectCode(project.projectCode);
+    setStatus(project.status);
+    setOwnerProfileId(project.ownerProfileId ?? UNASSIGNED_LEAD);
+    setCategory(project.category);
+    setClient(project.client ?? "");
+    setBillingRate(project.defaultHourlyRate ?? 0);
+  }, []);
+
+  // Fires the real fetch only — every setState lives inside its .then()
+  // callbacks, never synchronously in the caller, so this is safe to call
+  // directly from a mount effect.
+  const runFetch = useCallback(() => {
+    if (!organization) return;
+    const requestId = ++requestIdRef.current;
+    loadProjectDetail(organization.id, slug).then((result) => {
+      if (requestIdRef.current !== requestId) return;
+      if (result.status === "ready") {
+        setDetail({ status: "ready", project: result.project });
+        applyProject(result.project);
+      } else if (result.status === "not-found") {
+        setDetail({ status: "not-found" });
+      } else {
+        setDetail({ status: "error", message: result.message });
+      }
+    });
+    loadOrganizationMembers(organization.id).then((result) => {
+      if (result.status === "ready") setMembers(result.members);
+    });
+    loadOrganizationClients(organization.id).then((result) => {
+      if (result.status === "ready") setClients(result.clients);
+    });
+  }, [organization, slug, applyProject]);
+
+  useEffect(() => {
+    if (isDevFallback) return; // handled synchronously above — no fetch needed
+    runFetch();
+  }, [isDevFallback, runFetch]);
+
+  // Called after Save/Archive/Restore (always from an event handler, never
+  // from an effect) so the on-screen data — and, via the shared
+  // updateProjectSettings/restoreProject calls' own runFetch, Sidebar and
+  // /projects — reflect what was actually persisted.
+  const refreshAfterSave = useCallback(() => {
+    if (isDevFallback) {
+      const mock = sharedProjects.find((p) => p.slug === slug);
+      if (mock) {
+        const updated: ProjectDetail = { ...mock, ownerProfileId: null };
+        setDetail({ status: "ready", project: updated });
+        applyProject(updated);
+      }
+      return;
+    }
+    runFetch();
+  }, [isDevFallback, sharedProjects, slug, runFetch, applyProject]);
+
+  if (detail.status === "loading") {
+    return (
+      <div className="max-w-4xl mx-auto px-4 sm:px-8 py-20 text-center text-sm text-slate-400 dark:text-zinc-500">
+        Loading project…
+      </div>
+    );
+  }
+
+  if (detail.status === "error") {
+    return (
+      <div className="max-w-4xl mx-auto px-4 sm:px-8 py-10">
+        <p className="text-sm text-red-600 dark:text-red-400">{detail.message}</p>
+      </div>
+    );
+  }
+
+  if (detail.status === "not-found") {
     return (
       <div className="max-w-4xl mx-auto px-4 sm:px-8 py-10">
         <p className="text-sm text-slate-400 dark:text-zinc-600">Project not found.</p>
@@ -53,7 +219,98 @@ export function ProjectSettingsScreen({ slug }: { slug: string }) {
     );
   }
 
+  const project = detail.project;
   const isClient = category === "client";
+  const isArchived = project.status === "archived";
+
+  async function handleSave() {
+    setSaving(true);
+    setSaveError(null);
+    setSaved(false);
+
+    const result = await updateProjectSettings(project.slug, {
+      name,
+      description,
+      projectCode,
+      status: status as EditableProjectStatus,
+      category,
+      ...(isClient ? { client: client || null, defaultHourlyRate: billingRate } : {}),
+      ownerProfileId: ownerProfileId || null,
+    });
+
+    setSaving(false);
+    if (!result.success) {
+      setSaveError(result.message ?? "Something went wrong.");
+      return;
+    }
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+    refreshAfterSave();
+  }
+
+  async function handleRestore() {
+    setRestoring(true);
+    await restoreProject(project.slug);
+    setRestoring(false);
+    refreshAfterSave();
+  }
+
+  // Creates the client immediately in Supabase (or, in dev fallback, a
+  // local in-memory-only entry) and selects it in the form right away —
+  // it's only written to this project's client_name once the user clicks
+  // Save Changes, same as every other field on this screen.
+  async function handleCreateClient(rawName: string): Promise<{ success: boolean; message?: string }> {
+    const trimmed = rawName.trim();
+
+    if (isDevFallback) {
+      if (clients.some((c) => c.name.toLowerCase() === trimmed.toLowerCase())) {
+        return { success: false, message: "A client with this name already exists in your organization." };
+      }
+      const newClient: Client = { id: `dev-${Date.now()}`, name: trimmed };
+      setClients((prev) => [...prev, newClient].sort((a, b) => a.name.localeCompare(b.name)));
+      setClient(newClient.name);
+      return { success: true };
+    }
+
+    if (!organization) return { success: false, message: "No active organization." };
+
+    const result = await createOrganizationClient(organization.id, trimmed);
+    if (result.status === "error") return { success: false, message: result.message };
+    setClients((prev) => [...prev, result.client].sort((a, b) => a.name.localeCompare(b.name)));
+    setClient(result.client.name);
+    return { success: true };
+  }
+
+  function handleClientChange(value: string) {
+    if (value === ADD_NEW_CLIENT) {
+      setShowAddClientModal(true);
+      return;
+    }
+    setClient(value);
+  }
+
+  const leadOptions = [
+    { value: UNASSIGNED_LEAD, label: "Unassigned" },
+    ...members.map((member) => ({ value: member.id, label: member.name })),
+    // The current lead may not be in the active roster (e.g. a disabled
+    // membership) — still show their name so the field never silently
+    // switches to someone else.
+    ...(project.ownerProfileId && !members.some((m) => m.id === project.ownerProfileId)
+      ? [{ value: project.ownerProfileId, label: project.owner.name }]
+      : []),
+  ];
+
+  const clientOptions = [
+    { value: "", label: "Select a client" },
+    ...clients.map((c) => ({ value: c.name, label: c.name })),
+    // The project's current client may predate this org's real roster
+    // (e.g. set before any client had been created) — keep it selectable
+    // so saving never silently changes it.
+    ...(project.client && !clients.some((c) => c.name === project.client)
+      ? [{ value: project.client, label: project.client }]
+      : []),
+    { value: ADD_NEW_CLIENT, label: "+ Add new client" },
+  ];
 
   return (
     <div className="max-w-4xl mx-auto px-4 sm:px-8 py-10 pb-16">
@@ -68,22 +325,30 @@ export function ProjectSettingsScreen({ slug }: { slug: string }) {
       <div className="mt-8">
         <SettingGroup title="General">
           <SettingRow label="Project Name">
-            <TextField value={project.name} width="w-64" />
+            <TextField value={name} onChange={setName} width="w-64" />
           </SettingRow>
           <SettingRow label="Description" hint="Shown on the project overview">
-            <TextField value={project.description} width="w-64" />
+            <TextField value={description} onChange={setDescription} width="w-64" />
           </SettingRow>
           <SettingRow label="Project Code" hint="Prefix for this project's ticket IDs (e.g. MBA-123). Must be unique across the workspace.">
-            <TextField value={project.projectCode} width="w-24" />
+            <TextField value={projectCode} onChange={setProjectCode} width="w-24" />
           </SettingRow>
           <SettingRow label="Status">
-            <SelectField value={statusMeta[project.status].label} />
+            {isArchived ? (
+              <SelectField value={statusMeta[project.status].label} disabled />
+            ) : (
+              <SelectField
+                value={status}
+                onChange={(next) => setStatus(next as ProjectStatus)}
+                options={EDITABLE_STATUSES.map((s) => ({ value: s, label: statusMeta[s].label }))}
+              />
+            )}
           </SettingRow>
           <SettingRow label="Project Lead">
             <div className="flex items-center gap-2">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={project.owner.avatar} alt={project.owner.name} className="w-6 h-6 rounded-full flex-shrink-0" />
-              <SelectField value={project.owner.name} />
+              <SelectField value={ownerProfileId} onChange={setOwnerProfileId} options={leadOptions} />
             </div>
           </SettingRow>
         </SettingGroup>
@@ -96,13 +361,23 @@ export function ProjectSettingsScreen({ slug }: { slug: string }) {
             label="Client"
             hint={isClient ? "Required for client projects" : "Not applicable — this project is internal"}
           >
-            <SelectField value={isClient ? project.client ?? "Select a client" : "—"} disabled={!isClient} />
+            <SelectField
+              value={isClient ? client : ""}
+              onChange={handleClientChange}
+              options={clientOptions}
+              disabled={!isClient}
+            />
           </SettingRow>
           <SettingRow
             label="Billing Rate"
             hint={isClient ? "Used to estimate billing in Time Tracking" : "Not applicable — this project is internal"}
           >
-            <NumberField value={isClient ? project.defaultHourlyRate ?? 0 : 0} suffix="$ / hour" disabled={!isClient} />
+            <NumberField
+              value={isClient ? billingRate : 0}
+              onChange={setBillingRate}
+              suffix="$ / hour"
+              disabled={!isClient}
+            />
           </SettingRow>
 
           <div className="py-3.5">
@@ -121,23 +396,75 @@ export function ProjectSettingsScreen({ slug }: { slug: string }) {
           </div>
         </SettingGroup>
 
+        <div className="flex items-center gap-3 mt-2 mb-6">
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={saving}
+            className="text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3.5 py-2 shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-500 dark:hover:bg-brand-600 dark:shadow-brand-500/20 disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+            {saving ? "Saving…" : "Save Changes"}
+          </button>
+          {saved && (
+            <span className="flex items-center gap-1.5 text-[13px] font-medium text-emerald-600 dark:text-emerald-400">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+                <path d="M5 12l5 5L20 7" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              Changes saved
+            </span>
+          )}
+          {saveError && <span className="text-[13px] font-medium text-red-600 dark:text-red-400">{saveError}</span>}
+        </div>
+
         <SettingGroup title="Danger Zone">
           <div className="py-4">
             <div className="flex items-start justify-between gap-6">
               <div>
-                <p className="text-[13px] font-semibold text-slate-800 dark:text-zinc-200">Archive Project</p>
+                <p className="text-[13px] font-semibold text-slate-800 dark:text-zinc-200">
+                  {isArchived ? "Restore Project" : "Archive Project"}
+                </p>
                 <p className="text-[12px] text-slate-400 dark:text-zinc-500 mt-0.5 max-w-sm">
-                  Hides {project.name} from the active Projects list. Tickets, notes, and reports remain intact, and
-                  the project can be restored later.
+                  {isArchived
+                    ? `${project.name} is archived and hidden from the active Projects list. Restoring brings it back.`
+                    : `Hides ${project.name} from the active Projects list. Tickets, notes, and reports remain intact, and the project can be restored later.`}
                 </p>
               </div>
-              <button className="flex-shrink-0 text-[13px] font-medium text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-600/40 bg-amber-50 dark:bg-amber-500/5 px-3 py-1.5 rounded-lg hover:bg-amber-100 dark:hover:bg-amber-500/10 transition-colors">
-                Archive Project
-              </button>
+              {isArchived ? (
+                <button
+                  type="button"
+                  onClick={handleRestore}
+                  disabled={restoring}
+                  className="flex-shrink-0 text-[13px] font-medium text-white bg-brand-600 hover:bg-brand-700 px-3 py-1.5 rounded-lg shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-500 dark:hover:bg-brand-600 disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  {restoring ? "Restoring…" : "Restore Project"}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setShowArchiveModal(true)}
+                  className="flex-shrink-0 text-[13px] font-medium text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-600/40 bg-amber-50 dark:bg-amber-500/5 px-3 py-1.5 rounded-lg hover:bg-amber-100 dark:hover:bg-amber-500/10 transition-colors"
+                >
+                  Archive Project
+                </button>
+              )}
             </div>
           </div>
         </SettingGroup>
       </div>
+
+      {showArchiveModal && (
+        <ArchiveProjectModal
+          project={project}
+          onClose={() => {
+            setShowArchiveModal(false);
+            refreshAfterSave();
+          }}
+        />
+      )}
+
+      {showAddClientModal && (
+        <AddClientModal onClose={() => setShowAddClientModal(false)} onCreate={handleCreateClient} />
+      )}
     </div>
   );
 }

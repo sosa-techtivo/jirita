@@ -110,7 +110,7 @@ export function Sidebar({
   const { projects } = useOrganizationProjects();
   const mainNav     = mainNavForRole(user.role);
   const projectNav  = projectNavForRole(user.role);
-  const pinnedProjects = projects.slice(0, 3);
+  const pinnedProjects = projects.filter((project) => project.status !== "archived").slice(0, 3);
   const [showCreateModal, setShowCreateModal] = useState(false);
 
   return (

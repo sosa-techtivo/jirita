@@ -32,12 +32,46 @@ export type CreateProjectResult =
   | { status: "success"; project: ProjectSummary }
   | { status: "error"; message: string };
 
+// Superset of ProjectSummary used only by Project Settings — adds the raw
+// owner_profile_id (needed to preselect the Project Lead picker), which the
+// Sidebar/Projects-list ProjectSummary shape deliberately omits (it only
+// ever displays the resolved name/avatar, never the id).
+export interface ProjectDetail extends ProjectSummary {
+  ownerProfileId: string | null;
+}
+
+export type ProjectDetailResult =
+  | { status: "ready"; project: ProjectDetail }
+  | { status: "not-found" }
+  | { status: "error"; message: string };
+
+export interface OrgMember {
+  id: string;
+  name: string;
+  avatar: string;
+}
+
+export type OrgMembersResult =
+  | { status: "ready"; members: OrgMember[] }
+  | { status: "error"; message: string };
+
 const STATUS_FROM_DB: Record<string, ProjectStatus> = {
   planning: "planning",
   active: "active",
   on_hold: "on-hold",
   completed: "completed",
   archived: "archived",
+};
+
+// Inverse of STATUS_FROM_DB, deliberately excluding "archived" — that
+// transition only ever happens through archiveProject/restoreProject,
+// never through updateProjectSettings (see EditableProjectStatus).
+export type EditableProjectStatus = Exclude<ProjectStatus, "archived">;
+const STATUS_TO_DB: Record<EditableProjectStatus, string> = {
+  planning: "planning",
+  active: "active",
+  "on-hold": "on_hold",
+  completed: "completed",
 };
 
 const HEALTH_FROM_DB: Record<string, ProjectHealth> = {
@@ -276,4 +310,249 @@ export async function updateProject(params: {
   }
 
   return { status: "success", project: rowToProjectSummary(data, undefined) };
+}
+
+// Archive only sets status to "archived" — no other column changes, and
+// nothing is deleted. Tickets/comments/activity/time tracking reference
+// the project by id, untouched by this update, so they remain exactly as
+// they were.
+export async function archiveProject(params: { organizationId: string; slug: string }): Promise<CreateProjectResult> {
+  const supabase = getSupabaseBrowserClient();
+
+  const { data, error } = await supabase
+    .from("projects")
+    .update({ status: "archived" })
+    .eq("organization_id", params.organizationId)
+    .eq("slug", params.slug)
+    .select(PROJECT_COLUMNS)
+    .single<ProjectRow>();
+
+  if (error) {
+    logDev("projects archive failed", error);
+    return { status: "error", message: error.message };
+  }
+
+  return { status: "success", project: rowToProjectSummary(data, undefined) };
+}
+
+// Mirror of archiveProject — sets status back to "active". No confirmation
+// step at this layer; the UI decides whether to prompt (restore doesn't).
+export async function restoreProject(params: { organizationId: string; slug: string }): Promise<CreateProjectResult> {
+  const supabase = getSupabaseBrowserClient();
+
+  const { data, error } = await supabase
+    .from("projects")
+    .update({ status: "active" })
+    .eq("organization_id", params.organizationId)
+    .eq("slug", params.slug)
+    .select(PROJECT_COLUMNS)
+    .single<ProjectRow>();
+
+  if (error) {
+    logDev("projects restore failed", error);
+    return { status: "error", message: error.message };
+  }
+
+  return { status: "success", project: rowToProjectSummary(data, undefined) };
+}
+
+// Single-project read for Project Settings — same PROJECT_COLUMNS as the
+// list loader, plus owner_profile_id exposed on the result (see
+// ProjectDetail) so the Project Lead picker can preselect the right member.
+export async function loadProjectDetail(organizationId: string, slug: string): Promise<ProjectDetailResult> {
+  const supabase = getSupabaseBrowserClient();
+
+  const { data: row, error } = await supabase
+    .from("projects")
+    .select(PROJECT_COLUMNS)
+    .eq("organization_id", organizationId)
+    .eq("slug", slug)
+    .maybeSingle<ProjectRow>();
+
+  if (error) {
+    logDev("project detail query failed", error);
+    return { status: "error", message: error.message };
+  }
+  if (!row) return { status: "not-found" };
+
+  let ownerRow: OwnerProfileRow | undefined;
+  if (row.owner_profile_id) {
+    const { data: profileRow, error: ownerError } = await supabase
+      .from("profiles")
+      .select("id, first_name, last_name, avatar_url, updated_at")
+      .eq("id", row.owner_profile_id)
+      .maybeSingle<OwnerProfileRow>();
+    if (ownerError) logDev("owner profile query failed", ownerError);
+    else ownerRow = profileRow ?? undefined;
+  }
+
+  return {
+    status: "ready",
+    project: { ...rowToProjectSummary(row, ownerRow), ownerProfileId: row.owner_profile_id },
+  };
+}
+
+// Org roster for the Project Lead picker — any active member is a valid
+// candidate (the schema doesn't restrict owner_profile_id to a role), same
+// scope as the Admin-only Users module's eventual real data source. Two
+// flat queries rather than an embedded select, same reasoning as
+// loadOrganizationProjects above (avoids depending on PostgREST's FK
+// relationship cache).
+export async function loadOrganizationMembers(organizationId: string): Promise<OrgMembersResult> {
+  const supabase = getSupabaseBrowserClient();
+
+  const { data: membershipRows, error } = await supabase
+    .from("organization_memberships")
+    .select("profile_id")
+    .eq("organization_id", organizationId)
+    .eq("status", "active")
+    .returns<{ profile_id: string }[]>();
+
+  if (error) {
+    logDev("organization members query failed", error);
+    return { status: "error", message: error.message };
+  }
+
+  const profileIds = (membershipRows ?? []).map((row) => row.profile_id);
+  if (profileIds.length === 0) return { status: "ready", members: [] };
+
+  const { data: profileRows, error: profileError } = await supabase
+    .from("profiles")
+    .select("id, first_name, last_name, avatar_url, updated_at")
+    .in("id", profileIds)
+    .returns<OwnerProfileRow[]>();
+
+  if (profileError) {
+    logDev("member profiles query failed", profileError);
+    return { status: "error", message: profileError.message };
+  }
+
+  const members: OrgMember[] = (profileRows ?? [])
+    .map((row) => ({
+      id: row.id,
+      name: [row.first_name, row.last_name].filter(Boolean).join(" ") || "Unnamed",
+      avatar: resolveAvatarUrl(row.avatar_url, row.updated_at) ?? FALLBACK_AVATAR,
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  return { status: "ready", members };
+}
+
+export interface ProjectSettingsUpdate {
+  name?: string;
+  description?: string;
+  projectCode?: string;
+  status?: EditableProjectStatus;
+  category?: ProjectCategory;
+  client?: string | null;
+  defaultHourlyRate?: number | null;
+  ownerProfileId?: string | null;
+}
+
+// Settings-only write: only the keys present on `updates` are sent to
+// Supabase ("persist only the fields that changed"). Archiving/restoring
+// (status -> "archived"/"active" specifically) goes through
+// archiveProject/restoreProject exclusively — updates.status's type
+// (EditableProjectStatus) makes "archived" structurally impossible to pass
+// through this function, so there's no parallel path to that transition.
+export async function updateProjectSettings(
+  organizationId: string,
+  slug: string,
+  updates: ProjectSettingsUpdate
+): Promise<CreateProjectResult> {
+  const supabase = getSupabaseBrowserClient();
+
+  const payload: Record<string, string | number | null> = {};
+  if (updates.name !== undefined) payload.name = updates.name.trim();
+  if (updates.description !== undefined) payload.description = updates.description.trim() || null;
+  if (updates.projectCode !== undefined) payload.project_code = updates.projectCode.trim();
+  if (updates.status !== undefined) payload.status = STATUS_TO_DB[updates.status];
+  if (updates.category !== undefined) payload.category = updates.category;
+  if (updates.client !== undefined) payload.client_name = updates.client;
+  if (updates.defaultHourlyRate !== undefined) payload.default_hourly_rate = updates.defaultHourlyRate;
+  if (updates.ownerProfileId !== undefined) payload.owner_profile_id = updates.ownerProfileId;
+
+  const { data, error } = await supabase
+    .from("projects")
+    .update(payload)
+    .eq("organization_id", organizationId)
+    .eq("slug", slug)
+    .select(PROJECT_COLUMNS)
+    .single<ProjectRow>();
+
+  if (error) {
+    logDev("project settings update failed", error);
+    // 23505 = unique_violation — only project_code carries a unique
+    // constraint among the fields this function ever writes (slug itself
+    // is never edited here).
+    if (error.code === "23505") {
+      return { status: "error", message: "This project code is already used by another project in your organization." };
+    }
+    return { status: "error", message: error.message };
+  }
+
+  return { status: "success", project: rowToProjectSummary(data, undefined) };
+}
+
+// ── Clients (Project Settings → Billing → "+ Add new client") ───────────────
+// Deliberately not a foreign key on projects — projects.client_name stays
+// free text (see updateProjectSettings above). This table exists only so
+// the Client dropdown can offer a real, growing, per-organization roster
+// instead of the hardcoded CLIENT_NAMES placeholder in mock-projects.ts.
+
+export interface Client {
+  id: string;
+  name: string;
+}
+
+export type ClientsResult =
+  | { status: "ready"; clients: Client[] }
+  | { status: "error"; message: string };
+
+export async function loadOrganizationClients(organizationId: string): Promise<ClientsResult> {
+  const supabase = getSupabaseBrowserClient();
+
+  const { data, error } = await supabase
+    .from("clients")
+    .select("id, name")
+    .eq("organization_id", organizationId)
+    .order("name", { ascending: true })
+    .returns<Client[]>();
+
+  if (error) {
+    logDev("clients query failed", error);
+    return { status: "error", message: error.message };
+  }
+
+  return { status: "ready", clients: data ?? [] };
+}
+
+export type CreateClientResult =
+  | { status: "success"; client: Client }
+  | { status: "error"; message: string };
+
+// Named createOrganizationClient (not createClient) to avoid any confusion
+// with @supabase/supabase-js's own createClient re-exported from
+// supabase-client.ts in this same module graph.
+export async function createOrganizationClient(organizationId: string, name: string): Promise<CreateClientResult> {
+  const supabase = getSupabaseBrowserClient();
+  const trimmed = name.trim();
+
+  const { data, error } = await supabase
+    .from("clients")
+    .insert({ organization_id: organizationId, name: trimmed })
+    .select("id, name")
+    .single<Client>();
+
+  if (error) {
+    logDev("client insert failed", error);
+    // 23505 = unique_violation on (organization_id, name) — the basic
+    // duplicate-prevention this table's unique constraint provides.
+    if (error.code === "23505") {
+      return { status: "error", message: "A client with this name already exists in your organization." };
+    }
+    return { status: "error", message: error.message };
+  }
+
+  return { status: "success", client: data };
 }
