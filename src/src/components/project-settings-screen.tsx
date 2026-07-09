@@ -148,9 +148,12 @@ export function ProjectSettingsScreen({ slug }: { slug: string }) {
     setBillingRate(project.defaultHourlyRate ?? 0);
   }, []);
 
-  // Fires the real fetch only — every setState lives inside its .then()
-  // callbacks, never synchronously in the caller, so this is safe to call
-  // directly from a mount effect.
+  // Refetches just this project — every setState lives inside its .then()
+  // callback, never synchronously in the caller, so this is safe to call
+  // directly from a mount effect. Used both for the initial load and for
+  // refreshAfterSave below: a settings save never changes the org's member
+  // or client roster, so re-fetching those on every Save/Archive/Restore
+  // would just be unnecessary traffic.
   const runFetch = useCallback(() => {
     if (!organization) return;
     const requestId = ++requestIdRef.current;
@@ -165,18 +168,20 @@ export function ProjectSettingsScreen({ slug }: { slug: string }) {
         setDetail({ status: "error", message: result.message });
       }
     });
+  }, [organization, slug, applyProject]);
+
+  useEffect(() => {
+    if (isDevFallback || !organization) return; // dev fallback handled synchronously above — no fetch needed
+    runFetch();
+    // Members/clients only need loading once — they don't change as a
+    // side effect of saving this project's settings.
     loadOrganizationMembers(organization.id).then((result) => {
       if (result.status === "ready") setMembers(result.members);
     });
     loadOrganizationClients(organization.id).then((result) => {
       if (result.status === "ready") setClients(result.clients);
     });
-  }, [organization, slug, applyProject]);
-
-  useEffect(() => {
-    if (isDevFallback) return; // handled synchronously above — no fetch needed
-    runFetch();
-  }, [isDevFallback, runFetch]);
+  }, [isDevFallback, organization, runFetch]);
 
   // Called after Save/Archive/Restore (always from an event handler, never
   // from an effect) so the on-screen data — and, via the shared

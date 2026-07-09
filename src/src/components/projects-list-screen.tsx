@@ -3,8 +3,8 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import type { ProjectPriority, ProjectStatus, ProjectSummary } from "@/lib/mock-projects";
-import { StatusBadge, PriorityBadge, HealthBadge, ProjectCategoryBadge, statusMeta, priorityMeta } from "@/components/status-badge";
+import type { ProjectHealth, ProjectPriority, ProjectStatus, ProjectSummary } from "@/lib/mock-projects";
+import { StatusBadge, PriorityBadge, HealthBadge, ProjectCategoryBadge, statusMeta, priorityMeta, healthMeta } from "@/components/status-badge";
 import { FilterDropdown } from "@/components/tickets/filter-dropdown";
 import type { DropdownGroup } from "@/components/tickets/filter-dropdown";
 import { useCurrentUser } from "@/components/current-user-provider";
@@ -17,11 +17,21 @@ import { CreateProjectModal } from "@/components/create-project-modal";
 import { ArchiveProjectModal } from "@/components/archive-project-modal";
 
 const STATUS_ORDER: ProjectStatus[] = ["planning", "active", "on-hold", "completed", "archived"];
+const HEALTH_ORDER: ProjectHealth[] = ["healthy", "needs-attention", "critical"];
 const PRIORITY_ORDER: ProjectPriority[] = ["critical", "high", "medium", "low"];
 const MONTH_ORDER = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 const PRIORITY_GROUPS: DropdownGroup[] = [
   { options: PRIORITY_ORDER.map((priority) => ({ value: priority, label: priorityMeta[priority].label })) },
+];
+
+// Independent from the Status filter — Health (Healthy / Needs Attention /
+// Critical) is its own real column, not a lifecycle status, so it gets its
+// own dropdown rather than being folded into Status. Combines with Status
+// via a plain AND (e.g. Status=Active + Health=Critical), same as every
+// other filter here.
+const HEALTH_GROUPS: DropdownGroup[] = [
+  { options: HEALTH_ORDER.map((health) => ({ value: health, label: healthMeta[health].label })) },
 ];
 
 const SORT_GROUPS: DropdownGroup[] = [
@@ -91,6 +101,7 @@ function ManagedProjectsScreen() {
   const canCreateProject = canManage(user.role);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string[]>([]);
+  const [healthFilter, setHealthFilter] = useState<string[]>([]);
   const [leadFilter, setLeadFilter] = useState<string[]>([]);
   const [priorityFilter, setPriorityFilter] = useState<string[]>([]);
   const [sortBy, setSortBy] = useState<string[]>([]);
@@ -196,14 +207,21 @@ function ManagedProjectsScreen() {
       // the Status filter dropdown.
       const matchesStatus =
         statusFilter.length === 0 ? project.status !== "archived" : statusFilter.includes(project.status);
+      // Independent from Status — Health is its own real column
+      // (healthy / needs-attention / critical), so this is a separate AND
+      // condition rather than folded into matchesStatus, letting the two
+      // filters combine (e.g. Status=Active + Health=Critical).
+      const matchesHealth = healthFilter.length === 0 || healthFilter.includes(project.health);
       const matchesLead = leadFilter.length === 0 || leadFilter.includes(project.owner.name);
       const matchesPriority = priorityFilter.length === 0 || priorityFilter.includes(project.priority);
       const matchesSearch =
         query === "" ||
         project.name.toLowerCase().includes(query) ||
         project.description.toLowerCase().includes(query) ||
+        project.projectCode.toLowerCase().includes(query) ||
+        (project.client ?? "").toLowerCase().includes(query) ||
         project.owner.name.toLowerCase().includes(query);
-      return matchesStatus && matchesLead && matchesPriority && matchesSearch;
+      return matchesStatus && matchesHealth && matchesLead && matchesPriority && matchesSearch;
     })
     .sort((a, b) => {
       switch (sortBy[0]) {
@@ -264,6 +282,7 @@ function ManagedProjectsScreen() {
 
         <div className="flex flex-wrap items-center gap-1">
           <FilterDropdown label="Status" mode="multi" groups={statusGroups} selected={statusFilter} onChange={setStatusFilter} />
+          <FilterDropdown label="Health" mode="multi" groups={HEALTH_GROUPS} selected={healthFilter} onChange={setHealthFilter} />
           {!isProjectLead && (
             <FilterDropdown label="Project Lead" mode="multi" groups={leadGroups} selected={leadFilter} onChange={setLeadFilter} searchable />
           )}
@@ -614,6 +633,13 @@ function ProjectMenu({
 
 function EmptyState({ hasAnyProjects, onCreate }: { hasAnyProjects: boolean; onCreate: () => void }) {
   const { user } = useCurrentUser();
+  // Mirrors the header button's role gate exactly (isProjectLead ? "+ New
+  // Ticket" (no-op) : "+ Create Project") — previously this button always
+  // opened the create modal regardless of role, so a Project Lead landing
+  // on an empty filtered view could create a project from here even though
+  // the header's equivalent action for their role is a ticket, not a
+  // project.
+  const isProjectLead = user.role === "PROJECT_LEAD";
   return (
     <div className="flex flex-col items-center justify-center text-center py-20 px-4">
       <div className="w-10 h-10 rounded-lg border border-slate-200 flex items-center justify-center text-slate-400 mb-4 dark:border-zinc-700 dark:text-zinc-500">
@@ -628,7 +654,7 @@ function EmptyState({ hasAnyProjects, onCreate }: { hasAnyProjects: boolean; onC
       <p className="text-sm text-slate-400 mt-1 max-w-xs dark:text-zinc-500">
         {hasAnyProjects ? "Try adjusting your search or filters." : "Get started by creating your first project."}
       </p>
-      {canManage(user.role) && (
+      {canManage(user.role) && !isProjectLead && (
         <button
           type="button"
           onClick={onCreate}

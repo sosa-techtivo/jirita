@@ -198,15 +198,42 @@ function logDev(...args: unknown[]): void {
   if (process.env.NODE_ENV !== "production") console.warn("[projects]", ...args);
 }
 
-export async function loadOrganizationProjects(organizationId: string): Promise<ProjectsResult> {
+export interface LoadProjectsOptions {
+  /**
+   * Reserved for future pagination — omitted (the default everywhere today)
+   * fetches every project for the org, exactly like before this option
+   * existed. Passing `limit` (with optional `offset`) applies `.range()`
+   * without changing any other behavior, so pagination can be added later
+   * by wiring these through from the UI rather than restructuring the query.
+   */
+  limit?: number;
+  offset?: number;
+}
+
+export async function loadOrganizationProjects(
+  organizationId: string,
+  options: LoadProjectsOptions = {}
+): Promise<ProjectsResult> {
   const supabase = getSupabaseBrowserClient();
 
-  const { data: rows, error } = await supabase
+  let query = supabase
     .from("projects")
     .select(PROJECT_COLUMNS)
     .eq("organization_id", organizationId)
+    // Secondary tie-break so row order is fully deterministic even when
+    // two projects share the same updated_at down to the microsecond —
+    // .range()-based pagination later needs a stable sort to avoid
+    // skipping/duplicating rows across pages; today it's just a harmless
+    // guarantee since ties are otherwise vanishingly rare.
     .order("updated_at", { ascending: false })
-    .returns<ProjectRow[]>();
+    .order("slug", { ascending: true });
+
+  if (options.limit !== undefined) {
+    const offset = options.offset ?? 0;
+    query = query.range(offset, offset + options.limit - 1);
+  }
+
+  const { data: rows, error } = await query.returns<ProjectRow[]>();
 
   if (error) {
     logDev("projects query failed", error);
