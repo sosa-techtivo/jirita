@@ -3,16 +3,17 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { projects as allProjects } from "@/lib/mock-projects";
 import type { ProjectPriority, ProjectStatus, ProjectSummary } from "@/lib/mock-projects";
 import { StatusBadge, PriorityBadge, HealthBadge, ProjectCategoryBadge, statusMeta, priorityMeta } from "@/components/status-badge";
 import { FilterDropdown } from "@/components/tickets/filter-dropdown";
 import type { DropdownGroup } from "@/components/tickets/filter-dropdown";
 import { useCurrentUser } from "@/components/current-user-provider";
+import { useOrganizationProjects } from "@/components/organization-projects-provider";
 import { canManage } from "@/lib/current-user";
 import { getTeamByProjectSlug } from "@/lib/mock-team";
 import { LEAD_PROJECT_SLUGS, aggregateTeam } from "@/components/project-lead-dashboard";
 import { MemberProjectsScreen } from "@/components/member-projects-screen";
+import { CreateProjectModal } from "@/components/create-project-modal";
 
 const STATUS_ORDER: ProjectStatus[] = ["planning", "active", "on-hold", "completed", "archived"];
 const PRIORITY_ORDER: ProjectPriority[] = ["critical", "high", "medium", "low"];
@@ -41,6 +42,10 @@ function targetDateSortKey(targetDate: string): number {
 
 export function ProjectsListScreen() {
   const { user } = useCurrentUser();
+  const { status, errorMessage, retry } = useOrganizationProjects();
+
+  if (status === "loading") return <ProjectsLoadingState />;
+  if (status === "error") return <ProjectsErrorState message={errorMessage} onRetry={retry} />;
 
   // Members don't manage projects — they work inside them. They get a
   // purpose-built "what am I on / what's mine to do" view instead of a
@@ -54,8 +59,33 @@ export function ProjectsListScreen() {
   return <ManagedProjectsScreen />;
 }
 
+function ProjectsLoadingState() {
+  return (
+    <div className="max-w-4xl mx-auto px-4 sm:px-8 py-20 text-center text-sm text-slate-400 dark:text-zinc-500">
+      Loading projects…
+    </div>
+  );
+}
+
+function ProjectsErrorState({ message, onRetry }: { message: string | null; onRetry: () => void }) {
+  return (
+    <div className="max-w-4xl mx-auto px-4 sm:px-8 py-20 flex flex-col items-center text-center">
+      <h3 className="text-sm font-semibold text-slate-700 dark:text-zinc-200">Couldn&apos;t load projects</h3>
+      <p className="text-sm text-slate-400 mt-1 max-w-xs dark:text-zinc-500">{message ?? "Something went wrong."}</p>
+      <button
+        type="button"
+        onClick={onRetry}
+        className="mt-5 text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3.5 py-2 shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-500 dark:hover:bg-brand-600 dark:shadow-brand-500/20"
+      >
+        Retry
+      </button>
+    </div>
+  );
+}
+
 function ManagedProjectsScreen() {
   const { user } = useCurrentUser();
+  const { projects: allProjects } = useOrganizationProjects();
   const isProjectLead = user.role === "PROJECT_LEAD";
   const canCreateProject = canManage(user.role);
   const [search, setSearch] = useState("");
@@ -63,14 +93,14 @@ function ManagedProjectsScreen() {
   const [leadFilter, setLeadFilter] = useState<string[]>([]);
   const [priorityFilter, setPriorityFilter] = useState<string[]>([]);
   const [sortBy, setSortBy] = useState<string[]>([]);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [editingProject, setEditingProject] = useState<ProjectSummary | null>(null);
   const searchId = useId();
 
-  // Project Leads only ever manage their own projects — everyone else (Admin)
-  // sees the whole workspace.
-  const baseProjects = useMemo(
-    () => (isProjectLead ? allProjects.filter((p) => LEAD_PROJECT_SLUGS.includes(p.slug)) : allProjects),
-    [isProjectLead]
-  );
+  // RLS on `projects` already scopes rows per role (Admin sees the whole
+  // workspace; Project Lead/Member only see projects they're staffed on),
+  // so the fetched list needs no further client-side filtering here.
+  const baseProjects = allProjects;
 
   const statusGroups: DropdownGroup[] = useMemo(() => {
     const statuses = isProjectLead ? STATUS_ORDER.filter((s) => s !== "archived") : STATUS_ORDER;
@@ -87,7 +117,7 @@ function ManagedProjectsScreen() {
         }),
       },
     ];
-  }, []);
+  }, [allProjects]);
 
   const summaryCells: { label: string; value: number; className?: string }[] = useMemo(() => {
     if (isProjectLead) {
@@ -190,6 +220,7 @@ function ManagedProjectsScreen() {
         {canCreateProject && (
           <button
             type="button"
+            onClick={isProjectLead ? undefined : () => setShowCreateModal(true)}
             className="text-sm font-medium text-slate-600 border border-slate-200 hover:bg-slate-50 rounded-lg px-3.5 py-2 transition-colors flex-shrink-0 dark:text-zinc-300 dark:border-zinc-700 dark:hover:bg-zinc-900"
           >
             {isProjectLead ? "+ New Ticket" : "+ Create Project"}
@@ -243,19 +274,24 @@ function ManagedProjectsScreen() {
 
       <div className={isProjectLead ? "mt-3" : "mt-6"}>
         {filtered.length === 0 ? (
-          <EmptyState hasAnyProjects={baseProjects.length > 0} />
+          <EmptyState hasAnyProjects={baseProjects.length > 0} onCreate={() => setShowCreateModal(true)} />
         ) : (
           <div className="divide-y divide-slate-100 dark:divide-zinc-800">
             {filtered.map((project) =>
               isProjectLead ? (
                 <LeadProjectRow key={project.slug} project={project} />
               ) : (
-                <ProjectRow key={project.slug} project={project} />
+                <ProjectRow key={project.slug} project={project} onEdit={setEditingProject} />
               )
             )}
           </div>
         )}
       </div>
+
+      {showCreateModal && <CreateProjectModal onClose={() => setShowCreateModal(false)} />}
+      {editingProject && (
+        <CreateProjectModal editingProject={editingProject} onClose={() => setEditingProject(null)} />
+      )}
     </div>
   );
 }
@@ -277,7 +313,7 @@ function SummaryRow({ cells }: { cells: { label: string; value: number; classNam
 
 const ROW_GRID_COLS = "sm:grid-cols-[minmax(0,1fr)_96px_116px_172px_60px_32px]";
 
-function ProjectRow({ project }: { project: ProjectSummary }) {
+function ProjectRow({ project, onEdit }: { project: ProjectSummary; onEdit: (project: ProjectSummary) => void }) {
   const router = useRouter();
 
   return (
@@ -336,7 +372,7 @@ function ProjectRow({ project }: { project: ProjectSummary }) {
       <span className="hidden sm:inline text-xs text-slate-400 dark:text-zinc-500">{project.targetDate}</span>
 
       <div className="flex items-center justify-end">
-        <ProjectMenu project={project} isProjectLead={false} />
+        <ProjectMenu project={project} isProjectLead={false} onEdit={onEdit} />
       </div>
     </div>
   );
@@ -443,7 +479,15 @@ function LeadProjectRow({ project }: { project: ProjectSummary }) {
   );
 }
 
-function ProjectMenu({ project, isProjectLead }: { project: ProjectSummary; isProjectLead: boolean }) {
+function ProjectMenu({
+  project,
+  isProjectLead,
+  onEdit,
+}: {
+  project: ProjectSummary;
+  isProjectLead: boolean;
+  onEdit?: (project: ProjectSummary) => void;
+}) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -467,7 +511,13 @@ function ProjectMenu({ project, isProjectLead }: { project: ProjectSummary; isPr
       ]
     : [
         { label: "Open", onClick: () => router.push(`/projects/${project.slug}`) },
-        { label: "Edit", onClick: () => setOpen(false) },
+        {
+          label: "Edit",
+          onClick: () => {
+            setOpen(false);
+            onEdit?.(project);
+          },
+        },
         { label: "Duplicate", onClick: () => setOpen(false) },
         { label: "Archive", onClick: () => setOpen(false), danger: true },
       ];
@@ -518,7 +568,7 @@ function ProjectMenu({ project, isProjectLead }: { project: ProjectSummary; isPr
   );
 }
 
-function EmptyState({ hasAnyProjects }: { hasAnyProjects: boolean }) {
+function EmptyState({ hasAnyProjects, onCreate }: { hasAnyProjects: boolean; onCreate: () => void }) {
   const { user } = useCurrentUser();
   return (
     <div className="flex flex-col items-center justify-center text-center py-20 px-4">
@@ -537,6 +587,7 @@ function EmptyState({ hasAnyProjects }: { hasAnyProjects: boolean }) {
       {canManage(user.role) && (
         <button
           type="button"
+          onClick={onCreate}
           className="mt-5 text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3.5 py-2 shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-500 dark:hover:bg-brand-600 dark:shadow-brand-500/20"
         >
           + Create Project

@@ -1,15 +1,14 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { projects } from "@/lib/mock-projects";
 import { statusMeta } from "@/components/status-badge";
 import { useCurrentUser } from "@/components/current-user-provider";
+import { useOrganizationProjects } from "@/components/organization-projects-provider";
 import { mainNavForRole, projectNavForRole } from "@/lib/nav-config";
 import type { MainNavKey } from "@/lib/nav-config";
-
-const pinnedProjects = projects.slice(0, 3);
+import { CreateProjectModal } from "@/components/create-project-modal";
 
 // Main nav link content, keyed so `mainNavForRole`'s order (per role) drives
 // what renders where — the sidebar no longer hardcodes link order itself.
@@ -108,10 +107,14 @@ export function Sidebar({
   activePage?: string;
 }) {
   const { user } = useCurrentUser();
+  const { projects } = useOrganizationProjects();
   const mainNav     = mainNavForRole(user.role);
   const projectNav  = projectNavForRole(user.role);
+  const pinnedProjects = projects.slice(0, 3);
+  const [showCreateModal, setShowCreateModal] = useState(false);
 
   return (
+    <>
     <aside className="hidden md:flex w-60 flex-shrink-0 border-r border-slate-200 bg-white flex-col dark:border-zinc-700/60 dark:bg-zinc-950">
       <div className="px-4 py-3 border-b border-slate-100 dark:border-zinc-800">
         <Image
@@ -165,7 +168,12 @@ export function Sidebar({
       <div className="mt-5 px-3">
         <div className="flex items-center justify-between px-1 mb-1.5">
           <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-zinc-400">Projects</span>
-          <button className="text-slate-400 hover:text-slate-600 dark:text-zinc-500 dark:hover:text-zinc-300">
+          <button
+            type="button"
+            onClick={() => setShowCreateModal(true)}
+            aria-label="Create Project"
+            className="text-slate-400 hover:text-slate-600 dark:text-zinc-500 dark:hover:text-zinc-300"
+          >
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
               <path d="M12 5v14M5 12h14" />
             </svg>
@@ -272,5 +280,7 @@ export function Sidebar({
         </div>
       </div>
     </aside>
+    {showCreateModal && <CreateProjectModal onClose={() => setShowCreateModal(false)} />}
+    </>
   );
 }

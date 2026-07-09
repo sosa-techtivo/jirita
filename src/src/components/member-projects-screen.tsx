@@ -1,11 +1,12 @@
 "use client";
 
+import { useMemo } from "react";
 import { useRouter } from "next/navigation";
-import { getProjectBySlug } from "@/lib/mock-projects";
-import type { ProjectCategory } from "@/lib/mock-projects";
+import type { ProjectCategory, ProjectSummary } from "@/lib/mock-projects";
 import { ProjectCategoryBadge } from "@/components/status-badge";
 import { MEMBER_WORK } from "@/components/member-dashboard";
 import type { WorkItem } from "@/components/member-dashboard";
+import { useOrganizationProjects } from "@/components/organization-projects-provider";
 
 // A Member doesn't manage projects — they work inside them. So this page
 // never shows org-wide status/priority/health or ticket-volume metrics; it
@@ -49,7 +50,7 @@ interface MemberProjectCard {
   recencyHours: number;
 }
 
-function buildMemberProjectCards(work: WorkItem[]): MemberProjectCard[] {
+function buildMemberProjectCards(work: WorkItem[], projectsBySlug: Map<string, ProjectSummary>): MemberProjectCard[] {
   const bySlug = new Map<string, WorkItem[]>();
   for (const item of work) {
     const list = bySlug.get(item.project.slug) ?? [];
@@ -59,7 +60,7 @@ function buildMemberProjectCards(work: WorkItem[]): MemberProjectCard[] {
 
   return Array.from(bySlug.entries())
     .map(([slug, items]) => {
-      const project = getProjectBySlug(slug);
+      const project = projectsBySlug.get(slug);
       return {
         slug,
         name: items[0].project.name,
@@ -76,7 +77,9 @@ function buildMemberProjectCards(work: WorkItem[]): MemberProjectCard[] {
 }
 
 export function MemberProjectsScreen() {
-  const cards = buildMemberProjectCards(MEMBER_WORK);
+  const { projects } = useOrganizationProjects();
+  const projectsBySlug = useMemo(() => new Map(projects.map((project) => [project.slug, project])), [projects]);
+  const cards = buildMemberProjectCards(MEMBER_WORK, projectsBySlug);
 
   return (
     <div className="max-w-3xl mx-auto px-4 sm:px-8 py-10">

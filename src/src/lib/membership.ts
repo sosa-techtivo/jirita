@@ -60,7 +60,7 @@ interface ProfileRow {
 // re-upload (same path, upsert) doesn't keep showing a stale cached image.
 // profiles.updated_at already bumps on any column change via the
 // set_updated_at trigger, so it's a free, always-current cache-bust key.
-function resolveAvatarUrl(path: string | null, updatedAt: string): string | null {
+export function resolveAvatarUrl(path: string | null, updatedAt: string): string | null {
   if (!path) return null;
   const { data } = getSupabaseBrowserClient().storage.from("avatars").getPublicUrl(path);
   return `${data.publicUrl}?v=${encodeURIComponent(updatedAt)}`;

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import { ThemeProvider } from "@/components/theme-provider";
 import { CurrentUserProvider } from "@/components/current-user-provider";
+import { OrganizationProjectsProvider } from "@/components/organization-projects-provider";
 import { MemberProfileProvider } from "@/components/member-profile";
 import "./globals.css";
 
@@ -25,7 +26,9 @@ export default function RootLayout({
       <body className="min-h-full flex flex-col">
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
           <CurrentUserProvider>
-            <MemberProfileProvider>{children}</MemberProfileProvider>
+            <OrganizationProjectsProvider>
+              <MemberProfileProvider>{children}</MemberProfileProvider>
+            </OrganizationProjectsProvider>
           </CurrentUserProvider>
         </ThemeProvider>
       </body>
