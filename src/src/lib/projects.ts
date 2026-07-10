@@ -94,7 +94,9 @@ interface ProjectRow {
   health: string;
   category: string;
   client_name: string | null;
-  default_hourly_rate: number | null;
+  // PostgREST/Supabase serializes `numeric` columns as strings (to avoid JS
+  // floating-point precision loss) — coerced with Number(...) below.
+  default_hourly_rate: string | null;
   owner_profile_id: string | null;
   target_date: string | null;
   updated_at: string;
@@ -169,7 +171,7 @@ function rowToProjectSummary(row: ProjectRow, ownerRow: OwnerProfileRow | undefi
     // client_name in the real schema is free text, so this is a display
     // cast, not a validated membership check.
     client: (row.client_name as ClientName | null) ?? undefined,
-    defaultHourlyRate: row.default_hourly_rate ?? undefined,
+    defaultHourlyRate: row.default_hourly_rate !== null ? Number(row.default_hourly_rate) : undefined,
   };
 }
 

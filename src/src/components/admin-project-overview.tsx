@@ -543,6 +543,8 @@ export function AdminProjectOverview({ slug = "mobile-banking-app" }: { slug?: s
       {showNewTicket && (
         <NewTicketModal
           slug={slug}
+          tickets={tickets}
+          members={[]}
           onClose={() => setShowNewTicket(false)}
           onCreated={handleTicketCreated}
           onPreviewDuplicate={handlePreviewDuplicate}

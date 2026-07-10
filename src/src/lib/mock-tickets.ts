@@ -26,6 +26,8 @@ export interface Ticket {
   milestone: string;
   labels: string[];
   acceptanceCriteria?: string[];
+  /** Checked/unchecked state, aligned by index with acceptanceCriteria. */
+  acceptanceCriteriaDone?: boolean[];
   storyPoints?: number;
   hours?: number;
   dueDate?: string;
@@ -34,12 +36,24 @@ export interface Ticket {
   updatedAt: string;
 }
 
+// Real (Supabase-backed) projects don't exist in mock-projects.ts, so
+// getProjectBySlug can't resolve their project_code below — the real
+// Tickets data loader (src/lib/tickets.ts) registers each real project's
+// slug -> project_code here once it resolves it, so ticket IDs for real
+// tickets still show the correct prefix instead of falling back to "TKT".
+const realProjectCodes = new Map<string, string>();
+
+export function registerProjectCode(slug: string, projectCode: string): void {
+  realProjectCodes.set(slug, projectCode);
+}
+
 // The one place that builds a visible ticket ID. The prefix always comes
 // from the ticket's project (Project Settings → General → Project Code),
 // never hardcoded or derived from a project's name — every screen that
 // shows a ticket ID should call this instead of reading a stored key.
 export function getTicketDisplayKey(ticket: Ticket): string {
-  const code = getProjectBySlug(ticket.projectSlug)?.projectCode ?? "TKT";
+  const code =
+    realProjectCodes.get(ticket.projectSlug) ?? getProjectBySlug(ticket.projectSlug)?.projectCode ?? "TKT";
   return `${code}-${ticket.ticketNumber}`;
 }
 

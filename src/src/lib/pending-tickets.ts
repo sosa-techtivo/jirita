@@ -1,5 +1,5 @@
 import type { Ticket } from "./mock-tickets";
-import { tickets } from "./mock-tickets";
+import { tickets, getTicketDisplayKey } from "./mock-tickets";
 
 // ── Client-side registry ───────────────────────────────────────────────────────
 // Newly created tickets live here until the server knows about them.
@@ -14,6 +14,17 @@ export function registerTicket(ticket: Ticket): void {
 
 export function getRegisteredTicket(id: string): Ticket | undefined {
   return registry.get(id);
+}
+
+// Dev-fallback ticket detail routes navigate by the visible ticket code
+// (e.g. "TKT-6"), not the internal id — this looks up a just-created,
+// not-yet-in-the-static-array ticket the same way, by deriving its display
+// key instead of matching on id.
+export function getRegisteredTicketByCode(projectSlug: string, code: string): Ticket | undefined {
+  for (const ticket of registry.values()) {
+    if (ticket.projectSlug === projectSlug && getTicketDisplayKey(ticket) === code) return ticket;
+  }
+  return undefined;
 }
 
 // ── Ticket number counter ─────────────────────────────────────────────────────

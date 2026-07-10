@@ -8,9 +8,8 @@ import {
   StatusBadge,
   PriorityBadge,
   TicketTypeIcon,
-  getMockComments,
-  getMockActivity,
 } from "@/components/tickets/ticket-ui";
+import { loadTicketComments, loadTicketActivity, type TicketComment, type TicketActivityEvent } from "@/lib/tickets";
 import { MemberTrigger } from "@/components/member-profile";
 
 const FIELD_LABEL = "text-[10px] font-semibold uppercase tracking-widest text-slate-400 dark:text-zinc-600 mb-1";
@@ -78,9 +77,28 @@ export function TicketPreviewPanel({
     setTimeout(onClose, 250);
   }
 
+  // Real Comments/Activity for the displayed ticket only — no comment
+  // creation or activity logging exists yet, so these simply reflect
+  // whatever rows already exist (today: none) instead of mock content.
+  const [comments, setComments] = useState<TicketComment[]>([]);
+  const [activity, setActivity] = useState<TicketActivityEvent[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    loadTicketComments(displayedTicket.id).then((result) => {
+      if (cancelled) return;
+      setComments(result.status === "ready" ? result.comments : []);
+    });
+    loadTicketActivity(displayedTicket.id).then((result) => {
+      if (cancelled) return;
+      setActivity(result.status === "ready" ? result.events : []);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [displayedTicket.id]);
+
   const t = displayedTicket;
-  const comments = getMockComments(t);
-  const activity = getMockActivity(t);
 
   return (
     <>
@@ -230,6 +248,21 @@ export function TicketPreviewPanel({
             </p>
           </div>
 
+          {/* ── Acceptance Criteria ──────────────────────────────────────────── */}
+          {t.acceptanceCriteria !== undefined && t.acceptanceCriteria.length > 0 && (
+            <div className="px-5 pt-4 pb-5 border-t border-slate-100 dark:border-zinc-800">
+              <p className={`${FIELD_LABEL} mb-2.5`}>Acceptance Criteria</p>
+              <ul className="space-y-1.5">
+                {t.acceptanceCriteria.map((c, i) => (
+                  <li key={i} className="flex items-start gap-2 text-[13px] text-slate-700 dark:text-zinc-300 leading-relaxed">
+                    <span className="w-1 h-1 rounded-full bg-slate-300 dark:bg-zinc-600 flex-shrink-0 mt-[7px]" />
+                    {c}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           {/* ── Comments ─────────────────────────────────────────────────────── */}
           <div className="px-5 pt-4 pb-5 border-t border-slate-100 dark:border-zinc-800">
             <p className={`${FIELD_LABEL} mb-3`}>
@@ -241,6 +274,9 @@ export function TicketPreviewPanel({
               )}
             </p>
 
+            {comments.length === 0 ? (
+              <p className="text-[12px] text-slate-400 dark:text-zinc-600">No comments yet.</p>
+            ) : (
             <div className="space-y-4">
               {comments.map((c, i) => (
                 <div key={i} className="flex items-start gap-2.5">
@@ -274,12 +310,16 @@ export function TicketPreviewPanel({
                 </div>
               ))}
             </div>
+            )}
           </div>
 
           {/* ── Activity (vertical timeline) ─────────────────────────────────── */}
           <div className="px-5 pt-4 pb-6 border-t border-slate-100 dark:border-zinc-800">
             <p className={`${FIELD_LABEL} mb-3`}>Activity</p>
 
+            {activity.length === 0 ? (
+              <p className="text-[12px] text-slate-400 dark:text-zinc-600">No activity yet.</p>
+            ) : (
             <div>
               {activity.map((a, i) => {
                 const isLast = i === activity.length - 1;
@@ -306,13 +346,14 @@ export function TicketPreviewPanel({
                 );
               })}
             </div>
+            )}
           </div>
         </div>
 
         {/* ── Footer: always visible, outside scroll container ─────────────── */}
         <div className="flex-shrink-0 px-5 py-4 border-t border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-950">
           <Link
-            href={`/projects/${slug}/tickets/${ticket.id}`}
+            href={`/projects/${slug}/tickets/${getTicketDisplayKey(ticket)}`}
             onClick={onBeforeNavigate}
             className="flex items-center justify-center gap-2 w-full px-4 py-2.5 rounded-lg bg-brand-600 hover:bg-brand-700 dark:bg-brand-500 dark:hover:bg-brand-600 text-white text-sm font-semibold shadow-sm shadow-brand-600/20 dark:shadow-brand-500/20 transition-colors"
           >

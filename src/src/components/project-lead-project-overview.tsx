@@ -547,6 +547,8 @@ export function ProjectLeadProjectOverview({ slug = "mobile-banking-app" }: { sl
       {showNewTicket && (
         <NewTicketModal
           slug={slug}
+          tickets={tickets}
+          members={[]}
           onClose={() => setShowNewTicket(false)}
           onCreated={handleTicketCreated}
           onPreviewDuplicate={handlePreviewDuplicate}

@@ -56,25 +56,6 @@ If a requested change would require modifying them, stop and explain why instead
 
 ---
 
-# Source of Truth Documents
-
-Before making product, UX, or architecture decisions, review the following documents:
-
-1. PRODUCT_VISION.md
-2. MVP_SCOPE.md
-3. DESIGN_PRINCIPLES.md
-4. DESIGN_SYSTEM_PRINCIPLES.md
-5. USER_PERSONAS.md
-6. CORE_CONCEPTS.md
-7. INFORMATION_ARCHITECTURE.md
-8. USER_FLOWS.md
-9. NAVIGATION_PRINCIPLES.md
-10. FUTURE_ROADMAP.md
-
-These documents define the product and take precedence over assumptions.
-
----
-
 # Primary Goal
 
 Replace the current internal workflow used in Unfuddle while significantly improving:
@@ -286,13 +267,15 @@ However, simplicity must remain the defining characteristic of the platform.
 
 # Backend Integration Status
 
-Supabase Auth, real profile/organization-membership data, and Projects
-(Sidebar, the `/projects` list, and Project Settings) are connected and
-confirmed working end-to-end against a live Supabase project. Tickets,
-Dashboard, Reports, Users, and the rest of Settings are still unconnected
-mock data — see "Still mock" below for the exact boundary within Projects
-itself (Project Overview/Tickets/Notes/Team/per-project Reports are not
-part of this).
+Supabase Auth, real profile/organization-membership data, Projects
+(Sidebar, the `/projects` list, and Project Settings), and Tickets
+(the five list views, New Ticket creation, and the full Ticket Detail
+page — inline edits, Labels, Acceptance Criteria, Attachments, Time
+Tracking, Comments, and Activity) are connected and confirmed working
+end-to-end against a live Supabase project. Dashboard, Reports, Users,
+and the rest of Settings are still unconnected mock data — see
+"Still mock" below for the exact boundary within Projects itself
+(Project Overview/Notes/Team/per-project Reports are not part of this).
 
 ## Confirmed working (login/logout, profile, avatar, change password)
 
@@ -409,15 +392,132 @@ Overview, Tickets, Notes, Team, and per-project Reports still import
   text, this table only supplies a real per-org roster and basic
   duplicate-by-name prevention).
 
+## Confirmed working (Tickets — list views, New Ticket, and Ticket Detail)
+
+Scoped narrowly, like Projects above: only the ticket data itself and the
+screens listed here are real. Project Overview, Notes, Team, and
+per-project Reports are untouched — see "Still mock".
+
+- `src/lib/tickets.ts` — the single module for every real Tickets read/write:
+  `loadProjectTickets` (all five list views — List/Board/Calendar/Timeline/
+  Insights — scoped to one project via `project_id`, RLS decides
+  visibility same as Projects), `loadTicketByCode` (Ticket Detail's real
+  data source, resolved by the visible ticket code — e.g. `JIR-1` — never
+  the internal uuid, which stays a database-only identifier and is never
+  exposed in a URL), `createTicket` (New Ticket modal: title, description,
+  acceptance criteria, estimated hours, and assignee are persisted;
+  Type/Status/Priority/Labels/Due Date in "More Options" are still
+  unwired and always write fixed defaults — `to_do`/`normal`/`task`/none —
+  matching that sprint's explicit scope), `updateTicket` (every Ticket
+  Detail inline edit: Title, Description, Status, Type, Priority,
+  Assignee, Estimated Hours, Due Date, Labels, and each Acceptance
+  Criterion's checked state), `loadTicketComments` / `createTicketComment`
+  (real comment thread, newest first), `loadTicketActivity` (see Activity
+  Log below), `loadOrganizationLabels` / `createOrganizationLabel` (the
+  Labels selector's real, per-org, case-insensitive-deduped catalog, merged
+  with the static seed categories already in `ALL_LABELS`), `loadTicketAttachments`
+  / `uploadTicketAttachment` (real Supabase Storage upload + metadata row —
+  rename/replace/delete are still local-only, not persisted), and
+  `loadTicketTimeEntries` / `logTicketTime` (real time entries, minutes as
+  the canonical stored unit to avoid float drift, Date defaults to the
+  user's real local today).
+- `src/components/tickets-screen.tsx` — the five list views' orchestrator;
+  loads real tickets for the currently-open project only. Assigned filter
+  offers real org members (Anyone/Me/Unassigned + the real roster); the
+  Priority/Status dropdowns and quick-filter chips remain visual-only
+  (unwired), a pre-existing gap unrelated to the mock-data removal.
+- `src/components/tickets/new-ticket-modal.tsx` — Possible Duplicates
+  checks only the current project's own real tickets (never another
+  project's, never the old mock array).
+- `src/app/projects/[slug]/tickets/[ticketCode]/page.tsx` (renamed from
+  `[ticketId]`) + `src/components/tickets/ticket-detail-screen.tsx` — real
+  bug fixed here: the route used to navigate on the internal uuid and 404
+  when a stale dev-server route table lagged the rename; now the ticket
+  code is the only thing that ever appears in a ticket URL.
+  `TicketDetailBreadcrumb` mirrors `ProjectSettingsBreadcrumb`'s pattern
+  (client component reading the shared project list + the real ticket).
+  Attachments/Time Tracking/Comments keep their existing collapsible-
+  section UI untouched — only their data sources changed. Milestone and
+  Story Points fields are dead code (defined, never rendered) and were
+  left alone.
+- **Activity Log is real and comprehensive**, built almost entirely with
+  database triggers rather than client code, so "only after the real write
+  succeeds, with the real authenticated actor" comes for free and no
+  existing write path (`createTicket`/`updateTicket`/
+  `uploadTicketAttachment`/`logTicketTime`/`createTicketComment`) had to
+  change: ticket creation, every field change on `tickets` (one row per
+  column that actually changed — labels and acceptance-criteria-done are
+  diffed element by element, so each added/removed label or each toggled
+  criterion gets its own readable entry), attachment uploads, and time
+  entries are all logged by triggers; comment creation was already logged
+  by an earlier trigger. `loadTicketActivity` turns
+  `event_type`/`field_name`/`old_value`/`new_value` into the existing
+  Activity UI's plain `{label, timeAgo}` shape (e.g. "Alex Sosa changed
+  Status from To Do to In Progress"), and synthesizes a single "created
+  this ticket" entry for tickets that predate this feature — using that
+  ticket's own real `created_at`/`created_by`, with no actor shown at all
+  if `created_by` is null, never a fabricated name.
+- Migrations (all confirmed against the live project, in order):
+  `20260717000000_grant_authenticated_tickets_read.sql`,
+  `20260718000000_grant_authenticated_tickets_insert.sql`,
+  `20260719000000_fix_tickets_insert_rls_admin_lead.sql` (real bug: the
+  base schema's `tickets_insert`/`ticket_comments_insert`/etc. policies
+  only allowed a real `project_memberships` row, but that table is still
+  empty — no staffing UI exists yet — so every insert was blocked for
+  everyone; fixed by also allowing an org admin/lead, the same fix reused
+  by every ticket-related insert policy added afterward),
+  `20260720000000_grant_authenticated_ticket_comments_activity_read.sql`,
+  `20260721000000_grant_authenticated_tickets_update.sql`,
+  `20260722000000_add_labels_table.sql`,
+  `20260723000000_add_tickets_acceptance_criteria_done.sql` (parallel
+  `boolean[]` aligned by index with `acceptance_criteria` — deliberately
+  not a restructuring of that column, since reordering/editing/deleting
+  criteria aren't implemented),
+  `20260724000000_add_ticket_attachments.sql` (private `ticket-attachments`
+  Storage bucket, path `<ticket_id>/<uuid>-<filename>`),
+  `20260725000000_fix_ticket_attachments_storage_insert_policy.sql` (real
+  bug: the insert policy joined `projects` to check org admin/lead, and
+  since `projects` also has a `name` column, the unqualified
+  `storage.foldername(name)` reference silently resolved to the *project's*
+  name instead of the uploaded object's own path — every real upload
+  failed RLS until this was qualified as `objects.name`),
+  `20260726000000_add_ticket_time_entries.sql`,
+  `20260727000000_enable_real_ticket_comments.sql` (fixes the same
+  `is_project_member`-only bug for comments, adds `default auth.uid()` to
+  `author_profile_id`, and adds the first Activity-logging trigger,
+  `log_comment_activity`), `20260728000000_real_ticket_activity_log.sql`
+  (`tickets.created_by`, new `field_name`/`old_value`/`new_value` columns
+  on `ticket_activity`, and the creation/field-change/attachment/time-entry
+  triggers described above).
+
 ## Still mock
 
-- Tickets, Dashboard, Reports, Users, and the rest of Settings
-  (`/settings/*`) all still read from `src/lib/mock-*.ts` — do not assume
-  otherwise.
-- Within Projects itself: Project Overview (`/projects/[slug]`), Tickets,
-  Notes, Team, and per-project Reports still import
-  `src/lib/mock-projects.ts` directly — only the Sidebar, `/projects`, and
-  `/projects/[slug]/settings` are real (see above).
+- Dashboard, Reports, Users, and the rest of Settings (`/settings/*`) all
+  still read from `src/lib/mock-*.ts` — do not assume otherwise.
+- Within Projects itself: Project Overview (`/projects/[slug]`), Notes,
+  Team, and per-project Reports still import `src/lib/mock-projects.ts`
+  directly — only the Sidebar, `/projects`, and `/projects/[slug]/settings`
+  are real (see above). `admin-project-overview.tsx` and
+  `project-lead-project-overview.tsx` (the Project Overview dashboards)
+  still render `NewTicketModal`/`TicketDetailScreen` against their own
+  local mock ticket state — real Tickets data doesn't reach these two
+  screens.
+- Within Tickets/Ticket Detail specifically, still mock/unimplemented on
+  purpose (see the section above for what's real):
+  - New Ticket's "More Options" fields (Type, Status, Priority, Labels, Due
+    Date) — always write fixed defaults, never the value picked in the
+    modal.
+  - Assigned/Priority/Status dropdowns and quick-filter chips on the
+    Tickets list screen — visual only, don't filter anything.
+  - Related Tickets / Blocked By / Related To on Ticket Detail — the list
+    itself is real (empty, no fabricated links), but there's no real
+    cross-ticket search to link against yet.
+  - Attachments rename/replace/delete, and editing or deleting a Comment —
+    all local-only, not persisted.
+  - Milestone and Story Points fields on Ticket Detail — dead code, not
+    rendered anywhere.
+  - GitHub/Development integration — removed from Ticket Detail entirely
+    (no real integration exists).
 - `docs/UNFUDDLE_IMPORT_SPECIFICATION.md` defines how Techtivo's Unfuddle
   backup maps onto the schema for the eventual data migration. No importer
   code exists yet, and it leaves several product decisions (orphaned
@@ -429,7 +529,6 @@ Overview, Tickets, Notes, Team, and per-project Reports still import
 At the beginning of every new session, only read:
 
 - PROJECT_STATUS.md
-- CHANGELOG.md
 
 Consult additional documentation under /docs only when it is relevant to the specific task being implemented:
 

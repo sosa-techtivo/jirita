@@ -3,30 +3,36 @@
 import { useState } from "react";
 import { FilterChip } from "@/components/tickets/filter-chip";
 import { FilterDropdown, type DropdownGroup } from "@/components/tickets/filter-dropdown";
+import type { OrgMember } from "@/lib/projects";
 
-// ── Mock data ─────────────────────────────────────────────────────────────────
+// ── Static option groups ──────────────────────────────────────────────────────
 
-const avatar = (id: number) => `https://i.pravatar.cc/64?img=${id}`;
+const ASSIGNED_BASE_GROUP: DropdownGroup = {
+  options: [
+    { value: "__anyone__", label: "Anyone" },
+    { value: "me",         label: "Me" },
+    { value: "unassigned", label: "Unassigned" },
+  ],
+};
 
-const ASSIGNED_GROUPS: DropdownGroup[] = [
-  {
-    options: [
-      { value: "__anyone__", label: "Anyone" },
-      { value: "me",         label: "Me" },
-      { value: "unassigned", label: "Unassigned" },
-    ],
-  },
-  {
-    divider: true,
-    options: [
-      { value: "sarah",  label: "Sarah Chen",  displayLabel: "Sarah",  avatar: avatar(47) },
-      { value: "marcus", label: "Marcus Lee",  displayLabel: "Marcus", avatar: avatar(12) },
-      { value: "elena",  label: "Elena Rossi", displayLabel: "Elena",  avatar: avatar(5)  },
-      { value: "david",  label: "David Kim",   displayLabel: "David",  avatar: avatar(22) },
-      { value: "priya",  label: "Alejo Cadavid", displayLabel: "Priya",  avatar: avatar(33) },
-    ],
-  },
-];
+// Real org members only — no mock names. If there are none yet (dev
+// fallback, or an org with no other members), the dropdown just shows the
+// base group above.
+function buildAssignedGroups(members: OrgMember[]): DropdownGroup[] {
+  if (members.length === 0) return [ASSIGNED_BASE_GROUP];
+  return [
+    ASSIGNED_BASE_GROUP,
+    {
+      divider: true,
+      options: members.map((member) => ({
+        value: member.id,
+        label: member.name,
+        displayLabel: member.name.split(" ")[0],
+        avatar: member.avatar,
+      })),
+    },
+  ];
+}
 
 const PRIORITY_GROUPS: DropdownGroup[] = [
   {
@@ -78,15 +84,18 @@ export function FilterBar({
   onToggleChip,
   searchQuery,
   onSearchChange,
+  members,
 }: {
   activeChips: Set<string>;
   onToggleChip: (label: string) => void;
   searchQuery: string;
   onSearchChange: (query: string) => void;
+  members: OrgMember[];
 }) {
   const [assigned,  setAssigned]  = useState<string[]>([]);
   const [priority,  setPriority]  = useState<string[]>([]);
   const [status,    setStatus]    = useState<string[]>([]);
+  const assignedGroups = buildAssignedGroups(members);
 
   return (
     <div className="flex flex-col gap-3">
@@ -120,7 +129,7 @@ export function FilterBar({
         <FilterDropdown
           label="Assigned"
           mode="single"
-          groups={ASSIGNED_GROUPS}
+          groups={assignedGroups}
           selected={assigned}
           onChange={setAssigned}
           searchable

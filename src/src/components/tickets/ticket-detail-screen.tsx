@@ -10,24 +10,37 @@ import {
   LabelTag,
   TicketTypeIcon,
   TicketTypeSelect,
-  getMockComments,
-  getMockActivity,
   STATUS_LABEL,
 } from "@/components/tickets/ticket-ui";
 import { BackToTicketsButton } from "@/components/tickets/back-to-tickets-button";
 import { TicketPreviewPanel } from "@/components/tickets/ticket-preview-panel";
-import { getRegisteredTicket } from "@/lib/pending-tickets";
+import { getRegisteredTicketByCode } from "@/lib/pending-tickets";
+import {
+  loadTicketByCode,
+  loadTicketComments,
+  loadTicketActivity,
+  createTicketComment,
+  updateTicket,
+  loadOrganizationLabels,
+  createOrganizationLabel,
+  loadTicketAttachments,
+  uploadTicketAttachment,
+  loadTicketTimeEntries,
+  logTicketTime,
+  type TicketComment,
+  type TicketActivityEvent,
+  type UpdateTicketInput,
+  type TicketAttachment,
+  type TimeEntryRecord,
+  type LogTimeInput,
+} from "@/lib/tickets";
+import { loadOrganizationMembers, type OrgMember } from "@/lib/projects";
+import { FALLBACK_AVATAR } from "@/lib/current-user";
 import { MemberTrigger } from "@/components/member-profile";
+import { useCurrentUser } from "@/components/current-user-provider";
+import { useOrganizationProjects } from "@/components/organization-projects-provider";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-
-const TEAM_MEMBERS = [
-  { name: "Marcus Lee",  avatar: "https://i.pravatar.cc/64?img=12" },
-  { name: "Elena Rossi", avatar: "https://i.pravatar.cc/64?img=5"  },
-  { name: "Sarah Chen",  avatar: "https://i.pravatar.cc/64?img=47" },
-  { name: "Alejo Cadavid", avatar: "https://i.pravatar.cc/64?img=33" },
-  { name: "David Kim",   avatar: "https://i.pravatar.cc/64?img=22" },
-];
 
 const MILESTONES = ["App Store Submission", "Beta Release", "Security Audit"];
 
@@ -42,14 +55,6 @@ const PRIORITY_LABEL: Record<TicketPriority, string> = {
   normal: "Normal",
   low:    "Low",
 };
-
-const MOCK_ACCEPTANCE_CRITERIA = [
-  { id: 1, text: "User receives a confirmation email within 2 minutes of submission", done: true },
-  { id: 2, text: "Inline validation highlights missing required fields before submit", done: true },
-  { id: 3, text: "Success state persists after page refresh (no duplicate submissions)", done: false },
-  { id: 4, text: "Works correctly on iOS Safari and Android Chrome", done: false },
-  { id: 5, text: "Accessible via keyboard navigation (WCAG 2.1 AA)", done: false },
-];
 
 // Attachments data lives inside AttachmentsSection state (see below)
 
@@ -368,18 +373,26 @@ function EditableSidebarAssignee({
   value,
   onChange,
   projectSlug,
+  members,
 }: {
   value: { name: string; avatar: string };
   onChange: (v: { name: string; avatar: string }) => void;
   projectSlug?: string;
+  /** Real organization members only — no mock names. */
+  members: OrgMember[];
 }) {
   const [editing, setEditing] = useState(false);
   const ref = useRef<HTMLSelectElement>(null);
   useEffect(() => { if (editing) ref.current?.focus(); }, [editing]);
 
   const handleChange = (name: string) => {
-    const member = TEAM_MEMBERS.find((m) => m.name === name);
-    if (member) { onChange(member); setEditing(false); }
+    if (name === "Unassigned") {
+      onChange({ name: "Unassigned", avatar: FALLBACK_AVATAR });
+      setEditing(false);
+      return;
+    }
+    const member = members.find((m) => m.name === name);
+    if (member) { onChange({ name: member.name, avatar: member.avatar }); setEditing(false); }
   };
 
   return (
@@ -393,8 +406,9 @@ function EditableSidebarAssignee({
           onBlur={() => setEditing(false)}
           onKeyDown={(e) => { if (e.key === "Escape") setEditing(false); }}
         >
-          {TEAM_MEMBERS.map((m) => (
-            <option key={m.name} value={m.name}>{m.name}</option>
+          <option value="Unassigned">Unassigned</option>
+          {members.map((m) => (
+            <option key={m.id} value={m.name}>{m.name}</option>
           ))}
         </select>
       ) : (
@@ -624,12 +638,20 @@ function EditableSidebarDueDate({
 function EditableSidebarLabels({
   value,
   onChange,
+  allLabels,
+  onCreateLabel,
 }: {
   value: string[];
   onChange: (v: string[]) => void;
+  /** Static seed categories merged with the real, growing per-org catalog. */
+  allLabels: string[];
+  onCreateLabel: (name: string) => Promise<{ status: "success"; name: string } | { status: "error"; message: string }>;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<string[]>(value);
+  const [search, setSearch] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
   const toggle = (label: string) => {
@@ -638,8 +660,9 @@ function EditableSidebarLabels({
     );
   };
 
-  const save = () => { onChange(draft); setEditing(false); };
-  const cancel = () => { setDraft(value); setEditing(false); };
+  const resetPicker = () => { setSearch(""); setCreateError(null); };
+  const save = () => { onChange(draft); setEditing(false); resetPicker(); };
+  const cancel = () => { setDraft(value); setEditing(false); resetPicker(); };
 
   // Close on outside click
   useEffect(() => {
@@ -654,9 +677,37 @@ function EditableSidebarLabels({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editing, draft]);
 
+  const trimmedSearch = search.trim();
+  const filteredLabels = trimmedSearch
+    ? allLabels.filter((l) => l.toLowerCase().includes(trimmedSearch.toLowerCase()))
+    : allLabels;
+  const exactMatch = allLabels.some((l) => l.toLowerCase() === trimmedSearch.toLowerCase());
+  const showCreateOption = trimmedSearch.length > 0 && trimmedSearch.length <= 40 && !exactMatch;
+
+  const handleCreate = async () => {
+    if (!showCreateOption || creating) return;
+    setCreating(true);
+    setCreateError(null);
+    const result = await onCreateLabel(trimmedSearch);
+    setCreating(false);
+    if (result.status === "error") {
+      setCreateError(result.message);
+      return;
+    }
+    setDraft((prev) => (prev.includes(result.name) ? prev : [...prev, result.name]));
+    setSearch("");
+  };
+
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.key === "Escape") cancel();
-    if (e.key === "Enter") save();
+    if (e.key === "Enter") {
+      if (showCreateOption) {
+        e.preventDefault();
+        handleCreate();
+      } else {
+        save();
+      }
+    }
   };
 
   return (
@@ -664,8 +715,21 @@ function EditableSidebarLabels({
       <div ref={containerRef}>
         {editing ? (
           <div onKeyDown={onKeyDown} tabIndex={-1} className="outline-none">
+            <div className="flex items-center gap-1.5 px-2 py-1 mb-2 rounded-md border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900">
+              <svg className="w-3 h-3 text-slate-400 dark:text-zinc-600 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
+              </svg>
+              <input
+                type="text"
+                placeholder="Search or create…"
+                value={search}
+                onChange={(e) => { setSearch(e.target.value); setCreateError(null); }}
+                className="flex-1 min-w-0 bg-transparent text-[12px] text-slate-800 dark:text-zinc-200 outline-none placeholder:text-slate-400 dark:placeholder:text-zinc-600"
+              />
+            </div>
+
             <div className="flex flex-wrap gap-1 mb-2">
-              {ALL_LABELS.map((label) => {
+              {filteredLabels.map((label) => {
                 const active = draft.includes(label);
                 return (
                   <button
@@ -682,7 +746,21 @@ function EditableSidebarLabels({
                   </button>
                 );
               })}
+              {showCreateOption && (
+                <button
+                  onClick={handleCreate}
+                  disabled={creating}
+                  className="px-1.5 py-0.5 rounded text-[10px] font-medium border border-dashed border-brand-300 dark:border-brand-700 text-brand-600 dark:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-950/40 transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  {creating ? "Creating…" : `➕ Create "${trimmedSearch}"`}
+                </button>
+              )}
             </div>
+
+            {createError && (
+              <p className="text-[10px] text-red-600 dark:text-red-400 mb-2">{createError}</p>
+            )}
+
             <div className="flex gap-2">
               <button
                 onClick={save}
@@ -727,13 +805,6 @@ const RELATION_LABEL: Record<RelationKind, string> = {
 };
 
 type RelatedLink = { id: string; ticketId: string; kind: RelationKind };
-
-const MOCK_RELATED_LINKS: RelatedLink[] = [
-  { id: "r1", ticketId: "pci-compliance-gap",              kind: "blocks"     },
-  { id: "r2", ticketId: "kyc-vendor-outage",               kind: "blocked-by" },
-  { id: "r3", ticketId: "push-notification-setup",         kind: "related-to" },
-  { id: "r4", ticketId: "accessibility-audit",             kind: "related-to" },
-];
 
 function RelatedTicketCard({
   ticket,
@@ -807,12 +878,10 @@ function RelatedTicketCard({
 
 function RelatedTicketsSection({
   slug,
-  currentTicketId,
 }: {
   slug: string;
-  currentTicketId: string;
 }) {
-  const [links, setLinks] = useState<RelatedLink[]>(MOCK_RELATED_LINKS);
+  const [links, setLinks] = useState<RelatedLink[]>([]);
   const [previewTicket, setPreviewTicket] = useState<Ticket | null>(null);
   const [linking, setLinking] = useState(false);
   const [linkKind, setLinkKind] = useState<RelationKind>("related-to");
@@ -836,15 +905,9 @@ function RelatedTicketsSection({
     if (linking) searchRef.current?.focus();
   }, [linking]);
 
-  const linkedIds = new Set(links.map((l) => l.ticketId));
-
-  const q = searchQuery.toLowerCase();
-  const searchResults = ALL_TICKETS.filter(
-    (t) =>
-      t.id !== currentTicketId &&
-      !linkedIds.has(t.id) &&
-      (t.title.toLowerCase().includes(q) || getTicketDisplayKey(t).toLowerCase().includes(q))
-  );
+  // No real cross-ticket search exists yet (see "No implementar: Related
+  // tickets") — always empty, never the old mock projects' fake tickets.
+  const searchResults: Ticket[] = [];
 
   const addLink = (ticketId: string) => {
     setLinks((prev) => [...prev, { id: newId(), ticketId, kind: linkKind }]);
@@ -982,15 +1045,32 @@ function CollapsibleSection({
   badge,
   headerAction,
   defaultOpen = true,
+  forceOpenSignal,
   children,
 }: {
   title: string;
   badge?: string;
   headerAction?: ReactNode;
   defaultOpen?: boolean;
+  // Bump this (e.g. an incrementing counter) to force the section open
+  // without turning it into a fully controlled component — every other
+  // caller that doesn't pass it keeps managing `open` internally, exactly
+  // as before. Never fires on mount, only on a later change, so it can't
+  // override defaultOpen on first render.
+  forceOpenSignal?: number;
   children: ReactNode;
 }) {
   const [open, setOpen] = useState(defaultOpen);
+  const isFirstRender = useRef(true);
+
+  useEffect(() => {
+    if (forceOpenSignal === undefined) return;
+    if (isFirstRender.current) {
+      isFirstRender.current = false;
+      return;
+    }
+    setOpen(true);
+  }, [forceOpenSignal]);
 
   return (
     <div className="mt-10 pt-8 border-t border-slate-100 dark:border-zinc-800">
@@ -1040,48 +1120,55 @@ function CollapsibleSection({
 
 // ── Acceptance Criteria ───────────────────────────────────────────────────────
 
-function AcceptanceCriteriaSection() {
-  const [items, setItems] = useState(MOCK_ACCEPTANCE_CRITERIA);
-
-  const toggle = (id: number) =>
-    setItems((prev) => prev.map((item) => item.id === id ? { ...item, done: !item.done } : item));
-
-  const doneCount = items.filter((i) => i.done).length;
+function AcceptanceCriteriaSection({
+  criteria,
+  doneFlags,
+  onToggle,
+}: {
+  criteria: string[];
+  /** Real, persisted checked/unchecked state, aligned by index with criteria. */
+  doneFlags: boolean[];
+  onToggle: (index: number) => void;
+}) {
+  const doneCount = criteria.filter((_, i) => doneFlags[i] ?? false).length;
 
   return (
-    <CollapsibleSection title="Acceptance Criteria" badge={`· ${doneCount}/${items.length} done`} defaultOpen={true}>
+    <CollapsibleSection title="Acceptance Criteria" badge={`· ${doneCount}/${criteria.length} done`} defaultOpen={true}>
       <ul className="space-y-2.5">
-        {items.map((item) => (
-          <li key={item.id} className="flex items-start gap-3">
-            <button
-              onClick={() => toggle(item.id)}
-              aria-label={item.done ? "Mark incomplete" : "Mark complete"}
-              className={
-                "mt-0.5 w-4 h-4 rounded flex-shrink-0 border transition-colors flex items-center justify-center " +
-                (item.done
-                  ? "bg-brand-500 border-brand-500 dark:bg-brand-600 dark:border-brand-600"
-                  : "border-slate-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 hover:border-brand-400 dark:hover:border-brand-500")
-              }
-            >
-              {item.done && (
-                <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" strokeWidth="3" viewBox="0 0 12 12">
-                  <path d="M2 6l3 3 5-5" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              )}
-            </button>
-            <span
-              className={
-                "text-[14px] leading-snug select-none cursor-pointer " +
-                (item.done
-                  ? "line-through text-slate-400 dark:text-zinc-600"
-                  : "text-slate-700 dark:text-zinc-300")
-              }
-              onClick={() => toggle(item.id)}
-            >
-              {item.text}
-            </span>
-          </li>
-        ))}
+        {criteria.map((text, i) => {
+          const done = doneFlags[i] ?? false;
+          return (
+            <li key={i} className="flex items-start gap-3">
+              <button
+                onClick={() => onToggle(i)}
+                aria-label={done ? "Mark incomplete" : "Mark complete"}
+                className={
+                  "mt-0.5 w-4 h-4 rounded flex-shrink-0 border transition-colors flex items-center justify-center " +
+                  (done
+                    ? "bg-brand-500 border-brand-500 dark:bg-brand-600 dark:border-brand-600"
+                    : "border-slate-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 hover:border-brand-400 dark:hover:border-brand-500")
+                }
+              >
+                {done && (
+                  <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" strokeWidth="3" viewBox="0 0 12 12">
+                    <path d="M2 6l3 3 5-5" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                )}
+              </button>
+              <span
+                className={
+                  "text-[14px] leading-snug select-none cursor-pointer " +
+                  (done
+                    ? "line-through text-slate-400 dark:text-zinc-600"
+                    : "text-slate-700 dark:text-zinc-300")
+                }
+                onClick={() => onToggle(i)}
+              >
+                {text}
+              </span>
+            </li>
+          );
+        })}
       </ul>
     </CollapsibleSection>
   );
@@ -1107,12 +1194,6 @@ type UploadingItem = {
   progress: number;
 };
 
-const INITIAL_ATTACHMENTS: AttachmentItem[] = [
-  { id: "att-1", name: "design-mockup-v3.fig",   ext: "fig", size: "2.4 MB",  addedBy: "Elena Rossi", avatar: "https://i.pravatar.cc/64?img=5",  uploadedAt: "3 days ago" },
-  { id: "att-2", name: "requirements-spec.pdf",   ext: "pdf", size: "348 KB",  addedBy: "Marcus Lee",  avatar: "https://i.pravatar.cc/64?img=12", uploadedAt: "1 week ago" },
-  { id: "att-3", name: "screen-recording.mp4",    ext: "mp4", size: "18.2 MB", addedBy: "Sarah Chen",  avatar: "https://i.pravatar.cc/64?img=47", uploadedAt: "5 days ago" },
-];
-
 const EXT_COLOR: Record<string, string> = {
   fig:  "bg-purple-100 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400",
   pdf:  "bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400",
@@ -1137,8 +1218,15 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+let attachmentIdCounter = 0;
+
+// Date.now() + Math.random() alone can collide when several files are
+// selected in the same synchronous batch (same millisecond) — the counter
+// guarantees uniqueness regardless of timing, so a temp upload id can never
+// match another temp id or a persisted attachment's id.
 function newId(): string {
-  return `att-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  attachmentIdCounter += 1;
+  return `att-${Date.now()}-${attachmentIdCounter}-${Math.random().toString(36).slice(2, 7)}`;
 }
 
 // ── UploadingRow ──────────────────────────────────────────────────────────────
@@ -1351,10 +1439,35 @@ function AttachmentRow({
 
 // ── AttachmentsSection ────────────────────────────────────────────────────────
 
-function AttachmentsSection() {
-  const [attachments,   setAttachments]   = useState<AttachmentItem[]>(INITIAL_ATTACHMENTS);
+function toAttachmentItem(a: TicketAttachment): AttachmentItem {
+  return {
+    id: a.id,
+    name: a.filename,
+    ext: getExt(a.filename),
+    size: formatBytes(a.sizeBytes),
+    addedBy: a.uploadedByName,
+    avatar: a.uploadedByAvatar,
+    uploadedAt: a.uploadedAt,
+  };
+}
+
+function AttachmentsSection({
+  ticketId,
+  isDevFallback,
+  onUploaded,
+}: {
+  ticketId: string;
+  isDevFallback: boolean;
+  /** Called after a successful upload — a database trigger already logged the real activity row; this just tells the parent to refetch it. */
+  onUploaded: () => void;
+}) {
+  const [attachments,   setAttachments]   = useState<AttachmentItem[]>([]);
   const [uploading,     setUploading]     = useState<UploadingItem[]>([]);
   const [dragActive,    setDragActive]    = useState(false);
+  // Bumped once per successful upload — forces the section open if it was
+  // closed, and is a no-op (stays open) if it already was. Never bumped on
+  // failure, so a failed upload never opens the section.
+  const [uploadSuccessSignal, setUploadSuccessSignal] = useState(0);
   const [replacingIds,  setReplacingIds]  = useState<Set<string>>(new Set());
   const [pendingReplId, setPendingReplId] = useState<string | null>(null);
 
@@ -1362,40 +1475,44 @@ function AttachmentsSection() {
   const fileInputRef   = useRef<HTMLInputElement>(null);
   const replaceInputRef = useRef<HTMLInputElement>(null);
 
-  // Drive upload progress forward in 100 ms ticks
+  // Real attachments for this ticket only, loaded from Supabase. Dev
+  // fallback: no real ticket row exists to query against, so this simply
+  // stays empty (matches Comments/Activity/Labels' own dev-fallback
+  // behavior) rather than sending a request guaranteed to fail.
+  useEffect(() => {
+    if (isDevFallback) return;
+    let cancelled = false;
+    loadTicketAttachments(ticketId).then((result) => {
+      if (cancelled) return;
+      if (result.status === "ready") setAttachments(result.attachments.map(toAttachmentItem));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [ticketId, isDevFallback]);
+
+  // Trickle each uploading item's progress bar toward 90% while its real
+  // upload request is in flight — Supabase Storage's upload() has no
+  // granular byte-progress callback, so this is a visual approximation
+  // only (same UploadingRow/progress-bar UI as before); the item is
+  // removed and swapped for the real attachment once the actual request
+  // settles, in startUpload below, never by this timer.
   useEffect(() => {
     if (uploading.length === 0) return;
     const timer = setTimeout(() => {
-      setUploading((prev) => {
-        const stillGoing: UploadingItem[] = [];
-        const finished:   UploadingItem[] = [];
-        for (const item of prev) {
-          const next = Math.min(100, item.progress + Math.random() * 18 + 7);
-          if (next >= 100) finished.push({ ...item, progress: 100 });
-          else             stillGoing.push({ ...item, progress: next });
-        }
-        if (finished.length > 0) {
-          setAttachments((a) => [
-            ...finished.map((f) => ({
-              id: f.id,
-              name: f.name,
-              ext: f.ext,
-              size: f.size,
-              addedBy: "You",
-              avatar: "https://i.pravatar.cc/64?img=33",
-              uploadedAt: "Just now",
-            })),
-            ...a,
-          ]);
-        }
-        return stillGoing;
-      });
-    }, 100);
+      setUploading((prev) =>
+        prev.map((item) =>
+          item.progress < 90 ? { ...item, progress: Math.min(90, item.progress + Math.random() * 12 + 5) } : item
+        )
+      );
+    }, 150);
     return () => clearTimeout(timer);
   }, [uploading]);
 
   const startUpload = (files: FileList | File[]) => {
-    const items: UploadingItem[] = Array.from(files).map((f) => ({
+    if (isDevFallback) return; // no real ticket to upload against
+    const fileArray = Array.from(files);
+    const items: UploadingItem[] = fileArray.map((f) => ({
       id:       newId(),
       name:     f.name,
       ext:      getExt(f.name),
@@ -1403,6 +1520,28 @@ function AttachmentsSection() {
       progress: 0,
     }));
     setUploading((prev) => [...prev, ...items]);
+
+    items.forEach((item, i) => {
+      const file = fileArray[i];
+      uploadTicketAttachment(ticketId, file).then((result) => {
+        // Briefly show the bar at 100% (matches the previous "fills, then
+        // swaps" visual) before removing the temp row.
+        setUploading((prev) => prev.map((u) => (u.id === item.id ? { ...u, progress: 100 } : u)));
+        setTimeout(() => {
+          setUploading((prev) => prev.filter((u) => u.id !== item.id));
+          if (result.status === "error") {
+            console.warn("[ticket-detail] attachment upload failed:", result.message);
+            return;
+          }
+          setAttachments((prev) => {
+            if (prev.some((a) => a.id === result.attachment.id)) return prev;
+            return [toAttachmentItem(result.attachment), ...prev];
+          });
+          setUploadSuccessSignal((n) => n + 1);
+          onUploaded();
+        }, 200);
+      });
+    });
   };
 
   const totalCount = attachments.length + uploading.length;
@@ -1413,6 +1552,7 @@ function AttachmentsSection() {
       title="Attachments"
       badge={totalCount > 0 ? `· ${totalCount} ${totalCount === 1 ? "file" : "files"}` : undefined}
       defaultOpen={false}
+      forceOpenSignal={uploadSuccessSignal}
       headerAction={
         <button
           onClick={() => fileInputRef.current?.click()}
@@ -1515,203 +1655,10 @@ function AttachmentsSection() {
   );
 }
 
-// ── Development ───────────────────────────────────────────────────────────────
-
-type PRStatus = "open" | "review" | "merged" | "draft" | "closed";
-
-type MockPR = {
-  number: number; title: string; status: PRStatus;
-  branch: string; author: string; authorAvatar: string; updatedAt: string;
-};
-type MockBranch = { name: string };
-type MockCommit = { sha: string; message: string; author: string; authorAvatar: string; time: string };
-
-type MockPRGroup     = { kind: "prs";      label: string; items: MockPR[]     };
-type MockBranchGroup = { kind: "branches"; label: string; items: MockBranch[] };
-type MockCommitGroup = { kind: "commits";  label: string; items: MockCommit[] };
-type MockDevGroup    = MockPRGroup | MockBranchGroup | MockCommitGroup;
-type MockDevProvider = { id: string; name: string; groups: MockDevGroup[] };
-
-const PR_STATUS: Record<PRStatus, { label: string; cls: string }> = {
-  open:   { label: "Open",             cls: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400" },
-  review: { label: "Ready for Review", cls: "bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-400" },
-  merged: { label: "Merged",           cls: "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400" },
-  draft:  { label: "Draft",            cls: "bg-slate-100 text-slate-500 dark:bg-zinc-800 dark:text-zinc-400" },
-  closed: { label: "Closed",           cls: "bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400" },
-};
-
-const MOCK_DEV: MockDevProvider[] = [
-  {
-    id: "github",
-    name: "GitHub",
-    groups: [
-      {
-        kind: "prs",
-        label: "Pull Requests",
-        items: [
-          { number: 142, title: "Add KYC retry logic with exponential backoff", status: "review", branch: "feature/MBA-8-kyc-retry", author: "Elena Rossi", authorAvatar: "https://i.pravatar.cc/64?img=5",  updatedAt: "2h ago"    },
-          { number: 138, title: "Fix: handle null response from KYC provider",  status: "merged", branch: "fix/kyc-null-response",   author: "Marcus Lee",  authorAvatar: "https://i.pravatar.cc/64?img=12", updatedAt: "3 days ago" },
-        ],
-      },
-      {
-        kind: "branches",
-        label: "Branches",
-        items: [
-          { name: "feature/MBA-8-kyc-retry" },
-          { name: "fix/login-timeout"       },
-        ],
-      },
-      {
-        kind: "commits",
-        label: "Recent Commits",
-        items: [
-          { sha: "a3f9c12", message: "Fix retry timeout logic",    author: "Elena Rossi", authorAvatar: "https://i.pravatar.cc/64?img=5",  time: "2h ago"    },
-          { sha: "e7b2d04", message: "Improve API error handling", author: "Marcus Lee",  authorAvatar: "https://i.pravatar.cc/64?img=12", time: "5h ago"    },
-          { sha: "c1a8f39", message: "Update unit tests",          author: "Sarah Chen",  authorAvatar: "https://i.pravatar.cc/64?img=47", time: "1 day ago" },
-        ],
-      },
-    ],
-  },
-];
-
-function GitBranchIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className ?? "w-3.5 h-3.5"} fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 16 16" aria-hidden="true">
-      <circle cx="4"  cy="3.5"  r="1.5" />
-      <circle cx="4"  cy="12.5" r="1.5" />
-      <circle cx="12" cy="3.5"  r="1.5" />
-      <path d="M4 5v5.5M4 5a4 4 0 008 0" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function GitHubIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-      <path d="M12 0C5.37 0 0 5.373 0 12c0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61-.546-1.385-1.335-1.755-1.335-1.755-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 21.795 24 17.298 24 12c0-6.627-5.373-12-12-12z" />
-    </svg>
-  );
-}
-
-const DEV_GROUP_LABEL = "text-[10px] font-bold uppercase tracking-widest text-slate-300 dark:text-zinc-700";
-
-function renderDevGroup(group: MockDevGroup): ReactNode {
-  switch (group.kind) {
-
-    case "prs":
-      return (
-        <div className="space-y-2">
-          {group.items.map((pr, i) => {
-            const s = PR_STATUS[pr.status];
-            return (
-              <div key={i} className="px-3 py-2.5 rounded-lg border border-slate-100 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-900/60 hover:border-slate-200 dark:hover:border-zinc-700 transition-colors">
-                <div className="flex items-start gap-2 min-w-0">
-                  <span className="font-mono text-[11px] font-semibold text-slate-400 dark:text-zinc-600 mt-px flex-shrink-0">
-                    #{pr.number}
-                  </span>
-                  <p className="flex-1 min-w-0 text-[13px] font-medium text-slate-800 dark:text-zinc-200 leading-snug truncate">
-                    {pr.title}
-                  </p>
-                  <span className={"ml-1 flex-shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded " + s.cls}>
-                    {s.label}
-                  </span>
-                </div>
-                <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
-                  <GitBranchIcon className="w-3 h-3 text-slate-400 dark:text-zinc-600 flex-shrink-0" />
-                  <span className="font-mono text-[10px] text-slate-500 dark:text-zinc-500 max-w-[160px] truncate">
-                    {pr.branch}
-                  </span>
-                  <span className="text-slate-300 dark:text-zinc-700">·</span>
-                  <MemberTrigger name={pr.author} avatar={pr.authorAvatar} className="flex items-center gap-1.5">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={pr.authorAvatar} alt={pr.author} className="w-3.5 h-3.5 rounded-full flex-shrink-0" />
-                    <span className="text-[11px] text-slate-400 dark:text-zinc-600">{pr.author}</span>
-                  </MemberTrigger>
-                  <span className="text-slate-300 dark:text-zinc-700">·</span>
-                  <span className="text-[11px] text-slate-400 dark:text-zinc-600">{pr.updatedAt}</span>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      );
-
-    case "branches":
-      return (
-        <div className="space-y-1">
-          {group.items.map((b, i) => (
-            <div key={i} className="flex items-center gap-2 py-0.5">
-              <GitBranchIcon className="w-3.5 h-3.5 text-slate-400 dark:text-zinc-600 flex-shrink-0" />
-              <code className="text-[12px] font-mono text-slate-700 dark:text-zinc-300">{b.name}</code>
-            </div>
-          ))}
-        </div>
-      );
-
-    case "commits":
-      return (
-        <div>
-          {group.items.map((c, i) => (
-            <div
-              key={i}
-              className={
-                "flex items-center gap-2.5 py-1.5 " +
-                (i < group.items.length - 1 ? "border-b border-slate-100 dark:border-zinc-800/70" : "")
-              }
-            >
-              <code className="text-[10px] font-mono font-semibold bg-slate-100 dark:bg-zinc-800 text-slate-500 dark:text-zinc-400 px-1.5 py-0.5 rounded flex-shrink-0">
-                {c.sha}
-              </code>
-              <span className="flex-1 min-w-0 text-[13px] text-slate-700 dark:text-zinc-300 truncate">
-                {c.message}
-              </span>
-              <div className="flex items-center gap-1.5 flex-shrink-0">
-                <MemberTrigger name={c.author} avatar={c.authorAvatar} className="flex items-center gap-1.5">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={c.authorAvatar} alt={c.author} className="w-3.5 h-3.5 rounded-full" />
-                  <span className="text-[11px] text-slate-400 dark:text-zinc-600">{c.author}</span>
-                </MemberTrigger>
-                <span className="text-slate-300 dark:text-zinc-700">·</span>
-                <span className="text-[11px] text-slate-400 dark:text-zinc-600">{c.time}</span>
-              </div>
-            </div>
-          ))}
-        </div>
-      );
-  }
-}
-
-function DevelopmentSection() {
-  return (
-    <CollapsibleSection title="Development" defaultOpen={false}>
-      <div className="space-y-6">
-        {MOCK_DEV.map((provider) => (
-          <div key={provider.id}>
-            {/* Provider header */}
-            <div className="flex items-center gap-1.5 mb-4 pb-3 border-b border-slate-100 dark:border-zinc-800/60">
-              {provider.id === "github" && (
-                <GitHubIcon className="w-3.5 h-3.5 text-slate-500 dark:text-zinc-500" />
-              )}
-              <span className="text-[12px] font-semibold text-slate-600 dark:text-zinc-400">
-                {provider.name}
-              </span>
-            </div>
-
-            {/* Resource groups */}
-            <div className="space-y-5">
-              {provider.groups.map((group) => (
-                <div key={group.label}>
-                  <p className={`${DEV_GROUP_LABEL} mb-2.5`}>{group.label}</p>
-                  {renderDevGroup(group)}
-                </div>
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
-    </CollapsibleSection>
-  );
-}
+// No real GitHub/Development integration exists (see "No implementar:
+// GitHub integration") — the Development section (Pull Requests, Branches,
+// Recent Commits) is removed entirely rather than shown empty, since there
+// is no "connect a real integration" affordance to fall back to either.
 
 // ── Time Tracking ─────────────────────────────────────────────────────────────
 
@@ -1724,16 +1671,19 @@ interface TimeEntry {
   authorAvatar: string;
 }
 
-const MOCK_TIME_ENTRIES: TimeEntry[] = [
-  { id: "te-1", hours: 2, comment: "Implemented login validation", date: "Today",     authorName: "Marcus Lee", authorAvatar: "https://i.pravatar.cc/64?img=12" },
-  { id: "te-2", hours: 3, comment: "API integration",              date: "Yesterday", authorName: "Marcus Lee", authorAvatar: "https://i.pravatar.cc/64?img=12" },
-  { id: "te-3", hours: 6, comment: "Initial implementation",       date: "Jun 27",    authorName: "Marcus Lee", authorAvatar: "https://i.pravatar.cc/64?img=12" },
-];
 
-const TODAY_ISO = "2026-06-30";
+// The user's real local "today" — never a fixed/mock date. Built from local
+// getters (not toISOString(), which is UTC and can show the wrong calendar
+// day near midnight in the user's own timezone).
+function getTodayISO(): string {
+  const d = new Date();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${d.getFullYear()}-${month}-${day}`;
+}
 
 function formatDateDisplay(iso: string): string {
-  const today = new Date(`${TODAY_ISO}T00:00:00`);
+  const today = new Date(`${getTodayISO()}T00:00:00`);
   const d     = new Date(`${iso}T00:00:00`);
   const diff  = Math.round((today.getTime() - d.getTime()) / 86_400_000);
   if (diff === 0) return "Today";
@@ -1741,19 +1691,31 @@ function formatDateDisplay(iso: string): string {
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
+function toTimeEntry(record: TimeEntryRecord): TimeEntry {
+  return {
+    id: record.id,
+    hours: Math.round((record.minutes / 60) * 10) / 10,
+    comment: record.comment,
+    date: formatDateDisplay(record.workDate),
+    authorName: record.loggedByName,
+    authorAvatar: record.loggedByAvatar,
+  };
+}
+
 function LogTimeModal({
-  assignee,
   onClose,
   onSubmit,
 }: {
-  assignee: { name: string; avatar: string };
   onClose:  () => void;
-  onSubmit: (entry: Omit<TimeEntry, "id">) => void;
+  // Returns whether the entry actually persisted — the modal only closes
+  // itself on success, matching every other real-data modal in this file.
+  onSubmit: (input: LogTimeInput) => Promise<boolean>;
 }) {
   const [hrsStr,  setHrsStr]  = useState("");
   const [minsStr, setMinsStr] = useState("");
   const [comment, setComment] = useState("");
-  const [date,    setDate]    = useState(TODAY_ISO);
+  const [date,    setDate]    = useState(() => getTodayISO());
+  const [submitting, setSubmitting] = useState(false);
 
   const hrsRef = useRef<HTMLInputElement>(null);
 
@@ -1767,18 +1729,19 @@ function LogTimeModal({
 
   const h          = Math.max(0, parseInt(hrsStr  || "0", 10) || 0);
   const m          = Math.max(0, Math.min(59, parseInt(minsStr || "0", 10) || 0));
-  const totalHours = h + m / 60;
-  const canSubmit  = totalHours > 0;
+  const totalMinutes = h * 60 + m;
+  const canSubmit  = totalMinutes > 0 && !submitting;
 
-  function handleSubmit() {
+  async function handleSubmit() {
     if (!canSubmit) return;
-    onSubmit({
-      hours:        Math.round(totalHours * 10) / 10,
-      comment:      comment.trim(),
-      date:         formatDateDisplay(date),
-      authorName:   assignee.name,
-      authorAvatar: assignee.avatar,
+    setSubmitting(true);
+    const ok = await onSubmit({
+      minutes:  totalMinutes,
+      comment:  comment.trim(),
+      workDate: date,
     });
+    setSubmitting(false);
+    if (ok) onClose();
   }
 
   return (
@@ -1861,7 +1824,7 @@ function LogTimeModal({
             <input
               type="date"
               value={date}
-              max={TODAY_ISO}
+              max={getTodayISO()}
               onChange={(e) => setDate(e.target.value)}
               className={INPUT_BASE}
             />
@@ -2038,18 +2001,32 @@ function TimeHistoryModal({
 }
 
 function TimeTrackingSection({
+  ticketId,
   entries,
   estimatedHours,
-  assignee,
   onAddEntry,
 }: {
+  ticketId:       string;
   entries:        TimeEntry[];
   estimatedHours: number | undefined;
-  assignee:       { name: string; avatar: string };
+  /** Called with the real, persisted entry — after a successful save only. */
   onAddEntry:     (entry: TimeEntry) => void;
 }) {
   const [logModal,  setLogModal]  = useState(false);
   const [histModal, setHistModal] = useState(false);
+
+  // Persists the entry to Supabase; only calls onAddEntry (which updates the
+  // visible list/total/remaining/progress bar) once the write actually
+  // succeeds — never from local state alone.
+  async function handleLogTime(input: LogTimeInput): Promise<boolean> {
+    const result = await logTicketTime(ticketId, input);
+    if (result.status === "error") {
+      console.warn("[ticket-detail] failed to log time:", result.message);
+      return false;
+    }
+    onAddEntry(toTimeEntry(result.entry));
+    return true;
+  }
 
   const totalLogged = entries.reduce((s, e) => s + e.hours, 0);
   const pct         = estimatedHours ? Math.min(100, Math.round((totalLogged / estimatedHours) * 100)) : 0;
@@ -2138,12 +2115,8 @@ function TimeTrackingSection({
 
       {logModal && (
         <LogTimeModal
-          assignee={assignee}
           onClose={() => setLogModal(false)}
-          onSubmit={(entry) => {
-            onAddEntry({ ...entry, id: `te-${Date.now()}` });
-            setLogModal(false);
-          }}
+          onSubmit={handleLogTime}
         />
       )}
 
@@ -2193,36 +2166,254 @@ function NotFound({ ticketId, slug }: { ticketId: string; slug: string }) {
   );
 }
 
+// Dev-only fallback lookup (no real organization) — the static mock array
+// scoped to this project, plus anything just created this session via the
+// New Ticket modal's dev-fallback path (see pending-tickets.ts). Never
+// reached once a real organization exists.
+function resolveDevTicket(slug: string, ticketCode: string): Ticket | undefined {
+  return (
+    ALL_TICKETS.find((t) => t.projectSlug === slug && getTicketDisplayKey(t) === ticketCode) ??
+    getRegisteredTicketByCode(slug, ticketCode)
+  );
+}
+
+// ── Breadcrumb ────────────────────────────────────────────────────────────────
+// Client component, same reasoning as ProjectSettingsBreadcrumb in
+// project-settings-screen.tsx: real project/ticket data lives client-side
+// (Supabase + the shared Projects context), so a server-rendered breadcrumb
+// can't show it — this reads the real project name from the shared
+// provider and the real ticket code/title from its own lookup.
+export function TicketDetailBreadcrumb({ slug, ticketCode }: { slug: string; ticketCode: string }) {
+  const { organization, isDevFallback } = useCurrentUser();
+  const { projects } = useOrganizationProjects();
+  const projectName = projects.find((p) => p.slug === slug)?.name ?? slug;
+
+  const [loadedTitle, setLoadedTitle] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (isDevFallback || !organization) return;
+    let cancelled = false;
+    loadTicketByCode(organization.id, slug, ticketCode).then((result) => {
+      if (cancelled) return;
+      setLoadedTitle(result.status === "ready" ? result.ticket.title : null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [isDevFallback, organization, slug, ticketCode]);
+
+  const displayText = (isDevFallback ? resolveDevTicket(slug, ticketCode)?.title : loadedTitle) ?? ticketCode;
+
+  return (
+    <>
+      <Link href="/projects" className="text-slate-400 hover:text-slate-600 dark:text-zinc-500 dark:hover:text-zinc-300">
+        Projects
+      </Link>
+      <span className="text-slate-300 dark:text-zinc-700">/</span>
+      <Link
+        href={`/projects/${slug}`}
+        className="text-slate-400 hover:text-slate-600 dark:text-zinc-500 dark:hover:text-zinc-300"
+      >
+        {projectName}
+      </Link>
+      <span className="text-slate-300 dark:text-zinc-700">/</span>
+      <Link
+        href={`/projects/${slug}/tickets`}
+        className="text-slate-400 hover:text-slate-600 dark:text-zinc-500 dark:hover:text-zinc-300"
+      >
+        Tickets
+      </Link>
+      <span className="text-slate-300 dark:text-zinc-700">/</span>
+      <span className="text-slate-800 font-medium dark:text-zinc-200 truncate">{displayText}</span>
+    </>
+  );
+}
+
 // ── Main export ───────────────────────────────────────────────────────────────
 
 export function TicketDetailScreen({
-  ticket: initialTicket,
-  ticketId,
   slug,
+  ticketCode,
 }: {
-  ticket: Ticket | undefined;
-  ticketId: string;
   slug: string;
+  ticketCode: string;
 }) {
-  const [ticket, setTicket] = useState<Ticket | undefined>(
-    () => initialTicket ?? getRegisteredTicket(ticketId)
+  const { organization, isDevFallback } = useCurrentUser();
+
+  const [loadState, setLoadState] = useState<"loading" | "ready" | "not-found" | "error">(
+    isDevFallback ? (resolveDevTicket(slug, ticketCode) ? "ready" : "not-found") : "loading"
   );
-  const [activityLog, setActivityLog] = useState<Array<{ label: string; timeAgo: string }>>(() => {
-    const t = initialTicket ?? getRegisteredTicket(ticketId);
-    return t ? getMockActivity(t) : [];
-  });
-  const [loggedEntries, setLoggedEntries] = useState<TimeEntry[]>(MOCK_TIME_ENTRIES);
+  const [loadErrorMessage, setLoadErrorMessage] = useState<string | null>(null);
+  const [ticket, setTicket] = useState<Ticket | undefined>(() =>
+    isDevFallback ? resolveDevTicket(slug, ticketCode) : undefined
+  );
+  // Real Comments/Activity — start empty and stay empty unless real rows
+  // exist, in every mode (including dev fallback — no mock people, ever).
+  const [comments, setComments] = useState<TicketComment[]>([]);
+  const [activityLog, setActivityLog] = useState<TicketActivityEvent[]>([]);
+  const [addingComment, setAddingComment] = useState(false);
+  const [commentDraft, setCommentDraft] = useState("");
+  const [submittingComment, setSubmittingComment] = useState(false);
+  const commentTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const [loggedEntries, setLoggedEntries] = useState<TimeEntry[]>([]);
+  const [members, setMembers] = useState<OrgMember[]>([]);
+  // Real, per-organization label catalog — starts empty; merged with the
+  // static ALL_LABELS seed list below. Dev fallback: no real catalog to
+  // load, so only the static seed list is offered (no persistence anyway).
+  const [orgLabels, setOrgLabels] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (isDevFallback || !organization) return; // handled synchronously above
+    let cancelled = false;
+    loadTicketByCode(organization.id, slug, ticketCode).then((result) => {
+      if (cancelled) return;
+      if (result.status === "ready") {
+        setTicket(result.ticket);
+        setLoadState("ready");
+        loadTicketComments(result.ticket.id).then((r) => {
+          if (!cancelled) setComments(r.status === "ready" ? r.comments : []);
+        });
+        loadTicketActivity(result.ticket.id).then((r) => {
+          if (!cancelled) setActivityLog(r.status === "ready" ? r.events : []);
+        });
+        loadTicketTimeEntries(result.ticket.id).then((r) => {
+          if (!cancelled) setLoggedEntries(r.status === "ready" ? r.entries.map(toTimeEntry) : []);
+        });
+      } else if (result.status === "not-found") {
+        setLoadState("not-found");
+      } else {
+        setLoadErrorMessage(result.message);
+        setLoadState("error");
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [isDevFallback, organization, slug, ticketCode]);
+
+  useEffect(() => {
+    if (isDevFallback || !organization) return; // dev fallback: no mock members either
+    loadOrganizationMembers(organization.id).then((result) => {
+      if (result.status === "ready") setMembers(result.members);
+    });
+  }, [isDevFallback, organization]);
+
+  useEffect(() => {
+    if (isDevFallback || !organization) return;
+    loadOrganizationLabels(organization.id).then((result) => {
+      if (result.status === "ready") setOrgLabels(result.labels.map((l) => l.name));
+    });
+  }, [isDevFallback, organization]);
+
+  useEffect(() => {
+    if (addingComment) commentTextareaRef.current?.focus();
+  }, [addingComment]);
+
+  if (loadState === "loading") {
+    return (
+      <div className="h-full flex items-center justify-center text-sm text-slate-400 dark:text-zinc-500">
+        Loading ticket…
+      </div>
+    );
+  }
+
+  if (loadState === "error") {
+    return (
+      <div className="h-full flex flex-col items-center justify-center text-center px-4">
+        <h3 className="text-sm font-semibold text-slate-700 dark:text-zinc-200">Couldn&apos;t load ticket</h3>
+        <p className="text-sm text-slate-400 mt-1 max-w-xs dark:text-zinc-500">
+          {loadErrorMessage ?? "Something went wrong."}
+        </p>
+      </div>
+    );
+  }
 
   if (!ticket) {
-    return <NotFound ticketId={ticketId} slug={slug} />;
+    return <NotFound ticketId={ticketCode} slug={slug} />;
   }
 
   const update = <K extends keyof Ticket>(key: K, value: Ticket[K]) => {
     setTicket((prev) => prev ? { ...prev, [key]: value } : prev);
   };
 
-  const addActivity = (label: string) => {
-    setActivityLog((prev) => [{ label, timeAgo: "Just now" }, ...prev]);
+  const ticketId = ticket.id;
+
+  // Refetches real Activity from Supabase — every field edit, acceptance
+  // criteria toggle, attachment upload, and time entry is now logged by a
+  // database trigger as part of its own real write (see
+  // 20260727000000/20260728000000), so this never invents a local entry;
+  // it only ever reflects what's already been committed.
+  const refreshActivity = () => {
+    loadTicketActivity(ticketId).then((r) => {
+      if (r.status === "ready") setActivityLog(r.events);
+    });
+  };
+
+  // Persists one inline edit to Supabase. Dev fallback (no real organization)
+  // keeps today's local-only behavior — there is no real ticket row to write
+  // to. Minimal error handling per scope: failures are logged, not shown in
+  // the UI (no error affordance exists for these fields today).
+  const persist = (patch: UpdateTicketInput) => {
+    if (isDevFallback) return;
+    updateTicket(ticketId, slug, patch).then((result) => {
+      if (result.status === "error") {
+        console.warn("[ticket-detail] failed to save change:", result.message);
+        return;
+      }
+      refreshActivity();
+    });
+  };
+
+  // Acceptance Criteria checkbox — unlike persist() above, this updates
+  // local state only AFTER a successful write, so a failed save never shows
+  // a checked box that didn't actually persist. Dev fallback keeps the
+  // pre-existing instant-toggle behavior (no real ticket to write to).
+  const toggleAcceptanceCriterion = (index: number) => {
+    const criteria = ticket.acceptanceCriteria;
+    if (!criteria) return;
+    const currentDone = ticket.acceptanceCriteriaDone ?? [];
+    const nextDone = criteria.map((_, i) => (i === index ? !(currentDone[i] ?? false) : (currentDone[i] ?? false)));
+
+    if (isDevFallback) {
+      update("acceptanceCriteriaDone", nextDone);
+      return;
+    }
+
+    updateTicket(ticketId, slug, { acceptanceCriteriaDone: nextDone }).then((result) => {
+      if (result.status === "error") {
+        console.warn("[ticket-detail] failed to save change:", result.message);
+        return;
+      }
+      update("acceptanceCriteriaDone", nextDone);
+      refreshActivity();
+    });
+  };
+
+  // Merge the static seed categories with the real, growing per-org catalog
+  // (case-insensitive de-dup — a real label matching a seed name by
+  // spelling only shows once). Available to any ticket in the workspace,
+  // since orgLabels is loaded from the shared `labels` table, not per-ticket.
+  const allLabelOptions = (() => {
+    const seen = new Set<string>();
+    const merged: string[] = [];
+    for (const l of [...ALL_LABELS, ...orgLabels]) {
+      const key = l.toLowerCase();
+      if (!seen.has(key)) {
+        seen.add(key);
+        merged.push(l);
+      }
+    }
+    return merged;
+  })();
+
+  const createLabel = async (name: string): Promise<{ status: "success"; name: string } | { status: "error"; message: string }> => {
+    if (isDevFallback || !organization) {
+      return { status: "error", message: "Not available in this mode." };
+    }
+    const result = await createOrganizationLabel(organization.id, name);
+    if (result.status === "error") return result;
+    setOrgLabels((prev) => [...prev, result.label.name]);
+    return { status: "success", name: result.label.name };
   };
 
   const totalLogged = loggedEntries.reduce((s, e) => s + e.hours, 0);
@@ -2230,14 +2421,34 @@ export function TicketDetailScreen({
 
   const addEntry = (entry: TimeEntry) => {
     setLoggedEntries((prev) => [entry, ...prev]);
-    const hrs   = `${entry.hours}h`;
-    const label = entry.comment
-      ? `${entry.authorName} logged ${hrs} — ${entry.comment}`
-      : `${entry.authorName} logged ${hrs}`;
-    addActivity(label);
+    // A database trigger already logged the real "time_logged" activity
+    // row as part of the same insert (see 20260728000000) — refetch
+    // instead of inventing a local entry.
+    refreshActivity();
   };
 
-  const comments = getMockComments(ticket, 3);
+  function cancelComment() {
+    setCommentDraft("");
+    setAddingComment(false);
+  }
+
+  async function submitComment() {
+    const trimmed = commentDraft.trim();
+    if (!trimmed || submittingComment) return;
+    setSubmittingComment(true);
+    const result = await createTicketComment(ticketId, trimmed);
+    setSubmittingComment(false);
+    if (result.status === "error") {
+      console.warn("[ticket-detail] failed to post comment:", result.message);
+      return;
+    }
+    setComments((prev) => [result.comment, ...prev]);
+    setCommentDraft("");
+    setAddingComment(false);
+    // A database trigger already created the matching "<name> added a
+    // comment" ticket_activity row as part of the same insert.
+    refreshActivity();
+  }
 
   return (
     <div className="min-h-full bg-white dark:bg-zinc-950">
@@ -2260,13 +2471,13 @@ export function TicketDetailScreen({
                 </span>
                 <EditableStatusBadge
                   value={ticket.status}
-                  onChange={(v) => update("status", v)}
+                  onChange={(v) => { update("status", v); persist({ status: v }); }}
                 />
               </div>
 
               <EditableTitle
                 value={ticket.title}
-                onChange={(v) => update("title", v)}
+                onChange={(v) => { update("title", v); persist({ title: v }); }}
               />
 
               <p className="text-[12px] text-slate-400 dark:text-zinc-600 mt-2.5 flex items-center gap-1.5 flex-wrap">
@@ -2306,20 +2517,24 @@ export function TicketDetailScreen({
             <CollapsibleSection title="Description" defaultOpen={true}>
               <EditableDescription
                 value={ticket.description}
-                onChange={(v) => update("description", v)}
+                onChange={(v) => { update("description", v); persist({ description: v }); }}
               />
             </CollapsibleSection>
 
-            <AcceptanceCriteriaSection />
+            {ticket.acceptanceCriteria !== undefined && ticket.acceptanceCriteria.length > 0 && (
+              <AcceptanceCriteriaSection
+                criteria={ticket.acceptanceCriteria}
+                doneFlags={ticket.acceptanceCriteriaDone ?? []}
+                onToggle={toggleAcceptanceCriterion}
+              />
+            )}
 
-            <AttachmentsSection />
-
-            <DevelopmentSection />
+            <AttachmentsSection ticketId={ticket.id} isDevFallback={isDevFallback} onUploaded={refreshActivity} />
 
             <TimeTrackingSection
+              ticketId={ticket.id}
               entries={loggedEntries}
               estimatedHours={ticket.hours}
-              assignee={ticket.assignee}
               onAddEntry={addEntry}
             />
 
@@ -2328,9 +2543,12 @@ export function TicketDetailScreen({
               badge={ticket.commentCount !== undefined ? `· ${ticket.commentCount} total` : undefined}
               defaultOpen={true}
             >
+              {comments.length === 0 ? (
+                <p className="text-[13px] text-slate-400 dark:text-zinc-600">No comments yet.</p>
+              ) : (
               <div className="space-y-6">
-                {comments.map((c, i) => (
-                  <div key={i} className="flex items-start gap-3">
+                {comments.map((c) => (
+                  <div key={c.id} className="flex items-start gap-3">
                     <MemberTrigger
                       name={c.name}
                       avatar={c.avatar}
@@ -2362,6 +2580,53 @@ export function TicketDetailScreen({
                   </div>
                 ))}
               </div>
+              )}
+
+              {/* Add comment */}
+              <div className={comments.length === 0 ? "mt-4" : "mt-6"}>
+                {addingComment ? (
+                  <div>
+                    <textarea
+                      ref={commentTextareaRef}
+                      rows={3}
+                      placeholder="Write a comment…"
+                      value={commentDraft}
+                      onChange={(e) => setCommentDraft(e.target.value)}
+                      className="w-full resize-none text-[13px] text-slate-700 dark:text-zinc-300 leading-relaxed bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-700 rounded-lg px-3 py-2.5 outline-none focus:border-brand-500 dark:focus:border-brand-500 focus:ring-1 focus:ring-brand-500/30 placeholder:text-slate-300 dark:placeholder:text-zinc-700"
+                    />
+                    <div className="flex items-center justify-end gap-2 mt-2">
+                      <button
+                        type="button"
+                        onClick={cancelComment}
+                        className="px-3.5 py-1.5 text-[13px] font-medium text-slate-600 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800 rounded-lg transition-colors"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={submitComment}
+                        disabled={commentDraft.trim().length === 0 || submittingComment}
+                        className={[
+                          "px-3.5 py-1.5 text-[13px] font-semibold rounded-lg transition-all",
+                          commentDraft.trim().length === 0 || submittingComment
+                            ? "bg-slate-100 dark:bg-zinc-800 text-slate-400 dark:text-zinc-600 cursor-not-allowed"
+                            : "bg-brand-500 hover:bg-brand-600 text-white shadow-sm shadow-brand-500/30 cursor-pointer",
+                        ].join(" ")}
+                      >
+                        Comment
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setAddingComment(true)}
+                    className="text-[12px] font-medium text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300 transition-colors"
+                  >
+                    Add comment
+                  </button>
+                )}
+              </div>
             </CollapsibleSection>
 
             <CollapsibleSection
@@ -2369,6 +2634,9 @@ export function TicketDetailScreen({
               badge={`· ${activityLog.length} updates`}
               defaultOpen={true}
             >
+              {activityLog.length === 0 ? (
+                <p className="text-[13px] text-slate-400 dark:text-zinc-600">No activity yet.</p>
+              ) : (
               <div className="pb-2">
                 {activityLog.map((a, i) => {
                   const isLast = i === activityLog.length - 1;
@@ -2392,6 +2660,7 @@ export function TicketDetailScreen({
                   );
                 })}
               </div>
+              )}
             </CollapsibleSection>
 
           </article>
@@ -2401,49 +2670,54 @@ export function TicketDetailScreen({
 
             <EditableSidebarStatus
               value={ticket.status}
-              onChange={(v) => update("status", v)}
+              onChange={(v) => { update("status", v); persist({ status: v }); }}
             />
 
             <EditableSidebarType
               value={ticket.type}
-              onChange={(v) => update("type", v)}
+              onChange={(v) => { update("type", v); persist({ type: v }); }}
             />
 
             <EditableSidebarPriority
               value={ticket.priority}
-              onChange={(v) => update("priority", v)}
+              onChange={(v) => { update("priority", v); persist({ priority: v }); }}
             />
 
             <EditableSidebarAssignee
               value={ticket.assignee}
-              onChange={(v) => update("assignee", v)}
+              onChange={(v) => {
+                update("assignee", v);
+                const member = members.find((m) => m.name === v.name);
+                persist({ assigneeProfileId: member ? member.id : null });
+              }}
               projectSlug={ticket.projectSlug}
+              members={members}
             />
 
             <EditableSidebarHours
               value={ticket.hours}
               onChange={(next) => {
-                const prev = ticket.hours;
                 update("hours", next);
-                if (next !== prev) {
-                  const from = prev !== undefined ? `${prev} h` : "—";
-                  const to   = next !== undefined ? `${next} h` : "—";
-                  addActivity(`${ticket.assignee.name} changed Estimated Hours ${from} → ${to}`);
-                }
+                persist({ hours: next ?? null });
               }}
             />
 
             <EditableSidebarDueDate
               value={ticket.dueDate}
-              onChange={(v) => update("dueDate", v)}
+              onChange={(v) => {
+                update("dueDate", v);
+                persist({ dueDate: v ? parseDisplayDate(v) : null });
+              }}
             />
 
             <EditableSidebarLabels
               value={ticket.labels}
-              onChange={(v) => update("labels", v)}
+              onChange={(v) => { update("labels", v); persist({ labels: v }); }}
+              allLabels={allLabelOptions}
+              onCreateLabel={createLabel}
             />
 
-            <RelatedTicketsSection slug={slug} currentTicketId={ticket.id} />
+            <RelatedTicketsSection slug={slug} />
 
           </aside>
 

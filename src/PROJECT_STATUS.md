@@ -1,4 +1,4 @@
-> Last Updated: July 16, 2026
+> Last Updated: July 28, 2026
 
 ---
 
@@ -8,9 +8,9 @@
 
 JIRITA is currently in the UI/UX MVP phase.
 
-The application now includes the full shell, a role-based UX layer (Admin / Project Lead / Member), projects listing, role-specific project overviews, a five-view Tickets experience with Task/Bug ticket types, Quick Ticket Preview, Full Ticket Detail with Time Tracking, role-specific Dashboards, role-specific Projects/Reports/Time Tracking screens, a personal My Work workspace, an editable Notes experience, a Settings section, a per-project Settings screen, a dedicated Admin-only Users management module, a real Supabase Auth flow (Login/Logout/Forgot/Reset/Change Password) with a Profile page that saves real data, and a single shared Member Profile Modal used everywhere a person is referenced. Auth/Profile, and now Projects (Sidebar, the `/projects` list, and per-project Settings), are backed by a live Supabase project; every other screen is still navigable and connected using mock data — see Architecture Status.
+The application now includes the full shell, a role-based UX layer (Admin / Project Lead / Member), projects listing, role-specific project overviews, a five-view Tickets experience with Task/Bug ticket types, Quick Ticket Preview, Full Ticket Detail with Time Tracking, role-specific Dashboards, role-specific Projects/Reports/Time Tracking screens, a personal My Work workspace, an editable Notes experience, a Settings section, a per-project Settings screen, a dedicated Admin-only Users management module, a real Supabase Auth flow (Login/Logout/Forgot/Reset/Change Password) with a Profile page that saves real data, and a single shared Member Profile Modal used everywhere a person is referenced. Auth/Profile, Projects (Sidebar, the `/projects` list, and per-project Settings), and now Tickets (all five list views, New Ticket creation, and the full Ticket Detail page) are backed by a live Supabase project; every other screen is still navigable and connected using mock data — see Architecture Status.
 
-The current objective is to complete the remaining frontend experience while continuing backend integration. Auth, profile/organization-membership data, avatar upload, and change password are confirmed working end-to-end against a live Supabase project. Projects has followed the same path: Sidebar, the `/projects` list, and `/projects/[slug]/settings` now read and write real project rows (create, edit, archive/restore, and per-project Settings' General/Billing fields, including a minimal real Clients roster). Project Overview, Tickets, Notes, Team, per-project Reports, Dashboard, company-wide Reports, Users, and the rest of Settings are still mock data — see Architecture Status.
+The current objective is to complete the remaining frontend experience while continuing backend integration. Auth, profile/organization-membership data, avatar upload, and change password are confirmed working end-to-end against a live Supabase project. Projects has followed the same path: Sidebar, the `/projects` list, and `/projects/[slug]/settings` now read and write real project rows (create, edit, archive/restore, and per-project Settings' General/Billing fields, including a minimal real Clients roster). Tickets has now followed the same path too: the five list views, New Ticket creation, and the full Ticket Detail page (inline edits, Labels, Acceptance Criteria, Attachments, Time Tracking, Comments, and a real trigger-driven Activity Log) all read and write real ticket rows. Project Overview, Notes, Team, per-project Reports, Dashboard, company-wide Reports, Users, and the rest of Settings are still mock data — see Architecture Status.
 
 ---
 
@@ -24,7 +24,7 @@ The current objective is to complete the remaining frontend experience while con
 
 `/src/docs/` holds implementation-facing documentation for backend work
 (`SUPABASE_MVP_SCHEMA.md`, `SUPABASE_SETUP.md`, `UNFUDDLE_IMPORT_SPECIFICATION.md`)
-— distinct from this file and `CHANGELOG.md`, which live at the `/src` root.
+— distinct from this file, which lives at the `/src` root.
 
 ---
 
@@ -166,7 +166,7 @@ Five independently scrolling columns:
 Each column:
 
 - Color-coded dot accent, count badge, last-activity subtitle
-- Cards link to `/projects/[slug]/tickets/[ticketId]`
+- Cards link to `/projects/[slug]/tickets/[ticketCode]`
 
 Each board card:
 
@@ -231,12 +231,23 @@ Clicking a ticket card opens a slide-in preview panel from the right (520px wide
 
 #### Full Ticket Detail Page
 
-The route `/projects/[slug]/tickets/[ticketId]` renders a complete ticket workspace.
+The route `/projects/[slug]/tickets/[ticketCode]` renders a complete ticket workspace, backed by real Supabase data — see Backend Integration below.
 
 - **← Back to Tickets** button at the top uses `router.back()`, preserving browser history
 - Two-column layout: main content left, metadata sidebar right
-- Main content: issue key, title, status badge, description, comments (3), activity timeline
-- Sidebar: editable status, priority, assignee, milestone, story points, due date, labels, Estimated hours
+- Main content: issue key, title, status badge, description, Acceptance Criteria, Attachments, Time Tracking, comments, activity timeline
+- Sidebar: editable status, type, priority, assignee, due date, labels, Estimated hours. Milestone and Story Points fields exist in code but are dead — defined, never rendered
+
+#### Backend Integration
+
+Tickets is now backed by real Supabase data — the second major mock-to-real seam after Projects (see Architecture Status for the full read/write/RLS breakdown).
+
+- `src/lib/tickets.ts` — the single module for every real Tickets read/write: `loadProjectTickets` (all five list views, scoped by `project_id`), `loadTicketByCode` (Ticket Detail's data source, resolved by the visible ticket code, e.g. `JIR-1` — the internal uuid is never exposed in a URL), `createTicket` (New Ticket modal — Type/Status/Priority/Labels/Due Date in "More Options" still write fixed defaults, not the value picked in the form), `updateTicket` (every Ticket Detail inline edit: Title, Description, Status, Type, Priority, Assignee, Estimated Hours, Due Date, Labels, and each Acceptance Criterion's checked state), `loadTicketComments`/`createTicketComment`, `loadTicketActivity`, `loadOrganizationLabels`/`createOrganizationLabel`, `loadTicketAttachments`/`uploadTicketAttachment` (real Storage upload + metadata row — rename/replace/delete stay local-only), and `loadTicketTimeEntries`/`logTicketTime` (minutes as the canonical stored unit)
+- The ticket detail route was renamed from `/projects/[slug]/tickets/[ticketId]` to `/projects/[slug]/tickets/[ticketCode]` — a real bug is fixed here: the route used to navigate on the internal uuid and could 404 when a stale dev-server route table lagged the rename; the ticket code is now the only thing that ever appears in a ticket URL
+- **Activity Log is real and comprehensive**, built almost entirely with database triggers rather than client code, so ticket creation, every field change, attachment uploads, and time entries are all logged automatically with the real authenticated actor
+- Assigned filter on the Tickets list screen now offers the real organization roster instead of mock names; Priority/Status dropdowns and quick-filter chips remain visual-only (unwired), unchanged from before
+- New Ticket's Possible Duplicates check now runs against the current project's own real tickets, never another project's or the old mock array
+- Admin/Project Lead Project Overview still create/view tickets via `NewTicketModal`/`TicketDetailScreen` against their own local mock ticket state — real Tickets data doesn't reach those two screens yet
 
 #### Navigation & State Restoration
 
@@ -258,7 +269,7 @@ A delivery-focused rebuild with no revenue, invoicing, hourly-rate, or billing-b
 
 Members have no Time Tracking nav item. A compact "My Time" summary row plus a "View Timesheet" link (`personal-timesheet-panel.tsx`) live inside My Work instead.
 
-Time Tracking is also integrated into the Ticket Detail page for logging against a specific ticket.
+Time Tracking is also integrated into the Ticket Detail page for logging against a specific ticket. This ticket-level piece is now backed by real Supabase data (`loadTicketTimeEntries`/`logTicketTime` in `src/lib/tickets.ts`, minutes as the canonical stored unit) — see Tickets → Backend Integration. The standalone Admin/Project Lead `/time-tracking` screens above are unaffected and still use mock data.
 
 Includes:
 
@@ -267,11 +278,10 @@ Includes:
   - Conditional variance text: `+Zh over estimate` in amber, shown only when over
   - Smart 2-segment 4px progress bar: brand fills estimated portion, amber fills overage
   - `View N entries →` link opens `TimeHistoryModal`
-- **`LogTimeModal`**: hours + minutes inputs, date picker, comment textarea; submit appends a `TimeEntry` and fires `addActivity()`
+- **`LogTimeModal`**: hours + minutes inputs, date picker, comment textarea; submit persists a real time entry and the Activity Log picks it up via a database trigger
 - **`TimeHistoryModal`**: full entry list with summary stats (Logged / Estimated / Remaining), scrollable timeline-dot entry list
 - Ticket header stats row: Estimated / Logged / Remaining (shown when `ticket.hours` is set)
 - Sidebar "Estimated" field (renamed from "Hours")
-- Mock initial entries: 11h total (2h today, 3h yesterday, 6h Jun 27)
 
 ### Dashboard
 
@@ -441,7 +451,7 @@ See Architecture Status for the full list of applied migrations.
 
 # In Progress
 
-Nothing currently in progress. Auth/profile/avatar and Projects (Sidebar, `/projects`, per-project Settings) backend integration are done and confirmed working — see Current Sprint → Completed → Authentication & Profile / Projects / Project Settings. Next candidate is wiring Tickets to the same Supabase schema — see Next Recommended Feature. The Unfuddle → Jirita import is specified (`docs/UNFUDDLE_IMPORT_SPECIFICATION.md`) but no importer code exists yet.
+Nothing currently in progress. Auth/profile/avatar, Projects (Sidebar, `/projects`, per-project Settings), and now Tickets (five list views, New Ticket, full Ticket Detail) backend integration are all done and confirmed working — see Current Sprint → Completed → Authentication & Profile / Projects / Project Settings / Tickets. Next candidate is one of the remaining mock-to-real seams — see Next Recommended Feature. The Unfuddle → Jirita import is specified (`docs/UNFUDDLE_IMPORT_SPECIFICATION.md`) but no importer code exists yet.
 
 ---
 
@@ -466,9 +476,14 @@ All top-level navigation items (Dashboard, My Work, Projects, Reports, Settings)
 
 # Next Recommended Feature
 
-Ticket editing — inline status, assignee, and priority changes directly in the ticket detail page. (Authentication, previously recommended here, is now complete and confirmed working against a live Supabase project — see Current Sprint → Completed → Authentication & Profile.)
+Continue the Supabase backend work already underway, following the same pattern established for profiles/organization_memberships, Projects, and now Tickets (real query + minimum-privilege grants + RLS, with a dev-only mock fallback until fully connected). (Authentication and Ticket editing, previously recommended here, are now both complete and confirmed working against a live Supabase project — see Current Sprint → Completed → Authentication & Profile / Tickets.)
 
-Alternatively: continue the Supabase backend work already underway — Tickets is the natural next mock-to-real seam to wire, following the same pattern established for profiles/organization_memberships and now Projects (real query + minimum-privilege grants + RLS, with a dev-only mock fallback until it's fully connected). Wiring Tickets would also let Project Overview/per-project Reports/Dashboard pick up real numbers instead of the `openTickets`/`blockedTickets`/`progress`/etc. fields Projects' own real data still defaults to 0 (see Architecture Status). See Architecture Status.
+The natural next mock-to-real seams:
+
+- Project Overview, Notes, Team, and per-project Reports — still import `src/lib/mock-projects.ts` directly even though Tickets itself is now real; wiring these would also let Project Overview/per-project Reports/Dashboard pick up real ticket-derived numbers instead of the `openTickets`/`blockedTickets`/`progress`/etc. fields Projects' own real rows still default to 0 (see Architecture Status)
+- Dashboard, company-wide Reports, and Users — still fully mock, no real data wired at all yet
+
+See Architecture Status.
 
 ---
 
@@ -505,7 +520,7 @@ Milestones, Versions, and Components were evaluated and explicitly decided again
 
 # Architecture Status
 
-Current architecture follows a frontend-first approach, with Auth/Profile and now Projects as real exceptions — see below.
+Current architecture follows a frontend-first approach, with Auth/Profile, Projects, and now Tickets as real exceptions — see below.
 
 Current stack:
 
@@ -513,7 +528,7 @@ Current stack:
 - React 19
 - TypeScript
 - TailwindCSS v4
-- `@supabase/supabase-js` — used by `src/lib/auth.ts`, `src/lib/membership.ts`, `src/lib/avatar-upload.ts`, and `src/lib/projects.ts`
+- `@supabase/supabase-js` — used by `src/lib/auth.ts`, `src/lib/membership.ts`, `src/lib/avatar-upload.ts`, `src/lib/projects.ts`, and `src/lib/tickets.ts`
 
 Not installed:
 
@@ -521,12 +536,12 @@ Not installed:
 
 Current data source:
 
-- **Real Supabase**: authentication/session, `profiles`, `organization_memberships`, `organizations`, the `avatars` Storage bucket, `projects`, and `clients` — confirmed working end-to-end against a live project. Real coverage of `projects` is scoped to the Sidebar, the `/projects` list, and `/projects/[slug]/settings` only — Project Overview, Tickets, Notes, Team, and per-project Reports still read `mock-projects.ts` directly.
-- **Mock data** (everything else): `src/lib/mock-projects.ts` (still the source for Project Overview/Tickets/Notes/Team/per-project Reports), `src/lib/mock-tickets.ts`, and the other `src/lib/mock-*.ts` files; module-level constants in screen components.
+- **Real Supabase**: authentication/session, `profiles`, `organization_memberships`, `organizations`, the `avatars` Storage bucket, `projects`, `clients`, `tickets`, `ticket_comments`, `ticket_activity`, `labels`, `ticket_attachments` (+ the `ticket-attachments` Storage bucket), and `ticket_time_entries` — confirmed working end-to-end against a live project. Real coverage of `projects` is scoped to the Sidebar, the `/projects` list, and `/projects/[slug]/settings` only — Project Overview, Notes, Team, and per-project Reports still read `mock-projects.ts` directly. Real coverage of `tickets` is scoped to the five list views, New Ticket creation, and the full Ticket Detail page — Project Overview (Admin/Project Lead variants) still create/view tickets against local mock state instead.
+- **Mock data** (everything else): `src/lib/mock-projects.ts` (still the source for Project Overview/Notes/Team/per-project Reports), `src/lib/mock-tickets.ts` (still supplies the `Ticket` type/`getTicketDisplayKey` helper the real Tickets code builds on, and remains the actual data source for Project Overview's local ticket state), and the other `src/lib/mock-*.ts` files; module-level constants in screen components.
 
 Backend integration, connected and confirmed working:
 
-- `src/lib/supabase-client.ts` — the lazy Supabase browser client, now imported by `auth.ts`/`membership.ts`/`avatar-upload.ts`/`projects.ts`
+- `src/lib/supabase-client.ts` — the lazy Supabase browser client, now imported by `auth.ts`/`membership.ts`/`avatar-upload.ts`/`projects.ts`/`tickets.ts`
 - `src/lib/auth.ts` — login, logout, session (`onAuthStateChange`), forgot/reset password, and change password (verified via re-authentication, never a manual password comparison)
 - `src/lib/membership.ts` — loads a signed-in user's `profiles` + active `organization_memberships` + `organizations` row, and writes real updates (name, weekly capacity via a security-definer RPC, avatar path)
 - `src/lib/avatar-upload.ts` — client-side validate/resize (Canvas, no new dependency)/upload to Supabase Storage
@@ -534,10 +549,13 @@ Backend integration, connected and confirmed working:
 - `src/lib/projects.ts` — all real Projects reads/writes: `loadOrganizationProjects` (org-scoped list, RLS decides who sees what — no client-side role filtering), `createProject`/`updateProject` (Projects list Create/Edit modal: name + description), `archiveProject`/`restoreProject` (status only), `loadProjectDetail`/`updateProjectSettings` (Project Settings' General/Billing fields — status writes here structurally exclude `"archived"`), `loadOrganizationMembers` (Project Lead picker), `loadOrganizationClients`/`createOrganizationClient` (Billing → Client roster)
 - `src/components/organization-projects-provider.tsx` — `OrganizationProjectsProvider`, mounted in `layout.tsx` next to `CurrentUserProvider`; Sidebar, `/projects`, and the Project Settings breadcrumb all read the same fetched list, so any write anywhere refetches once and every surface updates together. Dev-only mock fallback, same convention as `CurrentUserProvider`.
 - `src/components/create-project-modal.tsx` / `archive-project-modal.tsx` / `add-client-modal.tsx` — Create/Edit Project, Archive confirmation (reused unchanged by Project Settings' Danger Zone), and the minimal "+ Add new client" flow, respectively
-- Applied migrations, in order: `20260708000000_mvp_schema.sql` (base schema + RLS), `20260708010000_grant_authenticated_membership_read.sql` (SELECT grants — RLS alone doesn't grant table privileges), `20260709000000_profile_self_service_updates.sql` (self-service name/capacity writes), `20260710000000_avatars_storage.sql` + `20260711000000_fix_avatars_storage_policies.sql` (the `avatars` bucket and its RLS policies — first pass had a policy bug blocking uploads, fixed in the second file), `20260712000000_grant_authenticated_projects_read.sql`, `20260713000000_grant_authenticated_projects_insert.sql`, `20260714000000_fix_projects_select_rls_self_reference.sql` (real bug fix — `projects_select`'s helper function re-queried `projects` from within its own policy, which broke `INSERT`/`UPDATE ... RETURNING` specifically because Postgres evaluates the RETURNING-time SELECT check against the row being written in the same command and that self-reference doesn't reliably see it yet; rewritten to check the row's own columns directly), `20260715000000_grant_authenticated_projects_update.sql`, `20260716000000_add_clients_table.sql` (new `clients` table — not a foreign key on `projects`; `client_name` stays free text). See `docs/SUPABASE_SETUP.md` for how to apply migrations to a new project.
+- `src/lib/tickets.ts` — all real Tickets reads/writes: `loadProjectTickets` (all five list views, scoped by `project_id`, RLS decides visibility same as Projects), `loadTicketByCode` (Ticket Detail's data source, resolved by the visible ticket code — never the internal uuid, which stays database-only), `createTicket` (New Ticket modal: title/description/acceptance criteria/estimated hours/assignee persist; "More Options" fields still write fixed defaults), `updateTicket` (every Ticket Detail inline edit), `loadTicketComments`/`createTicketComment`, `loadTicketActivity` (turns trigger-logged rows into the existing Activity UI shape), `loadOrganizationLabels`/`createOrganizationLabel`, `loadTicketAttachments`/`uploadTicketAttachment` (real Storage upload + metadata row — rename/replace/delete stay local-only), `loadTicketTimeEntries`/`logTicketTime` (minutes as the canonical unit)
+- `src/app/projects/[slug]/tickets/[ticketCode]/page.tsx` (renamed from `[ticketId]`) + `src/components/tickets/ticket-detail-screen.tsx` — the visible ticket code is now the only thing that ever appears in a ticket URL, fixing a real bug where the route navigated on the internal uuid
+- Activity Log is real and driven almost entirely by database triggers, so ticket creation, field changes, attachment uploads, and time entries are all logged automatically with the real authenticated actor — no existing write path had to change to get this
+- Applied migrations, in order: `20260708000000_mvp_schema.sql` (base schema + RLS), `20260708010000_grant_authenticated_membership_read.sql` (SELECT grants — RLS alone doesn't grant table privileges), `20260709000000_profile_self_service_updates.sql` (self-service name/capacity writes), `20260710000000_avatars_storage.sql` + `20260711000000_fix_avatars_storage_policies.sql` (the `avatars` bucket and its RLS policies — first pass had a policy bug blocking uploads, fixed in the second file), `20260712000000_grant_authenticated_projects_read.sql`, `20260713000000_grant_authenticated_projects_insert.sql`, `20260714000000_fix_projects_select_rls_self_reference.sql` (real bug fix — `projects_select`'s helper function re-queried `projects` from within its own policy, which broke `INSERT`/`UPDATE ... RETURNING` specifically because Postgres evaluates the RETURNING-time SELECT check against the row being written in the same command and that self-reference doesn't reliably see it yet; rewritten to check the row's own columns directly), `20260715000000_grant_authenticated_projects_update.sql`, `20260716000000_add_clients_table.sql` (new `clients` table — not a foreign key on `projects`; `client_name` stays free text), `20260717000000_grant_authenticated_tickets_read.sql`, `20260718000000_grant_authenticated_tickets_insert.sql`, `20260719000000_fix_tickets_insert_rls_admin_lead.sql` (real bug fix — the base schema's ticket-related insert policies only allowed a real `project_memberships` row, but that table is still empty since no staffing UI exists yet, so every insert was blocked for everyone; fixed by also allowing an org admin/lead), `20260720000000_grant_authenticated_ticket_comments_activity_read.sql`, `20260721000000_grant_authenticated_tickets_update.sql`, `20260722000000_add_labels_table.sql`, `20260723000000_add_tickets_acceptance_criteria_done.sql` (parallel `boolean[]` aligned by index with `acceptance_criteria`), `20260724000000_add_ticket_attachments.sql` (private `ticket-attachments` Storage bucket), `20260725000000_fix_ticket_attachments_storage_insert_policy.sql` (real bug fix — an unqualified `storage.foldername(name)` reference silently resolved to the *project's* `name` column instead of the uploaded object's own path, blocking every real upload until qualified as `objects.name`), `20260726000000_add_ticket_time_entries.sql`, `20260727000000_enable_real_ticket_comments.sql` (fixes the same `project_memberships`-only gap for comments, adds the first Activity-logging trigger), `20260728000000_real_ticket_activity_log.sql` (`tickets.created_by`, and the creation/field-change/attachment/time-entry Activity triggers). See `docs/SUPABASE_SETUP.md` for how to apply migrations to a new project.
 - `docs/UNFUDDLE_IMPORT_SPECIFICATION.md` — how the Techtivo Unfuddle backup will map onto the schema; no importer code exists yet
 
-Everything except Auth/Profile/Avatar and Projects (Sidebar/`/projects`/Project Settings) still runs entirely on mock data — Project Overview, Tickets, Notes, Team, per-project Reports, Dashboard, company-wide Reports, Users, and the rest of Settings are not connected. Note also that Projects' own real rows don't yet populate `openTickets`/`blockedTickets`/`overdueTickets`/`awaitingReviewTickets`/`dueThisWeekTickets`/`progress`/`activeMilestones` — those are derived from `tickets` by design and default to 0 until Tickets is wired (see `docs/SUPABASE_MVP_SCHEMA.md`).
+Everything except Auth/Profile/Avatar, Projects (Sidebar/`/projects`/Project Settings), and Tickets (five list views/New Ticket/Ticket Detail) still runs entirely on mock data — Project Overview, Notes, Team, per-project Reports, Dashboard, company-wide Reports, Users, and the rest of Settings are not connected. Note also that Projects' own real rows still don't populate `openTickets`/`blockedTickets`/`overdueTickets`/`awaitingReviewTickets`/`dueThisWeekTickets`/`progress`/`activeMilestones` — those are derived from `tickets` by design and default to 0 on the Projects list/Project Settings screens even though Tickets itself is now real, since nothing yet re-aggregates those derived fields back onto the `projects` rows (see `docs/SUPABASE_MVP_SCHEMA.md`).
 
 ---
 
@@ -558,7 +576,7 @@ Current working routes:
 - `/projects` — role-specific (Admin full table / Project Lead scoped blocks / Member "My Projects")
 - `/projects/[slug]`
 - `/projects/[slug]/tickets`
-- `/projects/[slug]/tickets/[ticketId]`
+- `/projects/[slug]/tickets/[ticketCode]`
 - `/projects/[slug]/notes`
 - `/projects/[slug]/team`
 - `/projects/[slug]/reports`
@@ -642,18 +660,21 @@ Favor reusable components over duplicated implementations.
 Current known items:
 
 - `ProjectOverview`'s Member-role variant (the original, unmodified page) has hardcoded "Mobile Banking App" data; it does not dynamically load project data based on slug. The Admin and Project Lead rebuilds (`admin-project-overview.tsx`, `project-lead-project-overview.tsx`) correctly key off `slug`.
-- Filter chips and search inputs on the Tickets page are UI-only; chips toggle visually but do not filter the ticket list.
-- Ticket Detail page fields are mostly read-only; no inline editing is implemented beyond status transitions.
+- Priority/Status filter dropdowns and quick-filter chips on the Tickets page are UI-only — they toggle visually but do not filter the ticket list. (The Assigned filter now lists the real organization roster, but selecting a value still doesn't filter, same gap.)
+- New Ticket's "More Options" fields (Type, Status, Priority, Labels, Due Date) always write fixed defaults (`to_do`/`normal`/`task`/none), never the value picked in the form.
+- Ticket Attachments rename/replace/delete, and editing or deleting a Comment, are local-only — not persisted to Supabase.
+- Milestone and Story Points fields on Ticket Detail's sidebar are dead code — defined in `ticket-detail-screen.tsx` but never rendered.
+- Admin/Project Lead Project Overview still create/view tickets via `NewTicketModal`/`TicketDetailScreen` against their own local mock ticket state — real Tickets data doesn't reach those two screens yet.
 - `settings-screen.tsx` (`SettingsScreen` hub component) is retained but no longer rendered — `/settings` redirects directly to `/settings/general`.
 - Org-wide Settings (`/settings/*`) toggles and fields are visual only; no state persists between page loads. (Project Settings — `/projects/[slug]/settings` — is the one exception: it's real and persists, see Current Sprint → Completed → Project Settings.)
 - Role now comes from a real `organization_membership` when one exists; `current-user.ts`'s mock identities are a dev-only fallback (never in production) rather than the only source of truth. **Resolved**: the `RoleSwitcher` is now gated behind `isDevFallback` (only renders, with a visible "Dev fallback" badge, when there's no real membership) instead of always showing. No real server-side permission enforcement is wired into the UI yet for projects/tickets/etc. — the RLS policies in `supabase/migrations/20260708000000_mvp_schema.sql` are applied and enforce tenant isolation at the DB layer, but the UI doesn't call any of those tables yet.
 - Note "Duplicate" and "Delete" menu actions in `NoteDetailModal` are visual stubs with no effect.
 - In dev fallback only (no real organization membership — never in production): the Projects list no longer filters by the old `LEAD_PROJECT_SLUGS` array (removed since real data is scoped by RLS instead), so a Project Lead testing without a seeded Supabase project now sees the full mock projects list rather than just their 3 owned slugs, while the summary cells (Blocked Tickets, Due This Week, Team Members Over Capacity) still compute against the `LEAD_PROJECT_SLUGS`-scoped team aggregation — a minor mismatch specific to unauthenticated/dev-fallback local testing, not the real-org path.
-- Projects' real rows don't populate ticket-derived fields (`openTickets`, `blockedTickets`, `overdueTickets`, `awaitingReviewTickets`, `dueThisWeekTickets`, `progress`, `activeMilestones`) — they default to 0 until Tickets is wired to Supabase (by schema design, see `docs/SUPABASE_MVP_SCHEMA.md`), so the Projects list currently shows 0/empty progress bars for real projects on those specific fields.
+- Projects' real rows don't populate ticket-derived fields (`openTickets`, `blockedTickets`, `overdueTickets`, `awaitingReviewTickets`, `dueThisWeekTickets`, `progress`, `activeMilestones`) — by schema design these are derived from `tickets` and default to 0, and nothing yet re-aggregates them back onto the `projects` rows even though Tickets itself is now real (see `docs/SUPABASE_MVP_SCHEMA.md`), so the Projects list currently shows 0/empty progress bars for real projects on those specific fields.
 
 Planned future work:
 
-- Backend integration for Tickets/Dashboard/Reports/Users/Settings, and for the still-mock parts of Projects itself (Project Overview, Notes, Team, per-project Reports) (Auth/Profile/Avatar and Projects' Sidebar/`/projects`/Settings are done — see Architecture Status; schema for the rest is designed in `docs/SUPABASE_MVP_SCHEMA.md` and applied via `supabase/migrations/20260708000000_mvp_schema.sql`, just not queried by the UI yet)
+- Backend integration for Dashboard/Reports/Users/Settings, and for the still-mock parts of Projects itself (Project Overview, Notes, Team, per-project Reports) (Auth/Profile/Avatar, Projects' Sidebar/`/projects`/Settings, and Tickets are done — see Architecture Status; schema for the rest is designed in `docs/SUPABASE_MVP_SCHEMA.md` and applied via the migrations in `supabase/migrations/`, just not queried by the UI yet)
 - API layer
 - Real drag & drop (Kanban)
 - Real-time updates
@@ -679,11 +700,10 @@ Complete every major screen required for a usable project management platform be
 
 Remaining priority order:
 
-1. Ticket editing (inline status, assignee, priority changes)
-2. Backlog / Sprint Planning
-3. Per-project Reports, Notes, Team pages refinements
+1. Backlog / Sprint Planning
+2. Per-project Reports, Notes, Team pages refinements
 
-(Authentication, previously first on this list, is now complete.)
+(Authentication and Ticket editing, previously first on this list, are now both complete.)
 
 ---
 

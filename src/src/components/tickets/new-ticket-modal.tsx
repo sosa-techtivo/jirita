@@ -2,19 +2,15 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Ticket, TicketStatus, TicketPriority, TicketType } from "@/lib/mock-tickets";
-import { tickets as ALL_TICKETS, getTicketDisplayKey } from "@/lib/mock-tickets";
+import { getTicketDisplayKey } from "@/lib/mock-tickets";
 import { StatusBadge, STATUS_LABEL, TicketTypeIcon, TicketTypeSelect } from "@/components/tickets/ticket-ui";
 import { registerTicket, nextTicketNumber, titleToTicketId } from "@/lib/pending-tickets";
+import { createTicket } from "@/lib/tickets";
+import { useCurrentUser } from "@/components/current-user-provider";
+import { FALLBACK_AVATAR } from "@/lib/current-user";
+import type { OrgMember } from "@/lib/projects";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-
-const TEAM_MEMBERS = [
-  { name: "Marcus Lee",  avatar: "https://i.pravatar.cc/64?img=12" },
-  { name: "Elena Rossi", avatar: "https://i.pravatar.cc/64?img=5"  },
-  { name: "Sarah Chen",  avatar: "https://i.pravatar.cc/64?img=47" },
-  { name: "Alejo Cadavid", avatar: "https://i.pravatar.cc/64?img=33" },
-  { name: "David Kim",   avatar: "https://i.pravatar.cc/64?img=22" },
-];
 
 const MILESTONES = ["App Store Submission", "Beta Release", "Security Audit"];
 
@@ -65,11 +61,13 @@ function getSuggestedLabels(title: string, selected: string[]): string[] {
     .map(([label]) => label);
 }
 
-function getDuplicates(title: string): Ticket[] {
+// Simple MVP similarity: partial word overlap against the current project's
+// own tickets only (never other projects) — no fuzzy/advanced matching.
+function getDuplicates(title: string, projectTickets: Ticket[]): Ticket[] {
   if (title.trim().length < 3) return [];
   const words = title.toLowerCase().split(/\W+/).filter((w) => w.length >= 3);
   if (words.length === 0) return [];
-  return ALL_TICKETS.map((t) => {
+  return projectTickets.map((t) => {
     const tWords = t.title.toLowerCase().split(/\W+/);
     const score = words.filter((w) => tWords.some((tw) => tw.includes(w) || w.includes(tw))).length;
     return { ticket: t, score };
@@ -234,15 +232,23 @@ function LabelPicker({
 
 export function NewTicketModal({
   slug,
+  tickets,
+  members,
   onClose,
   onCreated,
   onPreviewDuplicate,
 }: {
   slug:               string;
+  /** Current project's own tickets only — used for Possible Duplicates. */
+  tickets:            Ticket[];
+  /** Real organization members only — used for Assignee. No mock names. */
+  members:            OrgMember[];
   onClose:            () => void;
   onCreated:          (ticket: Ticket) => void;
   onPreviewDuplicate: (ticket: Ticket) => void;
 }) {
+  const { organization, isDevFallback } = useCurrentUser();
+
   // Entrance animation
   const [visible, setVisible] = useState(false);
   useEffect(() => {
@@ -257,11 +263,13 @@ export function NewTicketModal({
   const [status, setStatus]             = useState<TicketStatus>("to-do");
   const [priority, setPriority]         = useState<TicketPriority>("normal");
   const [ticketType, setTicketType]     = useState<TicketType>("TASK");
-  const [assigneeName, setAssigneeName] = useState("");
+  const [assigneeId, setAssigneeId]     = useState("");
   const [labels, setLabels]             = useState<string[]>([]);
   const [dueDate, setDueDate]           = useState("");
   const [hours, setHours]               = useState("");
   const [moreOpen, setMoreOpen]         = useState(false);
+  const [submitting, setSubmitting]     = useState(false);
+  const [error, setError]               = useState<string | null>(null);
 
   const titleRef      = useRef<HTMLInputElement>(null);
   const textareaRef   = useRef<HTMLTextAreaElement>(null);
@@ -286,9 +294,9 @@ export function NewTicketModal({
   }, [criteria.length]);
 
   // Derived
-  const duplicates      = getDuplicates(title);
+  const duplicates      = getDuplicates(title, tickets);
   const suggestedLabels = getSuggestedLabels(title, labels);
-  const canSubmit       = title.trim().length > 0;
+  const canSubmit       = title.trim().length > 0 && !submitting;
 
   const toggleLabel = (label: string) =>
     setLabels((prev) =>
@@ -308,8 +316,8 @@ export function NewTicketModal({
     setCriteria((prev) => prev.filter((_, idx) => idx !== i));
 
   const buildTicket = (): Ticket => {
-    const assignee = TEAM_MEMBERS.find((m) => m.name === assigneeName)
-      ?? { name: "Unassigned", avatar: "https://i.pravatar.cc/64?img=0" };
+    const member = members.find((m) => m.id === assigneeId);
+    const assignee = member ? { name: member.name, avatar: member.avatar } : { name: "Unassigned", avatar: FALLBACK_AVATAR };
     const filledCriteria = criteria.filter((c) => c.trim().length > 0);
     return {
       id:           titleToTicketId(title),
@@ -330,11 +338,35 @@ export function NewTicketModal({
     };
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!canSubmit) { titleRef.current?.focus(); return; }
-    const ticket = buildTicket();
-    registerTicket(ticket);
-    onCreated(ticket);
+
+    // Dev-only fallback: no real organization — unchanged local/mock
+    // behavior (never reached once a real organization exists).
+    if (isDevFallback || !organization) {
+      const ticket = buildTicket();
+      registerTicket(ticket);
+      onCreated(ticket);
+      return;
+    }
+
+    setSubmitting(true);
+    setError(null);
+    const filledCriteria = criteria.filter((c) => c.trim().length > 0);
+    const result = await createTicket(organization.id, slug, {
+      title: title.trim(),
+      description: description.trim() || undefined,
+      acceptanceCriteria: filledCriteria.length > 0 ? filledCriteria : undefined,
+      hours: hours ? (parseInt(hours, 10) >= 0 ? parseInt(hours, 10) : undefined) : undefined,
+      assigneeProfileId: assigneeId || undefined,
+    });
+    setSubmitting(false);
+
+    if (result.status === "error") {
+      setError(result.message);
+      return;
+    }
+    onCreated(result.ticket);
   };
 
   const submitRef = useRef(handleSubmit);
@@ -343,6 +375,7 @@ export function NewTicketModal({
   });
 
   const handleClose = () => {
+    if (submitting) return;
     setVisible(false);
     setTimeout(onClose, 200);
   };
@@ -353,7 +386,7 @@ export function NewTicketModal({
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [submitting]);
 
   const autoResizeTextarea = () => {
     const el = textareaRef.current;
@@ -675,10 +708,10 @@ export function NewTicketModal({
                     {/* Assignee */}
                     <div>
                       <label className={FIELD_LABEL}>Assignee</label>
-                      <select value={assigneeName} onChange={(e) => setAssigneeName(e.target.value)} className={INPUT}>
+                      <select value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)} className={INPUT}>
                         <option value="">— Unassigned</option>
-                        {TEAM_MEMBERS.map((m) => (
-                          <option key={m.name} value={m.name}>{m.name}</option>
+                        {members.map((m) => (
+                          <option key={m.id} value={m.id}>{m.name}</option>
                         ))}
                       </select>
                     </div>
@@ -710,6 +743,8 @@ export function NewTicketModal({
               </div>
             </div>
 
+            {error && <p className="text-[13px] text-red-600 dark:text-red-400 pb-1">{error}</p>}
+
           </div>
 
           {/* ── Footer ──────────────────────────────────────────────────────── */}
@@ -731,8 +766,8 @@ export function NewTicketModal({
                   : "bg-slate-100 dark:bg-zinc-800 text-slate-400 dark:text-zinc-600 cursor-not-allowed")
               }
             >
-              Create Ticket
-              {canSubmit && (
+              {submitting ? "Creating…" : "Create Ticket"}
+              {canSubmit && !submitting && (
                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
                   <path d="M5 12h14M12 5l7 7-7 7" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>

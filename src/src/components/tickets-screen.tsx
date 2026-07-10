@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { tickets } from "@/lib/mock-tickets";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { tickets as MOCK_TICKETS } from "@/lib/mock-tickets";
 import type { Ticket } from "@/lib/mock-tickets";
+import { loadProjectTickets } from "@/lib/tickets";
+import { loadOrganizationMembers, type OrgMember } from "@/lib/projects";
 import { NewTicketModal } from "@/components/tickets/new-ticket-modal";
 import { ViewSwitcher, type ViewMode } from "@/components/tickets/view-switcher";
 import { FilterBar } from "@/components/tickets/filter-bar";
@@ -65,7 +67,7 @@ export function presetTicketsFilter(slug: string, chips: string[]) {
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function TicketsScreen({ slug, projectName }: { slug: string; projectName: string }) {
-  const { user } = useCurrentUser();
+  const { user, organization, isDevFallback } = useCurrentUser();
   const canCreateTicket = canManage(user.role);
   const [showNewTicket, setShowNewTicket] = useState(false);
   // Read saved state once per mount (useMemo with [] deps).
@@ -73,16 +75,63 @@ export function TicketsScreen({ slug, projectName }: { slug: string; projectName
   // double-invocation doesn't lose it on the "real" render.
   const saved = useMemo(() => readSaved(slug), []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const [ticketList, setTicketList] = useState<Ticket[]>(tickets);
+  // Dev-only fallback: no real organization membership — same mock array
+  // used before this feature existed, just scoped to the current project
+  // (real data is always scoped this way; see loadProjectTickets). Never
+  // reached once a real organization exists.
+  const initialDevTickets = useMemo(
+    () => (isDevFallback ? MOCK_TICKETS.filter((t) => t.projectSlug === slug) : []),
+    [isDevFallback, slug]
+  );
+
+  const [loadState, setLoadState] = useState<"loading" | "ready" | "error">(isDevFallback ? "ready" : "loading");
+  const [loadErrorMessage, setLoadErrorMessage] = useState<string | null>(null);
+  const [ticketList, setTicketList] = useState<Ticket[]>(initialDevTickets);
+  // Real org members for the Assigned filter's dropdown options only — the
+  // filter itself stays unwired (see FilterBar), this just replaces the
+  // mock names it used to show. Dev fallback shows none, never mock names.
+  const [members, setMembers] = useState<OrgMember[]>([]);
   const [view, setView] = useState<ViewMode>(saved?.view ?? getDefaultTicketView());
   const [previewTicket, setPreviewTicket] = useState<Ticket | null>(() => {
     if (!saved?.previewTicketId) return null;
-    return tickets.find((t) => t.id === saved.previewTicketId) ?? null;
+    return MOCK_TICKETS.find((t) => t.id === saved.previewTicketId) ?? null;
   });
   const [activeChips, setActiveChips] = useState<Set<string>>(
     () => new Set(saved?.activeChips ?? [])
   );
   const [searchQuery, setSearchQuery] = useState(saved?.searchQuery ?? "");
+
+  const requestIdRef = useRef(0);
+
+  const runFetch = useCallback(() => {
+    if (!organization) return;
+    const requestId = ++requestIdRef.current;
+    loadProjectTickets(organization.id, slug).then((result) => {
+      if (requestIdRef.current !== requestId) return;
+      if (result.status === "ready") {
+        setTicketList(result.tickets);
+        setLoadState("ready");
+      } else if (result.status === "not-found") {
+        setTicketList([]);
+        setLoadState("ready");
+      } else {
+        setLoadErrorMessage(result.message);
+        setLoadState("error");
+      }
+    });
+  }, [organization, slug]);
+
+  useEffect(() => {
+    if (isDevFallback) return; // handled synchronously above — no fetch needed
+    runFetch();
+  }, [isDevFallback, runFetch]);
+
+  useEffect(() => {
+    if (isDevFallback || !organization) return; // dev fallback: no mock members either
+    loadOrganizationMembers(organization.id).then((result) => {
+      if (result.status === "ready") setMembers(result.members);
+    });
+  }, [isDevFallback, organization]);
 
   // Clear sessionStorage and restore scroll after first render
   useEffect(() => {
@@ -139,6 +188,32 @@ export function TicketsScreen({ slug, projectName }: { slug: string; projectName
     setPreviewTicket(ticket);
   }
 
+  if (loadState === "loading") {
+    return (
+      <div className="h-full flex items-center justify-center text-sm text-slate-400 dark:text-zinc-500">
+        Loading tickets…
+      </div>
+    );
+  }
+
+  if (loadState === "error") {
+    return (
+      <div className="h-full flex flex-col items-center justify-center text-center px-4">
+        <h3 className="text-sm font-semibold text-slate-700 dark:text-zinc-200">Couldn&apos;t load tickets</h3>
+        <p className="text-sm text-slate-400 mt-1 max-w-xs dark:text-zinc-500">
+          {loadErrorMessage ?? "Something went wrong."}
+        </p>
+        <button
+          type="button"
+          onClick={runFetch}
+          className="mt-5 text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3.5 py-2 shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-500 dark:hover:bg-brand-600 dark:shadow-brand-500/20"
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="h-full flex flex-col">
       {/* Page header */}
@@ -172,6 +247,7 @@ export function TicketsScreen({ slug, projectName }: { slug: string; projectName
           onToggleChip={toggleChip}
           searchQuery={searchQuery}
           onSearchChange={setSearchQuery}
+          members={members}
         />
 
         {/* Quick stats */}
@@ -218,6 +294,8 @@ export function TicketsScreen({ slug, projectName }: { slug: string; projectName
       {showNewTicket && (
         <NewTicketModal
           slug={slug}
+          tickets={ticketList}
+          members={members}
           onClose={() => setShowNewTicket(false)}
           onCreated={handleTicketCreated}
           onPreviewDuplicate={handlePreviewDuplicate}
