@@ -47,7 +47,7 @@ const STATUS_FROM_DB: Record<string, TicketStatus> = {
   done: "done",
 };
 
-const PRIORITY_VALUES: TicketPriority[] = ["high", "normal", "low"];
+const PRIORITY_VALUES: TicketPriority[] = ["highest", "high", "medium", "low"];
 
 const TYPE_FROM_DB: Record<string, TicketType> = {
   task: "TASK",
@@ -98,6 +98,8 @@ interface TicketRow {
   hours: string | null;
   due_date: string | null;
   updated_at: string;
+  created_by: string | null;
+  created_at: string;
 }
 
 interface AssigneeProfileRow {
@@ -109,7 +111,7 @@ interface AssigneeProfileRow {
 }
 
 const TICKET_COLUMNS =
-  "id, ticket_number, title, description, status, priority, type, assignee_profile_id, milestone, labels, acceptance_criteria, acceptance_criteria_done, story_points, hours, due_date, updated_at";
+  "id, ticket_number, title, description, status, priority, type, assignee_profile_id, milestone, labels, acceptance_criteria, acceptance_criteria_done, story_points, hours, due_date, updated_at, created_by, created_at";
 
 // Mirrors formatTargetDate in lib/projects.ts exactly ("MMM D", no year) —
 // every date-parsing helper across the ticket views (Calendar/Timeline/
@@ -164,12 +166,13 @@ function rowToTicket(row: TicketRow, projectSlug: string, assigneeRow: AssigneeP
     title: row.title,
     description: row.description ?? "",
     status: STATUS_FROM_DB[row.status] ?? "backlog",
-    priority: PRIORITY_VALUES.includes(row.priority as TicketPriority) ? (row.priority as TicketPriority) : "normal",
+    priority: PRIORITY_VALUES.includes(row.priority as TicketPriority) ? (row.priority as TicketPriority) : "medium",
     type: TYPE_FROM_DB[row.type] ?? "TASK",
     assignee: {
       name: assigneeName,
       avatar: (assigneeRow ? resolveAvatarUrl(assigneeRow.avatar_url, assigneeRow.updated_at) : null) ?? FALLBACK_AVATAR,
     },
+    assigneeProfileId: row.assignee_profile_id,
     milestone: row.milestone ?? "No Milestone",
     labels: row.labels ?? [],
     acceptanceCriteria: row.acceptance_criteria && row.acceptance_criteria.length > 0 ? row.acceptance_criteria : undefined,
@@ -178,6 +181,9 @@ function rowToTicket(row: TicketRow, projectSlug: string, assigneeRow: AssigneeP
     hours: row.hours !== null ? Number(row.hours) : undefined,
     dueDate: formatDueDate(row.due_date),
     updatedAt: formatTicketUpdatedAt(row.updated_at),
+    updatedAtISO: row.updated_at,
+    createdByProfileId: row.created_by,
+    createdAtISO: row.created_at,
   };
 }
 
@@ -364,7 +370,7 @@ export async function createTicket(
       title: input.title,
       description: input.description ?? null,
       status: "to_do",
-      priority: "normal",
+      priority: "medium",
       type: "task",
       acceptance_criteria: acceptanceCriteria,
       hours: input.hours ?? null,
@@ -593,7 +599,7 @@ interface ActivityRow {
 // duplicates of ticket-ui.tsx's STATUS_LABEL / the app's Type/Priority
 // wording, kept local so lib/ doesn't import from components/.
 const ACTIVITY_STATUS_LABEL: Record<TicketStatus, string> = {
-  backlog: "Inbox",
+  backlog: "Backlog",
   "to-do": "To Do",
   "in-progress": "In Progress",
   review: "In Review",
@@ -607,8 +613,9 @@ const ACTIVITY_TYPE_LABEL: Record<TicketType, string> = {
 };
 
 const ACTIVITY_PRIORITY_LABEL: Record<TicketPriority, string> = {
+  highest: "Highest",
   high: "High",
-  normal: "Normal",
+  medium: "Medium",
   low: "Low",
 };
 
@@ -678,6 +685,10 @@ function buildActivityLabel(row: ActivityRow, actorName: string | null, resolveN
       return `${who}unchecked acceptance criterion "${row.new_value ?? ""}"`.trim();
     case "attachment_uploaded":
       return `${who}uploaded "${row.new_value ?? ""}"`.trim();
+    case "attachment_renamed":
+      return `${who}renamed attachment from "${row.old_value ?? ""}" to "${row.new_value ?? ""}"`.trim();
+    case "attachment_deleted":
+      return `${who}deleted attachment "${row.old_value ?? ""}"`.trim();
     case "time_logged": {
       const minutes = Number(row.new_value ?? "0");
       const hrs = Math.round((minutes / 60) * 10) / 10;
@@ -685,6 +696,10 @@ function buildActivityLabel(row: ActivityRow, actorName: string | null, resolveN
     }
     case "added_a_comment":
       return `${who}added a comment`.trim();
+    case "relation_added":
+      return `${who}linked this ticket to ${row.new_value ?? ""} (${row.field_name ?? ""})`.trim();
+    case "relation_removed":
+      return `${who}removed the link to ${row.old_value ?? ""} (${row.field_name ?? ""})`.trim();
     default:
       return `${who}${row.event_type.replace(/_/g, " ")}`.trim();
   }
@@ -878,16 +893,16 @@ export async function loadTicketActivity(ticketId: string): Promise<TicketActivi
 }
 
 // ── Attachments (Ticket Detail) ─────────────────────────────────────────────────
-// Real Supabase Storage + a ticket_attachments metadata row per file — the
-// section previously only simulated an upload locally (fake progress,
-// nothing persisted). Rename/replace/delete still aren't wired to any real
-// write path (no UI exists for them to call), matching this fix's scope.
+// Real Supabase Storage + a ticket_attachments metadata row per file — upload,
+// rename, and delete are all wired to real writes (see uploadTicketAttachment /
+// renameTicketAttachment / deleteTicketAttachment below).
 
 const ATTACHMENTS_BUCKET = "ticket-attachments";
 
 export interface TicketAttachment {
   id: string;
   filename: string;
+  storagePath: string;
   sizeBytes: number;
   mimeType: string | null;
   uploadedByName: string;
@@ -910,6 +925,7 @@ function rowToAttachment(row: AttachmentRow, uploaderRow: AssigneeProfileRow | u
   return {
     id: row.id,
     filename: row.filename,
+    storagePath: row.storage_path,
     sizeBytes: row.size_bytes,
     mimeType: row.mime_type,
     uploadedByName: resolveProfileName(uploaderRow) ?? "Unknown",
@@ -1009,6 +1025,307 @@ export async function uploadTicketAttachment(ticketId: string, file: File): Prom
   }
 
   return { status: "success", attachment: rowToAttachment(row, uploaderRow) };
+}
+
+export type DownloadTicketAttachmentResult =
+  | { status: "success" }
+  | { status: "error"; message: string };
+
+// The bucket is private, so a plain public URL doesn't work — this fetches
+// the object through the authenticated client (same ticket_attachments_
+// storage_select RLS policy that already gates loadTicketAttachments) and
+// saves it via a temporary object URL, so the browser downloads it with its
+// original filename regardless of the randomized storage path.
+export async function downloadTicketAttachment(
+  storagePath: string,
+  filename: string
+): Promise<DownloadTicketAttachmentResult> {
+  const supabase = getSupabaseBrowserClient();
+
+  const { data: blob, error } = await supabase.storage.from(ATTACHMENTS_BUCKET).download(storagePath);
+
+  if (error || !blob) {
+    logDev("attachment download failed", error);
+    return { status: "error", message: error?.message ?? "Download failed" };
+  }
+
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+
+  return { status: "success" };
+}
+
+export type TicketAttachmentPreviewUrlResult =
+  | { status: "success"; url: string }
+  | { status: "error"; message: string };
+
+// The bucket is private, so previewing (embedding in an <img>/<iframe>)
+// needs a signed URL rather than getPublicUrl — createSignedUrl is gated by
+// the same ticket_attachments_storage_select RLS policy that already
+// authorizes loadTicketAttachments/downloadTicketAttachment for this object.
+// Short-lived on purpose: only needed for as long as the Preview modal
+// is open.
+export async function getTicketAttachmentPreviewUrl(storagePath: string): Promise<TicketAttachmentPreviewUrlResult> {
+  const supabase = getSupabaseBrowserClient();
+
+  const { data, error } = await supabase.storage.from(ATTACHMENTS_BUCKET).createSignedUrl(storagePath, 300);
+
+  if (error || !data) {
+    logDev("attachment preview signed url failed", error);
+    return { status: "error", message: error?.message ?? "Preview failed" };
+  }
+
+  return { status: "success", url: data.signedUrl };
+}
+
+export type RenameTicketAttachmentResult =
+  | { status: "success" }
+  | { status: "error"; message: string };
+
+// Updates only the ticket_attachments.filename column — storage_path (the
+// actual Storage object key) is deliberately never touched, since filename
+// is already tracked separately from it (see uploadTicketAttachment above).
+export async function renameTicketAttachment(
+  attachmentId: string,
+  filename: string
+): Promise<RenameTicketAttachmentResult> {
+  const supabase = getSupabaseBrowserClient();
+
+  // .select() after .update() is required to actually detect a denied
+  // write: PostgREST reports an UPDATE that RLS silently matched zero rows
+  // on as a normal success with no error, so without this the UI would show
+  // the new name and then have it quietly revert on refresh.
+  const { data, error } = await supabase
+    .from("ticket_attachments")
+    .update({ filename })
+    .eq("id", attachmentId)
+    .select("id");
+
+  if (error) {
+    logDev("attachment rename failed", error);
+    return { status: "error", message: error.message };
+  }
+  if (!data || data.length === 0) {
+    logDev("attachment rename failed", "update matched no row (RLS denied or attachment no longer exists)");
+    return { status: "error", message: "You don't have permission to rename this attachment." };
+  }
+
+  return { status: "success" };
+}
+
+export type DeleteTicketAttachmentResult =
+  | { status: "success" }
+  | { status: "error"; message: string };
+
+// Deletes the metadata row first — that row is what the Attachments list
+// (and "does it reappear after refresh") actually depends on. The Storage
+// object is then removed best-effort: if that second step fails, the row is
+// still gone, matching the UI, leaving at worst an orphaned Storage object
+// rather than a row that points at a missing file.
+export async function deleteTicketAttachment(
+  attachmentId: string,
+  storagePath: string
+): Promise<DeleteTicketAttachmentResult> {
+  const supabase = getSupabaseBrowserClient();
+
+  // Same reasoning as renameTicketAttachment above: .select() is required to
+  // tell "deleted" apart from "RLS silently matched zero rows."
+  const { data, error } = await supabase.from("ticket_attachments").delete().eq("id", attachmentId).select("id");
+
+  if (error) {
+    logDev("attachment delete failed", error);
+    return { status: "error", message: error.message };
+  }
+  if (!data || data.length === 0) {
+    logDev("attachment delete failed", "delete matched no row (RLS denied or attachment already gone)");
+    return { status: "error", message: "You don't have permission to delete this attachment." };
+  }
+
+  const { error: storageError } = await supabase.storage.from(ATTACHMENTS_BUCKET).remove([storagePath]);
+  if (storageError) {
+    // The row is already gone (and the UI already reflects that) — log for
+    // visibility but don't surface this as a failure of the delete action.
+    logDev("attachment storage cleanup failed", storageError);
+  }
+
+  return { status: "success" };
+}
+
+// ── Related Tickets (Ticket Detail) ─────────────────────────────────────────────
+// Real ticket_relations rows — the "+ Link" control, relation-kind selector,
+// and search previously did nothing (search results were hardcoded empty,
+// links only lived in local React state). Only 3 canonical kinds are ever
+// stored ('related_to' | 'blocks' | 'duplicates'); the 5 UI-facing kinds are
+// derived per-perspective (see loadTicketRelations) — this is what keeps the
+// inverse relation (Blocks ↔ Is blocked by, Duplicates ↔ Is duplicated by)
+// automatically correct, since there's only ever one row per relation to
+// get out of sync.
+
+export type TicketRelationKind = "related-to" | "blocks" | "blocked-by" | "duplicates" | "duplicated-by";
+
+export interface RelatedTicket {
+  linkId: string;
+  kind: TicketRelationKind;
+  ticket: Ticket;
+}
+
+interface TicketRelationRow {
+  id: string;
+  ticket_id: string;
+  related_ticket_id: string;
+  kind: string;
+  created_at: string;
+}
+
+export type TicketRelationsResult =
+  | { status: "ready"; relations: RelatedTicket[] }
+  | { status: "error"; message: string };
+
+// Newest first, same convention as the rest of Ticket Detail's lists.
+export async function loadTicketRelations(ticketId: string, slug: string): Promise<TicketRelationsResult> {
+  const supabase = getSupabaseBrowserClient();
+
+  const { data: rows, error } = await supabase
+    .from("ticket_relations")
+    .select("id, ticket_id, related_ticket_id, kind, created_at")
+    .or(`ticket_id.eq.${ticketId},related_ticket_id.eq.${ticketId}`)
+    .order("created_at", { ascending: false })
+    .returns<TicketRelationRow[]>();
+
+  if (error) {
+    logDev("ticket relations query failed", error);
+    return { status: "error", message: error.message };
+  }
+
+  if (!rows || rows.length === 0) return { status: "ready", relations: [] };
+
+  const otherIds = Array.from(
+    new Set(rows.map((r) => (r.ticket_id === ticketId ? r.related_ticket_id : r.ticket_id)))
+  );
+
+  const { data: ticketRows, error: ticketsError } = await supabase
+    .from("tickets")
+    .select(TICKET_COLUMNS)
+    .in("id", otherIds)
+    .returns<TicketRow[]>();
+
+  if (ticketsError) {
+    logDev("related tickets query failed", ticketsError);
+    return { status: "error", message: ticketsError.message };
+  }
+
+  const assigneeIds = Array.from(
+    new Set((ticketRows ?? []).map((r) => r.assignee_profile_id).filter((id): id is string => Boolean(id)))
+  );
+  const assigneesById = await loadProfilesByIds(supabase, assigneeIds);
+
+  const ticketsById = new Map(
+    (ticketRows ?? []).map((row) => [
+      row.id,
+      rowToTicket(row, slug, row.assignee_profile_id ? assigneesById.get(row.assignee_profile_id) : undefined),
+    ])
+  );
+
+  const relations: RelatedTicket[] = rows
+    .map((r): RelatedTicket | undefined => {
+      const isForward = r.ticket_id === ticketId;
+      const otherId = isForward ? r.related_ticket_id : r.ticket_id;
+      const ticket = ticketsById.get(otherId);
+      if (!ticket) return undefined;
+
+      let kind: TicketRelationKind;
+      if (r.kind === "blocks") kind = isForward ? "blocks" : "blocked-by";
+      else if (r.kind === "duplicates") kind = isForward ? "duplicates" : "duplicated-by";
+      else kind = "related-to";
+
+      return { linkId: r.id, kind, ticket };
+    })
+    .filter((x): x is RelatedTicket => x !== undefined);
+
+  return { status: "ready", relations };
+}
+
+const RELATION_KIND_TO_DB: Record<TicketRelationKind, "related_to" | "blocks" | "duplicates"> = {
+  "related-to":    "related_to",
+  "blocks":        "blocks",
+  "blocked-by":    "blocks",
+  "duplicates":    "duplicates",
+  "duplicated-by": "duplicates",
+};
+
+export type CreateTicketRelationResult =
+  | { status: "success" }
+  | { status: "error"; message: string };
+
+export async function createTicketRelation(
+  ticketId: string,
+  otherTicketId: string,
+  kind: TicketRelationKind
+): Promise<CreateTicketRelationResult> {
+  if (ticketId === otherTicketId) {
+    return { status: "error", message: "A ticket can't be related to itself." };
+  }
+
+  const dbKind = RELATION_KIND_TO_DB[kind];
+
+  // Normalize direction into the one canonical row this relation is stored
+  // as: "blocked-by"/"duplicated-by" mean the OTHER ticket is the one doing
+  // the blocking/duplicating, so the row is stored from its side instead.
+  // "related-to" is symmetric, so it's always stored in a fixed (sorted)
+  // order regardless of which ticket initiated it — otherwise requesting
+  // the same relation from either ticket would create two different rows
+  // instead of colliding on the unique constraint below.
+  let fromId = ticketId;
+  let toId = otherTicketId;
+  if (kind === "blocked-by" || kind === "duplicated-by") {
+    fromId = otherTicketId;
+    toId = ticketId;
+  } else if (kind === "related-to") {
+    [fromId, toId] = [ticketId, otherTicketId].sort();
+  }
+
+  const supabase = getSupabaseBrowserClient();
+  const { error } = await supabase
+    .from("ticket_relations")
+    .insert({ ticket_id: fromId, related_ticket_id: toId, kind: dbKind });
+
+  if (error) {
+    logDev("ticket relation creation failed", error);
+    // Postgres unique_violation — ticket_relations_unique already caught this.
+    if (error.code === "23505") {
+      return { status: "error", message: "These tickets are already related." };
+    }
+    return { status: "error", message: error.message };
+  }
+
+  return { status: "success" };
+}
+
+export type DeleteTicketRelationResult =
+  | { status: "success" }
+  | { status: "error"; message: string };
+
+export async function deleteTicketRelation(linkId: string): Promise<DeleteTicketRelationResult> {
+  const supabase = getSupabaseBrowserClient();
+
+  const { data, error } = await supabase.from("ticket_relations").delete().eq("id", linkId).select("id");
+
+  if (error) {
+    logDev("ticket relation delete failed", error);
+    return { status: "error", message: error.message };
+  }
+  if (!data || data.length === 0) {
+    logDev("ticket relation delete failed", "delete matched no row (RLS denied or link already gone)");
+    return { status: "error", message: "You don't have permission to remove this link." };
+  }
+
+  return { status: "success" };
 }
 
 // ── Time Tracking (Ticket Detail) ───────────────────────────────────────────────

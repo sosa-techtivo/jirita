@@ -5,6 +5,18 @@ import { TicketTypeIcon } from "@/components/tickets/ticket-ui";
 import { MemberTrigger } from "@/components/member-profile";
 
 function PriorityIndicator({ priority }: { priority: TicketPriority }) {
+  // Highest reuses High's exact treatment, one shade darker and bolder —
+  // same convention as ticket-ui.tsx's PriorityBadge.
+  if (priority === "highest") {
+    return (
+      <span className="inline-flex items-center gap-1 text-[11px] font-bold text-red-700 dark:text-red-400 flex-shrink-0">
+        <svg className="w-2.5 h-2.5" viewBox="0 0 10 10" fill="currentColor" aria-hidden="true">
+          <path d="M5 1L9.5 9H0.5L5 1Z" />
+        </svg>
+        Highest
+      </span>
+    );
+  }
   if (priority === "high") {
     return (
       <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-red-600 dark:text-red-400 flex-shrink-0">
@@ -22,6 +34,8 @@ function PriorityIndicator({ priority }: { priority: TicketPriority }) {
       </span>
     );
   }
+  // Medium (like Normal before it) shows no indicator — Board/List cards
+  // stay uncluttered for the default/unremarkable priority.
   return null;
 }
 

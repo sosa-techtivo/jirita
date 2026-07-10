@@ -4,7 +4,7 @@ import { BoardColumn, type ColumnDefinition, type OnTicketClick } from "@/compon
 const COLUMNS: ColumnDefinition[] = [
   {
     id: "backlog",
-    label: "Inbox",
+    label: "Backlog",
     statuses: ["backlog"],
     dotClass: "bg-slate-400 dark:bg-zinc-500",
     countClass: "bg-slate-200/80 text-slate-600 dark:bg-zinc-700 dark:text-zinc-300",

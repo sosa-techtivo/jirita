@@ -1,13 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { tickets as MOCK_TICKETS } from "@/lib/mock-tickets";
+import { tickets as MOCK_TICKETS, getTicketDisplayKey } from "@/lib/mock-tickets";
 import type { Ticket } from "@/lib/mock-tickets";
-import { loadProjectTickets } from "@/lib/tickets";
+import { loadProjectTickets, loadOrganizationLabels, createOrganizationLabel } from "@/lib/tickets";
 import { loadOrganizationMembers, type OrgMember } from "@/lib/projects";
+import { buildLabelCatalog, parseDisplayDate, getTodayISO } from "@/components/tickets/ticket-ui";
 import { NewTicketModal } from "@/components/tickets/new-ticket-modal";
 import { ViewSwitcher, type ViewMode } from "@/components/tickets/view-switcher";
-import { FilterBar } from "@/components/tickets/filter-bar";
+import { FilterBar, type AddFilterKind } from "@/components/tickets/filter-bar";
+import { EMPTY_DATE_RANGE, type DateRangeValue } from "@/components/tickets/date-range-filter-dropdown";
 import { BoardView } from "@/components/tickets/board-view";
 import { ListView } from "@/components/tickets/list-view";
 import { CalendarView } from "@/components/tickets/calendar-view";
@@ -67,7 +69,7 @@ export function presetTicketsFilter(slug: string, chips: string[]) {
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function TicketsScreen({ slug, projectName }: { slug: string; projectName: string }) {
-  const { user, organization, isDevFallback } = useCurrentUser();
+  const { user, userId, organization, isDevFallback } = useCurrentUser();
   const canCreateTicket = canManage(user.role);
   const [showNewTicket, setShowNewTicket] = useState(false);
   // Read saved state once per mount (useMemo with [] deps).
@@ -91,6 +93,9 @@ export function TicketsScreen({ slug, projectName }: { slug: string; projectName
   // filter itself stays unwired (see FilterBar), this just replaces the
   // mock names it used to show. Dev fallback shows none, never mock names.
   const [members, setMembers] = useState<OrgMember[]>([]);
+  // Real per-org label catalog, only needed for the preview panel's Labels
+  // editor (see editable prop below) — same catalog/merge Ticket Detail uses.
+  const [orgLabels, setOrgLabels] = useState<string[]>([]);
   const [view, setView] = useState<ViewMode>(saved?.view ?? getDefaultTicketView());
   const [previewTicket, setPreviewTicket] = useState<Ticket | null>(() => {
     if (!saved?.previewTicketId) return null;
@@ -100,6 +105,22 @@ export function TicketsScreen({ slug, projectName }: { slug: string; projectName
     () => new Set(saved?.activeChips ?? [])
   );
   const [searchQuery, setSearchQuery] = useState(saved?.searchQuery ?? "");
+  // Controlled here (not local to FilterBar) so they can be combined with
+  // the quick-filter chips below in one shared filteredTickets — see
+  // filter-bar.tsx's own comment on why these are now props, not state.
+  const [assigned, setAssigned] = useState<string[]>([]);
+  const [priority, setPriority] = useState<string[]>([]);
+  const [status,   setStatus]   = useState<string[]>([]);
+  // "Add Filter" filters — activeAddFilters tracks which chips are showing
+  // in the bar (added via the menu, removed by clearing their value back to
+  // empty); the values themselves live in their own state so each one keeps
+  // working even while the others are added/removed independently.
+  const [activeAddFilters, setActiveAddFilters] = useState<Set<AddFilterKind>>(new Set());
+  const [labelsFilter,       setLabelsFilter]       = useState<string[]>([]);
+  const [reporterFilter,     setReporterFilter]     = useState<string[]>([]);
+  const [dueDateFilter,      setDueDateFilter]      = useState<DateRangeValue>(EMPTY_DATE_RANGE);
+  const [createdDateFilter,  setCreatedDateFilter]  = useState<DateRangeValue>(EMPTY_DATE_RANGE);
+  const [updatedDateFilter,  setUpdatedDateFilter]  = useState<DateRangeValue>(EMPTY_DATE_RANGE);
 
   const requestIdRef = useRef(0);
 
@@ -133,6 +154,13 @@ export function TicketsScreen({ slug, projectName }: { slug: string; projectName
     });
   }, [isDevFallback, organization]);
 
+  useEffect(() => {
+    if (isDevFallback || !organization) return;
+    loadOrganizationLabels(organization.id).then((result) => {
+      if (result.status === "ready") setOrgLabels(result.labels.map((l) => l.name));
+    });
+  }, [isDevFallback, organization]);
+
   // Clear sessionStorage and restore scroll after first render
   useEffect(() => {
     const raw = sessionStorage.getItem(sessionKey(slug));
@@ -155,6 +183,157 @@ export function TicketsScreen({ slug, projectName }: { slug: string; projectName
       return next;
     });
   }
+
+  function handleAddFilter(kind: AddFilterKind) {
+    setActiveAddFilters((prev) => new Set(prev).add(kind));
+  }
+
+  // Clearing a filter's value back to empty removes its chip from the bar
+  // (returns it to the "Add Filter" menu) — same "clear = gone" convention
+  // as the date-range popover's own comment.
+  function removeAddFilter(kind: AddFilterKind) {
+    setActiveAddFilters((prev) => {
+      const next = new Set(prev);
+      next.delete(kind);
+      return next;
+    });
+  }
+
+  function handleLabelsChange(values: string[]) {
+    setLabelsFilter(values);
+    if (values.length === 0) removeAddFilter("labels");
+  }
+
+  function handleReporterChange(values: string[]) {
+    setReporterFilter(values);
+    if (values.length === 0) removeAddFilter("reporter");
+  }
+
+  function handleDueDateRangeChange(value: DateRangeValue) {
+    setDueDateFilter(value);
+    if (!value.from && !value.to) removeAddFilter("due-date");
+  }
+
+  function handleCreatedDateRangeChange(value: DateRangeValue) {
+    setCreatedDateFilter(value);
+    if (!value.from && !value.to) removeAddFilter("created-date");
+  }
+
+  function handleUpdatedDateRangeChange(value: DateRangeValue) {
+    setUpdatedDateFilter(value);
+    if (!value.from && !value.to) removeAddFilter("updated-date");
+  }
+
+  // The single place every filter (search, the 3 dropdowns, the 5 "Add
+  // Filter" filters, and the 5 quick chips) is actually applied — every view
+  // below (Board/List/Calendar/Timeline/Insights) and the header's Tickets/
+  // Estimated/Blocked counters all read from this one filtered list, so none
+  // of them can drift out of sync or need their own copy of this logic.
+  const filteredTickets = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+
+    // "Mine"/"Unassigned" match the real assignee_profile_id, not the
+    // display name (a name isn't a stable identifier — see
+    // Ticket.assigneeProfileId). Dev fallback has no real ids to compare
+    // (mock tickets never carry assigneeProfileId), so it falls back to
+    // matching by name there only, same convention used elsewhere in dev
+    // fallback (e.g. member-profile-modal.tsx).
+    const isMine = (t: Ticket) =>
+      isDevFallback ? t.assignee.name === user.name : userId !== null && t.assigneeProfileId === userId;
+    const isUnassigned = (t: Ticket) =>
+      isDevFallback ? t.assignee.name === "Unassigned" : t.assigneeProfileId == null;
+
+    // Due Soon: active tickets due from today through the next 7 days,
+    // never overdue — no existing reusable "due soon" definition applies to
+    // real (non-mock-dated) tickets, see my-work-screen.tsx's isDueSoon,
+    // which is pinned to a hardcoded mock "today" and isn't safe to reuse
+    // for real dates.
+    const todayISO = getTodayISO();
+    const dueSoonCutoffISO = getTodayISO(7);
+    const isDueSoon = (t: Ticket) => {
+      if (t.status === "done" || !t.dueDate) return false;
+      const dueISO = parseDisplayDate(t.dueDate);
+      if (!dueISO) return false;
+      return dueISO >= todayISO && dueISO <= dueSoonCutoffISO;
+    };
+
+    // Recently Updated: real updatedAtISO within the last 7 days. Undefined
+    // for mock tickets (no real timestamp exists), so this never matches in
+    // dev fallback.
+    const nowMs = new Date().getTime();
+    const isRecentlyUpdated = (t: Ticket) => {
+      if (!t.updatedAtISO) return false;
+      const diffMs = nowMs - new Date(t.updatedAtISO).getTime();
+      return diffMs >= 0 && diffMs <= 7 * 24 * 60 * 60 * 1000;
+    };
+
+    // Local calendar date (not UTC — same reasoning as getTodayISO) behind a
+    // full timestamp, so Created/Updated Date ranges compare day-to-day like
+    // the date-only inputs that set them, not exact instants.
+    const toLocalDateISO = (iso: string): string => {
+      const d = new Date(iso);
+      const month = String(d.getMonth() + 1).padStart(2, "0");
+      const day = String(d.getDate()).padStart(2, "0");
+      return `${d.getFullYear()}-${month}-${day}`;
+    };
+    const inDateRange = (dateISO: string | undefined, range: DateRangeValue): boolean => {
+      if (!dateISO) return false;
+      if (range.from && dateISO < range.from) return false;
+      if (range.to && dateISO > range.to) return false;
+      return true;
+    };
+    const hasDueDateFilter     = Boolean(dueDateFilter.from || dueDateFilter.to);
+    const hasCreatedDateFilter = Boolean(createdDateFilter.from || createdDateFilter.to);
+    const hasUpdatedDateFilter = Boolean(updatedDateFilter.from || updatedDateFilter.to);
+
+    return ticketList.filter((t) => {
+      if (query) {
+        const matchesText =
+          t.title.toLowerCase().includes(query) || getTicketDisplayKey(t).toLowerCase().includes(query);
+        if (!matchesText) return false;
+      }
+
+      if (assigned.length > 0) {
+        const value = assigned[0];
+        if (value === "me") {
+          if (!isMine(t)) return false;
+        } else if (value === "unassigned") {
+          if (!isUnassigned(t)) return false;
+        } else if (t.assigneeProfileId !== value) {
+          return false;
+        }
+      }
+
+      if (priority.length > 0 && !priority.includes(t.priority)) return false;
+      if (status.length > 0 && !status.includes(t.status)) return false;
+
+      // "Add Filter" filters.
+      // Labels: matches if the ticket has at least one of the selected
+      // labels (OR within this filter — labels are multi-valued per
+      // ticket, same convention as Priority/Status's own multi-select).
+      if (labelsFilter.length > 0 && !labelsFilter.some((l) => t.labels.includes(l))) return false;
+      // Reporter: who created the ticket, by real id — never the display name.
+      if (reporterFilter.length > 0 && !reporterFilter.includes(t.createdByProfileId ?? "")) return false;
+      if (hasDueDateFilter) {
+        const dueISO = t.dueDate ? parseDisplayDate(t.dueDate) : "";
+        if (!inDateRange(dueISO || undefined, dueDateFilter)) return false;
+      }
+      if (hasCreatedDateFilter && !inDateRange(t.createdAtISO ? toLocalDateISO(t.createdAtISO) : undefined, createdDateFilter)) return false;
+      if (hasUpdatedDateFilter && !inDateRange(t.updatedAtISO ? toLocalDateISO(t.updatedAtISO) : undefined, updatedDateFilter)) return false;
+
+      // Quick filter chips — every active one must match (AND).
+      if (activeChips.has("Mine") && !isMine(t)) return false;
+      if (activeChips.has("Blocked") && t.status !== "blocked") return false;
+      if (activeChips.has("High Priority") && t.priority !== "highest" && t.priority !== "high") return false;
+      if (activeChips.has("Due Soon") && !isDueSoon(t)) return false;
+      if (activeChips.has("Recently Updated") && !isRecentlyUpdated(t)) return false;
+
+      return true;
+    });
+  }, [
+    ticketList, searchQuery, assigned, priority, status, activeChips, isDevFallback, user.name, userId,
+    labelsFilter, reporterFilter, dueDateFilter, createdDateFilter, updatedDateFilter,
+  ]);
 
   function openPreview(ticket: Ticket) {
     setPreviewTicket(ticket);
@@ -188,6 +367,25 @@ export function TicketsScreen({ slug, projectName }: { slug: string; projectName
     setPreviewTicket(ticket);
   }
 
+  // Passed to the preview panel's editable mode — after a successful inline
+  // edit there, keeps the board/list card and the preview's own selection in
+  // sync without a page reload (the panel already updates its own displayed
+  // copy internally; this only updates the list this screen renders from).
+  function handleTicketUpdated(updated: Ticket) {
+    setTicketList((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
+    setPreviewTicket((prev) => (prev && prev.id === updated.id ? updated : prev));
+  }
+
+  const createLabel = async (name: string): Promise<{ status: "success"; name: string } | { status: "error"; message: string }> => {
+    if (isDevFallback || !organization) {
+      return { status: "error", message: "Not available in this mode." };
+    }
+    const result = await createOrganizationLabel(organization.id, name);
+    if (result.status === "error") return result;
+    setOrgLabels((prev) => [...prev, result.label.name]);
+    return { status: "success", name: result.label.name };
+  };
+
   if (loadState === "loading") {
     return (
       <div className="h-full flex items-center justify-center text-sm text-slate-400 dark:text-zinc-500">
@@ -213,6 +411,10 @@ export function TicketsScreen({ slug, projectName }: { slug: string; projectName
       </div>
     );
   }
+
+  // Computed once and reused by both the Labels filter (FilterBar) and the
+  // preview panel's Labels editor, instead of each building its own copy.
+  const allLabelOptions = buildLabelCatalog(orgLabels);
 
   return (
     <div className="h-full flex flex-col">
@@ -248,20 +450,39 @@ export function TicketsScreen({ slug, projectName }: { slug: string; projectName
           searchQuery={searchQuery}
           onSearchChange={setSearchQuery}
           members={members}
+          assigned={assigned}
+          onAssignedChange={setAssigned}
+          priority={priority}
+          onPriorityChange={setPriority}
+          status={status}
+          onStatusChange={setStatus}
+          activeAddFilters={activeAddFilters}
+          onAddFilter={handleAddFilter}
+          allLabels={allLabelOptions}
+          labels={labelsFilter}
+          onLabelsChange={handleLabelsChange}
+          reporter={reporterFilter}
+          onReporterChange={handleReporterChange}
+          dueDateRange={dueDateFilter}
+          onDueDateRangeChange={handleDueDateRangeChange}
+          createdDateRange={createdDateFilter}
+          onCreatedDateRangeChange={handleCreatedDateRangeChange}
+          updatedDateRange={updatedDateFilter}
+          onUpdatedDateRangeChange={handleUpdatedDateRangeChange}
         />
 
-        {/* Quick stats */}
+        {/* Quick stats — recalculated from the filtered results, same as every view below */}
         <div className="flex items-center gap-1.5 mt-3 text-xs text-slate-500 dark:text-zinc-500">
-          <span className="font-semibold text-slate-700 dark:text-zinc-300">{ticketList.length}</span>
+          <span className="font-semibold text-slate-700 dark:text-zinc-300">{filteredTickets.length}</span>
           <span>Tickets</span>
           <span className="mx-1 text-slate-200 dark:text-zinc-700">·</span>
           <span className="font-semibold text-slate-700 dark:text-zinc-300">
-            {ticketList.reduce((s, t) => s + (t.hours ?? 0), 0)}h
+            {filteredTickets.reduce((s, t) => s + (t.hours ?? 0), 0)}h
           </span>
           <span>Estimated</span>
           <span className="mx-1 text-slate-200 dark:text-zinc-700">·</span>
           <span className="font-semibold text-red-600 dark:text-red-400">
-            {ticketList.filter((t) => t.status === "blocked").length}
+            {filteredTickets.filter((t) => t.status === "blocked").length}
           </span>
           <span>Blocked</span>
         </div>
@@ -269,17 +490,17 @@ export function TicketsScreen({ slug, projectName }: { slug: string; projectName
         <div className="mt-3 border-b border-slate-200 dark:border-zinc-800" />
       </div>
 
-      {/* Content area */}
+      {/* Content area — every view reads the same filteredTickets, so Board/List/Calendar/Timeline/Insights always agree */}
       {view === "board" ? (
-        <BoardView tickets={ticketList} onTicketClick={openPreview} />
+        <BoardView tickets={filteredTickets} onTicketClick={openPreview} />
       ) : view === "calendar" ? (
-        <CalendarView tickets={ticketList} onTicketClick={openPreview} />
+        <CalendarView tickets={filteredTickets} onTicketClick={openPreview} />
       ) : view === "timeline" ? (
-        <TimelineView tickets={ticketList} onTicketClick={openPreview} />
+        <TimelineView tickets={filteredTickets} onTicketClick={openPreview} />
       ) : view === "insights" ? (
-        <InsightsView tickets={ticketList} onTicketClick={openPreview} />
+        <InsightsView tickets={filteredTickets} onTicketClick={openPreview} />
       ) : (
-        <ListView tickets={ticketList} onTicketClick={openPreview} />
+        <ListView tickets={filteredTickets} onTicketClick={openPreview} />
       )}
 
       {previewTicket !== null && (
@@ -288,6 +509,12 @@ export function TicketsScreen({ slug, projectName }: { slug: string; projectName
           slug={slug}
           onClose={closePreview}
           onBeforeNavigate={handleBeforeExpand}
+          editable
+          isDevFallback={isDevFallback}
+          members={members}
+          allLabels={allLabelOptions}
+          onCreateLabel={createLabel}
+          onTicketUpdated={handleTicketUpdated}
         />
       )}
 

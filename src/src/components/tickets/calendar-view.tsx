@@ -74,7 +74,7 @@ function groupTicketsByDate(tickets: Ticket[]): Record<string, Ticket[]> {
 
 function statusDotClass(t: Ticket): string {
   if (t.status === "blocked") return "bg-red-500";
-  if (t.priority === "high") return "bg-amber-500";
+  if (t.priority === "highest" || t.priority === "high") return "bg-amber-500";
   if (t.status === "review") return "bg-violet-500";
   if (t.status === "done") return "bg-emerald-500";
   if (t.status === "in-progress") return "bg-amber-400";
@@ -84,7 +84,7 @@ function statusDotClass(t: Ticket): string {
 
 function statusLabel(t: Ticket): string {
   const labels: Record<string, string> = {
-    backlog: "Inbox",
+    backlog: "Backlog",
     "to-do": "To Do",
     "in-progress": "In Progress",
     review: "In Review",

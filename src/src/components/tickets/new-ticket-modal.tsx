@@ -3,7 +3,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Ticket, TicketStatus, TicketPriority, TicketType } from "@/lib/mock-tickets";
 import { getTicketDisplayKey } from "@/lib/mock-tickets";
-import { StatusBadge, STATUS_LABEL, TicketTypeIcon, TicketTypeSelect } from "@/components/tickets/ticket-ui";
+import { StatusBadge, STATUS_LABEL, TicketTypeIcon, TicketTypeSelect, PRIORITY_LABEL } from "@/components/tickets/ticket-ui";
 import { registerTicket, nextTicketNumber, titleToTicketId } from "@/lib/pending-tickets";
 import { createTicket } from "@/lib/tickets";
 import { useCurrentUser } from "@/components/current-user-provider";
@@ -19,12 +19,6 @@ const ALL_LABELS = [
   "Design", "Enhancement", "Integration", "iOS", "Marketing",
   "Notifications", "Onboarding", "Performance", "Security",
 ];
-
-const PRIORITY_LABEL: Record<TicketPriority, string> = {
-  high:   "High",
-  normal: "Normal",
-  low:    "Low",
-};
 
 const LABEL_HINTS: Array<{ words: string[]; label: string }> = [
   { words: ["security", "secure", "auth", "authentication", "password", "encrypt", "pci", "kyc", "mfa", "biometric", "token", "otp", "2fa"], label: "Security" },
@@ -261,7 +255,7 @@ export function NewTicketModal({
   const [description, setDescription]   = useState("");
   const [criteria, setCriteria]         = useState<string[]>([]);
   const [status, setStatus]             = useState<TicketStatus>("to-do");
-  const [priority, setPriority]         = useState<TicketPriority>("normal");
+  const [priority, setPriority]         = useState<TicketPriority>("medium");
   const [ticketType, setTicketType]     = useState<TicketType>("TASK");
   const [assigneeId, setAssigneeId]     = useState("");
   const [labels, setLabels]             = useState<string[]>([]);
@@ -352,21 +346,28 @@ export function NewTicketModal({
 
     setSubmitting(true);
     setError(null);
-    const filledCriteria = criteria.filter((c) => c.trim().length > 0);
-    const result = await createTicket(organization.id, slug, {
-      title: title.trim(),
-      description: description.trim() || undefined,
-      acceptanceCriteria: filledCriteria.length > 0 ? filledCriteria : undefined,
-      hours: hours ? (parseInt(hours, 10) >= 0 ? parseInt(hours, 10) : undefined) : undefined,
-      assigneeProfileId: assigneeId || undefined,
-    });
-    setSubmitting(false);
-
-    if (result.status === "error") {
-      setError(result.message);
-      return;
+    try {
+      const filledCriteria = criteria.filter((c) => c.trim().length > 0);
+      const result = await createTicket(organization.id, slug, {
+        title: title.trim(),
+        description: description.trim() || undefined,
+        acceptanceCriteria: filledCriteria.length > 0 ? filledCriteria : undefined,
+        hours: hours ? (parseInt(hours, 10) >= 0 ? parseInt(hours, 10) : undefined) : undefined,
+        assigneeProfileId: assigneeId || undefined,
+      });
+      if (result.status === "error") {
+        setError(result.message);
+        return;
+      }
+      onCreated(result.ticket);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
+    } finally {
+      // In a `finally` (not right after the await) so a thrown/rejected
+      // request still always clears the spinner instead of leaving the
+      // "Creating…" button stuck.
+      setSubmitting(false);
     }
-    onCreated(result.ticket);
   };
 
   const submitRef = useRef(handleSubmit);

@@ -83,6 +83,15 @@ export function MemberTrigger({
   const { openMemberProfile } = useMemberProfile();
   const identity: MemberIdentity = { name, avatar, role, projectSlug };
 
+  // "Unassigned" is the app-wide sentinel for "no assignee" (see
+  // EditableSidebarAssignee / PreviewAssigneeControl's onChange({ name:
+  // "Unassigned", ... }) — never a real person's name), so there's no real
+  // profile to open. Renders as plain, non-interactive content: no click,
+  // no keyboard handler, no hover state, no pointer cursor.
+  if (name === "Unassigned") {
+    return <span className={className}>{children}</span>;
+  }
+
   function handleClick(e: MouseEvent) {
     if (nested) e.stopPropagation();
     openMemberProfile(identity);

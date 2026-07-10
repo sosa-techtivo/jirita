@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, type KeyboardEvent, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import type { Ticket, TicketStatus, TicketPriority, TicketType } from "@/lib/mock-tickets";
 import { tickets as ALL_TICKETS, getTicketDisplayKey } from "@/lib/mock-tickets";
@@ -11,6 +12,17 @@ import {
   TicketTypeIcon,
   TicketTypeSelect,
   STATUS_LABEL,
+  PRIORITY_LABEL,
+  buildLabelCatalog,
+  EDIT_BTN,
+  INPUT_BASE,
+  PencilIcon,
+  CalendarIcon,
+  parseDisplayDate,
+  formatISODate,
+  getTodayISO,
+  EditableStatusBadge,
+  ErrorToast,
 } from "@/components/tickets/ticket-ui";
 import { BackToTicketsButton } from "@/components/tickets/back-to-tickets-button";
 import { TicketPreviewPanel } from "@/components/tickets/ticket-preview-panel";
@@ -25,14 +37,24 @@ import {
   createOrganizationLabel,
   loadTicketAttachments,
   uploadTicketAttachment,
+  downloadTicketAttachment,
+  getTicketAttachmentPreviewUrl,
+  renameTicketAttachment,
+  deleteTicketAttachment,
   loadTicketTimeEntries,
   logTicketTime,
+  loadProjectTickets,
+  loadTicketRelations,
+  createTicketRelation,
+  deleteTicketRelation,
   type TicketComment,
   type TicketActivityEvent,
   type UpdateTicketInput,
   type TicketAttachment,
   type TimeEntryRecord,
   type LogTimeInput,
+  type RelatedTicket,
+  type TicketRelationKind,
 } from "@/lib/tickets";
 import { loadOrganizationMembers, type OrgMember } from "@/lib/projects";
 import { FALLBACK_AVATAR } from "@/lib/current-user";
@@ -44,87 +66,12 @@ import { useOrganizationProjects } from "@/components/organization-projects-prov
 
 const MILESTONES = ["App Store Submission", "Beta Release", "Security Audit"];
 
-const ALL_LABELS = [
-  "Accessibility", "API", "Bug", "Compliance", "Dark Mode",
-  "Design", "Enhancement", "Integration", "iOS", "Marketing",
-  "Notifications", "Onboarding", "Performance", "Security",
-];
-
-const PRIORITY_LABEL: Record<TicketPriority, string> = {
-  high:   "High",
-  normal: "Normal",
-  low:    "Low",
-};
-
 // Attachments data lives inside AttachmentsSection state (see below)
-
-const MONTH_MAP: Record<string, string> = {
-  Jan: "01", Feb: "02", Mar: "03", Apr: "04", May: "05", Jun: "06",
-  Jul: "07", Aug: "08", Sep: "09", Oct: "10", Nov: "11", Dec: "12",
-};
-
-function parseDisplayDate(display: string): string {
-  const parts = display.trim().split(/\s+/);
-  if (parts.length !== 2) return "";
-  const month = MONTH_MAP[parts[0]];
-  const day = parts[1].padStart(2, "0");
-  return month ? `2026-${month}-${day}` : "";
-}
-
-function formatISODate(iso: string): string {
-  if (!iso) return "";
-  const d = new Date(`${iso}T00:00:00`);
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-}
-
-// ── Icons ─────────────────────────────────────────────────────────────────────
-
-function PencilIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className ?? "w-3 h-3"}
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      viewBox="0 0 24 24"
-      aria-hidden="true"
-    >
-      <path d="M15.232 5.232l3.536 3.536M9 13l6.586-6.586a2 2 0 012.828 2.828L11.828 15.828a2 2 0 01-2.828 0L7 14l2-1z" />
-      <path d="M3 21h18" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function CalendarIcon() {
-  return (
-    <svg
-      className="w-3 h-3 text-slate-400 dark:text-zinc-500 flex-shrink-0"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      viewBox="0 0 24 24"
-      aria-hidden="true"
-    >
-      <rect x="3" y="4" width="18" height="18" rx="2" />
-      <path d="M16 2v4M8 2v4M3 10h18" />
-    </svg>
-  );
-}
 
 // ── Shared style tokens ───────────────────────────────────────────────────────
 
 const SECTION_LABEL =
   "text-[11px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600";
-
-const EDIT_BTN =
-  "opacity-0 group-hover:opacity-100 transition-opacity ml-1.5 p-0.5 rounded " +
-  "text-slate-300 hover:text-slate-500 dark:text-zinc-600 dark:hover:text-zinc-400 " +
-  "hover:bg-slate-100 dark:hover:bg-zinc-800 flex-shrink-0 focus:outline-none focus:opacity-100";
-
-const INPUT_BASE =
-  "bg-white dark:bg-zinc-950 text-[13px] font-medium text-slate-800 dark:text-zinc-200 " +
-  "border border-slate-200 dark:border-zinc-700 rounded-md px-2 py-1 outline-none " +
-  "focus:border-brand-500 dark:focus:border-brand-500 focus:ring-1 focus:ring-brand-500/30 w-full";
 
 // ── Sidebar layout ────────────────────────────────────────────────────────────
 
@@ -248,45 +195,6 @@ function EditableDescription({ value, onChange }: { value: string; onChange: (v:
       >
         <PencilIcon />
       </button>
-    </div>
-  );
-}
-
-// ── Editable: Status (used in header and sidebar) ─────────────────────────────
-
-function EditableStatusBadge({ value, onChange }: { value: TicketStatus; onChange: (v: TicketStatus) => void }) {
-  const [editing, setEditing] = useState(false);
-  const selectRef = useRef<HTMLSelectElement>(null);
-
-  useEffect(() => { if (editing) selectRef.current?.focus(); }, [editing]);
-
-  if (editing) {
-    return (
-      <select
-        ref={selectRef}
-        className={
-          `text-[11px] font-semibold rounded-md px-2 py-0.5 outline-none cursor-pointer ` +
-          `border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 ` +
-          `text-slate-800 dark:text-zinc-200`
-        }
-        value={value}
-        onChange={(e) => { onChange(e.target.value as TicketStatus); setEditing(false); }}
-        onBlur={() => setEditing(false)}
-        onKeyDown={(e) => { if (e.key === "Escape") setEditing(false); }}
-      >
-        {(Object.keys(STATUS_LABEL) as TicketStatus[]).map((k) => (
-          <option key={k} value={k}>{STATUS_LABEL[k]}</option>
-        ))}
-      </select>
-    );
-  }
-
-  return (
-    <div className="group flex items-center gap-1 cursor-pointer" onClick={() => setEditing(true)}>
-      <StatusBadge status={value} />
-      <span className={EDIT_BTN.replace("ml-1.5", "")}>
-        <PencilIcon className="w-2.5 h-2.5" />
-      </span>
     </div>
   );
 }
@@ -796,15 +704,15 @@ function EditableSidebarLabels({
 
 // ── Related Tickets ───────────────────────────────────────────────────────────
 
-type RelationKind = "blocks" | "blocked-by" | "related-to";
-
-const RELATION_LABEL: Record<RelationKind, string> = {
-  "blocks":     "Blocks",
-  "blocked-by": "Blocked by",
-  "related-to": "Related to",
+const RELATION_LABEL: Record<TicketRelationKind, string> = {
+  "related-to":    "Related to",
+  "blocks":        "Blocks",
+  "blocked-by":    "Blocked by",
+  "duplicates":    "Duplicates",
+  "duplicated-by": "Duplicated by",
 };
 
-type RelatedLink = { id: string; ticketId: string; kind: RelationKind };
+const RELATION_KIND_ORDER: TicketRelationKind[] = ["blocks", "blocked-by", "duplicates", "duplicated-by", "related-to"];
 
 function RelatedTicketCard({
   ticket,
@@ -833,7 +741,7 @@ function RelatedTicketCard({
           <div className="flex-shrink-0">
             <StatusBadge status={ticket.status} />
           </div>
-          {ticket.priority === "high" && (
+          {(ticket.priority === "highest" || ticket.priority === "high") && (
             <span
               className="flex-shrink-0 w-1.5 h-1.5 rounded-full bg-rose-400 dark:bg-rose-500"
               title="High priority"
@@ -877,17 +785,49 @@ function RelatedTicketCard({
 }
 
 function RelatedTicketsSection({
+  ticketId,
   slug,
+  onChanged,
+  onError,
 }: {
+  ticketId: string;
   slug: string;
+  /** Called after a successful add/remove — a database trigger already
+   *  logged the real Activity Log rows as part of the same write; this just
+   *  tells the parent to refetch it (same pattern as AttachmentsSection's
+   *  onUploaded / TimeTrackingSection's onLogged). */
+  onChanged: () => void;
+  /** Called when removing a link fails — surfaced via the shared error toast.
+   *  Adding a link has its own inline error (linkError) inside the picker, but
+   *  a remove can happen while the picker is closed, so it needs this instead. */
+  onError: (message: string) => void;
 }) {
-  const [links, setLinks] = useState<RelatedLink[]>([]);
+  const { organization, isDevFallback } = useCurrentUser();
+
+  const [relations, setRelations]     = useState<RelatedTicket[]>([]);
   const [previewTicket, setPreviewTicket] = useState<Ticket | null>(null);
-  const [linking, setLinking] = useState(false);
-  const [linkKind, setLinkKind] = useState<RelationKind>("related-to");
+  const [linking, setLinking]         = useState(false);
+  const [linkKind, setLinkKind]       = useState<TicketRelationKind>("related-to");
   const [searchQuery, setSearchQuery] = useState("");
+  // All of this project's tickets, loaded once when the link picker first
+  // opens — the same loader Tickets' own list views use, reused here rather
+  // than a separate search endpoint, and filtered client-side below.
+  const [projectTickets, setProjectTickets] = useState<Ticket[] | null>(null);
+  const [linkError, setLinkError]     = useState<string | null>(null);
   const selectorRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+
+  const loadRelations = () => {
+    if (isDevFallback) return;
+    loadTicketRelations(ticketId, slug).then((result) => {
+      if (result.status === "ready") setRelations(result.relations);
+    });
+  };
+
+  useEffect(() => {
+    loadRelations();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ticketId, isDevFallback]);
 
   useEffect(() => {
     if (!linking) return;
@@ -905,24 +845,56 @@ function RelatedTicketsSection({
     if (linking) searchRef.current?.focus();
   }, [linking]);
 
-  // No real cross-ticket search exists yet (see "No implementar: Related
-  // tickets") — always empty, never the old mock projects' fake tickets.
-  const searchResults: Ticket[] = [];
+  useEffect(() => {
+    if (!linking || isDevFallback || !organization || projectTickets !== null) return;
+    loadProjectTickets(organization.id, slug).then((result) => {
+      if (result.status === "ready") setProjectTickets(result.tickets);
+    });
+  }, [linking, isDevFallback, organization, slug, projectTickets]);
 
-  const addLink = (ticketId: string) => {
-    setLinks((prev) => [...prev, { id: newId(), ticketId, kind: linkKind }]);
-    setLinking(false);
-    setSearchQuery("");
+  const linkedTicketIds = new Set(relations.map((r) => r.ticket.id));
+  const query = searchQuery.trim().toLowerCase();
+  const searchResults = (projectTickets ?? []).filter((t) => {
+    if (t.id === ticketId || linkedTicketIds.has(t.id)) return false;
+    if (!query) return true;
+    return t.title.toLowerCase().includes(query) || getTicketDisplayKey(t).toLowerCase().includes(query);
+  });
+
+  const addLink = (otherTicketId: string) => {
+    if (isDevFallback) return;
+    setLinkError(null);
+    createTicketRelation(ticketId, otherTicketId, linkKind).then((result) => {
+      if (result.status === "error") {
+        setLinkError(result.message);
+        return;
+      }
+      setLinking(false);
+      setSearchQuery("");
+      loadRelations();
+      onChanged();
+    }).catch((err) => {
+      setLinkError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
+    });
   };
 
-  const grouped = (["blocks", "blocked-by", "related-to"] as RelationKind[])
-    .map((kind) => ({
-      kind,
-      items: links
-        .filter((l) => l.kind === kind)
-        .map((l) => ({ link: l, ticket: ALL_TICKETS.find((t) => t.id === l.ticketId) }))
-        .filter((x): x is { link: RelatedLink; ticket: Ticket } => x.ticket !== undefined),
-    }))
+  const removeLink = (linkId: string) => {
+    if (isDevFallback) return;
+    deleteTicketRelation(linkId).then((result) => {
+      if (result.status === "error") {
+        console.warn("[ticket-detail] failed to remove related ticket:", result.message);
+        onError(result.message);
+        return;
+      }
+      loadRelations();
+      onChanged();
+    }).catch((err) => {
+      console.warn("[ticket-detail] failed to remove related ticket:", err);
+      onError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
+    });
+  };
+
+  const grouped = RELATION_KIND_ORDER
+    .map((kind) => ({ kind, items: relations.filter((r) => r.kind === kind) }))
     .filter((g) => g.items.length > 0);
 
   return (
@@ -933,7 +905,7 @@ function RelatedTicketsSection({
           Related Tickets
         </p>
         <button
-          onClick={() => setLinking((v) => !v)}
+          onClick={() => { setLinking((v) => !v); setLinkError(null); }}
           className="text-[10px] font-semibold text-brand-600 dark:text-brand-500 hover:text-brand-700 dark:hover:text-brand-400 transition-colors leading-none"
         >
           + Link
@@ -949,10 +921,10 @@ function RelatedTicketsSection({
           <div className="flex items-stretch border-b border-slate-100 dark:border-zinc-800">
             <select
               value={linkKind}
-              onChange={(e) => setLinkKind(e.target.value as RelationKind)}
+              onChange={(e) => setLinkKind(e.target.value as TicketRelationKind)}
               className="text-[10px] font-medium bg-slate-50 dark:bg-zinc-800/80 text-slate-600 dark:text-zinc-400 border-r border-slate-100 dark:border-zinc-800 px-1.5 outline-none flex-shrink-0 cursor-pointer"
             >
-              {(Object.keys(RELATION_LABEL) as RelationKind[]).map((k) => (
+              {(Object.keys(RELATION_LABEL) as TicketRelationKind[]).map((k) => (
                 <option key={k} value={k}>{RELATION_LABEL[k]}</option>
               ))}
             </select>
@@ -971,7 +943,7 @@ function RelatedTicketsSection({
           <div className="max-h-40 overflow-y-auto">
             {searchResults.length === 0 ? (
               <p className="px-2.5 py-2 text-[11px] text-slate-400 dark:text-zinc-600">
-                {searchQuery ? "No results" : "No more tickets to link"}
+                {projectTickets === null ? "Loading…" : searchQuery ? "No results" : "No more tickets to link"}
               </p>
             ) : (
               searchResults.slice(0, 6).map((t) => (
@@ -994,6 +966,11 @@ function RelatedTicketsSection({
               ))
             )}
           </div>
+          {linkError && (
+            <p className="px-2.5 py-1.5 text-[10px] text-red-600 dark:text-red-400 border-t border-slate-100 dark:border-zinc-800">
+              {linkError}
+            </p>
+          )}
         </div>
       )}
 
@@ -1011,12 +988,12 @@ function RelatedTicketsSection({
                 {RELATION_LABEL[kind]}
               </p>
               <div className="space-y-1.5">
-                {items.map(({ link, ticket: t }) => (
+                {items.map(({ linkId, ticket: t }) => (
                   <RelatedTicketCard
-                    key={link.id}
+                    key={linkId}
                     ticket={t}
                     onOpen={() => setPreviewTicket(t)}
-                    onRemove={() => setLinks((prev) => prev.filter((l) => l.id !== link.id))}
+                    onRemove={() => removeLink(linkId)}
                   />
                 ))}
               </div>
@@ -1184,6 +1161,7 @@ type AttachmentItem = {
   addedBy: string;
   avatar: string;
   uploadedAt: string;
+  storagePath: string;
 };
 
 type UploadingItem = {
@@ -1212,10 +1190,26 @@ function getExt(name: string): string {
   return name.split(".").pop()?.toLowerCase() ?? "file";
 }
 
+// Image formats every evergreen browser can render directly in an <img>
+// tag. Anything else (Office docs, zips, video, etc.) gets no Preview
+// action, per this feature's explicit scope.
+const PREVIEWABLE_IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "avif"]);
+
+function getPreviewKind(ext: string): "image" | "pdf" | null {
+  if (ext === "pdf") return "pdf";
+  if (PREVIEWABLE_IMAGE_EXTS.has(ext)) return "image";
+  return null;
+}
+
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function formatRemainingHours(hours: number): string {
+  const clamped = Math.max(0, hours);
+  return `${Number(clamped.toFixed(1))}`;
 }
 
 let attachmentIdCounter = 0;
@@ -1260,40 +1254,88 @@ function UploadingRow({ item }: { item: UploadingItem }) {
 
 function AttachmentRow({
   file,
-  replacing,
   onDelete,
   onRename,
-  onReplace,
+  onDownload,
 }: {
   file: AttachmentItem;
-  replacing: boolean;
   onDelete: () => void;
-  onRename: (name: string) => void;
-  onReplace: () => void;
+  /** Resolves to whether the rename actually persisted — the input only
+   *  closes on success, so a failure leaves it open to retry instead of
+   *  silently discarding the edit. */
+  onRename: (name: string) => Promise<boolean>;
+  onDownload: () => void;
 }) {
   const [renaming, setRenaming]     = useState(false);
   const [renameDraft, setRenameDraft] = useState(file.name);
   const [menuOpen, setMenuOpen]     = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const previewKind = getPreviewKind(file.ext);
+  // Screen-space position for the portaled menu panel below — computed from
+  // the trigger button at the moment the menu opens (see toggleMenu) so it
+  // tracks the button correctly even though it's no longer a DOM descendant
+  // of it once rendered via the portal.
+  const [menuPos, setMenuPos] = useState<{ top: number; right: number } | null>(null);
 
-  const renameRef = useRef<HTMLInputElement>(null);
-  const menuRef   = useRef<HTMLDivElement>(null);
+  const renameRef    = useRef<HTMLInputElement>(null);
+  const menuRef       = useRef<HTMLDivElement>(null);
+  const menuPanelRef  = useRef<HTMLDivElement>(null);
 
   useEffect(() => { if (renaming) renameRef.current?.focus(); }, [renaming]);
 
   useEffect(() => {
     if (!menuOpen) return;
     const handle = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
+      const target = e.target as Node;
+      const insideTrigger = menuRef.current?.contains(target) ?? false;
+      const insidePanel   = menuPanelRef.current?.contains(target) ?? false;
+      if (!insideTrigger && !insidePanel) setMenuOpen(false);
     };
     document.addEventListener("mousedown", handle);
     return () => document.removeEventListener("mousedown", handle);
   }, [menuOpen]);
 
-  const saveRename = () => {
+  // Keeps the portaled menu tracking the trigger button's viewport position
+  // while it's open (e.g. if the page scrolls) — the initial position is set
+  // synchronously in toggleMenu below, this effect only keeps it in sync.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const updatePos = () => {
+      const rect = menuRef.current?.getBoundingClientRect();
+      if (rect) setMenuPos({ top: rect.bottom + 4, right: window.innerWidth - rect.right });
+    };
+    window.addEventListener("scroll", updatePos, true);
+    window.addEventListener("resize", updatePos);
+    return () => {
+      window.removeEventListener("scroll", updatePos, true);
+      window.removeEventListener("resize", updatePos);
+    };
+  }, [menuOpen]);
+
+  // Rendered via a portal (see below) so the menu isn't clipped by the
+  // Attachments section's overflow-hidden collapse wrapper (CollapsibleSection)
+  // — position is computed in viewport coordinates from the trigger button
+  // at the moment the menu opens.
+  const toggleMenu = () => {
+    if (menuOpen) {
+      setMenuOpen(false);
+      setMenuPos(null);
+      return;
+    }
+    const rect = menuRef.current?.getBoundingClientRect();
+    setMenuPos(rect ? { top: rect.bottom + 4, right: window.innerWidth - rect.right } : null);
+    setMenuOpen(true);
+  };
+
+  const saveRename = async () => {
     const v = renameDraft.trim();
-    if (v && v !== file.name) onRename(v);
-    else setRenameDraft(file.name);
+    if (v && v !== file.name) {
+      const ok = await onRename(v);
+      if (!ok) return; // keep the input open so the user can retry or cancel
+    } else {
+      setRenameDraft(file.name);
+    }
     setRenaming(false);
   };
 
@@ -1322,20 +1364,10 @@ function AttachmentRow({
   }
 
   return (
-    <li className={
-      "group flex items-center gap-3 px-3 py-2.5 rounded-lg border transition-colors " +
-      (replacing
-        ? "border-slate-200 dark:border-zinc-700 bg-slate-50 dark:bg-zinc-900/60"
-        : "border-slate-100 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-900/60 hover:border-slate-200 dark:hover:border-zinc-700")
-    }>
+    <li className="group flex items-center gap-3 px-3 py-2.5 rounded-lg border transition-colors border-slate-100 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-900/60 hover:border-slate-200 dark:hover:border-zinc-700">
       {/* Extension badge */}
       <span className={"w-8 h-8 rounded-md flex items-center justify-center flex-shrink-0 text-[9px] font-bold uppercase tracking-wide " + extColor}>
-        {replacing ? (
-          <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
-            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
-            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-          </svg>
-        ) : file.ext}
+        {file.ext}
       </span>
 
       {/* File info */}
@@ -1368,7 +1400,7 @@ function AttachmentRow({
             <span>{file.addedBy}</span>
           </MemberTrigger>
           <span>·</span>
-          <span>{replacing ? "Updating…" : file.uploadedAt}</span>
+          <span>{file.uploadedAt}</span>
         </p>
       </div>
 
@@ -1377,6 +1409,7 @@ function AttachmentRow({
         <div className="flex items-center gap-0.5 flex-shrink-0">
           <button
             aria-label={`Download ${file.name}`}
+            onClick={onDownload}
             className="p-1.5 rounded-md text-slate-400 dark:text-zinc-600 hover:text-slate-600 dark:hover:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
           >
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
@@ -1387,7 +1420,7 @@ function AttachmentRow({
           <div ref={menuRef} className="relative">
             <button
               aria-label="More options"
-              onClick={() => setMenuOpen((v) => !v)}
+              onClick={toggleMenu}
               className="p-1.5 rounded-md text-slate-400 dark:text-zinc-600 hover:text-slate-600 dark:hover:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
             >
               <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 16 16" aria-hidden="true">
@@ -1397,8 +1430,24 @@ function AttachmentRow({
               </svg>
             </button>
 
-            {menuOpen && (
-              <div className="absolute right-0 top-full mt-1 w-36 rounded-lg border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 shadow-lg shadow-slate-200/50 dark:shadow-black/40 z-20 py-1">
+            {menuOpen && menuPos && createPortal(
+              <div
+                ref={menuPanelRef}
+                style={{ position: "fixed", top: menuPos.top, right: menuPos.right }}
+                className="w-36 rounded-lg border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 shadow-lg shadow-slate-200/50 dark:shadow-black/40 z-20 py-1"
+              >
+                {previewKind && (
+                  <button
+                    className="w-full text-left px-3 py-1.5 text-[12px] text-slate-700 dark:text-zinc-300 hover:bg-slate-50 dark:hover:bg-zinc-800 flex items-center gap-2.5 transition-colors"
+                    onClick={() => { setMenuOpen(false); setPreviewOpen(true); }}
+                  >
+                    <svg className="w-3 h-3 text-slate-400 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                      <path d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" strokeLinecap="round" strokeLinejoin="round" />
+                      <path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                    Preview
+                  </button>
+                )}
                 <button
                   className="w-full text-left px-3 py-1.5 text-[12px] text-slate-700 dark:text-zinc-300 hover:bg-slate-50 dark:hover:bg-zinc-800 flex items-center gap-2.5 transition-colors"
                   onClick={() => { setMenuOpen(false); setRenameDraft(file.name); setRenaming(true); }}
@@ -1408,15 +1457,6 @@ function AttachmentRow({
                     <path d="M3 21h18" strokeLinecap="round" />
                   </svg>
                   Rename
-                </button>
-                <button
-                  className="w-full text-left px-3 py-1.5 text-[12px] text-slate-700 dark:text-zinc-300 hover:bg-slate-50 dark:hover:bg-zinc-800 flex items-center gap-2.5 transition-colors"
-                  onClick={() => { setMenuOpen(false); onReplace(); }}
-                >
-                  <svg className="w-3 h-3 text-slate-400 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                    <path d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M12 3v12m-5-5l5-5 5 5" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                  Replace File
                 </button>
                 <div className="my-1 h-px bg-slate-100 dark:bg-zinc-800" />
                 <button
@@ -1428,12 +1468,105 @@ function AttachmentRow({
                   </svg>
                   Delete
                 </button>
-              </div>
+              </div>,
+              document.body
             )}
           </div>
         </div>
       )}
+
+      {previewOpen && previewKind && createPortal(
+        <AttachmentPreviewModal file={file} kind={previewKind} onClose={() => setPreviewOpen(false)} />,
+        document.body
+      )}
     </li>
+  );
+}
+
+// ── AttachmentPreviewModal ───────────────────────────────────────────────────
+
+function AttachmentPreviewModal({
+  file,
+  kind,
+  onClose,
+}: {
+  file: AttachmentItem;
+  kind: "image" | "pdf";
+  onClose: () => void;
+}) {
+  const [url, setUrl] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    getTicketAttachmentPreviewUrl(file.storagePath).then((result) => {
+      if (cancelled) return;
+      if (result.status === "error") { setFailed(true); return; }
+      setUrl(result.url);
+    });
+    return () => { cancelled = true; };
+  }, [file.storagePath]);
+
+  useEffect(() => {
+    const onKey = (e: globalThis.KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/40 dark:bg-black/60" onClick={onClose} aria-hidden="true" />
+      <div
+        className="relative w-full max-w-2xl max-h-[calc(100dvh-3rem)] flex flex-col rounded-2xl border shadow-2xl bg-white dark:bg-zinc-900 border-slate-200 dark:border-zinc-700 shadow-black/15 dark:shadow-black/50 overflow-hidden"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="attachment-preview-title"
+      >
+        <div className="flex items-center justify-between px-5 pt-5 pb-4 border-b border-slate-100 dark:border-zinc-800 flex-shrink-0">
+          <h2 id="attachment-preview-title" className="text-[15px] font-bold text-slate-900 dark:text-zinc-50 truncate pr-4">
+            {file.name}
+          </h2>
+          <button
+            onClick={onClose}
+            className="w-6 h-6 rounded-md flex items-center justify-center text-slate-400 dark:text-zinc-500 hover:text-slate-600 dark:hover:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors flex-shrink-0"
+            aria-label="Close"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+              <path strokeLinecap="round" d="M18 6L6 18M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        <div className="flex-1 min-h-0 overflow-auto bg-slate-50 dark:bg-zinc-950/40">
+          {!url && !failed && (
+            <div className="flex items-center justify-center h-[70vh]">
+              <svg className="w-5 h-5 animate-spin text-slate-300 dark:text-zinc-700" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+            </div>
+          )}
+
+          {failed && (
+            <p className="text-[13px] text-slate-400 dark:text-zinc-600 text-center py-16">
+              Couldn&apos;t load preview.
+            </p>
+          )}
+
+          {url && kind === "image" && (
+            <div className="flex items-center justify-center min-h-[70vh] p-4">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={url} alt={file.name} className="max-w-full h-auto" />
+            </div>
+          )}
+
+          {url && kind === "pdf" && (
+            <iframe src={url} title={file.name} className="w-full h-[70vh] border-0" />
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -1448,6 +1581,7 @@ function toAttachmentItem(a: TicketAttachment): AttachmentItem {
     addedBy: a.uploadedByName,
     avatar: a.uploadedByAvatar,
     uploadedAt: a.uploadedAt,
+    storagePath: a.storagePath,
   };
 }
 
@@ -1455,11 +1589,14 @@ function AttachmentsSection({
   ticketId,
   isDevFallback,
   onUploaded,
+  onError,
 }: {
   ticketId: string;
   isDevFallback: boolean;
-  /** Called after a successful upload — a database trigger already logged the real activity row; this just tells the parent to refetch it. */
+  /** Called after a successful upload, rename, or delete — a database trigger already logged the real activity row; this just tells the parent to refetch it. */
   onUploaded: () => void;
+  /** Called with a message when an upload/rename/delete fails — surfaced via the shared error toast. */
+  onError: (message: string) => void;
 }) {
   const [attachments,   setAttachments]   = useState<AttachmentItem[]>([]);
   const [uploading,     setUploading]     = useState<UploadingItem[]>([]);
@@ -1468,12 +1605,9 @@ function AttachmentsSection({
   // closed, and is a no-op (stays open) if it already was. Never bumped on
   // failure, so a failed upload never opens the section.
   const [uploadSuccessSignal, setUploadSuccessSignal] = useState(0);
-  const [replacingIds,  setReplacingIds]  = useState<Set<string>>(new Set());
-  const [pendingReplId, setPendingReplId] = useState<string | null>(null);
 
   const dragCounter    = useRef(0);
   const fileInputRef   = useRef<HTMLInputElement>(null);
-  const replaceInputRef = useRef<HTMLInputElement>(null);
 
   // Real attachments for this ticket only, loaded from Supabase. Dev
   // fallback: no real ticket row exists to query against, so this simply
@@ -1531,6 +1665,7 @@ function AttachmentsSection({
           setUploading((prev) => prev.filter((u) => u.id !== item.id));
           if (result.status === "error") {
             console.warn("[ticket-detail] attachment upload failed:", result.message);
+            onError(result.message);
             return;
           }
           setAttachments((prev) => {
@@ -1540,6 +1675,12 @@ function AttachmentsSection({
           setUploadSuccessSignal((n) => n + 1);
           onUploaded();
         }, 200);
+      }).catch((err) => {
+        // Without this, a rejected (not just {status:"error"}) upload would
+        // leave this item's progress bar stuck on screen forever.
+        setUploading((prev) => prev.filter((u) => u.id !== item.id));
+        console.warn("[ticket-detail] attachment upload failed:", err);
+        onError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
       });
     });
   };
@@ -1565,7 +1706,7 @@ function AttachmentsSection({
         </button>
       }
     >
-      {/* Hidden file inputs */}
+      {/* Hidden file input */}
       <input
         ref={fileInputRef}
         type="file"
@@ -1573,24 +1714,6 @@ function AttachmentsSection({
         className="hidden"
         onChange={(e) => {
           if (e.target.files?.length) { startUpload(e.target.files); e.target.value = ""; }
-        }}
-      />
-      <input
-        ref={replaceInputRef}
-        type="file"
-        className="hidden"
-        onChange={(e) => {
-          const id   = pendingReplId;
-          const file = e.target.files?.[0];
-          if (!id || !file) return;
-          setPendingReplId(null);
-          e.target.value = "";
-          const patch = { name: file.name, ext: getExt(file.name), size: formatBytes(file.size), uploadedAt: "Just now" };
-          setReplacingIds((prev) => new Set([...prev, id]));
-          setTimeout(() => {
-            setAttachments((prev) => prev.map((a) => a.id === id ? { ...a, ...patch } : a));
-            setReplacingIds((prev) => { const s = new Set(prev); s.delete(id); return s; });
-          }, 1200);
         }}
       />
 
@@ -1642,10 +1765,66 @@ function AttachmentsSection({
               <AttachmentRow
                 key={a.id}
                 file={a}
-                replacing={replacingIds.has(a.id)}
-                onDelete={() => setAttachments((prev) => prev.filter((x) => x.id !== a.id))}
-                onRename={(name) => setAttachments((prev) => prev.map((x) => x.id === a.id ? { ...x, name, ext: getExt(name) } : x))}
-                onReplace={() => { setPendingReplId(a.id); replaceInputRef.current?.click(); }}
+                onDelete={() => {
+                  // Dev fallback: no real attachment row to delete.
+                  if (isDevFallback) {
+                    setAttachments((prev) => prev.filter((x) => x.id !== a.id));
+                    return;
+                  }
+                  // Local state only updates after a successful delete, so a
+                  // failed delete leaves the row (and its confirm prompt) in
+                  // place instead of optimistically vanishing.
+                  deleteTicketAttachment(a.id, a.storagePath).then((result) => {
+                    if (result.status === "error") {
+                      console.warn("[ticket-detail] attachment delete failed:", result.message);
+                      onError(result.message);
+                      return;
+                    }
+                    setAttachments((prev) => prev.filter((x) => x.id !== a.id));
+                    // A database trigger already logged the real
+                    // "attachment_deleted" activity row as part of the same
+                    // delete — refetch instead of inventing a local entry.
+                    onUploaded();
+                  }).catch((err) => {
+                    console.warn("[ticket-detail] attachment delete failed:", err);
+                    onError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
+                  });
+                }}
+                onRename={async (name) => {
+                  // Dev fallback: no real attachment row to write to, keep
+                  // the previous local-only behavior.
+                  if (isDevFallback) {
+                    setAttachments((prev) => prev.map((x) => x.id === a.id ? { ...x, name, ext: getExt(name) } : x));
+                    return true;
+                  }
+                  // Local state only updates after a successful write, so a
+                  // failed rename never shows a name that didn't persist.
+                  try {
+                    const result = await renameTicketAttachment(a.id, name);
+                    if (result.status === "error") {
+                      console.warn("[ticket-detail] attachment rename failed:", result.message);
+                      onError(result.message);
+                      return false;
+                    }
+                    setAttachments((prev) => prev.map((x) => x.id === a.id ? { ...x, name, ext: getExt(name) } : x));
+                    // A database trigger already logged the real
+                    // "attachment_renamed" activity row as part of the same
+                    // update — refetch instead of inventing a local entry.
+                    onUploaded();
+                    return true;
+                  } catch (err) {
+                    console.warn("[ticket-detail] attachment rename failed:", err);
+                    onError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
+                    return false;
+                  }
+                }}
+                onDownload={() => {
+                  downloadTicketAttachment(a.storagePath, a.name).then((result) => {
+                    if (result.status === "error") {
+                      console.warn("[ticket-detail] attachment download failed:", result.message);
+                    }
+                  });
+                }}
               />
             ))}
           </ul>
@@ -1675,13 +1854,6 @@ interface TimeEntry {
 // The user's real local "today" — never a fixed/mock date. Built from local
 // getters (not toISOString(), which is UTC and can show the wrong calendar
 // day near midnight in the user's own timezone).
-function getTodayISO(): string {
-  const d = new Date();
-  const month = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${d.getFullYear()}-${month}-${day}`;
-}
-
 function formatDateDisplay(iso: string): string {
   const today = new Date(`${getTodayISO()}T00:00:00`);
   const d     = new Date(`${iso}T00:00:00`);
@@ -1943,7 +2115,7 @@ function TimeHistoryModal({
                     <div>
                       <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600 mb-0.5">Remaining</p>
                       <p className={`text-[18px] font-bold tabular-nums leading-none ${remaining === 0 ? "text-emerald-600 dark:text-emerald-400" : "text-slate-800 dark:text-zinc-100"}`}>
-                        {remaining}h
+                        {formatRemainingHours(remaining)}h
                       </p>
                     </div>
                   </>
@@ -2005,12 +2177,15 @@ function TimeTrackingSection({
   entries,
   estimatedHours,
   onAddEntry,
+  onError,
 }: {
   ticketId:       string;
   entries:        TimeEntry[];
   estimatedHours: number | undefined;
   /** Called with the real, persisted entry — after a successful save only. */
   onAddEntry:     (entry: TimeEntry) => void;
+  /** Called with a message when a save fails — surfaced via the shared error toast. */
+  onError:        (message: string) => void;
 }) {
   const [logModal,  setLogModal]  = useState(false);
   const [histModal, setHistModal] = useState(false);
@@ -2019,13 +2194,20 @@ function TimeTrackingSection({
   // visible list/total/remaining/progress bar) once the write actually
   // succeeds — never from local state alone.
   async function handleLogTime(input: LogTimeInput): Promise<boolean> {
-    const result = await logTicketTime(ticketId, input);
-    if (result.status === "error") {
-      console.warn("[ticket-detail] failed to log time:", result.message);
+    try {
+      const result = await logTicketTime(ticketId, input);
+      if (result.status === "error") {
+        console.warn("[ticket-detail] failed to log time:", result.message);
+        onError(result.message);
+        return false;
+      }
+      onAddEntry(toTimeEntry(result.entry));
+      return true;
+    } catch (err) {
+      console.warn("[ticket-detail] failed to log time:", err);
+      onError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
       return false;
     }
-    onAddEntry(toTimeEntry(result.entry));
-    return true;
   }
 
   const totalLogged = entries.reduce((s, e) => s + e.hours, 0);
@@ -2261,23 +2443,34 @@ export function TicketDetailScreen({
   // static ALL_LABELS seed list below. Dev fallback: no real catalog to
   // load, so only the static seed list is offered (no persistence anyway).
   const [orgLabels, setOrgLabels] = useState<string[]>([]);
+  // Single shared surface for every write failure below (inline edits,
+  // comments, time entries, attachments, related tickets) — previously most
+  // of these only logged to the console with nothing shown to the user.
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const showError = (message: string) => setErrorMessage(message);
 
-  useEffect(() => {
-    if (isDevFallback || !organization) return; // handled synchronously above
-    let cancelled = false;
+  // Extracted (not just inlined in the effect below) so the load-error state
+  // can offer a real Retry, the same way tickets-screen.tsx's ticket *list*
+  // already does — this was previously the one load path in the module with
+  // no way to recover without a full page reload.
+  const detailRequestIdRef = useRef(0);
+  const runFetchTicket = () => {
+    if (!organization) return;
+    const requestId = ++detailRequestIdRef.current;
+    setLoadState("loading");
     loadTicketByCode(organization.id, slug, ticketCode).then((result) => {
-      if (cancelled) return;
+      if (detailRequestIdRef.current !== requestId) return;
       if (result.status === "ready") {
         setTicket(result.ticket);
         setLoadState("ready");
         loadTicketComments(result.ticket.id).then((r) => {
-          if (!cancelled) setComments(r.status === "ready" ? r.comments : []);
+          if (detailRequestIdRef.current === requestId) setComments(r.status === "ready" ? r.comments : []);
         });
         loadTicketActivity(result.ticket.id).then((r) => {
-          if (!cancelled) setActivityLog(r.status === "ready" ? r.events : []);
+          if (detailRequestIdRef.current === requestId) setActivityLog(r.status === "ready" ? r.events : []);
         });
         loadTicketTimeEntries(result.ticket.id).then((r) => {
-          if (!cancelled) setLoggedEntries(r.status === "ready" ? r.entries.map(toTimeEntry) : []);
+          if (detailRequestIdRef.current === requestId) setLoggedEntries(r.status === "ready" ? r.entries.map(toTimeEntry) : []);
         });
       } else if (result.status === "not-found") {
         setLoadState("not-found");
@@ -2286,9 +2479,13 @@ export function TicketDetailScreen({
         setLoadState("error");
       }
     });
-    return () => {
-      cancelled = true;
-    };
+  };
+
+  useEffect(() => {
+    if (isDevFallback) return; // handled synchronously above
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: runFetchTicket also runs from the Retry button, and must show "Loading…" immediately either way
+    runFetchTicket();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isDevFallback, organization, slug, ticketCode]);
 
   useEffect(() => {
@@ -2324,6 +2521,13 @@ export function TicketDetailScreen({
         <p className="text-sm text-slate-400 mt-1 max-w-xs dark:text-zinc-500">
           {loadErrorMessage ?? "Something went wrong."}
         </p>
+        <button
+          type="button"
+          onClick={runFetchTicket}
+          className="mt-5 text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3.5 py-2 shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-500 dark:hover:bg-brand-600 dark:shadow-brand-500/20"
+        >
+          Retry
+        </button>
       </div>
     );
   }
@@ -2351,16 +2555,31 @@ export function TicketDetailScreen({
 
   // Persists one inline edit to Supabase. Dev fallback (no real organization)
   // keeps today's local-only behavior — there is no real ticket row to write
-  // to. Minimal error handling per scope: failures are logged, not shown in
-  // the UI (no error affordance exists for these fields today).
+  // to. Every call site pairs this with an optimistic update(key, value)
+  // immediately before calling persist(patch) — `ticket` is closed over at
+  // that same synchronous moment, so `previousTicket` below is exactly the
+  // pre-optimistic snapshot, regardless of which field changed. On failure
+  // that snapshot is restored (so a rejected edit never stays on screen) and
+  // the error is shown via the shared toast, not just logged. On success the
+  // ticket is synced to the server's own confirmed row rather than trusting
+  // the optimistic value stayed in sync.
   const persist = (patch: UpdateTicketInput) => {
     if (isDevFallback) return;
+    const previousTicket = ticket;
     updateTicket(ticketId, slug, patch).then((result) => {
       if (result.status === "error") {
         console.warn("[ticket-detail] failed to save change:", result.message);
+        setTicket(previousTicket);
+        showError(result.message);
         return;
       }
+      // Success path intentionally unchanged from before this fix — only
+      // the failure branch above (and the .catch() below) are new.
       refreshActivity();
+    }).catch((err) => {
+      console.warn("[ticket-detail] failed to save change:", err);
+      setTicket(previousTicket);
+      showError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
     });
   };
 
@@ -2382,29 +2601,20 @@ export function TicketDetailScreen({
     updateTicket(ticketId, slug, { acceptanceCriteriaDone: nextDone }).then((result) => {
       if (result.status === "error") {
         console.warn("[ticket-detail] failed to save change:", result.message);
+        showError(result.message);
         return;
       }
       update("acceptanceCriteriaDone", nextDone);
       refreshActivity();
+    }).catch((err) => {
+      console.warn("[ticket-detail] failed to save change:", err);
+      showError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
     });
   };
 
-  // Merge the static seed categories with the real, growing per-org catalog
-  // (case-insensitive de-dup — a real label matching a seed name by
-  // spelling only shows once). Available to any ticket in the workspace,
-  // since orgLabels is loaded from the shared `labels` table, not per-ticket.
-  const allLabelOptions = (() => {
-    const seen = new Set<string>();
-    const merged: string[] = [];
-    for (const l of [...ALL_LABELS, ...orgLabels]) {
-      const key = l.toLowerCase();
-      if (!seen.has(key)) {
-        seen.add(key);
-        merged.push(l);
-      }
-    }
-    return merged;
-  })();
+  // Available to any ticket in the workspace, since orgLabels is loaded from
+  // the shared `labels` table, not per-ticket.
+  const allLabelOptions = buildLabelCatalog(orgLabels);
 
   const createLabel = async (name: string): Promise<{ status: "success"; name: string } | { status: "error"; message: string }> => {
     if (isDevFallback || !organization) {
@@ -2436,18 +2646,28 @@ export function TicketDetailScreen({
     const trimmed = commentDraft.trim();
     if (!trimmed || submittingComment) return;
     setSubmittingComment(true);
-    const result = await createTicketComment(ticketId, trimmed);
-    setSubmittingComment(false);
-    if (result.status === "error") {
-      console.warn("[ticket-detail] failed to post comment:", result.message);
-      return;
+    try {
+      const result = await createTicketComment(ticketId, trimmed);
+      if (result.status === "error") {
+        console.warn("[ticket-detail] failed to post comment:", result.message);
+        showError(result.message);
+        return;
+      }
+      setComments((prev) => [result.comment, ...prev]);
+      setCommentDraft("");
+      setAddingComment(false);
+      // A database trigger already created the matching "<name> added a
+      // comment" ticket_activity row as part of the same insert.
+      refreshActivity();
+    } catch (err) {
+      console.warn("[ticket-detail] failed to post comment:", err);
+      showError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
+    } finally {
+      // In a `finally` (not right after the await) so a thrown/rejected
+      // request still always clears the spinner instead of leaving the
+      // composer stuck disabled.
+      setSubmittingComment(false);
     }
-    setComments((prev) => [result.comment, ...prev]);
-    setCommentDraft("");
-    setAddingComment(false);
-    // A database trigger already created the matching "<name> added a
-    // comment" ticket_activity row as part of the same insert.
-    refreshActivity();
   }
 
   return (
@@ -2507,7 +2727,7 @@ export function TicketDetailScreen({
                   <span className="text-[12px] text-slate-400 dark:text-zinc-600">
                     Remaining{" "}
                     <span className={`font-semibold ${remaining <= 0 && ticket.hours !== undefined ? "text-amber-600 dark:text-amber-400" : "text-slate-600 dark:text-zinc-300"}`}>
-                      {Math.max(0, remaining)}h
+                      {formatRemainingHours(remaining)}h
                     </span>
                   </span>
                 </div>
@@ -2529,13 +2749,14 @@ export function TicketDetailScreen({
               />
             )}
 
-            <AttachmentsSection ticketId={ticket.id} isDevFallback={isDevFallback} onUploaded={refreshActivity} />
+            <AttachmentsSection ticketId={ticket.id} isDevFallback={isDevFallback} onUploaded={refreshActivity} onError={showError} />
 
             <TimeTrackingSection
               ticketId={ticket.id}
               entries={loggedEntries}
               estimatedHours={ticket.hours}
               onAddEntry={addEntry}
+              onError={showError}
             />
 
             <CollapsibleSection
@@ -2673,16 +2894,6 @@ export function TicketDetailScreen({
               onChange={(v) => { update("status", v); persist({ status: v }); }}
             />
 
-            <EditableSidebarType
-              value={ticket.type}
-              onChange={(v) => { update("type", v); persist({ type: v }); }}
-            />
-
-            <EditableSidebarPriority
-              value={ticket.priority}
-              onChange={(v) => { update("priority", v); persist({ priority: v }); }}
-            />
-
             <EditableSidebarAssignee
               value={ticket.assignee}
               onChange={(v) => {
@@ -2692,6 +2903,16 @@ export function TicketDetailScreen({
               }}
               projectSlug={ticket.projectSlug}
               members={members}
+            />
+
+            <EditableSidebarType
+              value={ticket.type}
+              onChange={(v) => { update("type", v); persist({ type: v }); }}
+            />
+
+            <EditableSidebarPriority
+              value={ticket.priority}
+              onChange={(v) => { update("priority", v); persist({ priority: v }); }}
             />
 
             <EditableSidebarHours
@@ -2717,12 +2938,14 @@ export function TicketDetailScreen({
               onCreateLabel={createLabel}
             />
 
-            <RelatedTicketsSection slug={slug} />
+            <RelatedTicketsSection ticketId={ticket.id} slug={slug} onChanged={refreshActivity} onError={showError} />
 
           </aside>
 
         </div>
       </div>
+
+      {errorMessage && <ErrorToast message={errorMessage} onDismiss={() => setErrorMessage(null)} />}
     </div>
   );
 }

@@ -180,7 +180,7 @@ Purpose: matches `Ticket` in `mock-tickets.ts`.
 | `title` | `text` | |
 | `description` | `text` | |
 | `status` | `ticket_status` enum | `backlog` \| `to_do` \| `in_progress` \| `review` \| `blocked` \| `done` |
-| `priority` | `ticket_priority` enum | `high` \| `normal` \| `low` |
+| `priority` | `ticket_priority` enum | `highest` \| `high` \| `medium` \| `low` |
 | `type` | `ticket_type` enum | `task` \| `bug` |
 | `assignee_profile_id` | `uuid` fk → `profiles.id` | nullable = unassigned |
 | `milestone` | `text` | nullable, free-form (see note above) |

@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import type { Ticket, TicketStatus, TicketPriority } from "@/lib/mock-tickets";
 import { getTicketDisplayKey } from "@/lib/mock-tickets";
 import type { OnTicketClick } from "@/components/tickets/board-column";
-import { TicketTypeIcon } from "@/components/tickets/ticket-ui";
+import { TicketTypeIcon, PRIORITY_VALUES } from "@/components/tickets/ticket-ui";
 import { MemberTrigger } from "@/components/member-profile";
 
 // ── Colours ─────────────────────────────────────────────────────────────────
@@ -17,7 +17,7 @@ const STATUS_HEX: Record<TicketStatus, string> = {
 };
 
 const STATUS_LABEL: Record<TicketStatus, string> = {
-  backlog:       "Inbox",
+  backlog:       "Backlog",
   "to-do":       "To Do",
   "in-progress": "In Progress",
   review:        "In Review",
@@ -26,9 +26,13 @@ const STATUS_LABEL: Record<TicketStatus, string> = {
 };
 
 const PRIORITY_META: Record<TicketPriority, { label: string; hex: string; barClass: string }> = {
-  high:   { label: "High",   hex: "#f87171", barClass: "bg-red-400 dark:bg-red-500" },
-  normal: { label: "Normal", hex: "#94a3b8", barClass: "bg-slate-400 dark:bg-zinc-500" },
-  low:    { label: "Low",    hex: "#cbd5e1", barClass: "bg-slate-300 dark:bg-zinc-600" },
+  // One shade darker/more saturated than High, same red family — signals
+  // more urgent than High without introducing a new color.
+  highest: { label: "Highest", hex: "#dc2626", barClass: "bg-red-600 dark:bg-red-600" },
+  high:    { label: "High",    hex: "#f87171", barClass: "bg-red-400 dark:bg-red-500" },
+  // Medium reuses the exact hex/barClass that "Normal" (the value it replaced) used.
+  medium:  { label: "Medium",  hex: "#94a3b8", barClass: "bg-slate-400 dark:bg-zinc-500" },
+  low:     { label: "Low",     hex: "#cbd5e1", barClass: "bg-slate-300 dark:bg-zinc-600" },
 };
 
 // ── Date helpers ─────────────────────────────────────────────────────────────
@@ -210,9 +214,8 @@ function AssigneeWorkload({ tickets }: { tickets: Ticket[] }) {
 // ── Priority distribution ────────────────────────────────────────────────────
 
 function PriorityDistribution({ tickets }: { tickets: Ticket[] }) {
-  const PRIORITY_ORDER: TicketPriority[] = ["high", "normal", "low"];
   const total = tickets.length;
-  const rows = PRIORITY_ORDER.map((p) => {
+  const rows = PRIORITY_VALUES.map((p) => {
     const count = tickets.filter((t) => t.priority === p).length;
     return { ...PRIORITY_META[p], count, pct: total > 0 ? Math.round((count / total) * 100) : 0 };
   });

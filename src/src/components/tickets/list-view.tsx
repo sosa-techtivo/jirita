@@ -3,7 +3,7 @@ import { TicketListRow } from "@/components/tickets/ticket-card";
 import type { OnTicketClick } from "@/components/tickets/board-column";
 
 const GROUPS: { id: string; label: string; statuses: Ticket["status"][] }[] = [
-  { id: "backlog", label: "Inbox", statuses: ["backlog"] },
+  { id: "backlog", label: "Backlog", statuses: ["backlog"] },
   { id: "todo", label: "To Do", statuses: ["to-do"] },
   { id: "in-progress", label: "In Progress", statuses: ["in-progress", "blocked"] },
   { id: "in-review", label: "In Review", statuses: ["review"] },

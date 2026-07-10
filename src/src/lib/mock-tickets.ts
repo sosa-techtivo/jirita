@@ -1,7 +1,7 @@
 import { getProjectBySlug } from "@/lib/mock-projects";
 
 export type TicketStatus = "backlog" | "to-do" | "in-progress" | "review" | "blocked" | "done";
-export type TicketPriority = "high" | "normal" | "low";
+export type TicketPriority = "highest" | "high" | "medium" | "low";
 export type TicketType = "TASK" | "BUG";
 
 export const TICKET_TYPE_LABEL: Record<TicketType, string> = {
@@ -23,6 +23,10 @@ export interface Ticket {
   /** Task vs Bug — defaults to "TASK" for anything created without an explicit choice. */
   type: TicketType;
   assignee: { name: string; avatar: string };
+  /** Real profiles.id backing `assignee` — null when unassigned, undefined on mock
+   *  tickets that predate this field. Never displayed; only for real id-based
+   *  matching (e.g. a "Mine" filter), since `assignee.name` isn't a stable key. */
+  assigneeProfileId?: string | null;
   milestone: string;
   labels: string[];
   acceptanceCriteria?: string[];
@@ -34,6 +38,18 @@ export interface Ticket {
   commentCount?: number;
   attachmentCount?: number;
   updatedAt: string;
+  /** Real ISO timestamp behind the `updatedAt` display string ("Updated 3
+   *  days ago") — needed for real date-range filtering (e.g. "Recently
+   *  Updated"), since the display string alone can't be compared reliably.
+   *  Undefined on mock tickets, which have no real timestamp to expose. */
+  updatedAtISO?: string;
+  /** Real profiles.id of whoever created the ticket ("Reporter") — null/undefined
+   *  when genuinely unknown (a pre-existing ticket with no created_by, or a mock
+   *  ticket). Never displayed; only for id-based filtering (a "Reporter" filter). */
+  createdByProfileId?: string | null;
+  /** Real ISO creation timestamp, for a "Created Date" range filter — same
+   *  reasoning as updatedAtISO above. Undefined on mock tickets. */
+  createdAtISO?: string;
 }
 
 // Real (Supabase-backed) projects don't exist in mock-projects.ts, so
@@ -68,7 +84,7 @@ export const tickets: Ticket[] = [
     title: "Offline mode for balance viewing",
     description: "Allow users to view their last cached balance and recent transactions without a network connection.",
     status: "backlog",
-    priority: "normal",
+    priority: "medium",
     type: "TASK",
     assignee: { name: "Marcus Lee", avatar: avatar(12) },
     milestone: "App Store Submission",
@@ -123,7 +139,7 @@ export const tickets: Ticket[] = [
     title: "Redesign account settings screen",
     description: "Simplify the settings layout and surface security controls more clearly.",
     status: "to-do",
-    priority: "normal",
+    priority: "medium",
     type: "TASK",
     assignee: { name: "Elena Rossi", avatar: avatar(5) },
     milestone: "App Store Submission",
@@ -141,7 +157,7 @@ export const tickets: Ticket[] = [
     title: "Prepare App Store screenshots and listing copy",
     description: "Finalize localized screenshots and metadata ahead of submission.",
     status: "to-do",
-    priority: "normal",
+    priority: "medium",
     type: "TASK",
     assignee: { name: "Elena Rossi", avatar: avatar(5) },
     milestone: "App Store Submission",
@@ -178,7 +194,7 @@ export const tickets: Ticket[] = [
     title: "Implement transaction history pagination",
     description: "Paginate the transaction list to keep load times fast for high-volume accounts.",
     status: "in-progress",
-    priority: "normal",
+    priority: "medium",
     type: "TASK",
     assignee: { name: "Marcus Lee", avatar: avatar(12) },
     milestone: "Beta Release",
@@ -235,7 +251,7 @@ export const tickets: Ticket[] = [
     title: "Push notification setup",
     description: "Wire up push notification delivery for transaction and security alerts.",
     status: "review",
-    priority: "normal",
+    priority: "medium",
     type: "TASK",
     assignee: { name: "Alejo Cadavid", avatar: avatar(33) },
     milestone: "Beta Release",
@@ -253,7 +269,7 @@ export const tickets: Ticket[] = [
     title: "API rate limiting",
     description: "Add per-client rate limits to protect the transfers API from abuse.",
     status: "review",
-    priority: "normal",
+    priority: "medium",
     type: "TASK",
     assignee: { name: "Alejo Cadavid", avatar: avatar(33) },
     milestone: "Security Audit",
@@ -273,7 +289,7 @@ export const tickets: Ticket[] = [
     title: "Add MFA onboarding",
     description: "Guide new users through enabling multi-factor authentication on first login.",
     status: "done",
-    priority: "normal",
+    priority: "medium",
     type: "TASK",
     assignee: { name: "David Kim", avatar: avatar(22) },
     milestone: "Beta Release",
@@ -311,7 +327,7 @@ export const tickets: Ticket[] = [
     title: "Legacy database export",
     description: "Export the legacy monolith database in preparation for migration to the new platform.",
     status: "in-progress",
-    priority: "normal",
+    priority: "medium",
     type: "TASK",
     assignee: { name: "Jordan Wu", avatar: avatar(15) },
     milestone: "Platform Cutover",
@@ -364,7 +380,7 @@ export const tickets: Ticket[] = [
     title: "Route admin panels to new platform",
     description: "Update internal routing so admin tooling resolves against the new platform endpoints.",
     status: "to-do",
-    priority: "normal",
+    priority: "medium",
     type: "TASK",
     assignee: { name: "Marcus Lee", avatar: avatar(12) },
     milestone: "Platform Cutover",

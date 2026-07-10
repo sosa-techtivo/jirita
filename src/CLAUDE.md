@@ -269,11 +269,14 @@ However, simplicity must remain the defining characteristic of the platform.
 
 Supabase Auth, real profile/organization-membership data, Projects
 (Sidebar, the `/projects` list, and Project Settings), and Tickets
-(the five list views, New Ticket creation, and the full Ticket Detail
-page — inline edits, Labels, Acceptance Criteria, Attachments, Time
-Tracking, Comments, and Activity) are connected and confirmed working
-end-to-end against a live Supabase project. Dashboard, Reports, Users,
-and the rest of Settings are still unconnected mock data — see
+(the five list views with real search/filters, New Ticket creation, the
+full Ticket Detail page — inline edits, Labels, Acceptance Criteria,
+Attachments including rename/delete/preview, Time Tracking, Comments,
+Related Tickets, and Activity — plus an editable Quick Ticket Preview
+panel) are connected and confirmed working end-to-end against a live
+Supabase project. The per-project Member Profile card (Active Tickets,
+Assigned Hours, Utilization, Workload) is also real. Dashboard, Reports,
+Users, and the rest of Settings are still unconnected mock data — see
 "Still mock" below for the exact boundary within Projects itself
 (Project Overview/Notes/Team/per-project Reports are not part of this).
 
@@ -407,25 +410,50 @@ per-project Reports are untouched — see "Still mock".
   exposed in a URL), `createTicket` (New Ticket modal: title, description,
   acceptance criteria, estimated hours, and assignee are persisted;
   Type/Status/Priority/Labels/Due Date in "More Options" are still
-  unwired and always write fixed defaults — `to_do`/`normal`/`task`/none —
+  unwired and always write fixed defaults — `to_do`/`medium`/`task`/none —
   matching that sprint's explicit scope), `updateTicket` (every Ticket
-  Detail inline edit: Title, Description, Status, Type, Priority,
-  Assignee, Estimated Hours, Due Date, Labels, and each Acceptance
-  Criterion's checked state), `loadTicketComments` / `createTicketComment`
-  (real comment thread, newest first), `loadTicketActivity` (see Activity
-  Log below), `loadOrganizationLabels` / `createOrganizationLabel` (the
-  Labels selector's real, per-org, case-insensitive-deduped catalog, merged
-  with the static seed categories already in `ALL_LABELS`), `loadTicketAttachments`
-  / `uploadTicketAttachment` (real Supabase Storage upload + metadata row —
-  rename/replace/delete are still local-only, not persisted), and
-  `loadTicketTimeEntries` / `logTicketTime` (real time entries, minutes as
-  the canonical stored unit to avoid float drift, Date defaults to the
-  user's real local today).
+  Detail *and* Quick Ticket Preview inline edit: Title, Description,
+  Status, Type, Priority, Assignee, Estimated Hours, Due Date, Labels, and
+  each Acceptance Criterion's checked state), `loadTicketComments` /
+  `createTicketComment` (real comment thread, newest first),
+  `loadTicketActivity` (see Activity Log below), `loadOrganizationLabels` /
+  `createOrganizationLabel` (the Labels selector's real, per-org,
+  case-insensitive-deduped catalog, merged with the static seed categories
+  already in `ALL_LABELS`), `loadTicketAttachments` / `uploadTicketAttachment`
+  / `downloadTicketAttachment` / `getTicketAttachmentPreviewUrl` (image/PDF
+  Preview via a short-lived signed URL — the bucket is private) /
+  `renameTicketAttachment` / `deleteTicketAttachment` (all real — Storage +
+  metadata row; "Replace File" was removed from the UI entirely rather than
+  wired up), `loadTicketTimeEntries` / `logTicketTime` (real time entries,
+  minutes as the canonical stored unit to avoid float drift, Date defaults
+  to the user's real local today), and `loadTicketRelations` /
+  `createTicketRelation` / `deleteTicketRelation` (Related Tickets — see its
+  own bullet below). Ticket priority is a 4-value scale —
+  `highest`/`high`/`medium`/`low` — `normal` was fully migrated to `medium`
+  and removed from the database enum, not just phased out client-side.
 - `src/components/tickets-screen.tsx` — the five list views' orchestrator;
-  loads real tickets for the currently-open project only. Assigned filter
-  offers real org members (Anyone/Me/Unassigned + the real roster); the
-  Priority/Status dropdowns and quick-filter chips remain visual-only
-  (unwired), a pre-existing gap unrelated to the mock-data removal.
+  loads real tickets for the currently-open project only, and now actually
+  filters them: free-text search (title/key), the Assigned/Priority/Status
+  dropdowns, the 5 quick-filter chips (Mine/Blocked/High Priority/Due
+  Soon/Recently Updated), and the "Add Filter" menu (Labels, Due Date,
+  Reporter, Created Date, Updated Date) all combine with AND into one
+  `filteredTickets` that every view and the header counters read from — none
+  of this filtering is duplicated per view. "Mine"/Reporter match the
+  signed-in user's real `profiles.id` (exposed as `userId` on
+  `useCurrentUser()`), never the display name.
+- `src/components/tickets/ticket-preview-panel.tsx` — the Quick Ticket
+  Preview drawer is now editable (Title, Status, Priority, Assignee,
+  Estimated, Due Date, Labels) when opened with `editable` — currently only
+  `tickets-screen.tsx` (the Tickets board) passes that; the other ~9 call
+  sites (Dashboard, Reports, Project Overview, etc., all still on mock
+  data) render it read-only exactly as before. Persists through the same
+  `updateTicket()` Ticket Detail itself uses, so both stay in sync.
+- `src/components/member-profile-modal.tsx` — the per-project Member card's
+  Active Tickets, Assigned Hours, Utilization, and Current Workload are now
+  computed from real tickets in that project (via `loadProjectTickets`),
+  replacing the old `mock-team.ts` roster numbers that showed 0 for any real
+  user not in that mock array. Weekly Capacity is intentionally left as-is
+  (no real per-member capacity source exists yet).
 - `src/components/tickets/new-ticket-modal.tsx` — Possible Duplicates
   checks only the current project's own real tickets (never another
   project's, never the old mock array).
@@ -440,23 +468,48 @@ per-project Reports are untouched — see "Still mock".
   section UI untouched — only their data sources changed. Milestone and
   Story Points fields are dead code (defined, never rendered) and were
   left alone.
+- **Related Tickets is real** — the "+ Link" control, relation-kind
+  selector, and search all work: search is scoped to the current project's
+  own real tickets (reuses `loadProjectTickets`, no separate search
+  endpoint), excludes the current ticket and anything already linked. Only
+  3 canonical kinds are ever stored (`related_to`/`blocks`/`duplicates`) in
+  a single `ticket_relations` row per relation; the 5 kinds the UI shows
+  (adding "Is blocked by"/"Is duplicated by") are derived per-perspective
+  from that one row depending on which ticket is looking at it — this is
+  what keeps the inverse relation correct and duplicate-relation prevention
+  a plain unique constraint instead of app-level bookkeeping. Opening the
+  related ticket, removing a link, and both tickets' Activity Logs all work.
 - **Activity Log is real and comprehensive**, built almost entirely with
   database triggers rather than client code, so "only after the real write
   succeeds, with the real authenticated actor" comes for free and no
   existing write path (`createTicket`/`updateTicket`/
-  `uploadTicketAttachment`/`logTicketTime`/`createTicketComment`) had to
-  change: ticket creation, every field change on `tickets` (one row per
-  column that actually changed — labels and acceptance-criteria-done are
-  diffed element by element, so each added/removed label or each toggled
-  criterion gets its own readable entry), attachment uploads, and time
-  entries are all logged by triggers; comment creation was already logged
-  by an earlier trigger. `loadTicketActivity` turns
-  `event_type`/`field_name`/`old_value`/`new_value` into the existing
+  `uploadTicketAttachment`/`renameTicketAttachment`/`deleteTicketAttachment`/
+  `logTicketTime`/`createTicketComment`/`createTicketRelation`/
+  `deleteTicketRelation`) had to change: ticket creation, every field change
+  on `tickets` (one row per column that actually changed — labels and
+  acceptance-criteria-done are diffed element by element, so each
+  added/removed label or each toggled criterion gets its own readable
+  entry), attachment uploads/renames/deletes, time entries, and related-
+  ticket add/remove (logged on *both* tickets involved, each with the
+  correct label for its own side) are all logged by triggers; comment
+  creation was already logged by an earlier trigger. `loadTicketActivity`
+  turns `event_type`/`field_name`/`old_value`/`new_value` into the existing
   Activity UI's plain `{label, timeAgo}` shape (e.g. "Alex Sosa changed
   Status from To Do to In Progress"), and synthesizes a single "created
   this ticket" entry for tickets that predate this feature — using that
   ticket's own real `created_at`/`created_by`, with no actor shown at all
   if `created_by` is null, never a fabricated name.
+- **Error handling is real across every Ticket write path** (create/edit/
+  move, comments, time entries, attachments, related tickets): a shared
+  `ErrorToast` (`ticket-ui.tsx`) surfaces failures that previously only hit
+  `console.warn` with nothing shown to the user; inline field edits
+  (`persist()` in `ticket-detail-screen.tsx`) roll back to the pre-edit
+  value on failure instead of leaving an unpersisted change on screen;
+  attachment rename now waits for the real result before closing its input
+  (previously closed optimistically, before knowing whether it saved);
+  New Ticket/Comment/Log Time all guard against a stuck spinner on a
+  rejected (not just `{status:"error"}`) request; Ticket Detail's own load
+  failure now has a Retry button, matching the ticket list's.
 - Migrations (all confirmed against the live project, in order):
   `20260717000000_grant_authenticated_tickets_read.sql`,
   `20260718000000_grant_authenticated_tickets_insert.sql`,
@@ -488,6 +541,22 @@ per-project Reports are untouched — see "Still mock".
   `log_comment_activity`), `20260728000000_real_ticket_activity_log.sql`
   (`tickets.created_by`, new `field_name`/`old_value`/`new_value` columns
   on `ticket_activity`, and the creation/field-change/attachment/time-entry
+  triggers described above),
+  `20260729000000_add_ticket_attachments_rename.sql` (RLS UPDATE policy +
+  column-scoped `grant update (filename)` — attachment rename never touches
+  `storage_path`, only the metadata row),
+  `20260730000000_add_ticket_attachments_delete.sql` (RLS DELETE policy on
+  both the metadata table and the `ticket-attachments` Storage bucket — no
+  delete permission existed anywhere before this),
+  `20260731000000_log_attachment_rename_delete_activity.sql` (the
+  `attachment_renamed`/`attachment_deleted` Activity triggers),
+  `20260801000000_unify_ticket_priority_scale.sql` (swaps the
+  `ticket_priority` enum from `high`/`normal`/`low` to
+  `highest`/`high`/`medium`/`low` — existing `normal` rows are migrated to
+  `medium` in the same `ALTER TYPE ... USING` step, and the old enum type is
+  dropped, not just deprecated),
+  `20260802000000_add_ticket_relations.sql` (the `ticket_relations` table,
+  its RLS policies, and the `relation_added`/`relation_removed` Activity
   triggers described above).
 
 ## Still mock
@@ -507,13 +576,11 @@ per-project Reports are untouched — see "Still mock".
   - New Ticket's "More Options" fields (Type, Status, Priority, Labels, Due
     Date) — always write fixed defaults, never the value picked in the
     modal.
-  - Assigned/Priority/Status dropdowns and quick-filter chips on the
-    Tickets list screen — visual only, don't filter anything.
-  - Related Tickets / Blocked By / Related To on Ticket Detail — the list
-    itself is real (empty, no fabricated links), but there's no real
-    cross-ticket search to link against yet.
-  - Attachments rename/replace/delete, and editing or deleting a Comment —
-    all local-only, not persisted.
+  - Editing or deleting a Comment — local-only, not persisted (posting a
+    comment itself is real).
+  - Attachments: rename, delete, download, and Preview are all real (see
+    above) — "Replace File" isn't a partial/mock feature, it was removed
+    from the menu entirely rather than wired up.
   - Milestone and Story Points fields on Ticket Detail — dead code, not
     rendered anywhere.
   - GitHub/Development integration — removed from Ticket Detail entirely

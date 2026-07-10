@@ -68,6 +68,11 @@ interface CurrentUserContextValue {
   status: MembershipStatus;
   user: CurrentUser;
   organization: { id: string; name: string; slug: string } | null;
+  /** The signed-in user's real Supabase auth/profile id (profiles.id === auth.users.id)
+   *  — the stable identifier tickets' assignee_profile_id should be compared against
+   *  (e.g. a "Mine" filter), never the display name. Null in the dev fallback, where
+   *  there's no real row to match against. */
+  userId: string | null;
   /** True when `user` is the dev-only mock fallback, not a real Supabase membership. */
   isDevFallback: boolean;
   /** Set only when status is "error" (or the dev fallback masked one) — the raw Supabase error message. */
@@ -327,6 +332,7 @@ export function CurrentUserProvider({ children }: { children: ReactNode }) {
     status,
     user,
     organization,
+    userId: readyFetch && authUser ? authUser.id : null,
     isDevFallback,
     errorMessage,
     setRole,

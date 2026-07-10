@@ -1,9 +1,12 @@
 "use client";
 
-import { useState } from "react";
 import { FilterChip } from "@/components/tickets/filter-chip";
 import { FilterDropdown, type DropdownGroup } from "@/components/tickets/filter-dropdown";
+import { DateRangeFilterDropdown, type DateRangeValue } from "@/components/tickets/date-range-filter-dropdown";
+import { PRIORITY_VALUES, PRIORITY_LABEL } from "@/components/tickets/ticket-ui";
 import type { OrgMember } from "@/lib/projects";
+
+export type AddFilterKind = "labels" | "due-date" | "reporter" | "created-date" | "updated-date";
 
 // ── Static option groups ──────────────────────────────────────────────────────
 
@@ -34,21 +37,19 @@ function buildAssignedGroups(members: OrgMember[]): DropdownGroup[] {
   ];
 }
 
+// Sourced from ticket-ui.tsx's PRIORITY_VALUES/PRIORITY_LABEL — the same
+// values Ticket creation/editing/preview/detail/board/list/calendar/
+// timeline all use, so this dropdown can never drift out of sync with them.
 const PRIORITY_GROUPS: DropdownGroup[] = [
   {
-    options: [
-      { value: "highest", label: "Highest" },
-      { value: "high",    label: "High"    },
-      { value: "medium",  label: "Medium"  },
-      { value: "low",     label: "Low"     },
-    ],
+    options: PRIORITY_VALUES.map((value) => ({ value, label: PRIORITY_LABEL[value] })),
   },
 ];
 
 const STATUS_GROUPS: DropdownGroup[] = [
   {
     options: [
-      { value: "backlog",      label: "Inbox"       },
+      { value: "backlog",      label: "Backlog"     },
       { value: "to-do",        label: "To Do"       },
       { value: "in-progress",  label: "In Progress" },
       { value: "blocked",      label: "Blocked"     },
@@ -58,17 +59,15 @@ const STATUS_GROUPS: DropdownGroup[] = [
   },
 ];
 
-const ADD_FILTER_GROUPS: DropdownGroup[] = [
-  {
-    options: [
-      { value: "labels",       label: "Labels"       },
-      { value: "due-date",     label: "Due Date"     },
-      { value: "reporter",     label: "Reporter"     },
-      { value: "created-date", label: "Created Date" },
-      { value: "updated-date", label: "Updated Date" },
-    ],
-  },
-];
+const ADD_FILTER_LABEL: Record<AddFilterKind, string> = {
+  labels:        "Labels",
+  "due-date":    "Due Date",
+  reporter:      "Reporter",
+  "created-date": "Created Date",
+  "updated-date": "Updated Date",
+};
+
+const ADD_FILTER_KINDS = Object.keys(ADD_FILTER_LABEL) as AddFilterKind[];
 
 const QUICK_FILTERS = ["Mine", "Blocked", "High Priority", "Due Soon", "Recently Updated"];
 
@@ -85,17 +84,80 @@ export function FilterBar({
   searchQuery,
   onSearchChange,
   members,
+  assigned,
+  onAssignedChange,
+  priority,
+  onPriorityChange,
+  status,
+  onStatusChange,
+  activeAddFilters,
+  onAddFilter,
+  allLabels,
+  labels,
+  onLabelsChange,
+  reporter,
+  onReporterChange,
+  dueDateRange,
+  onDueDateRangeChange,
+  createdDateRange,
+  onCreatedDateRangeChange,
+  updatedDateRange,
+  onUpdatedDateRangeChange,
 }: {
   activeChips: Set<string>;
   onToggleChip: (label: string) => void;
   searchQuery: string;
   onSearchChange: (query: string) => void;
   members: OrgMember[];
+  /** Controlled by the caller (not local state) so it can be combined with
+   *  the quick-filter chips and applied once to the shared ticket list —
+   *  see TicketsScreen's filteredTickets. */
+  assigned: string[];
+  onAssignedChange: (values: string[]) => void;
+  priority: string[];
+  onPriorityChange: (values: string[]) => void;
+  status: string[];
+  onStatusChange: (values: string[]) => void;
+  /** Which "Add Filter" options currently have a chip showing in the bar —
+   *  same controlled-by-the-caller reasoning as assigned/priority/status. */
+  activeAddFilters: Set<AddFilterKind>;
+  onAddFilter: (kind: AddFilterKind) => void;
+  allLabels: string[];
+  labels: string[];
+  onLabelsChange: (values: string[]) => void;
+  reporter: string[];
+  onReporterChange: (values: string[]) => void;
+  dueDateRange: DateRangeValue;
+  onDueDateRangeChange: (value: DateRangeValue) => void;
+  createdDateRange: DateRangeValue;
+  onCreatedDateRangeChange: (value: DateRangeValue) => void;
+  updatedDateRange: DateRangeValue;
+  onUpdatedDateRangeChange: (value: DateRangeValue) => void;
 }) {
-  const [assigned,  setAssigned]  = useState<string[]>([]);
-  const [priority,  setPriority]  = useState<string[]>([]);
-  const [status,    setStatus]    = useState<string[]>([]);
   const assignedGroups = buildAssignedGroups(members);
+  const reporterGroups: DropdownGroup[] = [
+    {
+      options: members.map((member) => ({
+        value: member.id,
+        label: member.name,
+        displayLabel: member.name.split(" ")[0],
+        avatar: member.avatar,
+      })),
+    },
+  ];
+  const labelGroups: DropdownGroup[] = [
+    { options: allLabels.map((l) => ({ value: l, label: l })) },
+  ];
+  // Menu only offers filters not already showing as a chip — matches the
+  // existing Assigned/Priority/Status dropdowns' own "one instance" pattern.
+  const addFilterGroups: DropdownGroup[] = [
+    {
+      options: ADD_FILTER_KINDS.filter((k) => !activeAddFilters.has(k)).map((k) => ({
+        value: k,
+        label: ADD_FILTER_LABEL[k],
+      })),
+    },
+  ];
 
   return (
     <div className="flex flex-col gap-3">
@@ -131,7 +193,7 @@ export function FilterBar({
           mode="single"
           groups={assignedGroups}
           selected={assigned}
-          onChange={setAssigned}
+          onChange={onAssignedChange}
           searchable
         />
         <FilterDropdown
@@ -139,15 +201,48 @@ export function FilterBar({
           mode="multi"
           groups={PRIORITY_GROUPS}
           selected={priority}
-          onChange={setPriority}
+          onChange={onPriorityChange}
         />
         <FilterDropdown
           label="Status"
           mode="multi"
           groups={STATUS_GROUPS}
           selected={status}
-          onChange={setStatus}
+          onChange={onStatusChange}
         />
+
+        {/* Filters added via "Add Filter" — same FilterDropdown pattern as
+            Assigned/Priority/Status; clearing a chip's value back to empty
+            removes it from the bar (see the onChange handlers below). */}
+        {activeAddFilters.has("labels") && (
+          <FilterDropdown
+            label="Labels"
+            mode="multi"
+            groups={labelGroups}
+            selected={labels}
+            onChange={onLabelsChange}
+            searchable
+          />
+        )}
+        {activeAddFilters.has("reporter") && (
+          <FilterDropdown
+            label="Reporter"
+            mode="multi"
+            groups={reporterGroups}
+            selected={reporter}
+            onChange={onReporterChange}
+            searchable
+          />
+        )}
+        {activeAddFilters.has("due-date") && (
+          <DateRangeFilterDropdown label="Due Date" value={dueDateRange} onChange={onDueDateRangeChange} />
+        )}
+        {activeAddFilters.has("created-date") && (
+          <DateRangeFilterDropdown label="Created Date" value={createdDateRange} onChange={onCreatedDateRangeChange} />
+        )}
+        {activeAddFilters.has("updated-date") && (
+          <DateRangeFilterDropdown label="Updated Date" value={updatedDateRange} onChange={onUpdatedDateRangeChange} />
+        )}
 
         <span className="w-px h-4 bg-slate-200 dark:bg-zinc-700 mx-1 hidden sm:block" />
 
@@ -155,9 +250,9 @@ export function FilterBar({
         <FilterDropdown
           label="Add Filter"
           mode="menu"
-          groups={ADD_FILTER_GROUPS}
+          groups={addFilterGroups}
           selected={[]}
-          onChange={() => {}}
+          onChange={(values) => onAddFilter(values[0] as AddFilterKind)}
           align="right"
           variant="add"
         />

@@ -14,6 +14,8 @@ import { fullName } from "@/lib/mock-users";
 import type { Role } from "@/lib/current-user";
 import { ROLE_LABELS } from "@/lib/current-user";
 import { getProjectBySlug } from "@/lib/mock-projects";
+import { loadProjectTickets } from "@/lib/tickets";
+import { useCurrentUser } from "@/components/current-user-provider";
 
 // The one Member Profile Modal used everywhere in the app a member is
 // clicked — ticket assignees, activity-feed actors, comment authors, team
@@ -125,11 +127,59 @@ export function MemberProfileModal({
   const [visible, setVisible] = useState(false);
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
   const [activeTab, setActiveTab] = useState<ProfileTab>(initialTab);
+  const { organization, isDevFallback } = useCurrentUser();
 
-  const pct = member ? utilizationOf(member) : 0;
+  // Real tickets for this project, refetched every time a different member's
+  // card is opened — resolveTeamMember (member-profile.tsx) only ever
+  // produces a real name/avatar (or a synthesized stub with assignedHours: 0
+  // and activeTicketIds: [] for anyone not in the old mock-team.ts roster),
+  // so Active Tickets/Assigned Hours/Utilization/Workload below are derived
+  // from this real data instead of that stub whenever it's available. Dev
+  // fallback (or no project context) keeps the previous mock-driven numbers.
+  const [realProjectTickets, setRealProjectTickets] = useState<Ticket[] | null>(null);
+
+  useEffect(() => {
+    // Reset the instant a different member's card opens (or this one closes)
+    // so stale numbers from the previous member never flash for the new one
+    // while the real fetch below is in flight.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: clears stale data the moment the identity changes, before the async fetch below resolves
+    setRealProjectTickets(null);
+    if (!member || !slug || isDevFallback || !organization) return;
+    let cancelled = false;
+    loadProjectTickets(organization.id, slug).then((result) => {
+      if (cancelled) return;
+      if (result.status === "ready") setRealProjectTickets(result.tickets);
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [member?.name, slug, isDevFallback, organization]);
+
+  // Active = not the one final/closed status ("done") — the same definition
+  // already used for "open"/"active" tickets everywhere else in the app
+  // (e.g. project-overview.tsx's openTickets, my-work-screen.tsx's
+  // activeCount). loadProjectTickets is already scoped to this one project,
+  // so no other-project tickets can appear here.
   const memberTickets = member
-    ? member.activeTicketIds.map((id) => getTicketById(id)).filter((t): t is Ticket => t !== undefined)
+    ? realProjectTickets
+      ? realProjectTickets.filter((t) => t.assignee.name === member.name && t.status !== "done")
+      : member.activeTicketIds.map((id) => getTicketById(id)).filter((t): t is Ticket => t !== undefined)
     : [];
+
+  // weeklyCapacity intentionally stays whatever resolveTeamMember already
+  // resolved (the mock roster's value, or the 40h fallback) — no real
+  // per-member capacity source exists yet (see membership.ts's
+  // updateOwnWeeklyCapacity, which only ever reads/writes the signed-in
+  // user's own row), so this doesn't invent new persistence for it.
+  const effectiveMember = member && {
+    ...member,
+    assignedHours: realProjectTickets
+      ? memberTickets.reduce((sum, t) => sum + (t.hours ?? 0), 0)
+      : member.assignedHours,
+  };
+
+  const pct = effectiveMember ? utilizationOf(effectiveMember) : 0;
 
   const displayName = user ? fullName(user) : member!.name;
   const displayAvatar = user ? user.avatar : member!.avatar;
@@ -253,7 +303,7 @@ export function MemberProfileModal({
                   </div>
                   <div className="flex-1 px-4 py-3">
                     <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600">Assigned Hours</p>
-                    <p className="text-lg font-bold text-slate-900 dark:text-zinc-50 mt-0.5 leading-none">{member!.assignedHours}h</p>
+                    <p className="text-lg font-bold text-slate-900 dark:text-zinc-50 mt-0.5 leading-none">{effectiveMember!.assignedHours}h</p>
                   </div>
                   <div className="flex-1 px-4 py-3">
                     <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600">Utilization</p>
@@ -271,7 +321,7 @@ export function MemberProfileModal({
                   </h2>
                   <CapacityBar pct={pct} />
                   <p className={`mt-1.5 text-[13px] font-medium ${capacityTextColor(pct)}`}>
-                    {remainingAvailabilityLabel(member!)}
+                    {remainingAvailabilityLabel(effectiveMember!)}
                   </p>
                 </div>
 

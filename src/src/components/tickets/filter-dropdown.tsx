@@ -159,6 +159,11 @@ export function FilterDropdown({
 
   function handleOptionClick(value: string) {
     if (mode === "menu") {
+      // Unlike single/multi, "menu" has no persistent selection of its own
+      // (hasSelection is forced false for it above) — it's a one-shot action
+      // per click, so the caller decides what selecting `value` means (e.g.
+      // "Add Filter" adding a new filter to the bar).
+      onChange([value]);
       setIsOpen(false);
       return;
     }
