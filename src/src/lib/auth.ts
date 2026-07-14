@@ -70,6 +70,23 @@ export async function confirmPasswordReset(newPassword: string): Promise<void> {
   if (error) throw new AuthError(error.message);
 }
 
+// Completes an invited user's own onboarding after they land here from the
+// invite email (an authenticated "invite" session, parsed the same way
+// confirmPasswordReset's "recovery" session is — detectSessionInUrl, on by
+// default): sets their password, then calls accept_own_invitation to flip
+// their own organization_memberships row from invited to active. That RPC
+// (not a direct table update) exists because organization_memberships'
+// update policy is admin-only by design — see its migration for why.
+export async function acceptInvitation(newPassword: string): Promise<void> {
+  const supabase = getSupabaseBrowserClient();
+
+  const { error: updateError } = await supabase.auth.updateUser({ password: newPassword });
+  if (updateError) throw new AuthError(updateError.message);
+
+  const { error: rpcError } = await supabase.rpc("accept_own_invitation");
+  if (rpcError) throw new AuthError(rpcError.message);
+}
+
 // Supabase has no dedicated "verify current password" call, so the current
 // password is verified by re-authenticating with it (signInWithPassword)
 // against the real signed-in user's email — never a manual string

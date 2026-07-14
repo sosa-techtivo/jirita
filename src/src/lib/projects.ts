@@ -585,3 +585,252 @@ export async function createOrganizationClient(organizationId: string, name: str
 
   return { status: "success", client: data };
 }
+
+// ── Team (Project → Team) ────────────────────────────────────────────────────
+// Real replacement for src/lib/mock-team.ts on the Team screen only
+// (/projects/[slug]/team) — every other mock-team.ts consumer (the shared
+// Member Profile Modal's per-project single-view mode, resolveTeamMember,
+// etc.) is untouched. project_memberships rows here are mostly *not*
+// written by this module: a database trigger (see migration
+// 20260808000000_auto_project_membership_on_contribution.sql) creates one
+// automatically the first time a person contributes to the project's
+// tickets (create/edit a ticket, comment, attach a file, log time, link a
+// ticket) — this only reads that table, plus the two writes "+ Add Member"
+// and (if ever wired up) member removal need directly.
+//
+// weeklyCapacity/assignedHours are *not* combined here: assignedHours needs
+// real tickets, which this module intentionally never imports (tickets.ts
+// already exports loadProjectTickets for that, and every other real-data
+// consumer that needs both — e.g. member-profile-modal.tsx — already
+// combines them itself instead of one module depending on the other).
+
+export interface ProjectTeamMember {
+  /** profiles.id — also what project_memberships is keyed on for this project. */
+  id: string;
+  name: string;
+  email: string;
+  avatar: string;
+  /** project_memberships.title — the existing per-project title field (e.g. "Project Lead", "Member"), never the person's org-wide role. */
+  title: string;
+  weeklyCapacity: number;
+}
+
+export type ProjectTeamResult =
+  | { status: "ready"; members: ProjectTeamMember[] }
+  | { status: "error"; message: string };
+
+interface TeamMembershipRow {
+  profile_id: string;
+  title: string | null;
+  weekly_capacity: number | null;
+}
+
+interface TeamProfileRow {
+  id: string;
+  first_name: string | null;
+  last_name: string | null;
+  email: string | null;
+  avatar_url: string | null;
+  updated_at: string;
+}
+
+export async function loadProjectTeam(organizationId: string, slug: string): Promise<ProjectTeamResult> {
+  const supabase = getSupabaseBrowserClient();
+
+  const { data: projectRow, error: projectError } = await supabase
+    .from("projects")
+    .select("id")
+    .eq("organization_id", organizationId)
+    .eq("slug", slug)
+    .maybeSingle<{ id: string }>();
+
+  if (projectError) {
+    logDev("project id lookup failed", projectError);
+    return { status: "error", message: projectError.message };
+  }
+  if (!projectRow) return { status: "ready", members: [] };
+
+  const { data: membershipRows, error: membershipError } = await supabase
+    .from("project_memberships")
+    .select("profile_id, title, weekly_capacity")
+    .eq("project_id", projectRow.id)
+    .returns<TeamMembershipRow[]>();
+
+  if (membershipError) {
+    logDev("project_memberships query failed", membershipError);
+    return { status: "error", message: membershipError.message };
+  }
+  if (!membershipRows || membershipRows.length === 0) return { status: "ready", members: [] };
+
+  const profileIds = membershipRows.map((row) => row.profile_id);
+  const { data: profileRows, error: profileError } = await supabase
+    .from("profiles")
+    .select("id, first_name, last_name, email, avatar_url, updated_at")
+    .in("id", profileIds)
+    .returns<TeamProfileRow[]>();
+
+  if (profileError) {
+    logDev("team profiles query failed", profileError);
+    return { status: "error", message: profileError.message };
+  }
+
+  const profileById = new Map((profileRows ?? []).map((p) => [p.id, p]));
+
+  const members: ProjectTeamMember[] = membershipRows
+    .map((membership): ProjectTeamMember | null => {
+      const profile = profileById.get(membership.profile_id);
+      if (!profile) return null; // orphaned membership row, no matching profile
+      return {
+        id: profile.id,
+        name: [profile.first_name, profile.last_name].filter(Boolean).join(" ") || "Unnamed",
+        email: profile.email ?? "",
+        avatar: resolveAvatarUrl(profile.avatar_url, profile.updated_at) ?? FALLBACK_AVATAR,
+        title: membership.title ?? "Member",
+        weeklyCapacity: membership.weekly_capacity ?? 0,
+      };
+    })
+    .filter((m): m is ProjectTeamMember => m !== null)
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  return { status: "ready", members };
+}
+
+export type ProjectMemberWriteResult = { status: "success" } | { status: "error"; message: string };
+
+// "+ Add Member" — direct client write, unlike the Server Actions elsewhere
+// in this app: project_memberships_insert's own RLS (is_org_admin_or_lead)
+// is exactly who Team's "+ Add Member" button is already gated to
+// (canManage(user.role) in team-screen.tsx), so no privileged service-role
+// escalation is needed here, only the table grant added in
+// 20260807000000. Never touches organization_memberships/profiles/auth
+// users — only this one project_memberships row.
+export async function addProjectMember(
+  organizationId: string,
+  slug: string,
+  profileId: string
+): Promise<ProjectMemberWriteResult> {
+  const supabase = getSupabaseBrowserClient();
+
+  const { data: projectRow, error: projectError } = await supabase
+    .from("projects")
+    .select("id")
+    .eq("organization_id", organizationId)
+    .eq("slug", slug)
+    .maybeSingle<{ id: string }>();
+
+  if (projectError) {
+    logDev("project id lookup failed", projectError);
+    return { status: "error", message: projectError.message };
+  }
+  if (!projectRow) return { status: "error", message: "Project not found." };
+
+  const { error } = await supabase
+    .from("project_memberships")
+    .insert({ project_id: projectRow.id, profile_id: profileId, title: "Member" });
+
+  if (error) {
+    logDev("project_memberships insert failed", error);
+    // 23505 = unique_violation on (project_id, profile_id) — already a
+    // member (e.g. auto-added by a contribution) is not a real failure.
+    if (error.code === "23505") return { status: "success" };
+    return { status: "error", message: error.message };
+  }
+
+  return { status: "success" };
+}
+
+// Wired from member-profile-modal.tsx's MemberMenu (Team's real member
+// cards only — see hasProjectMemberHistory below, which is what MemberMenu
+// checks before it even offers this). Deletes only the one
+// project_memberships row for this exact project + profile — never the
+// profile, the auth user, the organization membership, or any
+// ticket/comment/attachment/time-entry history, none of which reference
+// project_memberships at all. The real guarantee against removing a member
+// with history isn't this function or the UI hiding the option — it's the
+// project_memberships_prevent_delete_with_history trigger
+// (20260809000000), which blocks the delete at the database level no
+// matter how it's invoked; a rejected delete here just surfaces that
+// trigger's own error message.
+export async function removeProjectMember(
+  organizationId: string,
+  slug: string,
+  profileId: string
+): Promise<ProjectMemberWriteResult> {
+  const supabase = getSupabaseBrowserClient();
+
+  const { data: projectRow, error: projectError } = await supabase
+    .from("projects")
+    .select("id")
+    .eq("organization_id", organizationId)
+    .eq("slug", slug)
+    .maybeSingle<{ id: string }>();
+
+  if (projectError) {
+    logDev("project id lookup failed", projectError);
+    return { status: "error", message: projectError.message };
+  }
+  if (!projectRow) return { status: "error", message: "Project not found." };
+
+  const { error } = await supabase
+    .from("project_memberships")
+    .delete()
+    .eq("project_id", projectRow.id)
+    .eq("profile_id", profileId);
+
+  if (error) {
+    logDev("project_memberships delete failed", error);
+    // Includes the project_memberships_prevent_delete_with_history
+    // trigger's own raised message when this member actually has real
+    // history — surfaced as-is rather than a generic string, since it's
+    // already a clear, non-technical sentence.
+    return { status: "error", message: error.message };
+  }
+
+  return { status: "success" };
+}
+
+// Whether this project member has any real, already-recorded
+// participation (tickets created/assigned, comments, time entries,
+// attachments, relations, or any other ticket_activity row) in this
+// project — what member-profile-modal.tsx's MemberMenu checks before
+// deciding whether "Remove from Project" belongs in the menu at all.
+// Never the source of truth for whether removal is actually allowed —
+// that's project_memberships_prevent_delete_with_history (20260809000000),
+// enforced at the database level regardless of what this returns; this is
+// only what decides whether the option is *offered*. Errors (including an
+// unresolvable project, or a profile id that was never real to begin with
+// — e.g. a mock/synthesized identity from a non-Team context opening this
+// same shared modal) default to `true` (assume history), the same "don't
+// offer removal unless positively confirmed safe" default the option's
+// absence during the loading window already uses.
+export async function hasProjectMemberHistory(
+  organizationId: string,
+  slug: string,
+  profileId: string
+): Promise<boolean> {
+  const supabase = getSupabaseBrowserClient();
+
+  const { data: projectRow, error: projectError } = await supabase
+    .from("projects")
+    .select("id")
+    .eq("organization_id", organizationId)
+    .eq("slug", slug)
+    .maybeSingle<{ id: string }>();
+
+  if (projectError || !projectRow) {
+    if (projectError) logDev("project id lookup failed for history check", projectError);
+    return true;
+  }
+
+  const { data, error } = await supabase.rpc("project_membership_has_history", {
+    target_project_id: projectRow.id,
+    target_profile_id: profileId,
+  });
+
+  if (error) {
+    logDev("project_membership_has_history rpc failed", error);
+    return true;
+  }
+
+  return Boolean(data);
+}

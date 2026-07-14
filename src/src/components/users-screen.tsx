@@ -1,17 +1,25 @@
 "use client";
 
-import { useEffect, useId, useMemo, useRef, useState } from "react";
-import { users as INITIAL_USERS, fullName } from "@/lib/mock-users";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { fullName } from "@/lib/mock-users";
 import type { User, UserStatus } from "@/lib/mock-users";
-import { getProjectBySlug, projects } from "@/lib/mock-projects";
 import type { Role } from "@/lib/current-user";
 import { ROLE_LABELS } from "@/lib/current-user";
 import { useCurrentUser } from "@/components/current-user-provider";
+import { useOrganizationProjects } from "@/components/organization-projects-provider";
+import {
+  loadOrganizationUsers,
+  updateOrganizationMember,
+  disableOrganizationMember,
+  enableOrganizationMember,
+  generatePasswordResetLink,
+} from "@/lib/users";
 import { FilterDropdown } from "@/components/tickets/filter-dropdown";
 import type { DropdownGroup } from "@/components/tickets/filter-dropdown";
 import { MemberProfileModal, UserStatusBadge } from "@/components/member-profile-modal";
 import type { ProfileTab } from "@/components/member-profile-modal";
 import { InviteUserModal } from "@/components/invite-user-modal";
+import { ResetPasswordLinkModal } from "@/components/reset-password-link-modal";
 
 // ── Role badge ────────────────────────────────────────────────────────────────
 
@@ -30,11 +38,19 @@ function RoleBadge({ role }: { role: Role }) {
 }
 
 // ── Toast ─────────────────────────────────────────────────────────────────────
-// Mock actions (Reset Password, Resend Invitation) have no real backend to
-// call, so this is the only feedback surface for them — a brief, dismissable
+// Resend Invitation is still mock (no real backend to call), so this is the
+// only feedback surface for it — a brief, dismissable
 // confirmation rather than a silent no-op.
 
-function Toast({ message, onDismiss }: { message: string; onDismiss: () => void }) {
+interface ToastState {
+  message: string;
+  variant: "success" | "error";
+}
+
+// variant only ever changes the icon (checkmark vs. alert) — an error must
+// never be signaled with the same confirmation icon as a success. Position,
+// background, and text styling stay identical for both.
+function Toast({ toast, onDismiss }: { toast: ToastState; onDismiss: () => void }) {
   useEffect(() => {
     const id = setTimeout(onDismiss, 3200);
     return () => clearTimeout(id);
@@ -42,10 +58,17 @@ function Toast({ message, onDismiss }: { message: string; onDismiss: () => void 
 
   return (
     <div className="fixed bottom-5 right-5 z-[60] flex items-center gap-2 bg-slate-900 dark:bg-zinc-800 text-white text-[13px] font-medium px-4 py-2.5 rounded-lg shadow-lg shadow-black/20">
-      <svg className="w-4 h-4 text-emerald-400 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
-        <path d="M5 12l5 5L20 7" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-      {message}
+      {toast.variant === "error" ? (
+        <svg className="w-4 h-4 text-red-400 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="9" />
+          <path d="M12 8v5M12 16h.01" strokeLinecap="round" />
+        </svg>
+      ) : (
+        <svg className="w-4 h-4 text-emerald-400 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+          <path d="M5 12l5 5L20 7" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      )}
+      {toast.message}
     </div>
   );
 }
@@ -269,13 +292,24 @@ const STATUS_GROUPS: DropdownGroup[] = [{
   options: (["Active", "Invited", "Disabled"] as UserStatus[]).map((s) => ({ value: s, label: s })),
 }];
 
-const PROJECT_GROUPS: DropdownGroup[] = [{
-  options: projects.map((p) => ({ value: p.slug, label: p.name })),
-}];
-
 export function UsersScreen() {
-  const { user: currentUser } = useCurrentUser();
-  const [usersList, setUsersList] = useState<User[]>(INITIAL_USERS);
+  const { user: currentUser, organization, isDevFallback } = useCurrentUser();
+  // Real, org-scoped project list — same source Sidebar/Projects already
+  // use — for the Project filter's options and for resolving a user's
+  // projectSlugs to display names below (no mock-projects.ts involved).
+  const { projects: orgProjects } = useOrganizationProjects();
+  const projectNameBySlug = useMemo(
+    () => new Map(orgProjects.map((p) => [p.slug, p.name])),
+    [orgProjects]
+  );
+  const projectGroups: DropdownGroup[] = useMemo(
+    () => [{ options: orgProjects.map((p) => ({ value: p.slug, label: p.name })) }],
+    [orgProjects]
+  );
+
+  const [loadState, setLoadState] = useState<"loading" | "ready" | "error">(isDevFallback ? "ready" : "loading");
+  const [loadErrorMessage, setLoadErrorMessage] = useState<string | null>(null);
+  const [usersList, setUsersList] = useState<User[]>([]);
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState<string[]>([]);
   const [statusFilter, setStatusFilter] = useState<string[]>([]);
@@ -285,7 +319,39 @@ export function UsersScreen() {
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [profileTarget, setProfileTarget] = useState<{ user: User; tab: ProfileTab } | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<User | null>(null);
-  const [toast, setToast] = useState<string | null>(null);
+  const [resetPasswordLink, setResetPasswordLink] = useState<string | null>(null);
+  const [toast, setToast] = useState<ToastState | null>(null);
+  function showToast(message: string, variant: ToastState["variant"] = "success") {
+    setToast({ message, variant });
+  }
+
+  const requestIdRef = useRef(0);
+  // Guards both Disable and Enable (never both at once for the same row —
+  // the menu only ever offers one or the other based on current status).
+  const membershipStatusChangeIds = useRef<Set<string>>(new Set());
+  const generatingResetLinkIds = useRef<Set<string>>(new Set());
+
+  // No mock fallback here (unlike e.g. Projects' dev-only mock roster) —
+  // this module has no real backend without a real organization, so dev
+  // fallback simply shows an empty list rather than fabricated accounts.
+  const runFetch = useCallback(() => {
+    if (isDevFallback || !organization) return;
+    const requestId = ++requestIdRef.current;
+    loadOrganizationUsers(organization.id).then((result) => {
+      if (requestIdRef.current !== requestId) return;
+      if (result.status === "ready") {
+        setUsersList(result.users);
+        setLoadState("ready");
+      } else {
+        setLoadErrorMessage(result.message);
+        setLoadState("error");
+      }
+    });
+  }, [isDevFallback, organization]);
+
+  useEffect(() => {
+    runFetch();
+  }, [runFetch]);
 
   const searchId = useId();
 
@@ -310,29 +376,102 @@ export function UsersScreen() {
     setProfileTarget({ user, tab });
   }
 
-  function updateUser(updated: User) {
-    setUsersList((prev) => prev.map((u) => (u.id === updated.id ? updated : u)));
+  // Real persistence for the three fields organization_memberships already
+  // backs (role, status, weekly_capacity) — reuses that table's existing
+  // admin-only RLS, no RPC needed since this screen is already Admin-gated
+  // below. Re-fetches on success so the list always reflects the real
+  // persisted row rather than an optimistic guess.
+  async function persistMemberUpdate(
+    user: User,
+    updates: { role?: Role; status?: UserStatus; weeklyCapacity?: number },
+    successMessage: string
+  ) {
+    if (isDevFallback || !organization) return;
+    const result = await updateOrganizationMember(organization.id, user.id, updates);
+    if (result.status === "error") {
+      showToast(result.message, "error");
+      return;
+    }
+    runFetch();
+    showToast(successMessage);
   }
 
-  function handleInvited(newOrUpdated: User) {
-    setUsersList((prev) => {
-      const exists = prev.some((u) => u.id === newOrUpdated.id);
-      return exists
-        ? prev.map((u) => (u.id === newOrUpdated.id ? newOrUpdated : u))
-        : [newOrUpdated, ...prev];
-    });
-    setShowInvite(false);
+  // "Disable User" and "Enable User" — organization_memberships has no
+  // UPDATE grant for the authenticated role, so both go through the same
+  // Server Action (disableOrganizationMember / enableOrganizationMember,
+  // one shared implementation server-side) rather than persistMemberUpdate's
+  // direct client-side update; see src/lib/server/disable-user-action.ts.
+  // The in-flight guard below is what prevents a second click (e.g.
+  // reopening the row menu quickly) from firing a second request for the
+  // same user while the first is still pending — the menu itself already
+  // closes on click, same as every other row action.
+  async function handleSetMembershipStatus(user: User, targetStatus: "Active" | "Disabled") {
+    if (isDevFallback || !organization) return;
+    if (membershipStatusChangeIds.current.has(user.id)) return;
+    membershipStatusChangeIds.current.add(user.id);
+    const result =
+      targetStatus === "Disabled"
+        ? await disableOrganizationMember(organization.id, user.id)
+        : await enableOrganizationMember(organization.id, user.id);
+    membershipStatusChangeIds.current.delete(user.id);
+
+    if (result.status === "error") {
+      showToast(result.message, "error");
+      return;
+    }
+    runFetch();
+    showToast(`${fullName(user)} was ${targetStatus === "Disabled" ? "disabled" : "enabled"}.`);
+  }
+
+  // "Reset Password" — generates a single-use recovery link server-side
+  // (never sends mail) via generatePasswordResetLink; see
+  // src/lib/server/invite-user-action.ts's generatePasswordResetLinkAction.
+  // Nothing here changes organization_memberships or profiles, so unlike
+  // handleSetMembershipStatus there's no runFetch — the list has nothing to
+  // refresh. Success opens ResetPasswordLinkModal instead of a toast.
+  async function handleGeneratePasswordResetLink(user: User) {
+    if (isDevFallback || !organization) return;
+    if (generatingResetLinkIds.current.has(user.id)) return;
+    generatingResetLinkIds.current.add(user.id);
+    const result = await generatePasswordResetLink(organization.id, user.id);
+    generatingResetLinkIds.current.delete(user.id);
+
+    if (result.status === "error") {
+      showToast(result.message, "error");
+      return;
+    }
+    setResetPasswordLink(result.resetLink);
+  }
+
+  // The modal itself performs the real edit (Server Action, via
+  // editOrganizationMember — see invite-user-modal.tsx) and only calls this
+  // after it actually succeeds — refetch so Users reflects the real
+  // persisted row, never a locally-simulated one. Mirrors handleInviteSent's
+  // pattern. Name/role/weekly capacity are the fields the form persists;
+  // email/project-assignment edits in the same form are still display-only
+  // (no write path for those), unchanged from before.
+  function handleEdited(updated: User) {
     setEditingUser(null);
-    setToast(editingUser ? `${fullName(newOrUpdated)} was updated.` : `Invitation sent to ${newOrUpdated.email}.`);
+    runFetch();
+    showToast(`${fullName(updated)} was updated.`);
+  }
+
+  // The modal itself performs the real invite (Server Action) and only
+  // calls this after it actually succeeds — refetch so the new Invited row
+  // comes from Supabase like every other row, never a locally-simulated one.
+  function handleInviteSent(email: string) {
+    setShowInvite(false);
+    runFetch();
+    showToast(`Invitation sent to ${email}.`);
   }
 
   async function copyInvitationLink(u: User) {
     const link = `https://app.jirita.com/invite/${u.id}`;
     try {
       await navigator.clipboard.writeText(link);
-      setToast("Invitation link copied to clipboard.");
+      showToast("Invitation link copied to clipboard.");
     } catch {
-      setToast(link);
+      showToast(link);
     }
   }
 
@@ -348,15 +487,15 @@ export function UsersScreen() {
     if (u.status === "Active") {
       return [
         ...common,
-        { label: "Reset Password", onClick: () => setToast(`Password reset email sent to ${u.email}.`) },
-        { label: "Disable User", onClick: () => updateUser({ ...u, status: "Disabled" }) },
+        { label: "Reset Password", onClick: () => handleGeneratePasswordResetLink(u) },
+        { label: "Disable User", onClick: () => handleSetMembershipStatus(u, "Disabled") },
       ];
     }
 
     if (u.status === "Disabled") {
       return [
         ...common,
-        { label: "Enable User", onClick: () => updateUser({ ...u, status: "Active" }) },
+        { label: "Enable User", onClick: () => handleSetMembershipStatus(u, "Active") },
         { label: "Delete User", danger: true, onClick: () => setDeleteTarget(u) },
       ];
     }
@@ -364,7 +503,7 @@ export function UsersScreen() {
     // Invited
     return [
       ...common,
-      { label: "Resend Invitation", onClick: () => setToast(`Invitation resent to ${u.email}.`) },
+      { label: "Resend Invitation", onClick: () => showToast(`Invitation resent to ${u.email}.`) },
       { label: "Copy Invitation Link", onClick: () => copyInvitationLink(u) },
     ];
   }
@@ -382,6 +521,32 @@ export function UsersScreen() {
         <p className="text-sm text-slate-400 mt-1 max-w-xs dark:text-zinc-500">
           User management is only available to Admins.
         </p>
+      </div>
+    );
+  }
+
+  if (loadState === "loading") {
+    return (
+      <div className="h-full flex items-center justify-center text-sm text-slate-400 dark:text-zinc-500">
+        Loading users…
+      </div>
+    );
+  }
+
+  if (loadState === "error") {
+    return (
+      <div className="h-full flex flex-col items-center justify-center text-center px-4">
+        <h3 className="text-sm font-semibold text-slate-700 dark:text-zinc-200">Couldn&apos;t load users</h3>
+        <p className="text-sm text-slate-400 mt-1 max-w-xs dark:text-zinc-500">
+          {loadErrorMessage ?? "Something went wrong."}
+        </p>
+        <button
+          type="button"
+          onClick={runFetch}
+          className="mt-5 text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3.5 py-2 shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-500 dark:hover:bg-brand-600 dark:shadow-brand-500/20"
+        >
+          Retry
+        </button>
       </div>
     );
   }
@@ -426,7 +591,7 @@ export function UsersScreen() {
         <div className="flex items-center gap-1 flex-wrap">
           <FilterDropdown label="Role" mode="multi" groups={ROLE_GROUPS} selected={roleFilter} onChange={setRoleFilter} />
           <FilterDropdown label="Status" mode="multi" groups={STATUS_GROUPS} selected={statusFilter} onChange={setStatusFilter} />
-          <FilterDropdown label="Project" mode="multi" groups={PROJECT_GROUPS} selected={projectFilter} onChange={setProjectFilter} />
+          <FilterDropdown label="Project" mode="multi" groups={projectGroups} selected={projectFilter} onChange={setProjectFilter} />
         </div>
       </div>
 
@@ -474,17 +639,20 @@ export function UsersScreen() {
                         type="button"
                         onClick={() => openProfile(u, "projects")}
                         disabled={u.projectSlugs.length === 0}
-                        title={u.projectSlugs.map((slug) => getProjectBySlug(slug)?.name ?? slug).join(", ")}
+                        title={u.projectSlugs.map((slug) => projectNameBySlug.get(slug) ?? slug).join(", ")}
                         className="font-semibold text-slate-700 dark:text-zinc-300 tabular-nums hover:text-brand-600 dark:hover:text-brand-400 disabled:hover:text-slate-700 dark:disabled:hover:text-zinc-300 disabled:cursor-default transition-colors"
                       >
                         {u.projectSlugs.length}
                       </button>
                     </td>
                     <td className="py-2.5 pr-4 text-right whitespace-nowrap">
-                      <CapacityCell user={u} onSave={(hours) => updateUser({ ...u, weeklyCapacity: hours })} />
+                      <CapacityCell
+                        user={u}
+                        onSave={(hours) => persistMemberUpdate(u, { weeklyCapacity: hours }, "Weekly capacity updated.")}
+                      />
                     </td>
                     <td className="py-2.5 pr-4 text-right text-slate-500 dark:text-zinc-400 whitespace-nowrap">
-                      {u.lastLogin ?? "Never"}
+                      {u.lastLogin ?? "—"}
                     </td>
                     <td className="py-2.5 pr-5 text-right">
                       <RowActionsMenu actions={actionsFor(u)} />
@@ -500,7 +668,8 @@ export function UsersScreen() {
       {showInvite && (
         <InviteUserModal
           onClose={() => setShowInvite(false)}
-          onInvited={handleInvited}
+          onInviteSent={handleInviteSent}
+          onLinkGenerated={runFetch}
         />
       )}
 
@@ -508,7 +677,7 @@ export function UsersScreen() {
         <InviteUserModal
           editingUser={editingUser}
           onClose={() => setEditingUser(null)}
-          onInvited={handleInvited}
+          onEdited={handleEdited}
         />
       )}
 
@@ -526,13 +695,21 @@ export function UsersScreen() {
           onCancel={() => setDeleteTarget(null)}
           onConfirm={() => {
             setUsersList((prev) => prev.filter((u) => u.id !== deleteTarget.id));
-            setToast(`${fullName(deleteTarget)} was deleted.`);
+            showToast(`${fullName(deleteTarget)} was deleted.`);
             setDeleteTarget(null);
           }}
         />
       )}
 
-      {toast && <Toast message={toast} onDismiss={() => setToast(null)} />}
+      {resetPasswordLink && (
+        <ResetPasswordLinkModal
+          link={resetPasswordLink}
+          onCopy={() => showToast("Password reset link copied to clipboard.")}
+          onClose={() => setResetPasswordLink(null)}
+        />
+      )}
+
+      {toast && <Toast toast={toast} onDismiss={() => setToast(null)} />}
     </div>
   );
 }

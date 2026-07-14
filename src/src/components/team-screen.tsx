@@ -1,10 +1,10 @@
 "use client";
 
-import { useId, useMemo, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 import { useRouter } from "next/navigation";
-import { getTeamByProjectSlug } from "@/lib/mock-team";
-import type { TeamMember } from "@/lib/mock-team";
+import type { TeamMember, TeamMemberRemovedEventDetail } from "@/lib/mock-team";
+import { TEAM_MEMBER_REMOVED_EVENT } from "@/lib/mock-team";
 import { FilterDropdown } from "@/components/tickets/filter-dropdown";
 import type { DropdownGroup } from "@/components/tickets/filter-dropdown";
 import { useCurrentUser } from "@/components/current-user-provider";
@@ -17,22 +17,142 @@ import {
   remainingAvailabilityLabel,
 } from "@/components/member-profile-modal";
 import { useMemberProfile } from "@/components/member-profile";
+import { loadProjectTeam, loadOrganizationMembers, addProjectMember } from "@/lib/projects";
+import { loadProjectTickets } from "@/lib/tickets";
+import { AddTeamMemberModal } from "@/components/add-team-member-modal";
+import type { AddTeamMemberCandidate } from "@/components/add-team-member-modal";
 
 function assigneeQueryValue(name: string): string {
   return name.trim().split(/\s+/)[0]?.toLowerCase() ?? "";
 }
 
 // ── Main screen ───────────────────────────────────────────────────────────────
+// Real replacement for mock-team.ts's getTeamByProjectSlug — see
+// src/lib/projects.ts's loadProjectTeam header comment for the full data
+// story (project_memberships, mostly populated by a database trigger on
+// real ticket contributions, not by this screen). No other mock-team.ts
+// consumer (the shared Member Profile Modal's own single-view mode,
+// resolveTeamMember, etc.) is touched — this file only changes where the
+// Team screen itself gets its roster from.
 
 export function TeamScreen({ slug }: { slug: string }) {
-  const { user } = useCurrentUser();
+  const { user, organization, isDevFallback } = useCurrentUser();
   const canAddMember = canManage(user.role);
-  const members = useMemo(() => getTeamByProjectSlug(slug), [slug]);
+
+  const [loadState, setLoadState] = useState<"loading" | "ready" | "error">(isDevFallback ? "ready" : "loading");
+  const [loadErrorMessage, setLoadErrorMessage] = useState<string | null>(null);
+  const [members, setMembers] = useState<TeamMember[]>([]);
+  const [orgMembers, setOrgMembers] = useState<AddTeamMemberCandidate[]>([]);
+  const [showAddMember, setShowAddMember] = useState(false);
+  const [requestId, setRequestId] = useState(0);
+
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState<string[]>([]);
   const [statusFilter, setStatusFilter] = useState<string[]>([]);
   const { openMemberProfile } = useMemberProfile();
   const searchId = useId();
+
+  // useCallback for a stable reference — the removal-listener effect below
+  // calls this without wanting to resubscribe its window listener on every
+  // render.
+  const runFetch = useCallback(() => {
+    setRequestId((id) => id + 1);
+  }, []);
+
+  // Remove from Project (member-profile-modal.tsx's MemberMenu) runs inside
+  // the globally-mounted Member Profile Modal, entirely decoupled from this
+  // screen — see mock-team.ts's TEAM_MEMBER_REMOVED_EVENT for why a window
+  // event is the bridge. Filters the member out of local state immediately
+  // (so Team Members/Weekly Capacity/Assigned Hours/Team Utilization —
+  // all derived from `members` below — update the instant this fires, no
+  // manual refresh), then also runs a real refetch: without it, an
+  // *older* in-flight fetch (e.g. one already started by a prior Add
+  // Member) could still resolve afterward with the pre-removal roster and
+  // silently undo this update; runFetch's requestId bump both supersedes
+  // that stale request (via this same effect's own cleanup-on-rerun) and
+  // confirms the optimistic removal against the real, now-current data.
+  useEffect(() => {
+    function handleMemberRemoved(event: Event) {
+      const detail = (event as CustomEvent<TeamMemberRemovedEventDetail>).detail;
+      if (!detail || detail.slug !== slug) return;
+      setMembers((prev) => prev.filter((m) => m.id !== detail.profileId));
+      runFetch();
+    }
+    window.addEventListener(TEAM_MEMBER_REMOVED_EVENT, handleMemberRemoved);
+    return () => window.removeEventListener(TEAM_MEMBER_REMOVED_EVENT, handleMemberRemoved);
+  }, [slug, runFetch]);
+
+  // Combines project_memberships (roster + weekly capacity) with real
+  // tickets (assigned hours + active ticket count, matched by the real
+  // assigneeProfileId, never by name) — two already-existing real reads,
+  // never invented data. Every real project member always renders, even an
+  // Admin: nothing here filters by organizational role, only by actually
+  // having a project_memberships row.
+  useEffect(() => {
+    if (isDevFallback || !organization) return;
+    let cancelled = false;
+
+    Promise.all([loadProjectTeam(organization.id, slug), loadProjectTickets(organization.id, slug)]).then(
+      ([teamResult, ticketsResult]) => {
+        if (cancelled) return;
+
+        if (teamResult.status === "error") {
+          setLoadState("error");
+          setLoadErrorMessage(teamResult.message);
+          return;
+        }
+
+        const projectTickets = ticketsResult.status === "ready" ? ticketsResult.tickets : [];
+
+        const realMembers: TeamMember[] = teamResult.members.map((member) => {
+          const ownTickets = projectTickets.filter((t) => t.assigneeProfileId === member.id);
+          const activeTickets = ownTickets.filter((t) => t.status !== "done");
+          const assignedHours = activeTickets.reduce((sum, t) => sum + (t.hours ?? 0), 0);
+          return {
+            id: member.id,
+            projectSlug: slug,
+            name: member.name,
+            role: member.title,
+            email: member.email,
+            avatar: member.avatar,
+            // No real per-person availability source exists (never has,
+            // for any member anywhere in this app) — left as a fixed,
+            // honest default rather than a fabricated per-person value.
+            status: "Available",
+            weeklyCapacity: member.weeklyCapacity,
+            assignedHours,
+            activeTicketIds: activeTickets.map((t) => t.id),
+          };
+        });
+
+        setMembers(realMembers);
+        setLoadState("ready");
+      }
+    );
+
+    return () => {
+      cancelled = true;
+    };
+  }, [organization, isDevFallback, slug, requestId]);
+
+  // Add Member's candidate list — org members not already on this project's
+  // team. Only fetched for admins/leads who can actually see the button.
+  useEffect(() => {
+    if (isDevFallback || !organization || !canAddMember) return;
+    let cancelled = false;
+    loadOrganizationMembers(organization.id).then((result) => {
+      if (cancelled) return;
+      if (result.status === "ready") setOrgMembers(result.members);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [organization, isDevFallback, canAddMember]);
+
+  const addMemberCandidates = useMemo(
+    () => orgMembers.filter((om) => !members.some((m) => m.id === om.id)),
+    [orgMembers, members]
+  );
 
   const roleGroups: DropdownGroup[] = useMemo(() => {
     const roles = Array.from(new Set(members.map((m) => m.role)));
@@ -65,6 +185,44 @@ export function TeamScreen({ slug }: { slug: string }) {
   const totalAssignedHours = members.reduce((sum, m) => sum + m.assignedHours, 0);
   const teamUtilization = totalWeeklyCapacity === 0 ? 0 : Math.round((totalAssignedHours / totalWeeklyCapacity) * 100);
 
+  async function handleAddMember(profileId: string): Promise<{ success: boolean; message?: string }> {
+    if (isDevFallback || !organization) return { success: false, message: "Not available in this mode." };
+    const result = await addProjectMember(organization.id, slug, profileId);
+    if (result.status === "error") return { success: false, message: result.message };
+    runFetch();
+    return { success: true };
+  }
+
+  if (loadState === "loading") {
+    return (
+      <div className="max-w-5xl mx-auto px-4 sm:px-8 py-10">
+        <div className="h-full flex items-center justify-center text-sm text-slate-400 dark:text-zinc-500 py-20">
+          Loading team…
+        </div>
+      </div>
+    );
+  }
+
+  if (loadState === "error") {
+    return (
+      <div className="max-w-5xl mx-auto px-4 sm:px-8 py-10">
+        <div className="flex flex-col items-center justify-center text-center px-4 py-20">
+          <h3 className="text-sm font-semibold text-slate-700 dark:text-zinc-200">Couldn&apos;t load team</h3>
+          <p className="text-sm text-slate-400 mt-1 max-w-xs dark:text-zinc-500">
+            {loadErrorMessage ?? "Something went wrong."}
+          </p>
+          <button
+            type="button"
+            onClick={runFetch}
+            className="mt-5 text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3.5 py-2 shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-500 dark:hover:bg-brand-600 dark:shadow-brand-500/20"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-8 py-10">
       <div className="flex items-start justify-between gap-4">
@@ -77,6 +235,7 @@ export function TeamScreen({ slug }: { slug: string }) {
         {canAddMember && (
           <button
             type="button"
+            onClick={() => setShowAddMember(true)}
             className="text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3.5 py-2 shadow-sm shadow-brand-600/20 transition-colors flex-shrink-0 dark:bg-brand-500 dark:hover:bg-brand-600 dark:shadow-brand-500/20"
           >
             + Add Member
@@ -154,12 +313,21 @@ export function TeamScreen({ slug }: { slug: string }) {
                   avatar: member.avatar,
                   role: member.role,
                   projectSlug: member.projectSlug,
+                  profileId: member.id,
                 })}
               />
             ))}
           </div>
         )}
       </div>
+
+      {showAddMember && (
+        <AddTeamMemberModal
+          candidates={addMemberCandidates}
+          onClose={() => setShowAddMember(false)}
+          onAdd={handleAddMember}
+        />
+      )}
     </div>
   );
 }
@@ -248,4 +416,3 @@ function EmptyState({ hasAnyMembers }: { hasAnyMembers: boolean }) {
     </div>
   );
 }
-

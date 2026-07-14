@@ -3,8 +3,9 @@
 import { useEffect, useRef, useState } from "react";
 import type { Role } from "@/lib/current-user";
 import { ROLE_LABELS } from "@/lib/current-user";
-import { projects } from "@/lib/mock-projects";
 import type { User } from "@/lib/mock-users";
+import { useCurrentUser } from "@/components/current-user-provider";
+import { inviteOrganizationUser, generateOrganizationInviteLink, editOrganizationMember } from "@/lib/users";
 
 // Modeled on the New Ticket modal's shell (backdrop, centered dialog,
 // scrollable body, sticky footer) — see tickets/new-ticket-modal.tsx.
@@ -20,44 +21,95 @@ const INPUT =
 
 const ROLE_OPTIONS: Role[] = ["MEMBER", "PROJECT_LEAD", "ADMIN"];
 
-const avatar = (id: number) => `https://i.pravatar.cc/64?img=${id}`;
-// Pool of avatars not already used by named mock people, so a newly invited
-// user gets a plausible, non-colliding placeholder.
-const INVITE_AVATAR_POOL = [51, 44, 60, 8, 25, 36, 68, 19];
-let nextAvatarIndex = 0;
+type InviteMethod = "email" | "link";
 
-function nextInviteAvatar(): string {
-  const id = INVITE_AVATAR_POOL[nextAvatarIndex % INVITE_AVATAR_POOL.length];
-  nextAvatarIndex += 1;
-  return avatar(id);
+const INVITE_METHOD_OPTIONS: { value: InviteMethod; label: string }[] = [
+  { value: "email", label: "Send by email" },
+  { value: "link", label: "Generate invite link" },
+];
+
+// Same pill segmented-control pattern as profile-screen.tsx's
+// TicketViewToggle — reused here rather than a new visual pattern.
+function InviteMethodToggle({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: InviteMethod;
+  onChange: (v: InviteMethod) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div
+      className="inline-flex items-center gap-0.5 rounded-md border border-slate-200 bg-slate-50 p-0.5 dark:border-zinc-700 dark:bg-zinc-800"
+      role="radiogroup"
+      aria-label="Invitation Method"
+    >
+      {INVITE_METHOD_OPTIONS.map((opt) => {
+        const isActive = value === opt.value;
+        return (
+          <button
+            key={opt.value}
+            type="button"
+            role="radio"
+            aria-checked={isActive}
+            disabled={disabled}
+            onClick={() => onChange(opt.value)}
+            className={`rounded-[5px] px-2.5 py-1.5 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+              isActive
+                ? "bg-white text-slate-700 shadow-sm dark:bg-zinc-700 dark:text-zinc-100"
+                : "text-slate-400 hover:text-slate-600 dark:text-zinc-500 dark:hover:text-zinc-300"
+            }`}
+          >
+            {opt.label}
+          </button>
+        );
+      })}
+    </div>
+  );
 }
 
-function InlineToggle({ on, onClick }: { on: boolean; onClick: () => void }) {
+// Mirrors users-screen.tsx's Toast exactly (same feedback surface used by
+// the project's other copy-to-clipboard action, copyInvitationLink) — kept
+// local rather than imported to avoid a circular import between the two
+// modules.
+function CopyFeedback({ message, onDismiss }: { message: string; onDismiss: () => void }) {
+  useEffect(() => {
+    const id = setTimeout(onDismiss, 3200);
+    return () => clearTimeout(id);
+  }, [onDismiss]);
+
   return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={on}
-      onClick={onClick}
-      className={`relative w-9 h-5 rounded-full flex-shrink-0 transition-colors ${on ? "bg-brand-500" : "bg-slate-200 dark:bg-zinc-700"}`}
-    >
-      <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow-sm transition-transform ${on ? "translate-x-4" : "translate-x-0.5"}`} />
-    </button>
+    <div className="fixed bottom-5 right-5 z-[60] flex items-center gap-2 bg-slate-900 dark:bg-zinc-800 text-white text-[13px] font-medium px-4 py-2.5 rounded-lg shadow-lg shadow-black/20">
+      <svg className="w-4 h-4 text-emerald-400 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+        <path d="M5 12l5 5L20 7" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+      {message}
+    </div>
   );
 }
 
 // Also reused for "Edit User" (from the row Actions menu) via `editingUser`
-// — same fields minus "Send invitation immediately" (not meaningful once an
-// account already exists), so there's one form instead of two near-duplicates.
+// — same fields, so there's one form instead of two near-duplicates.
+// Editing is real (editOrganizationMember, a Server Action — see
+// handleSubmit below), same as inviting (onInviteSent).
 export function InviteUserModal({
   editingUser,
   onClose,
-  onInvited,
+  onEdited,
+  onInviteSent,
+  onLinkGenerated,
 }: {
   editingUser?: User;
   onClose: () => void;
-  onInvited: (user: User) => void;
+  /** Edit mode only — called after the real edit succeeds, so the parent can refetch the list. */
+  onEdited?: (user: User) => void;
+  /** "Send by email" only — called after the real invite succeeds, so the parent can refetch the list. */
+  onInviteSent?: (email: string) => void;
+  /** "Generate invite link" only — called once the link (and its profile/membership rows) are created, so the parent can quietly refetch the list while the modal stays open showing the link. */
+  onLinkGenerated?: () => void;
 }) {
+  const { organization, isDevFallback } = useCurrentUser();
   const isEditing = editingUser !== undefined;
   const [visible, setVisible] = useState(false);
   const [firstName, setFirstName] = useState(editingUser?.firstName ?? "");
@@ -65,8 +117,11 @@ export function InviteUserModal({
   const [email, setEmail] = useState(editingUser?.email ?? "");
   const [role, setRole] = useState<Role>(editingUser?.role ?? "MEMBER");
   const [weeklyCapacity, setWeeklyCapacity] = useState(String(editingUser?.weeklyCapacity ?? 40));
-  const [selectedProjects, setSelectedProjects] = useState<string[]>(editingUser?.projectSlugs ?? []);
-  const [sendImmediately, setSendImmediately] = useState(true);
+  const [method, setMethod] = useState<InviteMethod>("email");
+  const [submitting, setSubmitting] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [inviteLink, setInviteLink] = useState<string | null>(null);
+  const [linkCopied, setLinkCopied] = useState(false);
 
   const firstNameRef = useRef<HTMLInputElement>(null);
 
@@ -94,44 +149,103 @@ export function InviteUserModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  function toggleProject(slug: string) {
-    setSelectedProjects((prev) =>
-      prev.includes(slug) ? prev.filter((s) => s !== slug) : [...prev, slug]
-    );
-  }
-
   const canSubmit = firstName.trim().length > 0 && lastName.trim().length > 0 && email.trim().length > 0;
 
-  function handleSubmit() {
-    if (!canSubmit) return;
+  // The invite itself only ever creates a workspace membership — never a
+  // project assignment. editingUser's own projectSlugs pass through
+  // untouched (via the spread) rather than being overwritten here; project
+  // staffing is Team → Add Member's job, not this form's.
+  async function handleSubmit() {
+    if (!canSubmit || submitting) return;
     const capacity = Math.max(0, parseInt(weeklyCapacity, 10) || 0);
 
     if (editingUser) {
-      onInvited({
+      setFormError(null);
+      if (isDevFallback || !organization) {
+        setFormError("Editing users isn't available in this mode.");
+        return;
+      }
+
+      setSubmitting(true);
+      const editResult = await editOrganizationMember(organization.id, editingUser.id, {
+        firstName: firstName.trim(),
+        lastName: lastName.trim(),
+        role,
+        weeklyCapacity: capacity,
+      });
+      setSubmitting(false);
+
+      if (editResult.status === "error") {
+        setFormError(editResult.message);
+        return;
+      }
+
+      onEdited?.({
         ...editingUser,
         firstName: firstName.trim(),
         lastName: lastName.trim(),
         email: email.trim(),
         role,
         weeklyCapacity: capacity,
-        projectSlugs: selectedProjects,
       });
+      handleClose();
       return;
     }
 
-    onInvited({
-      id: `user-invited-${Date.now()}`,
+    setFormError(null);
+    if (isDevFallback || !organization) {
+      setFormError("Inviting users isn't available in this mode.");
+      return;
+    }
+
+    const fields = {
       firstName: firstName.trim(),
       lastName: lastName.trim(),
       email: email.trim(),
-      avatar: nextInviteAvatar(),
       role,
-      status: "Invited",
       weeklyCapacity: capacity,
-      projectSlugs: selectedProjects,
-      lastLogin: null,
-      joinedAt: sendImmediately ? "Invited just now" : "Not yet invited",
-    });
+    };
+
+    setSubmitting(true);
+
+    if (method === "email") {
+      const result = await inviteOrganizationUser(organization.id, fields);
+      setSubmitting(false);
+
+      if (result.status === "error") {
+        setFormError(result.message);
+        return;
+      }
+
+      onInviteSent?.(email.trim());
+      handleClose();
+      return;
+    }
+
+    const result = await generateOrganizationInviteLink(organization.id, fields);
+    setSubmitting(false);
+
+    if (result.status === "error") {
+      setFormError(result.message);
+      return;
+    }
+
+    // Stays open — the form is replaced by the success state below so the
+    // admin can copy the link, rather than closing like the email flow.
+    setInviteLink(result.inviteLink);
+    onLinkGenerated?.();
+  }
+
+  async function handleCopyLink() {
+    if (!inviteLink) return;
+    try {
+      await navigator.clipboard.writeText(inviteLink);
+    } catch {
+      // Clipboard write can fail (permissions, non-secure context); the
+      // link is already visible and selectable in the read-only field
+      // either way, so there's nothing further to recover here.
+    }
+    setLinkCopied(true);
   }
 
   return (
@@ -175,155 +289,176 @@ export function InviteUserModal({
 
           {/* Body */}
           <div className="flex-1 overflow-y-auto px-6 pb-2 space-y-5">
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className={FIELD_LABEL}>
-                  First Name<span className="ml-1.5 text-brand-500 dark:text-brand-400">*</span>
-                </label>
-                <input
-                  ref={firstNameRef}
-                  type="text"
-                  value={firstName}
-                  onChange={(e) => setFirstName(e.target.value)}
-                  placeholder="Jane"
-                  className={INPUT}
-                />
+            {inviteLink ? (
+              <div
+                role="alert"
+                className="flex items-start gap-2 rounded-lg border border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/10 px-3 py-2.5 text-[12.5px] text-emerald-700 dark:text-emerald-400"
+              >
+                <svg className="w-4 h-4 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                  <path d="M5 12l5 5L20 7" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                <span>Invite link generated successfully.</span>
               </div>
-              <div>
-                <label className={FIELD_LABEL}>
-                  Last Name<span className="ml-1.5 text-brand-500 dark:text-brand-400">*</span>
-                </label>
-                <input
-                  type="text"
-                  value={lastName}
-                  onChange={(e) => setLastName(e.target.value)}
-                  placeholder="Doe"
-                  className={INPUT}
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className={FIELD_LABEL}>
-                Email<span className="ml-1.5 text-brand-500 dark:text-brand-400">*</span>
-              </label>
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="jane.doe@techtivo.com"
-                className={INPUT}
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className={FIELD_LABEL}>Role</label>
-                <select value={role} onChange={(e) => setRole(e.target.value as Role)} className={INPUT}>
-                  {ROLE_OPTIONS.map((r) => (
-                    <option key={r} value={r}>{ROLE_LABELS[r]}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className={FIELD_LABEL}>Weekly Capacity</label>
-                <div className="relative">
-                  <input
-                    type="number"
-                    min={0}
-                    value={weeklyCapacity}
-                    onChange={(e) => setWeeklyCapacity(e.target.value)}
-                    className={`${INPUT} pr-9`}
-                  />
-                  <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[12px] text-slate-400 dark:text-zinc-500">
-                    h
-                  </span>
+            ) : (
+              formError && (
+                <div
+                  role="alert"
+                  className="flex items-start gap-2 rounded-lg border border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/10 px-3 py-2.5 text-[12.5px] text-red-700 dark:text-red-400"
+                >
+                  <svg className="w-4 h-4 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                    <circle cx="12" cy="12" r="9" />
+                    <path d="M12 8v5M12 16h.01" strokeLinecap="round" />
+                  </svg>
+                  <span>{formError}</span>
                 </div>
-              </div>
-            </div>
+              )
+            )}
 
-            <div>
-              <label className={FIELD_LABEL}>
-                Assign Projects
-                <span className="ml-2 font-normal normal-case tracking-normal text-slate-300 dark:text-zinc-700">optional</span>
-              </label>
-              <div className="rounded-lg border border-slate-200 dark:border-zinc-700 max-h-40 overflow-y-auto divide-y divide-slate-100 dark:divide-zinc-800">
-                {projects.map((project) => {
-                  const checked = selectedProjects.includes(project.slug);
-                  return (
-                    <label
-                      key={project.slug}
-                      className="flex items-center gap-2.5 px-3 py-2 text-[13px] text-slate-700 dark:text-zinc-300 cursor-pointer hover:bg-slate-50 dark:hover:bg-zinc-900"
-                    >
-                      <span
-                        className={[
-                          "flex-shrink-0 w-4 h-4 rounded border flex items-center justify-center transition-colors",
-                          checked
-                            ? "bg-brand-600 border-brand-600 dark:bg-brand-500 dark:border-brand-500"
-                            : "border-slate-300 dark:border-zinc-600",
-                        ].join(" ")}
-                      >
-                        {checked && (
-                          <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
-                            <path d="M5 12l5 5L20 7" strokeLinecap="round" strokeLinejoin="round" />
-                          </svg>
-                        )}
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() => toggleProject(project.slug)}
-                        className="sr-only"
-                      />
-                      <span className="truncate">{project.name}</span>
+            {inviteLink ? (
+              <div>
+                <label className={FIELD_LABEL}>Invite Link</label>
+                <input
+                  type="text"
+                  readOnly
+                  value={inviteLink}
+                  onFocus={(e) => e.currentTarget.select()}
+                  className={INPUT}
+                />
+              </div>
+            ) : (
+              <>
+                {!isEditing && (
+                  <div>
+                    <label className={FIELD_LABEL}>Invitation Method</label>
+                    <InviteMethodToggle value={method} onChange={setMethod} disabled={submitting} />
+                  </div>
+                )}
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className={FIELD_LABEL}>
+                      First Name<span className="ml-1.5 text-brand-500 dark:text-brand-400">*</span>
                     </label>
-                  );
-                })}
-              </div>
-            </div>
-
-            {!isEditing && (
-              <div className="flex items-center justify-between gap-4 pb-4">
-                <div>
-                  <p className="text-[13px] font-medium text-slate-800 dark:text-zinc-200">Send invitation immediately</p>
-                  <p className="text-[11px] text-slate-400 dark:text-zinc-600 mt-0.5">
-                    Emails the invite link right away. Turn off to create the account and invite later.
-                  </p>
+                    <input
+                      ref={firstNameRef}
+                      type="text"
+                      value={firstName}
+                      onChange={(e) => setFirstName(e.target.value)}
+                      placeholder="Jane"
+                      className={INPUT}
+                    />
+                  </div>
+                  <div>
+                    <label className={FIELD_LABEL}>
+                      Last Name<span className="ml-1.5 text-brand-500 dark:text-brand-400">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={lastName}
+                      onChange={(e) => setLastName(e.target.value)}
+                      placeholder="Doe"
+                      className={INPUT}
+                    />
+                  </div>
                 </div>
-                <InlineToggle on={sendImmediately} onClick={() => setSendImmediately((v) => !v)} />
-              </div>
+
+                <div>
+                  <label className={FIELD_LABEL}>
+                    Email<span className="ml-1.5 text-brand-500 dark:text-brand-400">*</span>
+                  </label>
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="jane.doe@techtivo.com"
+                    className={INPUT}
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className={FIELD_LABEL}>Role</label>
+                    <select value={role} onChange={(e) => setRole(e.target.value as Role)} className={INPUT}>
+                      {ROLE_OPTIONS.map((r) => (
+                        <option key={r} value={r}>{ROLE_LABELS[r]}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className={FIELD_LABEL}>Weekly Capacity</label>
+                    <div className="relative">
+                      <input
+                        type="number"
+                        min={0}
+                        value={weeklyCapacity}
+                        onChange={(e) => setWeeklyCapacity(e.target.value)}
+                        className={`${INPUT} pr-9`}
+                      />
+                      <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[12px] text-slate-400 dark:text-zinc-500">
+                        h
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </>
             )}
           </div>
 
           {/* Footer */}
           <div className="flex items-center justify-between gap-3 px-6 py-4 mt-1 border-t border-slate-100 dark:border-zinc-800 flex-shrink-0 rounded-b-2xl bg-slate-50/40 dark:bg-zinc-900/20">
-            <button
-              onClick={handleClose}
-              className="px-4 py-2 text-[13px] font-medium text-slate-500 dark:text-zinc-500 hover:text-slate-800 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800 rounded-lg transition-colors"
-            >
-              Cancel
-            </button>
+            {inviteLink ? (
+              <>
+                <button
+                  onClick={handleCopyLink}
+                  className="px-4 py-2 text-[13px] font-medium text-slate-500 dark:text-zinc-500 hover:text-slate-800 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800 rounded-lg transition-colors"
+                >
+                  Copy Link
+                </button>
 
-            <button
-              onClick={handleSubmit}
-              disabled={!canSubmit}
-              className={
-                "inline-flex items-center gap-2 px-6 py-2.5 text-[13px] font-semibold rounded-lg transition-all " +
-                (canSubmit
-                  ? "bg-brand-600 hover:bg-brand-700 dark:bg-brand-500 dark:hover:bg-brand-600 text-white shadow-md shadow-brand-600/25 dark:shadow-brand-500/20 hover:shadow-lg hover:shadow-brand-600/30"
-                  : "bg-slate-100 dark:bg-zinc-800 text-slate-400 dark:text-zinc-600 cursor-not-allowed")
-              }
-            >
-              {isEditing ? "Save Changes" : sendImmediately ? "Send Invitation" : "Create User"}
-              {canSubmit && (
-                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
-                  <path d="M5 12h14M12 5l7 7-7 7" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              )}
-            </button>
+                <button
+                  onClick={handleClose}
+                  className="inline-flex items-center gap-2 px-6 py-2.5 text-[13px] font-semibold rounded-lg transition-all bg-brand-600 hover:bg-brand-700 dark:bg-brand-500 dark:hover:bg-brand-600 text-white shadow-md shadow-brand-600/25 dark:shadow-brand-500/20 hover:shadow-lg hover:shadow-brand-600/30"
+                >
+                  Done
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  onClick={handleClose}
+                  className="px-4 py-2 text-[13px] font-medium text-slate-500 dark:text-zinc-500 hover:text-slate-800 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800 rounded-lg transition-colors"
+                >
+                  Cancel
+                </button>
+
+                <button
+                  onClick={handleSubmit}
+                  disabled={!canSubmit || submitting}
+                  className={
+                    "inline-flex items-center gap-2 px-6 py-2.5 text-[13px] font-semibold rounded-lg transition-all " +
+                    (canSubmit && !submitting
+                      ? "bg-brand-600 hover:bg-brand-700 dark:bg-brand-500 dark:hover:bg-brand-600 text-white shadow-md shadow-brand-600/25 dark:shadow-brand-500/20 hover:shadow-lg hover:shadow-brand-600/30"
+                      : "bg-slate-100 dark:bg-zinc-800 text-slate-400 dark:text-zinc-600 cursor-not-allowed")
+                  }
+                >
+                  {isEditing
+                    ? submitting ? "Saving…" : "Save Changes"
+                    : submitting
+                      ? method === "link" ? "Generating…" : "Sending…"
+                      : method === "link" ? "Generate Invite Link" : "Send Invitation"}
+                  {canSubmit && !submitting && (
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+                      <path d="M5 12h14M12 5l7 7-7 7" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  )}
+                </button>
+              </>
+            )}
           </div>
         </div>
       </div>
+
+      {linkCopied && <CopyFeedback message="Invite link copied to clipboard." onDismiss={() => setLinkCopied(false)} />}
     </>
   );
 }

@@ -11,15 +11,15 @@ import {
   useSyncExternalStore,
   type ReactNode,
 } from "react";
+import { usePathname } from "next/navigation";
 import {
   DEFAULT_ROLE,
   FALLBACK_AVATAR,
-  MOCK_USERS,
   ROLE_LABELS,
   type CurrentUser,
   type Role,
 } from "@/lib/current-user";
-import { onAuthStateChange, type AuthUser } from "@/lib/auth";
+import { logout, onAuthStateChange, type AuthUser } from "@/lib/auth";
 import {
   loadMembership,
   updateOwnWeeklyCapacity,
@@ -31,11 +31,6 @@ import { blobToDataUrl, resizeAvatarToSquareJpeg, uploadAvatarBlob, validateAvat
 
 const OVERRIDES_STORAGE_KEY = "jirita:profile-overrides";
 const DEV_ROLE_STORAGE_KEY = "jirita:mock-role";
-
-// Gate for the dev-only mock fallback below — never true in a production
-// build, so a missing/empty membership can never render a fake role as if
-// it were real production data (see CLAUDE.md Backend Integration Status).
-const DEV_FALLBACK_ALLOWED = process.env.NODE_ENV !== "production";
 
 interface ProfileOverride {
   firstName: string;
@@ -70,10 +65,14 @@ interface CurrentUserContextValue {
   organization: { id: string; name: string; slug: string } | null;
   /** The signed-in user's real Supabase auth/profile id (profiles.id === auth.users.id)
    *  — the stable identifier tickets' assignee_profile_id should be compared against
-   *  (e.g. a "Mine" filter), never the display name. Null in the dev fallback, where
-   *  there's no real row to match against. */
+   *  (e.g. a "Mine" filter), never the display name. Null whenever there's no real
+   *  membership row to match against (including while one is still loading). */
   userId: string | null;
-  /** True when `user` is the dev-only mock fallback, not a real Supabase membership. */
+  /** True when there's no real organization/project/ticket data to read for this
+   *  session (membership missing or the lookup errored) — other real-data screens
+   *  (Projects, Tickets, etc.) use this to fall back to their own local mock arrays
+   *  for local dev without seed data. Does NOT mean `user` is a mock identity — a
+   *  real signed-in session (authUser non-null) never shows one; see neutralUser(). */
   isDevFallback: boolean;
   /** Set only when status is "error" (or the dev fallback masked one) — the raw Supabase error message. */
   errorMessage: string | null;
@@ -117,27 +116,29 @@ function readOverrides(): ProfileOverrides {
   }
 }
 
-// Dev-fallback only — a real membership is persisted to Supabase directly
-// (see updateProfile below) and always reflects the freshly-fetched row, so
-// layering a local override on top of it would just mask genuine DB values
-// with stale localStorage ones.
-function applyOverride(base: CurrentUser, overrides: ProfileOverrides): CurrentUser {
-  const override = overrides[base.role];
-  if (!override) return base;
-  const firstName = override.firstName || base.firstName;
-  const lastName = override.lastName || base.lastName;
+// Shown while a real session's membership is loading, or when it comes
+// back empty/errored — replaces the old MOCK_USERS[devRole] fallback
+// entirely, so no session (real or dev) can ever display a named mock
+// person (no "Sarah Chen", no mock avatar/email/discipline/weeklyCapacity/
+// dates). `role` is the one exception: it still follows the RoleSwitcher's
+// stored dev role (only ever visible/switchable in the isDevFallback
+// state, gated in header-bar.tsx), since that's a permission-preview tool
+// for exercising role-gated UI on *real* screens, not an impersonation of
+// any specific fake person — no name/avatar/email is ever attached to it
+// here.
+function neutralUser(role: Role): CurrentUser {
   return {
-    ...base,
-    firstName,
-    lastName,
-    name: `${firstName} ${lastName}`,
-    weeklyCapacity: override.weeklyCapacity,
-    avatar: override.avatarDataUrl || base.avatar,
+    firstName: "",
+    lastName: "",
+    name: "",
+    email: "",
+    role,
+    discipline: "",
+    avatar: FALLBACK_AVATAR,
+    weeklyCapacity: 0,
+    memberSince: "—",
+    lastLogin: "—",
   };
-}
-
-function devFallbackUser(role: Role): CurrentUser {
-  return { ...MOCK_USERS[role] };
 }
 
 function formatDate(iso: string): string {
@@ -192,7 +193,28 @@ export function CurrentUserProvider({ children }: { children: ReactNode }) {
   const devRole = mounted ? readDevRole() : DEFAULT_ROLE;
   const [, forceUpdate] = useReducer((n: number) => n + 1, 0);
 
-  useEffect(() => onAuthStateChange(setAuthUser), []);
+  useEffect(
+    () =>
+      onAuthStateChange((user) => {
+        setAuthUser(user);
+        // Drop the last resolved membership the moment a session actually
+        // ends, not just in-flight requests (requestIdRef below still
+        // handles those) — otherwise, since fetchState is only ever keyed
+        // by forUserId, the *same* user signing back in (e.g. right after
+        // being disabled, then re-enabled and logging back in with the
+        // same profile id) would instantly match this stale, pre-sign-out
+        // value again on the next render, before the fresh runFetch below
+        // even resolves. That stale value is exactly what was driving a
+        // sign-out just now (see the effect further below), so re-matching
+        // it would re-trigger that same sign-out — a real bug (silent
+        // bounce straight back to /login after valid credentials), not a
+        // hypothetical one. Cleared here, in the same external-event
+        // callback that already reports the session ending, rather than a
+        // derived effect on authUser.
+        if (user === null) setFetchState(null);
+      }),
+    []
+  );
 
   const runFetch = useCallback((userId: string) => {
     const requestId = ++requestIdRef.current;
@@ -227,12 +249,58 @@ export function CurrentUserProvider({ children }: { children: ReactNode }) {
   const readyFetch = currentFetch?.status === "ready" ? currentFetch : null;
   const hasRealMembership = readyFetch !== null;
 
+  // A signed-in session whose membership resolves to "no-membership" — never
+  // had one, or an admin just disabled it while the tab was open — must
+  // never keep rendering the authenticated app or any fallback identity.
+  // signOut() clears the Supabase session (local storage + in-memory),
+  // which fires onAuthStateChange(null): authUser becomes null, `status`
+  // becomes "unauthenticated", and AuthGuard's existing redirect-to-/login
+  // effect takes it from there — no separate redirect/local-state-clearing
+  // logic needed here. The dependency array only changes when authUser or
+  // fetchState itself actually changes, so this fires once per resolution,
+  // not on every render while the (async) sign-out is in flight.
+  useEffect(() => {
+    if (authUser && currentFetch?.status === "no-membership") {
+      logout();
+    }
+  }, [authUser, currentFetch]);
+
+  // Revalidates the still-open session's membership on the two moments
+  // most likely to catch a change made elsewhere — regaining window focus
+  // and navigating to a new route — using the same runFetch every other
+  // refresh (the auth-state effect above, retry()) already goes through.
+  // Both are one-shot, event-driven checks, never a timer/poll.
+  useEffect(() => {
+    if (!authUser) return;
+    const userId = authUser.id;
+    function onFocus() {
+      runFetch(userId);
+    }
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [authUser, runFetch]);
+
+  const pathname = usePathname();
+  const lastPathnameRef = useRef(pathname);
+  useEffect(() => {
+    if (!authUser) return;
+    if (lastPathnameRef.current === pathname) return;
+    lastPathnameRef.current = pathname;
+    runFetch(authUser.id);
+  }, [pathname, authUser, runFetch]);
+
+  // Never a mock identity here while a real session exists — this is the
+  // fix for the "Sarah Chen" flash: a real signed-in user (authUser is
+  // non-null) whose membership is still loading, or came back empty/
+  // errored, now always sees neutralUser(), never a named mock person.
+  // Saved profile overrides (readOverrides — still written by
+  // updateProfile/uploadAvatar's dev-fallback branches below) are no
+  // longer read back in here; they only ever made sense layered on top of
+  // a named mock identity, which no longer exists.
   const baseUser = readyFetch
     ? realUser(readyFetch.membership, authUser?.lastSignInAt ?? null)
-    : devFallbackUser(devRole);
-  // Real membership: baseUser already reflects the freshly-fetched DB row —
-  // no local override layered on top (see applyOverride's comment).
-  const user = readyFetch ? baseUser : applyOverride(baseUser, readOverrides());
+    : neutralUser(devRole);
+  const user = baseUser;
 
   const updateProfile = useCallback(
     async (forRole: Role, fields: ProfileEditableFields): Promise<ProfileSaveResult> => {
@@ -309,7 +377,7 @@ export function CurrentUserProvider({ children }: { children: ReactNode }) {
     [hasRealMembership, authUser, runFetch, forceUpdate, user.role, user.firstName, user.lastName, user.weeklyCapacity]
   );
 
-  // Raw status from auth + the Supabase lookup, before any dev fallback.
+  // Raw status from auth + the Supabase lookup.
   const rawStatus: MembershipStatus =
     authUser === undefined
       ? "loading"
@@ -317,11 +385,16 @@ export function CurrentUserProvider({ children }: { children: ReactNode }) {
         ? "unauthenticated"
         : (currentFetch?.status ?? "loading");
 
-  // Only "no-membership" or "error" ever fall back — and only outside
-  // production. A real "ready" membership always wins; a signed-out/loading
-  // state is never masked.
-  const isDevFallback =
-    DEV_FALLBACK_ALLOWED && (rawStatus === "no-membership" || rawStatus === "error");
+  // Retired: a real signed-in session's identity/org data must never be
+  // masked by fake data, in any environment — a missing or inactive
+  // membership (including one just disabled by an admin, see the
+  // force-sign-out effect above) always surfaces as the real status below,
+  // never as "ready" with a mock role/org. Kept as an explicit `false`
+  // rather than deleted, so every existing consumer of `isDevFallback`
+  // (header badge/RoleSwitcher, OrganizationProjectsProvider's own local
+  // mock-data fallback, etc.) keeps compiling against the same shape —
+  // they now simply always take their real-data branch.
+  const isDevFallback = false;
 
   const status: MembershipStatus = isDevFallback ? "ready" : rawStatus;
 

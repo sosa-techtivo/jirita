@@ -1,0 +1,24 @@
+-- Grant authenticated-role read access to project_memberships.
+--
+-- Users (src/lib/users.ts's loadOrganizationUsers) queries project_memberships
+-- directly for the first time to count projects per person, and hit
+-- "permission denied for table project_memberships" (42501) — the same root
+-- cause already fixed for profiles/organization_memberships/organizations
+-- (20260708010000) and projects (20260712000000): `create table` alone
+-- grants nothing to the authenticated role, and Postgres checks base table
+-- privileges *before* RLS is ever evaluated. project_memberships got RLS
+-- policies in the base schema migration but was never given this grant,
+-- because no client code had queried it directly until now (the project
+-- creator/Project Lead backfill in 20260803000000 writes through a
+-- SECURITY DEFINER trigger, which bypasses grants for its own insert).
+--
+-- The existing project_memberships_select policy (can_view_project) already
+-- does exactly what's needed once this privilege gate is cleared: an org
+-- admin (is_org_admin — role = 'admin', status = 'active') can see every
+-- project_memberships row for projects in their own organization, a
+-- Project Lead/Member only sees rows for projects they're personally
+-- staffed on (is_project_member), and no row from another organization's
+-- projects is ever visible. Nothing about that policy needed to change —
+-- only the missing grant did.
+
+grant select on public.project_memberships to authenticated;

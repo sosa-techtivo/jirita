@@ -425,7 +425,11 @@ export interface MockComment {
 }
 
 export interface MockActivity {
-  label: string;
+  /** A plain string for every existing caller; ReactNode is also accepted
+   *  so a caller (e.g. member-profile-modal.tsx's real User Activity tab)
+   *  can embed an inline link (a ticket reference) inside the label without
+   *  ActivityTimeline itself needing to know about routing. */
+  label: ReactNode;
   timeAgo: string;
   /** Optional self-contained icon badge (e.g. a small colored circle+glyph)
    *  shown in place of the plain timeline dot. Callers that don't need

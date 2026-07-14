@@ -3,7 +3,9 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import type { AvailabilityStatus, TeamMember } from "@/lib/mock-team";
+import { TEAM_MEMBER_REMOVED_EVENT } from "@/lib/mock-team";
 import { getTicketById, getTicketDisplayKey, tickets as ALL_TICKETS } from "@/lib/mock-tickets";
 import type { Ticket } from "@/lib/mock-tickets";
 import { StatusBadge as TicketStatusBadge, PriorityBadge, TicketTypeIcon, ActivityTimeline } from "@/components/tickets/ticket-ui";
@@ -14,8 +16,12 @@ import { fullName } from "@/lib/mock-users";
 import type { Role } from "@/lib/current-user";
 import { ROLE_LABELS } from "@/lib/current-user";
 import { getProjectBySlug } from "@/lib/mock-projects";
-import { loadProjectTickets } from "@/lib/tickets";
+import { loadProjectTickets, loadUserActivity } from "@/lib/tickets";
+import type { UserActivityEvent } from "@/lib/tickets";
+import { generatePasswordResetLink } from "@/lib/users";
+import { hasProjectMemberHistory, removeProjectMember } from "@/lib/projects";
 import { useCurrentUser } from "@/components/current-user-provider";
+import { ResetPasswordLinkModal } from "@/components/reset-password-link-modal";
 
 // The one Member Profile Modal used everywhere in the app a member is
 // clicked — ticket assignees, activity-feed actors, comment authors, team
@@ -47,8 +53,22 @@ export function StatusBadge({ status }: { status: AvailabilityStatus }) {
   );
 }
 
+// weeklyCapacity/assignedHours normally already arrive as real, defaulted
+// numbers (loadProjectTeam/loadProjectTickets both fall back to 0 for a
+// null/missing value) — this is the last line of defense against a 0,
+// negative, or otherwise non-finite value reaching a division, not a
+// replacement for that upstream defaulting.
+function normalizeHours(value: number): number {
+  return Number.isFinite(value) && value >= 0 ? value : 0;
+}
+
 export function utilizationOf(member: TeamMember): number {
-  return Math.round((member.assignedHours / member.weeklyCapacity) * 100);
+  const weeklyCapacity = normalizeHours(member.weeklyCapacity);
+  const assignedHours = normalizeHours(member.assignedHours);
+  // 0 weekly capacity has nothing to divide by — 0% utilized, never NaN
+  // (0/0) or Infinity (positive/0).
+  if (weeklyCapacity <= 0) return 0;
+  return Math.round((assignedHours / weeklyCapacity) * 100);
 }
 
 export function capacityBarColor(pct: number): string {
@@ -64,15 +84,22 @@ export function capacityTextColor(pct: number): string {
 }
 
 export function CapacityBar({ pct }: { pct: number }) {
+  // Text elsewhere is free to show over-100% (over-allocation is real and
+  // meaningful) — only the bar's own width is clamped, same existing
+  // convention as before, just also guarded against a NaN/negative pct
+  // ever reaching the rendered style.
+  const safePct = Number.isFinite(pct) ? Math.min(Math.max(pct, 0), 100) : 0;
   return (
     <div className="h-1.5 rounded-full bg-slate-100 dark:bg-zinc-800 overflow-hidden">
-      <div className={`h-full rounded-full ${capacityBarColor(pct)}`} style={{ width: `${Math.min(pct, 100)}%` }} />
+      <div className={`h-full rounded-full ${capacityBarColor(safePct)}`} style={{ width: `${safePct}%` }} />
     </div>
   );
 }
 
 export function remainingAvailabilityLabel(member: TeamMember): string {
-  const remaining = member.weeklyCapacity - member.assignedHours;
+  const weeklyCapacity = normalizeHours(member.weeklyCapacity);
+  const assignedHours = normalizeHours(member.assignedHours);
+  const remaining = weeklyCapacity - assignedHours;
   return remaining >= 0 ? `${remaining}h available` : `${Math.abs(remaining)}h over capacity`;
 }
 
@@ -240,7 +267,7 @@ export function MemberProfileModal({
           }
         >
           <div className="flex items-center justify-end gap-1.5 px-6 pt-5 flex-shrink-0">
-            {!isUserMode && <MemberMenu />}
+            {!isUserMode && <MemberMenu member={member!} slug={slug!} onClose={handleClose} />}
             <CloseButton onClick={handleClose} />
           </div>
 
@@ -385,9 +412,55 @@ function CloseButton({ onClick }: { onClick: () => void }) {
   );
 }
 
-function MemberMenu() {
+// "Send Message" was removed outright — no internal messaging system
+// exists in JIRITA, so it never did anything and isn't replaced by
+// anything. "View Work History" (renamed from "View Ticket History") now
+// closes this modal and navigates to its own dedicated, paginated page
+// (/projects/[slug]/team/[userId]/work-history — see work-history-screen.tsx)
+// instead of opening a second modal, so a history that grows into the
+// hundreds/thousands of tickets is never loaded whole into a small dialog.
+// "Remove from Project" is real (removeProjectMember) and only ever offered
+// when hasProjectMemberHistory confirms this member has no real
+// participation in the project yet — never rendered disabled, simply
+// omitted from `items` otherwise. That check (and both actions) only
+// resolve correctly when `member.id` is a real profiles.id, which is only
+// ever true when this modal was opened from Team (see mock-team.ts's
+// resolveTeamMember — every other trigger across the app still passes a
+// mock/synthesized id, for which the history check safely defaults to
+// "has history" and Remove from Project never appears, matching this
+// menu's previous — dead — behavior for those contexts; View Work History
+// would simply navigate to an empty page for those, same as opening it for
+// anyone with no real history today). The real guarantee against deleting
+// a member with history is the database trigger (20260809000000), not this
+// hidden/shown decision — a stale "no history" read (a contribution
+// landing between the check and the click) simply fails the delete
+// silently here, same as this menu's other items have never surfaced
+// errors before.
+function MemberMenu({
+  member,
+  slug,
+  onClose,
+}: {
+  member: TeamMember;
+  slug: string;
+  onClose: () => void;
+}) {
+  const { organization, isDevFallback } = useCurrentUser();
+  const router = useRouter();
   const [open, setOpen] = useState(false);
+  const [canRemove, setCanRemove] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (isDevFallback || !organization) return;
+    let cancelled = false;
+    hasProjectMemberHistory(organization.id, slug, member.id).then((hasHistory) => {
+      if (!cancelled) setCanRemove(!hasHistory);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [organization, isDevFallback, slug, member.id]);
 
   useEffect(() => {
     if (!open) return;
@@ -398,10 +471,29 @@ function MemberMenu() {
     return () => document.removeEventListener("mousedown", onMouseDown);
   }, [open]);
 
-  const items: { label: string; danger?: boolean }[] = [
-    { label: "Send Message" },
-    { label: "View Ticket History" },
-    { label: "Remove from Project", danger: true },
+  async function handleRemove() {
+    setOpen(false);
+    if (isDevFallback || !organization) return;
+    const result = await removeProjectMember(organization.id, slug, member.id);
+    if (result.status !== "success") return; // leave the member/modal exactly as-is on failure — no separate error UI added here, per this action's existing (unchanged) behavior
+    // Only fired once the server has actually confirmed the delete — never
+    // before, so Team's own listener (team-screen.tsx) is reacting to a
+    // real, already-committed removal, not an optimistic guess.
+    window.dispatchEvent(
+      new CustomEvent(TEAM_MEMBER_REMOVED_EVENT, { detail: { slug, profileId: member.id } })
+    );
+    onClose();
+  }
+
+  function handleViewWorkHistory() {
+    setOpen(false);
+    onClose();
+    router.push(`/projects/${slug}/team/${member.id}/work-history`);
+  }
+
+  const items: { label: string; danger?: boolean; onClick: () => void }[] = [
+    { label: "View Work History", onClick: handleViewWorkHistory },
+    ...(canRemove ? [{ label: "Remove from Project", danger: true, onClick: handleRemove }] : []),
   ];
 
   return (
@@ -433,7 +525,7 @@ function MemberMenu() {
             <button
               key={item.label}
               type="button"
-              onClick={() => setOpen(false)}
+              onClick={item.onClick}
               className={
                 "w-full px-3 py-1.5 text-[13px] text-left transition-colors duration-150 " +
                 (item.danger
@@ -446,6 +538,7 @@ function MemberMenu() {
           ))}
         </div>
       </div>
+
     </div>
   );
 }
@@ -567,8 +660,56 @@ function PermissionsTabContent({ user }: { user: User }) {
   );
 }
 
+// Same feedback surface as invite-user-modal.tsx's CopyFeedback (used there
+// for the exact same "link copied" purpose) — duplicated locally rather
+// than imported for the same reason ResetPasswordLinkModal was pulled into
+// its own file instead of importing users-screen.tsx's Toast: this modal
+// is mounted from many unrelated places app-wide (see this file's own
+// header comment) and must stay self-contained, not coupled to one
+// screen's own toast state.
+function CopyLinkFeedback({ onDismiss }: { onDismiss: () => void }) {
+  useEffect(() => {
+    const id = setTimeout(onDismiss, 3200);
+    return () => clearTimeout(id);
+  }, [onDismiss]);
+
+  return (
+    <div className="fixed bottom-5 right-5 z-[60] flex items-center gap-2 bg-slate-900 dark:bg-zinc-800 text-white text-[13px] font-medium px-4 py-2.5 rounded-lg shadow-lg shadow-black/20">
+      <svg className="w-4 h-4 text-emerald-400 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+        <path d="M5 12l5 5L20 7" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+      Password reset link copied to clipboard.
+    </div>
+  );
+}
+
+// "Generate Reset Link" reuses the exact same Server Action, client
+// wrapper, and success modal as the Users row menu's "Reset Password"
+// action (generatePasswordResetLink / ResetPasswordLinkModal — see
+// src/lib/server/invite-user-action.ts's generatePasswordResetLinkAction).
+// Nothing here generates a link or talks to Supabase Auth directly; this
+// is only the same call wired to a second entry point, same as
+// users-screen.tsx's own onClick.
 function SecurityTabContent({ user }: { user: User }) {
-  const [resetSent, setResetSent] = useState(false);
+  const { organization, isDevFallback } = useCurrentUser();
+  const [generating, setGenerating] = useState(false);
+  const [resetLink, setResetLink] = useState<string | null>(null);
+  const [resetError, setResetError] = useState<string | null>(null);
+  const [linkCopied, setLinkCopied] = useState(false);
+
+  async function handleGenerateResetLink() {
+    if (isDevFallback || !organization || generating) return;
+    setResetError(null);
+    setGenerating(true);
+    const result = await generatePasswordResetLink(organization.id, user.id);
+    setGenerating(false);
+
+    if (result.status === "error") {
+      setResetError(result.message);
+      return;
+    }
+    setResetLink(result.resetLink);
+  }
 
   return (
     <div className="space-y-5">
@@ -584,23 +725,37 @@ function SecurityTabContent({ user }: { user: User }) {
         <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-zinc-400 mb-2">
           Password
         </h2>
+        {resetError && (
+          <p role="alert" className="text-[12px] text-red-600 dark:text-red-400 mb-2">
+            {resetError}
+          </p>
+        )}
         <div className="flex items-center justify-between gap-4 p-4 rounded-xl border border-slate-200 dark:border-zinc-700/70">
           <div>
             <p className="text-[13px] font-medium text-slate-800 dark:text-zinc-200">Reset Password</p>
             <p className="text-[12px] text-slate-400 dark:text-zinc-500 mt-0.5">
-              Sends a password reset link to {user.email}.
+              Generates a password reset link for {user.email}.
             </p>
           </div>
           <button
             type="button"
-            onClick={() => setResetSent(true)}
-            disabled={resetSent}
+            onClick={handleGenerateResetLink}
+            disabled={generating}
             className="flex-shrink-0 text-[13px] font-medium text-brand-600 dark:text-brand-400 border border-brand-200 dark:border-brand-500/30 px-3 py-1.5 rounded-lg hover:bg-brand-50 dark:hover:bg-brand-500/5 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
           >
-            {resetSent ? "Email sent" : "Send Reset Email"}
+            {generating ? "Generating…" : "Generate Reset Link"}
           </button>
         </div>
       </div>
+
+      {resetLink && (
+        <ResetPasswordLinkModal
+          link={resetLink}
+          onCopy={() => setLinkCopied(true)}
+          onClose={() => setResetLink(null)}
+        />
+      )}
+      {linkCopied && <CopyLinkFeedback onDismiss={() => setLinkCopied(false)} />}
     </div>
   );
 }
@@ -690,29 +845,92 @@ const ACTIVITY_ICON: Record<ActivityKind, ReactNode> = {
   ),
 };
 
+// Real activity for this user, sourced from ticket_activity via
+// loadUserActivity (tickets.ts) — never inferred from the account's current
+// status/dates the way the old mock events here were ("Logged in",
+// "Assigned to <project>", "Invitation email sent", "User disabled"), which
+// is exactly why those were removed instead of kept alongside real data.
+// "Joined the workspace" is the one account-level event kept, since it's
+// backed by a real organization_memberships.created_at, shown separately
+// from the empty-state check below so it's never confused with actual
+// ticket activity.
 function ActivityTabContent({ user }: { user: User }) {
-  const primaryProject = user.projectSlugs[0] ? getProjectBySlug(user.projectSlugs[0]) : undefined;
+  const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
+  const [ticketEvents, setTicketEvents] = useState<UserActivityEvent[]>([]);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const events: MockActivity[] = user.status === "Invited"
-    ? [{
-        label: `Invitation email sent to ${user.email}`,
-        timeAgo: user.joinedAt.replace(/^Invited /, ""),
-        icon: ACTIVITY_ICON.invited,
-      }]
-    : [
-        ...(user.status === "Disabled"
-          ? [{ label: "User disabled", timeAgo: "Recently", icon: ACTIVITY_ICON.disabled }]
-          : []),
-        { label: "Logged in", timeAgo: user.lastLogin ?? "—", icon: ACTIVITY_ICON.login },
-        ...(primaryProject
-          ? [{ label: `Assigned to ${primaryProject.name}`, timeAgo: user.joinedAt, icon: ACTIVITY_ICON.assigned }]
-          : []),
-        { label: `Joined the workspace as ${ROLE_LABELS[user.role]}`, timeAgo: user.joinedAt, icon: ACTIVITY_ICON.joined },
-      ];
+  useEffect(() => {
+    let cancelled = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: clears the previous member's activity the moment a different profile opens, before the async fetch below resolves
+    setStatus("loading");
+    setTicketEvents([]);
+    setErrorMessage(null);
+    loadUserActivity(user.id).then((result) => {
+      if (cancelled) return;
+      if (result.status === "error") {
+        setStatus("error");
+        setErrorMessage(result.message);
+        return;
+      }
+      setTicketEvents(result.events);
+      setStatus("ready");
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [user.id]);
 
-  return events.length === 0 ? (
-    <p className="text-sm text-slate-400 dark:text-zinc-500 py-2">No recent activity.</p>
-  ) : (
-    <ActivityTimeline events={events} ringClass="ring-white dark:ring-zinc-950" />
+  if (status === "loading") {
+    return <p className="text-sm text-slate-400 dark:text-zinc-500 py-2">Loading activity…</p>;
+  }
+
+  if (status === "error") {
+    return (
+      <div
+        role="alert"
+        className="flex items-start gap-2 rounded-lg border border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/10 px-3 py-2.5 text-[12.5px] text-red-700 dark:text-red-400"
+      >
+        <svg className="w-4 h-4 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="9" />
+          <path d="M12 8v5M12 16h.01" strokeLinecap="round" />
+        </svg>
+        <span>{errorMessage ?? "Couldn't load activity."}</span>
+      </div>
+    );
+  }
+
+  const realEvents: MockActivity[] = ticketEvents.map((ev) => ({
+    label: (
+      <>
+        {ev.labelPrefix}
+        {ev.ticketKey && ev.projectSlug ? (
+          <Link
+            href={`/projects/${ev.projectSlug}/tickets/${ev.ticketKey}`}
+            className="font-medium text-brand-600 dark:text-brand-400 hover:underline"
+          >
+            {ev.ticketKey}
+          </Link>
+        ) : (
+          ev.ticketKey
+        )}
+        {ev.labelSuffix}
+      </>
+    ),
+    timeAgo: ev.timeAgo,
+  }));
+
+  const joinedEvent: MockActivity = {
+    label: `Joined the workspace as ${ROLE_LABELS[user.role]}`,
+    timeAgo: user.joinedAt.replace(/^Invited /, ""),
+    icon: ACTIVITY_ICON.joined,
+  };
+
+  return (
+    <>
+      {realEvents.length === 0 && (
+        <p className="text-sm text-slate-400 dark:text-zinc-500 py-2">No activity recorded yet.</p>
+      )}
+      <ActivityTimeline events={[...realEvents, joinedEvent]} ringClass="ring-white dark:ring-zinc-950" />
+    </>
   );
 }

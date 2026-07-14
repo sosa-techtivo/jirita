@@ -892,6 +892,363 @@ export async function loadTicketActivity(ticketId: string): Promise<TicketActivi
   return { status: "ready", events };
 }
 
+// ── User Activity (Member Profile modal's Activity tab) ─────────────────────────
+// A summarized, cross-ticket, cross-project view of one person's real
+// ticket_activity rows — reuses the exact same table/triggers
+// loadTicketActivity above reads, just filtered by actor instead of by
+// ticket. This is deliberately a *summary*, not a detailed log (that's what
+// the ticket's own Activity Log is for — see buildActivityLabel above,
+// still used there, untouched): every event_type except ticket_created gets
+// folded into a single "Working on <ticket>" entry per ticket, counting how
+// many raw rows it represents, rather than describing each field change.
+// RLS (ticket_activity_select → can_view_project → is_org_member) is what
+// actually scopes this to the caller's own organization — a foreign-org
+// profile id simply has no visible rows, never a leak, so no separate
+// server-side org check is needed for this read (unlike the privileged
+// writes elsewhere in this module's Server Actions).
+
+export interface UserActivityEvent {
+  id: string;
+  timeAgo: string;
+  /** Text before the ticket reference (the whole label when ticketKey is null). */
+  labelPrefix: string;
+  /** Text after the ticket reference — only meaningful when ticketKey is set. */
+  labelSuffix: string;
+  /** e.g. "JIR-42" — null when the row's ticket/project couldn't be resolved. */
+  ticketKey: string | null;
+  /** Needed alongside ticketKey to build the ticket's real URL — never set without ticketKey. */
+  projectSlug: string | null;
+}
+
+export type UserActivityResult =
+  | { status: "ready"; events: UserActivityEvent[] }
+  | { status: "error"; message: string };
+
+// Final, post-grouping entry count shown in the tab.
+const USER_ACTIVITY_LIMIT = 10;
+// Raw ticket_activity rows fetched before grouping — larger than the display
+// limit on purpose: grouping only ever *reduces* the row count (many raw
+// rows on one ticket become one entry), so a single-ticket-heavy actor would
+// otherwise never fill out 10 summarized entries. Still one bounded query,
+// not pagination.
+const USER_ACTIVITY_RAW_FETCH_LIMIT = 100;
+
+interface UserActivityTicketRow {
+  id: string;
+  ticket_number: number;
+  project_id: string;
+}
+
+interface UserActivityProjectRow {
+  id: string;
+  slug: string;
+  project_code: string;
+}
+
+type UserActivityRawRow = ActivityRow & { ticket_id: string };
+
+// One summarized entry per ticket: either the ticket's own creation (kept
+// as its own milestone entry, never folded in) or every other real action
+// this actor took on that ticket, collapsed into a single "Working on"
+// count — comments, status/priority changes, attachments, time entries,
+// relations, and every other field edit all count toward it, never listed
+// individually here.
+interface SummarizedTicketActivity {
+  ticketId: string;
+  mostRecentAt: string;
+  count: number;
+  kind: "created" | "working-on";
+}
+
+function summarizeUserActivityRows(rows: UserActivityRawRow[]): SummarizedTicketActivity[] {
+  const summaries: SummarizedTicketActivity[] = [];
+  const workingOnByTicket = new Map<string, SummarizedTicketActivity>();
+
+  // rows is already newest-first (the query below orders it that way), so
+  // the first row seen for a given ticket in this loop is always its most
+  // recent — no separate sort needed to find it.
+  for (const row of rows) {
+    if (row.event_type === "ticket_created") {
+      summaries.push({ ticketId: row.ticket_id, mostRecentAt: row.created_at, count: 1, kind: "created" });
+      continue;
+    }
+    const existing = workingOnByTicket.get(row.ticket_id);
+    if (existing) {
+      existing.count += 1;
+    } else {
+      const summary: SummarizedTicketActivity = {
+        ticketId: row.ticket_id,
+        mostRecentAt: row.created_at,
+        count: 1,
+        kind: "working-on",
+      };
+      workingOnByTicket.set(row.ticket_id, summary);
+      summaries.push(summary);
+    }
+  }
+
+  return summaries.sort((a, b) => new Date(b.mostRecentAt).getTime() - new Date(a.mostRecentAt).getTime());
+}
+
+// Newest first, capped at USER_ACTIVITY_LIMIT *after* grouping — see
+// summarizeUserActivityRows above. Never infers anything from current
+// ticket state or the person's account status: every entry here is built
+// from real, already-logged ticket_activity rows for this exact actor.
+export async function loadUserActivity(profileId: string, limit = USER_ACTIVITY_LIMIT): Promise<UserActivityResult> {
+  const supabase = getSupabaseBrowserClient();
+
+  const { data: rows, error } = await supabase
+    .from("ticket_activity")
+    .select("id, actor_profile_id, ticket_id, event_type, field_name, old_value, new_value, created_at")
+    .eq("actor_profile_id", profileId)
+    .order("created_at", { ascending: false })
+    .limit(USER_ACTIVITY_RAW_FETCH_LIMIT)
+    .returns<UserActivityRawRow[]>();
+
+  if (error) {
+    logDev("user activity query failed", error);
+    return { status: "error", message: error.message };
+  }
+
+  const activityRows = rows ?? [];
+  if (activityRows.length === 0) return { status: "ready", events: [] };
+
+  const summarized = summarizeUserActivityRows(activityRows).slice(0, limit);
+
+  const ticketIds = Array.from(new Set(summarized.map((s) => s.ticketId)));
+  const { data: ticketRows, error: ticketsError } = await supabase
+    .from("tickets")
+    .select("id, ticket_number, project_id")
+    .in("id", ticketIds)
+    .returns<UserActivityTicketRow[]>();
+
+  if (ticketsError) {
+    logDev("user activity tickets lookup failed", ticketsError);
+    return { status: "error", message: ticketsError.message };
+  }
+
+  const ticketById = new Map((ticketRows ?? []).map((t) => [t.id, t]));
+  const projectIds = Array.from(new Set((ticketRows ?? []).map((t) => t.project_id)));
+
+  let projectRows: UserActivityProjectRow[] = [];
+  if (projectIds.length > 0) {
+    const { data, error: projectsError } = await supabase
+      .from("projects")
+      .select("id, slug, project_code")
+      .in("id", projectIds)
+      .returns<UserActivityProjectRow[]>();
+
+    if (projectsError) {
+      logDev("user activity projects lookup failed", projectsError);
+      return { status: "error", message: projectsError.message };
+    }
+    projectRows = data ?? [];
+  }
+  const projectById = new Map(projectRows.map((p) => [p.id, p]));
+
+  const events: UserActivityEvent[] = summarized.map((s) => {
+    const ticket = ticketById.get(s.ticketId);
+    const project = ticket ? projectById.get(ticket.project_id) : undefined;
+    const ticketKey = ticket && project ? `${project.project_code}-${ticket.ticket_number}` : null;
+    const relativeTime = formatRelativeTime(s.mostRecentAt);
+
+    if (s.kind === "created") {
+      return {
+        id: `created-${s.ticketId}`,
+        timeAgo: relativeTime,
+        labelPrefix: "Created ",
+        labelSuffix: "",
+        ticketKey,
+        projectSlug: ticketKey ? (project?.slug ?? null) : null,
+      };
+    }
+
+    return {
+      id: `working-on-${s.ticketId}`,
+      // The count rides in the same subtitle line as the relative time
+      // (e.g. "2 hours ago · 5 updates") rather than a third line, so the
+      // existing two-line timeline entry (label + subtitle) needs no
+      // structural change.
+      timeAgo: `${relativeTime} · ${s.count} update${s.count === 1 ? "" : "s"}`,
+      labelPrefix: "Working on ",
+      labelSuffix: "",
+      ticketKey,
+      projectSlug: ticketKey ? (project?.slug ?? null) : null,
+    };
+  });
+
+  return { status: "ready", events };
+}
+
+// ── Project member work history (Team → member menu's "View Work History") ──
+// A per-ticket summary, not an activity log — "which tickets has this person
+// actually worked on in this project, and how much" — never lists
+// individual comments/changes/attachments/time entries (that's still the
+// ticket's own Activity Log's job, buildActivityLabel above, untouched).
+// The actual participation/aggregation logic lives entirely in three
+// database functions (20260810000000_project_member_work_history_pagination.sql
+// — see that migration's own header comment for why it's a real,
+// server-side LIMIT/OFFSET rather than fetching everything and slicing
+// here): this module only calls them and reshapes the result into this
+// app's existing TicketStatus/TicketPriority/relative-time conventions.
+
+export interface ProjectMemberWorkHistorySummary {
+  ticketCount: number;
+  totalHours: number;
+  /** Pre-formatted relative time, or null when there's no history at all yet. */
+  lastActivityLabel: string | null;
+}
+
+export type ProjectMemberWorkHistorySummaryResult =
+  | { status: "ready"; summary: ProjectMemberWorkHistorySummary }
+  | { status: "error"; message: string };
+
+export interface ProjectMemberWorkHistoryEntry {
+  ticketId: string;
+  ticketKey: string;
+  title: string;
+  status: TicketStatus;
+  priority: TicketPriority;
+  /** Hours this person specifically logged on this ticket — never the ticket's total. */
+  hours: number;
+  /** Count of this person's own ticket_activity rows on this ticket — never includes being assigned by someone else. */
+  activityCount: number;
+  /** Pre-formatted relative time ("3 days ago") — same convention as TicketComment/TicketActivityEvent/UserActivityEvent. */
+  lastActivityLabel: string;
+}
+
+export type ProjectMemberWorkHistoryPageResult =
+  | { status: "ready"; entries: ProjectMemberWorkHistoryEntry[] }
+  | { status: "error"; message: string };
+
+// Resolves the project id once — both RPCs below take it, not the slug —
+// same "not found ⇒ ready with nothing" convention as this module's other
+// project-scoped loaders (e.g. loadProjectTeam) rather than a hard error,
+// since a not-yet-loaded organization/slug pairing during the first render
+// isn't itself a failure.
+async function resolveWorkHistoryProjectId(
+  organizationId: string,
+  slug: string
+): Promise<{ status: "ready"; projectId: string | null } | { status: "error"; message: string }> {
+  const supabase = getSupabaseBrowserClient();
+  const { data: projectRow, error } = await supabase
+    .from("projects")
+    .select("id")
+    .eq("organization_id", organizationId)
+    .eq("slug", slug)
+    .maybeSingle<{ id: string }>();
+
+  if (error) {
+    logDev("work history project lookup failed", error);
+    return { status: "error", message: error.message };
+  }
+  return { status: "ready", projectId: projectRow?.id ?? null };
+}
+
+// Full-history totals — Tickets worked on / Hours logged / Last activity —
+// always computed over every matching ticket, independent of which page
+// (if any) is currently being viewed.
+export async function loadProjectMemberWorkHistorySummary(
+  organizationId: string,
+  slug: string,
+  profileId: string
+): Promise<ProjectMemberWorkHistorySummaryResult> {
+  const projectResult = await resolveWorkHistoryProjectId(organizationId, slug);
+  if (projectResult.status === "error") return projectResult;
+  if (!projectResult.projectId) {
+    return { status: "ready", summary: { ticketCount: 0, totalHours: 0, lastActivityLabel: null } };
+  }
+
+  const supabase = getSupabaseBrowserClient();
+  const { data, error } = await supabase
+    .rpc("project_member_work_history_summary", {
+      target_project_id: projectResult.projectId,
+      target_profile_id: profileId,
+    })
+    .maybeSingle<{ ticket_count: number; total_hours: number; most_recent_activity_at: string | null }>();
+
+  if (error) {
+    logDev("work history summary rpc failed", error);
+    return { status: "error", message: error.message };
+  }
+
+  return {
+    status: "ready",
+    summary: {
+      ticketCount: data?.ticket_count ?? 0,
+      totalHours: Math.round((data?.total_hours ?? 0) * 10) / 10,
+      lastActivityLabel: data?.most_recent_activity_at ? formatRelativeTime(data.most_recent_activity_at) : null,
+    },
+  };
+}
+
+interface WorkHistoryPageRow {
+  ticket_id: string;
+  ticket_number: number;
+  title: string;
+  status: string;
+  priority: string;
+  hours: number;
+  activity_count: number;
+  last_activity_at: string;
+}
+
+// One page of rows (default 20 — see the caller, work-history-screen.tsx),
+// ordered by this person's last activity on each ticket, most recent
+// first, resolved entirely server-side via LIMIT/OFFSET in
+// project_member_work_history_page — this function never fetches more
+// than one page's worth of tickets.
+export async function loadProjectMemberWorkHistoryPage(
+  organizationId: string,
+  slug: string,
+  profileId: string,
+  page: number,
+  pageSize: number
+): Promise<ProjectMemberWorkHistoryPageResult> {
+  const projectResult = await resolveWorkHistoryProjectId(organizationId, slug);
+  if (projectResult.status === "error") return projectResult;
+  if (!projectResult.projectId) return { status: "ready", entries: [] };
+
+  const supabase = getSupabaseBrowserClient();
+  const { data: projectCodeRow, error: projectCodeError } = await supabase
+    .from("projects")
+    .select("project_code")
+    .eq("id", projectResult.projectId)
+    .maybeSingle<{ project_code: string }>();
+
+  if (projectCodeError) {
+    logDev("work history project code lookup failed", projectCodeError);
+    return { status: "error", message: projectCodeError.message };
+  }
+  const projectCode = projectCodeRow?.project_code ?? "";
+
+  const { data, error } = await supabase.rpc("project_member_work_history_page", {
+    target_project_id: projectResult.projectId,
+    target_profile_id: profileId,
+    page_size: pageSize,
+    page_offset: Math.max(0, page - 1) * pageSize,
+  });
+
+  if (error) {
+    logDev("work history page rpc failed", error);
+    return { status: "error", message: error.message };
+  }
+
+  const rows = (data ?? []) as WorkHistoryPageRow[];
+  const entries: ProjectMemberWorkHistoryEntry[] = rows.map((row) => ({
+    ticketId: row.ticket_id,
+    ticketKey: `${projectCode}-${row.ticket_number}`,
+    title: row.title,
+    status: STATUS_FROM_DB[row.status] ?? "backlog",
+    priority: row.priority as TicketPriority,
+    hours: Math.round(row.hours * 10) / 10,
+    activityCount: row.activity_count,
+    lastActivityLabel: formatRelativeTime(row.last_activity_at),
+  }));
+
+  return { status: "ready", entries };
+}
+
 // ── Attachments (Ticket Detail) ─────────────────────────────────────────────────
 // Real Supabase Storage + a ticket_attachments metadata row per file — upload,
 // rename, and delete are all wired to real writes (see uploadTicketAttachment /

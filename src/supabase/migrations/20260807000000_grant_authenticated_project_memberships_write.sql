@@ -1,0 +1,24 @@
+-- Grant authenticated-role write access to project_memberships.
+--
+-- project_memberships got real RLS write policies in the base schema
+-- migration (project_memberships_insert/_update/_delete, all scoped to
+-- is_org_admin_or_lead) but, like every other table in this app, `create
+-- table` alone grants nothing to the authenticated role — Postgres checks
+-- base table privileges *before* RLS is ever evaluated (see
+-- 20260804000000's own header comment for the read-side version of this
+-- same gap). Only SELECT was ever granted; INSERT/UPDATE/DELETE were not,
+-- because nothing wrote to this table from the client until now (Team's
+-- "+ Add Member" button and its member-removal menu item — see
+-- src/lib/projects.ts's addProjectMember/removeProjectMember).
+--
+-- This does not loosen any policy: project_memberships_insert/_update/_delete
+-- already correctly require is_org_admin_or_lead(organization_id), which is
+-- exactly who the Team screen's "Add Member" button is gated to
+-- (canManage(user.role) in team-screen.tsx). The automatic "contribution ⇒
+-- membership" path (20260808000000) does not depend on this grant at all —
+-- it writes through a SECURITY DEFINER trigger, which bypasses grants for
+-- its own insert, the same way 20260803000000's project-creator trigger
+-- already does — so a plain Member can still trigger their own automatic
+-- membership row even though they have no direct write grant here.
+
+grant insert, update, delete on public.project_memberships to authenticated;

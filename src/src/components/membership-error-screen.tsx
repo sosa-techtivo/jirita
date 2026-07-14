@@ -33,11 +33,16 @@ export function MembershipErrorScreen({
 
   return (
     <AuthCard
-      title={isError ? "Couldn't load your workspace" : "No workspace access yet"}
+      title={isError ? "Couldn't load your workspace" : "No active workspace access"}
       subtitle={
         isError
           ? "Something went wrong while loading your profile and organization membership."
-          : "Your account is signed in, but it isn't a member of any Jirita organization yet."
+          // Deliberately neutral: this also covers an account whose access
+          // was just turned off (not only one that was never added), so it
+          // never claims a cause that isn't actually known here — see
+          // current-user-provider.tsx's sign-out effect for why a real,
+          // signed-in session can still land here.
+          : "Your account doesn't have active access to a Jirita organization right now."
       }
     >
       <div className="space-y-4">
@@ -51,7 +56,7 @@ export function MembershipErrorScreen({
         )}
         {!isError && (
           <p className="text-[13px] text-slate-500 dark:text-zinc-400">
-            Ask an admin to add you to a workspace, then try again.
+            Ask an admin about your access, then try again.
           </p>
         )}
 
