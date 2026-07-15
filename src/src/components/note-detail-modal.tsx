@@ -9,20 +9,25 @@ export function NoteDetailModal({
   startInEditMode = false,
   onClose,
   onSave,
+  onDuplicate,
+  onDelete,
 }: {
   note: ProjectNote;
   startInEditMode?: boolean;
   onClose: () => void;
-  onSave: (updated: ProjectNote) => void;
+  onSave: (input: { title: string; body: string; tag?: string }) => Promise<boolean>;
+  onDuplicate: () => void;
+  onDelete: () => Promise<boolean>;
 }) {
   const [visible, setVisible] = useState(false);
   const [mode, setMode] = useState<"view" | "edit">(startInEditMode ? "edit" : "view");
   const [title, setTitle] = useState(note.title);
   const [tag, setTag] = useState<string | undefined>(note.tag);
   const [body, setBody] = useState(note.body);
+  const [saving, setSaving] = useState(false);
   const titleRef = useRef<HTMLInputElement>(null);
 
-  const canSave = title.trim().length > 0;
+  const canSave = title.trim().length > 0 && !saving;
 
   function handleClose() {
     setVisible(false);
@@ -36,19 +41,24 @@ export function NoteDetailModal({
     setMode("edit");
   }
 
-  function handleSave() {
+  async function handleSave() {
     if (!canSave) {
       titleRef.current?.focus();
       return;
     }
-    onSave({
-      ...note,
+    setSaving(true);
+    const success = await onSave({
       title: title.trim(),
       tag,
       body: body.trim() || "No additional details yet.",
-      updatedAt: "Just now",
     });
-    setMode("view");
+    setSaving(false);
+    if (success) setMode("view");
+  }
+
+  async function handleDelete() {
+    const success = await onDelete();
+    if (success) handleClose();
   }
 
   useEffect(() => {
@@ -99,7 +109,7 @@ export function NoteDetailModal({
             <>
               <div className="flex items-center justify-end gap-1.5 px-6 pt-5 flex-shrink-0">
                 {note.tag && <TagBadge tag={note.tag} />}
-                <NoteDetailMenu onEdit={enterEditMode} />
+                <NoteDetailMenu onEdit={enterEditMode} onDuplicate={onDuplicate} onDelete={() => { void handleDelete(); }} />
                 <CloseButton onClick={handleClose} />
               </div>
 
@@ -220,7 +230,15 @@ function CloseButton({ onClick }: { onClick: () => void }) {
   );
 }
 
-function NoteDetailMenu({ onEdit }: { onEdit: () => void }) {
+function NoteDetailMenu({
+  onEdit,
+  onDuplicate,
+  onDelete,
+}: {
+  onEdit: () => void;
+  onDuplicate: () => void;
+  onDelete: () => void;
+}) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -235,8 +253,8 @@ function NoteDetailMenu({ onEdit }: { onEdit: () => void }) {
 
   const items: { label: string; danger?: boolean; onSelect: () => void }[] = [
     { label: "Edit", onSelect: onEdit },
-    { label: "Duplicate", onSelect: () => {} },
-    { label: "Delete", danger: true, onSelect: () => {} },
+    { label: "Duplicate", onSelect: onDuplicate },
+    { label: "Delete", danger: true, onSelect: onDelete },
   ];
 
   return (

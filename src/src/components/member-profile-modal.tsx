@@ -5,7 +5,7 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { AvailabilityStatus, TeamMember } from "@/lib/mock-team";
-import { TEAM_MEMBER_REMOVED_EVENT } from "@/lib/mock-team";
+import { TEAM_MEMBER_REMOVED_EVENT, TEAM_PROJECT_LEAD_CHANGED_EVENT } from "@/lib/mock-team";
 import { getTicketById, getTicketDisplayKey, tickets as ALL_TICKETS } from "@/lib/mock-tickets";
 import type { Ticket } from "@/lib/mock-tickets";
 import { StatusBadge as TicketStatusBadge, PriorityBadge, TicketTypeIcon, ActivityTimeline } from "@/components/tickets/ticket-ui";
@@ -19,7 +19,7 @@ import { getProjectBySlug } from "@/lib/mock-projects";
 import { loadProjectTickets, loadUserActivity } from "@/lib/tickets";
 import type { UserActivityEvent } from "@/lib/tickets";
 import { generatePasswordResetLink } from "@/lib/users";
-import { hasProjectMemberHistory, removeProjectMember } from "@/lib/projects";
+import { hasProjectMemberHistory, removeProjectMember, setProjectLead } from "@/lib/projects";
 import { useCurrentUser } from "@/components/current-user-provider";
 import { ResetPasswordLinkModal } from "@/components/reset-password-link-modal";
 
@@ -445,7 +445,7 @@ function MemberMenu({
   slug: string;
   onClose: () => void;
 }) {
-  const { organization, isDevFallback } = useCurrentUser();
+  const { user, organization, isDevFallback } = useCurrentUser();
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [canRemove, setCanRemove] = useState(false);
@@ -491,8 +491,36 @@ function MemberMenu({
     router.push(`/projects/${slug}/team/${member.id}/work-history`);
   }
 
+  // Only an Admin viewer can promote a Project Lead, and only onto a member
+  // whose real org-wide role is itself Admin or Project Lead (member.role
+  // is that real org role label — see loadProjectTeam's own title field —
+  // never Member). member.projectRole is only ever set by the real Team
+  // roster (loadProjectTeam); every other TeamMember source in this app
+  // (mock rosters, resolveTeamMember's stubs) leaves it undefined, which
+  // also keeps this off outside a real Team context, same as canRemove
+  // above already relies on a real profiles.id. Same "wait for the server
+  // to confirm before touching anything" shape as handleRemove — no
+  // optimistic update here means no rollback is ever needed on failure.
+  async function handleMakeLead() {
+    setOpen(false);
+    if (isDevFallback || !organization) return;
+    const result = await setProjectLead(organization.id, slug, member.id);
+    if (result.status !== "success") return;
+    window.dispatchEvent(
+      new CustomEvent(TEAM_PROJECT_LEAD_CHANGED_EVENT, { detail: { slug, profileId: member.id } })
+    );
+    onClose();
+  }
+
+  const canMakeLead =
+    user.role === "ADMIN" &&
+    member.projectRole !== undefined &&
+    member.projectRole !== "lead" &&
+    (member.role === "Admin" || member.role === "Project Lead");
+
   const items: { label: string; danger?: boolean; onClick: () => void }[] = [
     { label: "View Work History", onClick: handleViewWorkHistory },
+    ...(canMakeLead ? [{ label: "Make Project Lead", onClick: handleMakeLead }] : []),
     ...(canRemove ? [{ label: "Remove from Project", danger: true, onClick: handleRemove }] : []),
   ];
 

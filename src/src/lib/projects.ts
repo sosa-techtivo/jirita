@@ -467,6 +467,136 @@ export async function loadOrganizationMembers(organizationId: string): Promise<O
   return { status: "ready", members };
 }
 
+export interface OrgWorkloadMember {
+  id: string;
+  name: string;
+  avatar: string;
+  weeklyCapacity: number;
+}
+
+export type OrgWorkloadMembersResult =
+  | { status: "ready"; members: OrgWorkloadMember[] }
+  | { status: "error"; message: string };
+
+// Active org members with their real weekly_capacity — backs the Admin
+// Dashboard's Team Workload widget only. Deliberately its own function
+// rather than adding weekly_capacity onto loadOrganizationMembers above:
+// that one's existing callers (the Project Lead picker) don't need it, and
+// this keeps that unrelated call site untouched. Assigned hours (the other
+// half of "workload") come from tickets already loaded elsewhere — see
+// dashboard-screen.tsx — computed with the exact same "active tickets only"
+// definition team-screen.tsx already uses, not duplicated here.
+export async function loadOrganizationWorkloadMembers(organizationId: string): Promise<OrgWorkloadMembersResult> {
+  const supabase = getSupabaseBrowserClient();
+
+  const { data: membershipRows, error } = await supabase
+    .from("organization_memberships")
+    .select("profile_id, weekly_capacity")
+    .eq("organization_id", organizationId)
+    .eq("status", "active")
+    .returns<{ profile_id: string; weekly_capacity: number | null }[]>();
+
+  if (error) {
+    logDev("organization workload members query failed", error);
+    return { status: "error", message: error.message };
+  }
+
+  if (!membershipRows || membershipRows.length === 0) return { status: "ready", members: [] };
+
+  const capacityByProfileId = new Map(membershipRows.map((row) => [row.profile_id, row.weekly_capacity ?? 0]));
+  const profileIds = membershipRows.map((row) => row.profile_id);
+
+  const { data: profileRows, error: profileError } = await supabase
+    .from("profiles")
+    .select("id, first_name, last_name, avatar_url, updated_at")
+    .in("id", profileIds)
+    .returns<OwnerProfileRow[]>();
+
+  if (profileError) {
+    logDev("workload member profiles query failed", profileError);
+    return { status: "error", message: profileError.message };
+  }
+
+  const members: OrgWorkloadMember[] = (profileRows ?? []).map((row) => ({
+    id: row.id,
+    name: [row.first_name, row.last_name].filter(Boolean).join(" ") || "Unnamed",
+    avatar: resolveAvatarUrl(row.avatar_url, row.updated_at) ?? FALLBACK_AVATAR,
+    weeklyCapacity: capacityByProfileId.get(row.id) ?? 0,
+  }));
+
+  return { status: "ready", members };
+}
+
+export interface LeadProject {
+  slug: string;
+  name: string;
+  targetDate: string;
+}
+
+export type LeadProjectsResult =
+  | { status: "ready"; projects: LeadProject[] }
+  | { status: "error"; message: string };
+
+// Active projects this specific profile leads, per the one authoritative
+// per-project signal for that: project_memberships.project_role = 'lead'
+// (see 20260812000000_add_project_membership_project_role.sql and Team's
+// "Make Project Lead" action, which is the only thing that ever writes
+// it). Backs the Project Lead Dashboard's Current Project selector only.
+//
+// Previously this queried projects.owner_profile_id instead — a different,
+// older "Project Lead" field (Project Settings' own picker) that Make
+// Project Lead never touches, so a real project_role = 'lead' membership
+// never showed up here even though Team and the sidebar both already
+// recognized it correctly (both ultimately key off project_memberships,
+// via can_view_project's is_project_member check — this function now does
+// the same). profile_id, not any organization_membership id, is what
+// project_memberships is keyed on throughout this app.
+//
+// RLS (project_memberships_select / projects_select, both via
+// can_view_project) already limits results to what this profile can
+// actually see — a lead row on a project this profile can't otherwise view
+// simply won't come back, same as everywhere else in this app.
+export async function loadLeadProjects(organizationId: string, profileId: string): Promise<LeadProjectsResult> {
+  const supabase = getSupabaseBrowserClient();
+
+  const { data: leadRows, error: leadError } = await supabase
+    .from("project_memberships")
+    .select("project_id")
+    .eq("profile_id", profileId)
+    .eq("project_role", "lead")
+    .returns<{ project_id: string }[]>();
+
+  if (leadError) {
+    logDev("lead project memberships query failed", leadError);
+    return { status: "error", message: leadError.message };
+  }
+  if (!leadRows || leadRows.length === 0) return { status: "ready", projects: [] };
+
+  const projectIds = leadRows.map((row) => row.project_id);
+
+  const { data: rows, error } = await supabase
+    .from("projects")
+    .select("slug, name, target_date")
+    .eq("organization_id", organizationId)
+    .eq("status", "active")
+    .in("id", projectIds)
+    .order("name", { ascending: true })
+    .returns<{ slug: string; name: string; target_date: string | null }[]>();
+
+  if (error) {
+    logDev("lead projects query failed", error);
+    return { status: "error", message: error.message };
+  }
+
+  const projects: LeadProject[] = (rows ?? []).map((row) => ({
+    slug: row.slug,
+    name: row.name,
+    targetDate: formatTargetDate(row.target_date),
+  }));
+
+  return { status: "ready", projects };
+}
+
 export interface ProjectSettingsUpdate {
   name?: string;
   description?: string;
@@ -604,15 +734,34 @@ export async function createOrganizationClient(organizationId: string, name: str
 // consumer that needs both — e.g. member-profile-modal.tsx — already
 // combines them itself instead of one module depending on the other).
 
+// Same organization_memberships.role -> display label mapping Users
+// already shows (see ROLE_LABELS in lib/current-user.ts) — duplicated here
+// as a small local map (same convention as every other DB-value label map
+// in this codebase, e.g. tickets.ts's own activityStatusLabel) rather than
+// importing a differently-shaped module for one lookup table.
+const ORG_ROLE_LABEL: Record<string, string> = {
+  admin: "Admin",
+  project_lead: "Project Lead",
+  member: "Member",
+};
+
 export interface ProjectTeamMember {
   /** profiles.id — also what project_memberships is keyed on for this project. */
   id: string;
   name: string;
   email: string;
   avatar: string;
-  /** project_memberships.title — the existing per-project title field (e.g. "Project Lead", "Member"), never the person's org-wide role. */
+  /** organization_memberships.role for this profile, in this org — "Admin" /
+   *  "Project Lead" / "Member". This is the person's real org-wide role,
+   *  never project_memberships.title (see below) — that field only ever
+   *  determines project membership, not what's displayed as their role. */
   title: string;
   weeklyCapacity: number;
+  /** project_memberships.project_role ('lead' | 'member') — the one
+   *  project-scoped role this table models today; see
+   *  20260812000000_add_project_membership_project_role.sql. Never derived
+   *  from organization_memberships. */
+  projectRole: "lead" | "member";
 }
 
 export type ProjectTeamResult =
@@ -621,8 +770,8 @@ export type ProjectTeamResult =
 
 interface TeamMembershipRow {
   profile_id: string;
-  title: string | null;
   weekly_capacity: number | null;
+  project_role: string;
 }
 
 interface TeamProfileRow {
@@ -632,6 +781,12 @@ interface TeamProfileRow {
   email: string | null;
   avatar_url: string | null;
   updated_at: string;
+}
+
+interface TeamOrgRoleRow {
+  profile_id: string;
+  role: string;
+  weekly_capacity: number | null;
 }
 
 export async function loadProjectTeam(organizationId: string, slug: string): Promise<ProjectTeamResult> {
@@ -652,7 +807,7 @@ export async function loadProjectTeam(organizationId: string, slug: string): Pro
 
   const { data: membershipRows, error: membershipError } = await supabase
     .from("project_memberships")
-    .select("profile_id, title, weekly_capacity")
+    .select("profile_id, weekly_capacity, project_role")
     .eq("project_id", projectRow.id)
     .returns<TeamMembershipRow[]>();
 
@@ -663,18 +818,46 @@ export async function loadProjectTeam(organizationId: string, slug: string): Pro
   if (!membershipRows || membershipRows.length === 0) return { status: "ready", members: [] };
 
   const profileIds = membershipRows.map((row) => row.profile_id);
-  const { data: profileRows, error: profileError } = await supabase
-    .from("profiles")
-    .select("id, first_name, last_name, email, avatar_url, updated_at")
-    .in("id", profileIds)
-    .returns<TeamProfileRow[]>();
 
-  if (profileError) {
-    logDev("team profiles query failed", profileError);
-    return { status: "error", message: profileError.message };
+  // Real org role (Admin/Project Lead/Member) comes from
+  // organization_memberships — the same table Users reads — fetched here
+  // as one batched query for every member at once, in parallel with the
+  // profiles lookup, never one query per person.
+  const [profilesResult, orgRolesResult] = await Promise.all([
+    supabase
+      .from("profiles")
+      .select("id, first_name, last_name, email, avatar_url, updated_at")
+      .in("id", profileIds)
+      .returns<TeamProfileRow[]>(),
+    supabase
+      .from("organization_memberships")
+      .select("profile_id, role, weekly_capacity")
+      .eq("organization_id", organizationId)
+      .in("profile_id", profileIds)
+      .returns<TeamOrgRoleRow[]>(),
+  ]);
+
+  if (profilesResult.error) {
+    logDev("team profiles query failed", profilesResult.error);
+    return { status: "error", message: profilesResult.error.message };
+  }
+  if (orgRolesResult.error) {
+    logDev("team org roles query failed", orgRolesResult.error);
+    return { status: "error", message: orgRolesResult.error.message };
   }
 
-  const profileById = new Map((profileRows ?? []).map((p) => [p.id, p]));
+  const profileById = new Map((profilesResult.data ?? []).map((p) => [p.id, p]));
+  const orgRoleLabelByProfileId = new Map(
+    (orgRolesResult.data ?? []).map((row) => [row.profile_id, ORG_ROLE_LABEL[row.role] ?? row.role])
+  );
+  // "+ Add Member" (addProjectMember) never sets project_memberships.weekly_capacity,
+  // so a member added that way has it null, not 0 — falling back to their real
+  // organization_memberships.weekly_capacity here (only when the project-level
+  // value is genuinely unset, never overriding an explicit 0) keeps this the
+  // same real number Users/Profile already show for them, instead of a
+  // fabricated 0h. Same fallback source ensure_project_membership already
+  // seeds new auto-added rows from.
+  const orgCapacityByProfileId = new Map((orgRolesResult.data ?? []).map((row) => [row.profile_id, row.weekly_capacity]));
 
   const members: ProjectTeamMember[] = membershipRows
     .map((membership): ProjectTeamMember | null => {
@@ -685,8 +868,9 @@ export async function loadProjectTeam(organizationId: string, slug: string): Pro
         name: [profile.first_name, profile.last_name].filter(Boolean).join(" ") || "Unnamed",
         email: profile.email ?? "",
         avatar: resolveAvatarUrl(profile.avatar_url, profile.updated_at) ?? FALLBACK_AVATAR,
-        title: membership.title ?? "Member",
-        weeklyCapacity: membership.weekly_capacity ?? 0,
+        title: orgRoleLabelByProfileId.get(profile.id) ?? "Member",
+        weeklyCapacity: membership.weekly_capacity ?? orgCapacityByProfileId.get(profile.id) ?? 0,
+        projectRole: membership.project_role === "lead" ? "lead" : "member",
       };
     })
     .filter((m): m is ProjectTeamMember => m !== null)
@@ -734,6 +918,65 @@ export async function addProjectMember(
     // member (e.g. auto-added by a contribution) is not a real failure.
     if (error.code === "23505") return { status: "success" };
     return { status: "error", message: error.message };
+  }
+
+  return { status: "success" };
+}
+
+// Wired from member-profile-modal.tsx's MemberMenu "Make Project Lead"
+// (Team's real member cards only, same as addProjectMember/removeProjectMember
+// above). The DB only allows one project_role = 'lead' row per project (the
+// partial unique index from 20260812000000_add_project_membership_project_role.sql),
+// so the previous lead — if any — has to be cleared back to 'member' first;
+// the second update is what actually promotes the new one. Only ever
+// touches this project's own project_memberships rows: no organization
+// role, no other project, no ticket/hours/KPI data. RLS
+// (project_memberships_update: is_org_admin_or_lead) is the same
+// unmodified floor every other project_memberships write already uses in
+// this app — "only Admin" for this specific action is enforced by the UI
+// only offering it to an Admin viewer (MemberMenu), same client-side-gate
+// pattern as every other role-gated action in this app (e.g. canManage for
+// Quick Actions), not a new RLS policy.
+export async function setProjectLead(
+  organizationId: string,
+  slug: string,
+  profileId: string
+): Promise<ProjectMemberWriteResult> {
+  const supabase = getSupabaseBrowserClient();
+
+  const { data: projectRow, error: projectError } = await supabase
+    .from("projects")
+    .select("id")
+    .eq("organization_id", organizationId)
+    .eq("slug", slug)
+    .maybeSingle<{ id: string }>();
+
+  if (projectError) {
+    logDev("project id lookup failed", projectError);
+    return { status: "error", message: projectError.message };
+  }
+  if (!projectRow) return { status: "error", message: "Project not found." };
+
+  const { error: clearError } = await supabase
+    .from("project_memberships")
+    .update({ project_role: "member" })
+    .eq("project_id", projectRow.id)
+    .eq("project_role", "lead");
+
+  if (clearError) {
+    logDev("clearing previous project lead failed", clearError);
+    return { status: "error", message: clearError.message };
+  }
+
+  const { error: setError } = await supabase
+    .from("project_memberships")
+    .update({ project_role: "lead" })
+    .eq("project_id", projectRow.id)
+    .eq("profile_id", profileId);
+
+  if (setError) {
+    logDev("setting project lead failed", setError);
+    return { status: "error", message: setError.message };
   }
 
   return { status: "success" };

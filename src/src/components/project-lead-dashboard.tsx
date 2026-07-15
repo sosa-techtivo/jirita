@@ -1,28 +1,27 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { useCurrentUser } from "@/components/current-user-provider";
 import { getTeamByProjectSlug } from "@/lib/mock-team";
 import type { TeamMember } from "@/lib/mock-team";
-import { projects } from "@/lib/mock-projects";
 import { TicketPreviewPanel } from "@/components/tickets/ticket-preview-panel";
 import type { Ticket } from "@/lib/mock-tickets";
 import { getTicketDisplayKey } from "@/lib/mock-tickets";
-import { TicketTypeIcon } from "@/components/tickets/ticket-ui";
+import { TicketTypeIcon, parseDisplayDate, getTodayISO, formatISODate, PRIORITY_VALUES, ErrorToast } from "@/components/tickets/ticket-ui";
 import {
   Card,
   ActiveTicketRow,
   RecentActivityList,
   MY_ACTIVE,
-  RECENT_ACTIVITY,
   av,
   HERO_CARD_CLASS,
   HERO_LABEL_CLASS,
   HERO_ACCENT_TEXT_CLASS,
   HERO_BORDER_CLASS,
 } from "@/components/dashboard-shared";
+import type { DashboardActivityEntry } from "@/components/dashboard-shared";
 import {
   utilizationOf,
   capacityTextColor,
@@ -30,47 +29,46 @@ import {
   remainingAvailabilityLabel,
 } from "@/components/member-profile-modal";
 import { useMemberProfile } from "@/components/member-profile";
+import { loadLeadProjects, loadProjectTeam, loadOrganizationMembers, addProjectMember } from "@/lib/projects";
+import type { LeadProject, ProjectTeamMember, OrgMember } from "@/lib/projects";
+import { loadProjectTickets, loadOrganizationLoggedMinutes, loadOrganizationActivity } from "@/lib/tickets";
+import type { OrganizationActivityEvent } from "@/lib/tickets";
+import { AddTeamMemberModal } from "@/components/add-team-member-modal";
+import { NewNoteModal } from "@/components/notes-screen";
+import { createNote } from "@/lib/notes";
+import { NewTicketModal } from "@/components/tickets/new-ticket-modal";
 
 // ── Data ──────────────────────────────────────────────────────────────────────
-// This is an operational view scoped to the Project Lead's own projects —
-// there is no organization-wide data here at all. The Project Context
-// selector below lets the Lead switch which of their projects (or all of
-// them at once) the dashboard is currently reporting on.
+// Current Project / Current Delivery / Attention Required / Team Capacity /
+// My Active Work / Recent Activity / Upcoming Deadlines are all real (see
+// the data-loading effects inside ProjectLeadDashboard below —
+// loadLeadProjects, loadProjectTickets, loadProjectTeam,
+// loadOrganizationLoggedMinutes, loadOrganizationActivity, all
+// already-existing loaders reused as-is). My Active Work / Recent Activity /
+// Upcoming Deadlines / Team Capacity are all scoped to the whole selected
+// project (every member/ticket, regardless of assignee), not just the
+// signed-in Project Lead's own work. PROJECT_TICKETS / MY_ACTIVE /
+// aggregateTeam / getTeamByProjectSlug mock data are no longer read by this
+// component itself, but stay defined/exported as-is because
+// projects-list-screen.tsx and project-lead-reports-screen.tsx still import
+// them directly.
 
-const ALL_PROJECTS_VALUE = "__all__";
-const DEFAULT_PROJECT_SLUG = "mobile-banking-app";
-
-// Projects this Project Lead is responsible for. A real backend would scope
-// this by an actual ownership/membership relation — here we just hardcode
-// the mock set the Lead manages. Exported so other Project Lead-scoped views
-// (e.g. the Projects list) stay consistent with this dashboard.
+// Projects this Project Lead manages, per the still-mock Reports screen —
+// kept exactly as-is (unused by this component's own Current Project
+// selector anymore, which reads real data instead) because
+// projects-list-screen.tsx and project-lead-reports-screen.tsx still import
+// this exact constant and must keep working unchanged.
 export const LEAD_PROJECT_SLUGS = ["mobile-banking-app", "client-website-redesign", "internal-platform-migration"];
 
-interface DeliverySnapshot {
-  completedTickets: number;
-  totalTickets: number;
-  remainingHours: number;
-  blockedTickets: number;
-  targetDate: string;
-}
+// My Active Work's real status set (To Do / In Progress / Blocked / In
+// Review) — deliberately narrower than the "active = status !== done" used
+// by Current Delivery/Attention Required/Upcoming Deadlines elsewhere in
+// this component: backlog tickets are excluded here on purpose, per spec.
+const ACTIVE_WORK_STATUSES: Ticket["status"][] = ["to-do", "in-progress", "blocked", "review"];
 
-// Delivery snapshot per project — no Sprint concept in the MVP, so this
-// tracks overall ticket/hours progress toward each project's target date.
-const DELIVERY_BY_PROJECT: Record<string, DeliverySnapshot> = {
-  "mobile-banking-app": { completedTickets: 14, totalTickets: 24, remainingHours: 107, blockedTickets: 3, targetDate: "Jul 5" },
-  "client-website-redesign": { completedTickets: 2, totalTickets: 8, remainingHours: 12, blockedTickets: 1, targetDate: "Jul 15" },
-  "internal-platform-migration": { completedTickets: 9, totalTickets: 14, remainingHours: 30, blockedTickets: 0, targetDate: "Jul 20" },
-};
-
-const DUE_TODAY_BY_PROJECT: Record<string, number> = {
-  "mobile-banking-app": 2,
-  "client-website-redesign": 1,
-  "internal-platform-migration": 1,
-};
-
-// Per-project ticket pools that feed "Awaiting Review" and "Upcoming
-// Deadlines" — Mobile Banking App reuses the Lead's own active work list
-// since that's already scoped to this project.
+// Per-project ticket pools that feed the still-mock Upcoming Deadlines
+// section only (Attention Required's own "Awaiting Review" is real — see
+// the component body).
 export const PROJECT_TICKETS: Record<string, Ticket[]> = {
   "mobile-banking-app": MY_ACTIVE,
   "client-website-redesign": [
@@ -124,29 +122,11 @@ export const PROJECT_TICKETS: Record<string, Ticket[]> = {
   ],
 };
 
-function isEarlierDate(a: string, b: string): boolean {
-  return new Date(`${a}, 2026`).getTime() < new Date(`${b}, 2026`).getTime();
-}
-
-function sumDelivery(slugs: string[]): DeliverySnapshot {
-  return slugs.reduce<DeliverySnapshot>(
-    (acc, slug) => {
-      const d = DELIVERY_BY_PROJECT[slug];
-      if (!d) return acc;
-      return {
-        completedTickets: acc.completedTickets + d.completedTickets,
-        totalTickets: acc.totalTickets + d.totalTickets,
-        remainingHours: acc.remainingHours + d.remainingHours,
-        blockedTickets: acc.blockedTickets + d.blockedTickets,
-        targetDate: acc.targetDate === "" || isEarlierDate(d.targetDate, acc.targetDate) ? d.targetDate : acc.targetDate,
-      };
-    },
-    { completedTickets: 0, totalTickets: 0, remainingHours: 0, blockedTickets: 0, targetDate: "" },
-  );
-}
-
 // Merge team rosters across projects, summing hours/capacity for anyone
-// staffed on more than one of the selected projects.
+// staffed on more than one of the selected projects. No longer called by
+// this component's own (now real) Team Capacity section — kept only because
+// projects-list-screen.tsx and project-lead-reports-screen.tsx still import
+// it directly.
 export function aggregateTeam(slugs: string[]): TeamMember[] {
   const merged = new Map<string, TeamMember>();
   for (const slug of slugs) {
@@ -263,55 +243,372 @@ function TeamCapacityRow({ member, onOpen }: { member: TeamMember; onOpen: (m: T
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function ProjectLeadDashboard() {
-  const { user } = useCurrentUser();
+  const { user, userId, organization, isDevFallback } = useCurrentUser();
   const { openMemberProfile } = useMemberProfile();
   const [preview, setPreview] = useState<Ticket | null>(null);
 
-  // Projects this Project Lead manages — the Project Context selector below
-  // lets them switch between any one of these, or view all of them at once.
-  const ownedProjects = projects.filter((p) => LEAD_PROJECT_SLUGS.includes(p.slug));
-  const [activeSlug, setActiveSlug] = useState(DEFAULT_PROJECT_SLUG);
+  // ── Current Project: real projects this profile leads (projects.owner_profile_id) ──
+  const [projectsLoadState, setProjectsLoadState] = useState<"loading" | "ready" | "error">(
+    isDevFallback ? "ready" : "loading"
+  );
+  const [projectsErrorMessage, setProjectsErrorMessage] = useState<string | null>(null);
+  const [leadProjects, setLeadProjects] = useState<LeadProject[]>([]);
+  const [activeSlug, setActiveSlug] = useState("");
 
-  const isAllProjects = activeSlug === ALL_PROJECTS_VALUE;
-  const selectedSlugs = isAllProjects ? LEAD_PROJECT_SLUGS : [activeSlug];
-  const selectedNames = selectedSlugs
-    .map((slug) => ownedProjects.find((p) => p.slug === slug)?.name)
-    .filter((name): name is string => name !== undefined);
+  useEffect(() => {
+    if (isDevFallback || !organization || !userId) return;
+    let cancelled = false;
 
-  const contextTitle = isAllProjects
-    ? "All Projects"
-    : ownedProjects.find((p) => p.slug === activeSlug)?.name ?? "Project";
+    loadLeadProjects(organization.id, userId).then((result) => {
+      if (cancelled) return;
+      if (result.status === "error") {
+        setProjectsLoadState("error");
+        setProjectsErrorMessage(result.message);
+        return;
+      }
+      setLeadProjects(result.projects);
+      setActiveSlug((prev) => (result.projects.some((p) => p.slug === prev) ? prev : result.projects[0]?.slug ?? ""));
+      setProjectsLoadState("ready");
+    });
 
-  // Links to project-scoped pages have nowhere to go when "All Projects" is
-  // selected — future project pages will adopt this same context, but for
-  // now those links just fall back to the projects list.
-  const linkSlug = isAllProjects ? null : activeSlug;
+    return () => {
+      cancelled = true;
+    };
+  }, [isDevFallback, organization, userId]);
+
+  // ── Current Delivery + Attention Required: real data for the selected project ──
+  const [deliveryLoadState, setDeliveryLoadState] = useState<"loading" | "ready" | "error">(
+    isDevFallback ? "ready" : "loading"
+  );
+  const [deliveryErrorMessage, setDeliveryErrorMessage] = useState<string | null>(null);
+  const [tickets, setTickets] = useState<Ticket[]>([]);
+  const [team, setTeam] = useState<ProjectTeamMember[]>([]);
+  const [activeLoggedMinutes, setActiveLoggedMinutes] = useState(0);
+  const [activityEvents, setActivityEvents] = useState<OrganizationActivityEvent[]>([]);
+  const [requestId, setRequestId] = useState(0);
+  const runFetch = () => setRequestId((id) => id + 1);
+
+  useEffect(() => {
+    if (isDevFallback || !organization || !activeSlug) return;
+    let cancelled = false;
+
+    (async () => {
+      const ticketsResult = await loadProjectTickets(organization.id, activeSlug);
+      if (cancelled) return;
+      if (ticketsResult.status === "error") {
+        setDeliveryLoadState("error");
+        setDeliveryErrorMessage(ticketsResult.message);
+        return;
+      }
+      const projectTicketsReal = ticketsResult.status === "ready" ? ticketsResult.tickets : [];
+      const activeTicketIds = projectTicketsReal.filter((t) => t.status !== "done").map((t) => t.id);
+      const allTicketIds = projectTicketsReal.map((t) => t.id);
+
+      const [teamResult, minutesResult, activityResult] = await Promise.all([
+        loadProjectTeam(organization.id, activeSlug),
+        loadOrganizationLoggedMinutes(activeTicketIds),
+        loadOrganizationActivity(allTicketIds),
+      ]);
+      if (cancelled) return;
+
+      if (teamResult.status === "error") {
+        setDeliveryLoadState("error");
+        setDeliveryErrorMessage(teamResult.message);
+        return;
+      }
+      if (minutesResult.status === "error") {
+        setDeliveryLoadState("error");
+        setDeliveryErrorMessage(minutesResult.message);
+        return;
+      }
+      if (activityResult.status === "error") {
+        setDeliveryLoadState("error");
+        setDeliveryErrorMessage(activityResult.message);
+        return;
+      }
+
+      setTickets(projectTicketsReal);
+      setTeam(teamResult.members);
+      setActiveLoggedMinutes(minutesResult.totalMinutes);
+      setActivityEvents(activityResult.events);
+      setDeliveryLoadState("ready");
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isDevFallback, organization, activeSlug, requestId]);
+
+  // ── Quick Actions: Add Member / New Note / New Ticket, each opening the
+  // exact same modal already used elsewhere in the app (Team's
+  // AddTeamMemberModal, Notes' NewNoteModal, Tickets' NewTicketModal) —
+  // never a second implementation of any of these flows. `orgMembers` is
+  // the same real-org-roster query Team's own Add Member and the Tickets
+  // board's own New Ticket already call. ──
+  const [showAddMember, setShowAddMember] = useState(false);
+  const [showNewNote, setShowNewNote] = useState(false);
+  const [showNewTicket, setShowNewTicket] = useState(false);
+  const [orgMembers, setOrgMembers] = useState<OrgMember[]>([]);
+  const [noteErrorMessage, setNoteErrorMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (isDevFallback || !organization) return;
+    let cancelled = false;
+    loadOrganizationMembers(organization.id).then((result) => {
+      if (cancelled) return;
+      if (result.status === "ready") setOrgMembers(result.members);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [isDevFallback, organization]);
+
+  const addMemberCandidates = useMemo(
+    () => orgMembers.filter((om) => !team.some((m) => m.id === om.id)),
+    [orgMembers, team]
+  );
+
+  async function handleAddMember(profileId: string): Promise<{ success: boolean; message?: string }> {
+    if (isDevFallback || !organization || !activeSlug) return { success: false, message: "Not available in this mode." };
+    const result = await addProjectMember(organization.id, activeSlug, profileId);
+    if (result.status === "error") return { success: false, message: result.message };
+    runFetch();
+    return { success: true };
+  }
+
+  async function handleCreateNote(input: { title: string; body: string; tag?: string }): Promise<boolean> {
+    if (!organization || !activeSlug) return false;
+    const result = await createNote(organization.id, activeSlug, { title: input.title, body: input.body });
+    if (result.status === "error") {
+      setNoteErrorMessage(result.message);
+      return false;
+    }
+    setShowNewNote(false);
+    return true;
+  }
+
+  function handleTicketCreated(ticket: Ticket) {
+    setTickets((prev) => [ticket, ...prev]);
+    setShowNewTicket(false);
+    setPreview(ticket);
+  }
+
+  function handleTicketPreviewDuplicate(ticket: Ticket) {
+    setShowNewTicket(false);
+    setPreview(ticket);
+  }
+
+  const todayISO = getTodayISO();
+
+  const activeProject = leadProjects.find((p) => p.slug === activeSlug);
+  const contextTitle = activeProject?.name ?? "Project";
+
+  const totalTickets = tickets.length;
+  const completedTickets = tickets.filter((t) => t.status === "done").length;
+  const deliveryPct = totalTickets === 0 ? 0 : Math.round((completedTickets / totalTickets) * 100);
+
+  const activeTickets = useMemo(() => tickets.filter((t) => t.status !== "done"), [tickets]);
+  const estimatedActiveHours = useMemo(() => activeTickets.reduce((sum, t) => sum + (t.hours ?? 0), 0), [activeTickets]);
+  // Never negative/NaN/Infinity: plain subtraction of two finite numbers,
+  // clamped at 0 — same "remaining = estimated - logged, floored at 0"
+  // shape as the Admin Dashboard's Hours Burn KPI, just scoped to this
+  // project's active tickets only (see the effect above).
+  const remainingHours = Math.max(0, Math.round(estimatedActiveHours - activeLoggedMinutes / 60));
+
+  const blockedTickets = tickets.filter((t) => t.status === "blocked").length;
+  const dueToday = activeTickets.filter((t) => t.dueDate && parseDisplayDate(t.dueDate) === todayISO).length;
+
+  // Over Capacity — same assignedHours (active tickets only) + utilizationOf
+  // calculation already used by Team/the Admin Dashboard, just scoped to
+  // this one project's real roster instead of the org-wide one.
+  const overCapacityMembers = useMemo(() => {
+    return team
+      .map((member) => {
+        const assignedHours = activeTickets
+          .filter((t) => t.assigneeProfileId === member.id)
+          .reduce((sum, t) => sum + (t.hours ?? 0), 0);
+        const pct = utilizationOf({
+          id: member.id,
+          projectSlug: activeSlug,
+          name: member.name,
+          role: member.title,
+          email: member.email,
+          avatar: member.avatar,
+          status: "Available",
+          weeklyCapacity: member.weeklyCapacity,
+          assignedHours,
+          activeTicketIds: [],
+        });
+        return { name: member.name, pct };
+      })
+      .filter((m) => m.pct > 100);
+  }, [team, activeTickets, activeSlug]);
+
+  const awaitingReview = useMemo(() => tickets.filter((t) => t.status === "review"), [tickets]);
+
+  // ── Team Capacity: the real project roster (`team`, from loadProjectTeam —
+  // already fetched above) combined with real assigned hours, same
+  // "activeTickets (status !== done) matched by assigneeProfileId" shape
+  // team-screen.tsx itself already uses — never a second query, never a
+  // second definition of "assigned hours". Sorted by utilization descending,
+  // same order the mock version already used. ──
+  const teamCapacity = useMemo<TeamMember[]>(() => {
+    return team
+      .map((member) => {
+        const ownActiveTickets = activeTickets.filter((t) => t.assigneeProfileId === member.id);
+        return {
+          id: member.id,
+          projectSlug: activeSlug,
+          name: member.name,
+          role: member.title,
+          email: member.email,
+          avatar: member.avatar,
+          status: "Available" as const,
+          weeklyCapacity: member.weeklyCapacity,
+          assignedHours: ownActiveTickets.reduce((sum, t) => sum + (t.hours ?? 0), 0),
+          activeTicketIds: ownActiveTickets.map((t) => t.id),
+          projectRole: member.projectRole,
+        };
+      })
+      .sort((a, b) => utilizationOf(b) - utilizationOf(a));
+  }, [team, activeTickets, activeSlug]);
+
+  // ── My Active Work: every active ticket in the selected project, not just
+  // the signed-in lead's own — "active" here is the explicit To Do/In
+  // Progress/Blocked/In Review set (backlog and done are excluded), sorted
+  // blocked-first, then by priority urgency, then by due date ascending
+  // (undated tickets sort last). ──
+  const myActiveWork = useMemo(() => {
+    return tickets
+      .filter((t) => ACTIVE_WORK_STATUSES.includes(t.status))
+      .slice()
+      .sort((a, b) => {
+        const aBlocked = a.status === "blocked" ? 0 : 1;
+        const bBlocked = b.status === "blocked" ? 0 : 1;
+        if (aBlocked !== bBlocked) return aBlocked - bBlocked;
+
+        const aPriority = PRIORITY_VALUES.indexOf(a.priority);
+        const bPriority = PRIORITY_VALUES.indexOf(b.priority);
+        if (aPriority !== bPriority) return aPriority - bPriority;
+
+        if (a.dueDate && b.dueDate) return parseDisplayDate(a.dueDate).localeCompare(parseDisplayDate(b.dueDate));
+        if (a.dueDate) return -1;
+        if (b.dueDate) return 1;
+        return 0;
+      });
+  }, [tickets]);
+
+  // ── Recent Activity: the same real ticket_activity feed the Admin
+  // Dashboard already uses (loadOrganizationActivity), just fetched scoped
+  // to this project's own ticket ids instead of every org ticket — see the
+  // effect above. Ticket lookups resolve against this project's own tickets
+  // state (never the mock catalog), and every entry shows this project's
+  // real name since every event here already belongs to it. ──
+  const ticketsById = useMemo(() => new Map(tickets.map((t) => [t.id, t])), [tickets]);
+  const recentActivityEntries = useMemo<DashboardActivityEntry[]>(
+    () =>
+      activityEvents.map((event) => {
+        const ticket = ticketsById.get(event.ticketId);
+        const base = {
+          id: event.id,
+          avatar: event.actorAvatar,
+          name: event.actorName ?? "Someone",
+          ticket,
+          project: contextTitle,
+          time: event.time,
+        };
+
+        if (event.type === "blocked") return { ...base, type: "blocked" as const, verb: "marked" };
+        if (event.type === "completed") return { ...base, type: "completed" as const, verb: "completed" };
+        if (event.type === "hours") {
+          return {
+            ...base,
+            type: "hours" as const,
+            verb: "updated the estimate on",
+            detail: <span className="font-medium">{event.oldHours}h → {event.newHours}h</span>,
+          };
+        }
+        if (event.type === "assigned") {
+          return {
+            ...base,
+            type: "assigned" as const,
+            verb: "reassigned",
+            detail: <>to <span className="font-medium">{event.newAssigneeName}</span></>,
+          };
+        }
+        return {
+          ...base,
+          type: "priority" as const,
+          verb: event.priorityRaised ? "raised priority on" : "lowered priority on",
+          detail: <span className="font-medium">{event.oldPriorityLabel} → {event.newPriorityLabel}</span>,
+        };
+      }),
+    [activityEvents, ticketsById, contextTitle]
+  );
+
+  // ── Upcoming Deadlines: every active (non-done) ticket in the selected
+  // project with a due date, not just the signed-in lead's own — same
+  // "active" definition as Current Delivery/Attention Required above,
+  // sorted by due date ascending (overdue tickets included, styled below). ──
+  const deadlines = useMemo(
+    () =>
+      tickets
+        .filter((t) => t.status !== "done" && t.dueDate)
+        .slice()
+        .sort((a, b) => parseDisplayDate(a.dueDate as string).localeCompare(parseDisplayDate(b.dueDate as string))),
+    [tickets]
+  );
+
+  // ── Target Date: the nearest deadline among this project's own active
+  // tickets — reuses `deadlines` above (already sorted ascending) instead of
+  // a second date computation. Falls back to the existing empty dash when no
+  // active ticket has a due date, same as before.
+  const targetDate = deadlines[0]?.dueDate ?? "—";
+
+  const linkSlug = activeSlug || null;
   function projectHref(path: string): string {
     return linkSlug ? `/projects/${linkSlug}/${path}` : "/projects";
   }
 
-  const delivery = isAllProjects
-    ? sumDelivery(selectedSlugs)
-    : DELIVERY_BY_PROJECT[activeSlug] ?? DELIVERY_BY_PROJECT[DEFAULT_PROJECT_SLUG];
-  const deliveryPct = delivery.totalTickets === 0 ? 0 : Math.round((delivery.completedTickets / delivery.totalTickets) * 100);
+  const loading = projectsLoadState === "loading" || (leadProjects.length > 0 && deliveryLoadState === "loading");
+  const loadError = projectsLoadState === "error" ? projectsErrorMessage : deliveryLoadState === "error" ? deliveryErrorMessage : null;
 
-  const dueToday = selectedSlugs.reduce((sum, slug) => sum + (DUE_TODAY_BY_PROJECT[slug] ?? 0), 0);
+  if (loading) {
+    return (
+      <div className="max-w-6xl mx-auto px-6 py-8 pb-16">
+        <div className="h-full flex items-center justify-center text-sm text-slate-400 dark:text-zinc-500 py-20">
+          Loading dashboard…
+        </div>
+      </div>
+    );
+  }
 
-  const team = aggregateTeam(selectedSlugs).sort((a, b) => utilizationOf(b) - utilizationOf(a));
-  const overCapacity = team.filter((m) => m.assignedHours > m.weeklyCapacity);
+  if (loadError) {
+    return (
+      <div className="max-w-6xl mx-auto px-6 py-8 pb-16">
+        <div className="flex flex-col items-center justify-center text-center px-4 py-20">
+          <h3 className="text-sm font-semibold text-slate-700 dark:text-zinc-200">Couldn&apos;t load dashboard</h3>
+          <p className="text-sm text-slate-400 mt-1 max-w-xs dark:text-zinc-500">{loadError}</p>
+        </div>
+      </div>
+    );
+  }
 
-  const projectTickets = selectedSlugs.flatMap((slug) => PROJECT_TICKETS[slug] ?? []);
-  const needsReview = projectTickets.filter((t) => t.status === "review" && t.priority === "high");
-
-  const projectActivity = RECENT_ACTIVITY.filter((entry) => selectedNames.includes(entry.project));
-
-  const deadlines = [...projectTickets]
-    .filter((t) => t.dueDate)
-    .sort((a, b) => {
-      const da = new Date(`${a.dueDate}, 2026`).getTime();
-      const db = new Date(`${b.dueDate}, 2026`).getTime();
-      return da - db;
-    });
+  if (leadProjects.length === 0) {
+    return (
+      <div className="max-w-6xl mx-auto px-6 py-8 pb-16">
+        <h1 className="text-[22px] font-bold text-slate-900 dark:text-zinc-50 tracking-tight leading-none mb-6">
+          Good morning, {user.name.split(" ")[0]} 👋
+        </h1>
+        <div className="flex flex-col items-center justify-center text-center px-4 py-20">
+          <h3 className="text-sm font-semibold text-slate-700 dark:text-zinc-200">No projects assigned</h3>
+          <p className="text-sm text-slate-400 mt-1 max-w-xs dark:text-zinc-500">
+            You&apos;re not the Project Lead on any active project yet.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-6xl mx-auto px-6 py-8 pb-16">
@@ -334,8 +631,7 @@ export function ProjectLeadDashboard() {
               aria-label="Current project"
               className="appearance-none bg-transparent border-none p-0 pr-5 text-sm font-semibold text-slate-700 dark:text-zinc-200 outline-none cursor-pointer hover:text-brand-600 dark:hover:text-brand-400 focus:ring-2 focus:ring-brand-500/30 rounded"
             >
-              <option value={ALL_PROJECTS_VALUE}>All Projects</option>
-              {ownedProjects.map((p) => (
+              {leadProjects.map((p) => (
                 <option key={p.slug} value={p.slug}>{p.name}</option>
               ))}
             </select>
@@ -343,13 +639,14 @@ export function ProjectLeadDashboard() {
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 9l6 6 6-6" />
             </svg>
           </div>
-          <p className="text-xs text-slate-400 dark:text-zinc-500 mt-1">Tuesday, June 30</p>
+          <p className="text-xs text-slate-400 dark:text-zinc-500 mt-1">{formatISODate(todayISO)}</p>
         </div>
 
         {/* Quick Actions */}
         <div className="flex items-center gap-2 flex-shrink-0">
-          <Link
-            href={projectHref("team")}
+          <button
+            type="button"
+            onClick={() => setShowAddMember(true)}
             className="inline-flex items-center gap-1.5 text-[13px] font-medium px-3.5 py-1.5 rounded-lg border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-slate-700 dark:text-zinc-300 hover:bg-slate-50 dark:hover:bg-zinc-800 transition-colors"
           >
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true">
@@ -358,9 +655,10 @@ export function ProjectLeadDashboard() {
               <path strokeLinecap="round" d="M19 20v-1.5a3.5 3.5 0 00-2.5-3.36M14 4.13a3 3 0 010 5.74" />
             </svg>
             Add Member
-          </Link>
-          <Link
-            href={projectHref("notes")}
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowNewNote(true)}
             className="inline-flex items-center gap-1.5 text-[13px] font-medium px-3.5 py-1.5 rounded-lg border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-slate-700 dark:text-zinc-300 hover:bg-slate-50 dark:hover:bg-zinc-800 transition-colors"
           >
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true">
@@ -368,16 +666,17 @@ export function ProjectLeadDashboard() {
               <path strokeLinecap="round" d="M9 12h6M9 16h4" />
             </svg>
             New Note
-          </Link>
-          <Link
-            href={projectHref("tickets")}
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowNewTicket(true)}
             className="inline-flex items-center gap-1.5 text-[13px] font-semibold px-3.5 py-1.5 rounded-lg bg-brand-500 hover:bg-brand-600 text-white transition-colors shadow-sm shadow-brand-500/30"
           >
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24" aria-hidden="true">
               <path strokeLinecap="round" d="M12 4v16m8-8H4" />
             </svg>
             New Ticket
-          </Link>
+          </button>
         </div>
       </div>
 
@@ -392,7 +691,7 @@ export function ProjectLeadDashboard() {
           </div>
           <div className="text-right flex-shrink-0">
             <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600">Target Date</p>
-            <p className="text-sm font-semibold text-slate-700 dark:text-zinc-300">{delivery.targetDate}</p>
+            <p className="text-sm font-semibold text-slate-700 dark:text-zinc-300">{targetDate}</p>
           </div>
         </div>
 
@@ -413,9 +712,9 @@ export function ProjectLeadDashboard() {
           </div>
 
           <div className={`flex-1 grid grid-cols-2 sm:grid-cols-3 gap-4 lg:pl-6 lg:border-l ${HERO_BORDER_CLASS}`}>
-            <HeroStat label="Completed Tickets" value={`${delivery.completedTickets} / ${delivery.totalTickets}`} />
-            <HeroStat label="Remaining Hours" value={`${delivery.remainingHours}h`} />
-            <HeroStat label="Blocked Tickets" value={delivery.blockedTickets} danger />
+            <HeroStat label="Completed Tickets" value={`${completedTickets} / ${totalTickets}`} />
+            <HeroStat label="Remaining Hours" value={`${remainingHours}h`} />
+            <HeroStat label="Blocked Tickets" value={blockedTickets} danger />
           </div>
         </div>
       </section>
@@ -427,7 +726,7 @@ export function ProjectLeadDashboard() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
         <AttentionCard
           tone="critical"
-          count={delivery.blockedTickets}
+          count={blockedTickets}
           label="Blocked Tickets"
           detail="Needs unblocking"
           href={projectHref("tickets")}
@@ -441,7 +740,7 @@ export function ProjectLeadDashboard() {
           tone="warning"
           count={dueToday}
           label="Due Today"
-          detail="Jun 30"
+          detail={formatISODate(todayISO)}
           href={projectHref("tickets")}
           icon={
             <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true">
@@ -452,9 +751,9 @@ export function ProjectLeadDashboard() {
         />
         <AttentionCard
           tone="warning"
-          count={overCapacity.length}
+          count={overCapacityMembers.length}
           label="Over Capacity"
-          detail={overCapacity.length > 0 ? overCapacity.map((m) => m.name).join(", ") : "Team is balanced"}
+          detail={overCapacityMembers.length > 0 ? overCapacityMembers.map((m) => m.name).join(", ") : "Team is balanced"}
           href={projectHref("team")}
           icon={
             <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true">
@@ -466,9 +765,9 @@ export function ProjectLeadDashboard() {
         />
         <AttentionCard
           tone="warning"
-          count={needsReview.length}
+          count={awaitingReview.length}
           label="Awaiting Review"
-          detail={needsReview[0]?.title ?? "High priority"}
+          detail={awaitingReview[0]?.title ?? "High priority"}
           href={projectHref("tickets")}
           icon={
             <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true">
@@ -481,80 +780,102 @@ export function ProjectLeadDashboard() {
       {/* ── Section 3: Team Capacity ─────────────────────────────────────────── */}
       <Card
         title="Team Capacity"
-        count={team.length}
+        count={teamCapacity.length}
         action={
           <Link href={projectHref("team")} className="text-[11px] font-medium text-brand-600 dark:text-brand-400 hover:underline">
             View team →
           </Link>
         }
       >
-        <div className="space-y-0.5">
-          {team.map((member) => (
-            <TeamCapacityRow
-              key={member.name}
-              member={member}
-              onOpen={(m) => openMemberProfile({ name: m.name, avatar: m.avatar, role: m.role, projectSlug: m.projectSlug })}
-            />
-          ))}
-        </div>
+        {teamCapacity.length === 0 ? (
+          <p className="text-xs text-slate-400 dark:text-zinc-600 py-2">No team members on this project yet.</p>
+        ) : (
+          <div className="space-y-0.5">
+            {teamCapacity.map((member) => (
+              <TeamCapacityRow
+                key={member.id}
+                member={member}
+                onOpen={(m) =>
+                  openMemberProfile({
+                    name: m.name,
+                    avatar: m.avatar,
+                    role: m.role,
+                    projectSlug: m.projectSlug,
+                    profileId: m.id,
+                    projectRole: m.projectRole,
+                  })
+                }
+              />
+            ))}
+          </div>
+        )}
       </Card>
 
       <div className="mt-5 space-y-5">
 
-        {/* ── Section 4: My Active Work ───────────────────────────────────────── */}
+        {/* ── Section 4: Project Work ───────────────────────────────────────── */}
         <Card
-          title="My Active Work"
-          count={MY_ACTIVE.length}
+          title="Project Work"
+          count={myActiveWork.length}
           action={
             <Link href="/my-work" className="text-[11px] font-medium text-brand-600 dark:text-brand-400 hover:underline">
               View all →
             </Link>
           }
         >
-          <div className="space-y-0.5">
-            {MY_ACTIVE.map((t) => (
-              <ActiveTicketRow key={t.id} ticket={t} onOpen={setPreview} />
-            ))}
-          </div>
+          {myActiveWork.length === 0 ? (
+            <p className="text-xs text-slate-400 dark:text-zinc-600 py-2">No active tickets in this project.</p>
+          ) : (
+            <div className="space-y-0.5">
+              {myActiveWork.map((t) => (
+                <ActiveTicketRow key={t.id} ticket={t} onOpen={setPreview} />
+              ))}
+            </div>
+          )}
         </Card>
 
         {/* ── Section 5: Recent Activity ──────────────────────────────────────── */}
         <Card title="Recent Activity">
-          <RecentActivityList items={projectActivity} onOpenTicket={setPreview} />
+          {recentActivityEntries.length === 0 ? (
+            <p className="text-xs text-slate-400 dark:text-zinc-600 py-2">No recent activity yet.</p>
+          ) : (
+            <RecentActivityList items={recentActivityEntries} onOpenTicket={setPreview} />
+          )}
         </Card>
 
         {/* ── Section 6: Upcoming Deadlines ───────────────────────────────────── */}
         <Card title="Upcoming Deadlines">
-          <div className="space-y-1">
-            {deadlines.map((t) => {
-              const isOverdue =
-                t.dueDate === "Jun 28" ||
-                t.dueDate === "Jun 29" ||
-                t.dueDate === "Jun 30";
-              return (
-                <button
-                  key={t.id}
-                  type="button"
-                  onClick={() => setPreview(t)}
-                  className="w-full flex items-center gap-2.5 py-1.5 px-2.5 -mx-2.5 rounded-lg hover:bg-slate-50 dark:hover:bg-zinc-800/50 transition-colors text-left"
-                >
-                  <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${isOverdue ? "bg-red-400" : "bg-slate-300 dark:bg-zinc-600"}`} />
-                  <span className="flex-1 min-w-0 flex items-baseline gap-1.5">
-                    <TicketTypeIcon type={t.type} />
-                    <span className="text-[11px] font-mono font-medium text-slate-400 dark:text-zinc-500 flex-shrink-0">
-                      {getTicketDisplayKey(t)}
+          {deadlines.length === 0 ? (
+            <p className="text-xs text-slate-400 dark:text-zinc-600 py-2">No upcoming deadlines.</p>
+          ) : (
+            <div className="space-y-1">
+              {deadlines.map((t) => {
+                const isOverdue = parseDisplayDate(t.dueDate as string) < todayISO;
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => setPreview(t)}
+                    className="w-full flex items-center gap-2.5 py-1.5 px-2.5 -mx-2.5 rounded-lg hover:bg-slate-50 dark:hover:bg-zinc-800/50 transition-colors text-left"
+                  >
+                    <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${isOverdue ? "bg-red-400" : "bg-slate-300 dark:bg-zinc-600"}`} />
+                    <span className="flex-1 min-w-0 flex items-baseline gap-1.5">
+                      <TicketTypeIcon type={t.type} />
+                      <span className="text-[11px] font-mono font-medium text-slate-400 dark:text-zinc-500 flex-shrink-0">
+                        {getTicketDisplayKey(t)}
+                      </span>
+                      <span className="min-w-0 text-[12px] text-slate-700 dark:text-zinc-300 truncate">
+                        {t.title}
+                      </span>
                     </span>
-                    <span className="min-w-0 text-[12px] text-slate-700 dark:text-zinc-300 truncate">
-                      {t.title}
+                    <span className={`text-[11px] font-semibold flex-shrink-0 ${isOverdue ? "text-red-500 dark:text-red-400" : "text-slate-500 dark:text-zinc-400"}`}>
+                      {t.dueDate}
                     </span>
-                  </span>
-                  <span className={`text-[11px] font-semibold flex-shrink-0 ${isOverdue ? "text-red-500 dark:text-red-400" : "text-slate-500 dark:text-zinc-400"}`}>
-                    {t.dueDate}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </Card>
 
       </div>
@@ -567,6 +888,36 @@ export function ProjectLeadDashboard() {
           onClose={() => setPreview(null)}
         />
       )}
+
+      {/* ── Quick Actions' modals — the exact same flows Team/Notes/Tickets use ── */}
+      {showAddMember && (
+        <AddTeamMemberModal
+          candidates={addMemberCandidates}
+          onClose={() => setShowAddMember(false)}
+          onAdd={handleAddMember}
+        />
+      )}
+
+      {showNewNote && (
+        <NewNoteModal
+          projectName={contextTitle}
+          onClose={() => setShowNewNote(false)}
+          onCreated={handleCreateNote}
+        />
+      )}
+
+      {showNewTicket && (
+        <NewTicketModal
+          slug={activeSlug}
+          tickets={tickets}
+          members={orgMembers}
+          onClose={() => setShowNewTicket(false)}
+          onCreated={handleTicketCreated}
+          onPreviewDuplicate={handleTicketPreviewDuplicate}
+        />
+      )}
+
+      {noteErrorMessage && <ErrorToast message={noteErrorMessage} onDismiss={() => setNoteErrorMessage(null)} />}
 
     </div>
   );

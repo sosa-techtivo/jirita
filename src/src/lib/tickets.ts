@@ -15,6 +15,8 @@ import { resolveAvatarUrl } from "./membership";
 import { FALLBACK_AVATAR } from "./current-user";
 import { registerProjectCode } from "./mock-tickets";
 import type { Ticket, TicketPriority, TicketStatus, TicketType } from "./mock-tickets";
+import { loadOrganizationProjects } from "./projects";
+import type { ProjectStatus } from "./mock-projects";
 
 export type TicketsResult =
   | { status: "ready"; tickets: Ticket[] }
@@ -1807,4 +1809,203 @@ export async function logTicketTime(ticketId: string, input: LogTimeInput): Prom
   }
 
   return { status: "success", entry: rowToTimeEntryRecord(row, loggerRow) };
+}
+
+// ── Organization-wide reads — backs the real Admin Dashboard only ──────────────
+// (src/components/dashboard-screen.tsx). Project Lead's and Member's own
+// dashboards are untouched and keep reading their own mock data.
+
+export type OrganizationTicketsResult =
+  | { status: "ready"; tickets: Ticket[]; projects: { slug: string; name: string; status: ProjectStatus }[] }
+  | { status: "error"; message: string };
+
+// Composes two already-existing loaders (loadOrganizationProjects +
+// loadProjectTickets per project) instead of a new direct query, so this
+// stays a thin aggregation over data paths that are already real and
+// already tested — not a new source of truth for what a "ticket" is. Also
+// returns the org's project slug/name/status triples (already fetched here
+// anyway) so callers needing a real project display name — e.g. Recent
+// Activity's "project" text — or needing to scope to active projects only
+// — e.g. Projects at Risk — don't have to issue a second, redundant fetch.
+export async function loadOrganizationTickets(organizationId: string): Promise<OrganizationTicketsResult> {
+  const projectsResult = await loadOrganizationProjects(organizationId);
+  if (projectsResult.status === "error") {
+    return { status: "error", message: projectsResult.message };
+  }
+
+  const perProject = await Promise.all(
+    projectsResult.projects.map((project) => loadProjectTickets(organizationId, project.slug))
+  );
+
+  const tickets: Ticket[] = [];
+  for (const result of perProject) {
+    if (result.status === "error") return { status: "error", message: result.message };
+    if (result.status === "ready") tickets.push(...result.tickets);
+  }
+
+  return {
+    status: "ready",
+    tickets,
+    projects: projectsResult.projects.map((project) => ({
+      slug: project.slug,
+      name: project.name,
+      status: project.status,
+    })),
+  };
+}
+
+export type OrganizationLoggedHoursResult =
+  | { status: "ready"; totalMinutes: number }
+  | { status: "error"; message: string };
+
+// Real logged hours (Time Entries) for the Hours Burn KPI — every other
+// dashboard KPI is derived client-side from loadOrganizationTickets' own
+// result, but estimated hours live on tickets while logged hours live in
+// ticket_time_entries, so this is the one genuinely new query.
+export async function loadOrganizationLoggedMinutes(ticketIds: string[]): Promise<OrganizationLoggedHoursResult> {
+  if (ticketIds.length === 0) return { status: "ready", totalMinutes: 0 };
+
+  const supabase = getSupabaseBrowserClient();
+
+  const { data: rows, error } = await supabase
+    .from("ticket_time_entries")
+    .select("minutes")
+    .in("ticket_id", ticketIds)
+    .returns<{ minutes: number }[]>();
+
+  if (error) {
+    logDev("organization time entries query failed", error);
+    return { status: "error", message: error.message };
+  }
+
+  const totalMinutes = (rows ?? []).reduce((sum, row) => sum + row.minutes, 0);
+  return { status: "ready", totalMinutes };
+}
+
+// The curated subset of real ticket_activity events the Admin Dashboard's
+// Recent Activity widget already has a visual category for (see
+// ACTIVITY_META in dashboard-shared.tsx: blocked/completed/hours/assigned/
+// priority — "note" is Project Notes' own activity, a different table, not
+// pulled in here). Every other real event_type (title/description edits,
+// attachments, comments, labels, acceptance criteria, relations, logged
+// time) is genuinely real too, just not one of the widget's existing
+// categories, so it's left out of this feed rather than forced into one
+// that doesn't fit. Returns plain data only (no JSX) — dashboard-screen.tsx
+// builds the actual verb/detail text, same "lib returns data, component
+// shapes presentation" split as the rest of this file.
+export type OrganizationActivityEventType = "blocked" | "completed" | "hours" | "assigned" | "priority";
+
+export interface OrganizationActivityEvent {
+  id: string;
+  type: OrganizationActivityEventType;
+  actorName: string | null;
+  actorAvatar: string;
+  ticketId: string;
+  time: string;
+  oldHours?: string;
+  newHours?: string;
+  newAssigneeName?: string;
+  oldPriorityLabel?: string;
+  newPriorityLabel?: string;
+  priorityRaised?: boolean;
+}
+
+export type OrganizationActivityResult =
+  | { status: "ready"; events: OrganizationActivityEvent[] }
+  | { status: "error"; message: string };
+
+interface OrgActivityRawRow {
+  id: string;
+  ticket_id: string;
+  actor_profile_id: string | null;
+  event_type: string;
+  old_value: string | null;
+  new_value: string | null;
+  created_at: string;
+}
+
+const ORG_ACTIVITY_RAW_FETCH_LIMIT = 200;
+
+function isRelevantOrgActivityRow(row: OrgActivityRawRow): boolean {
+  switch (row.event_type) {
+    case "status_changed":
+      return row.new_value === "blocked" || row.new_value === "done";
+    case "hours_changed":
+      return Boolean(row.old_value) && Boolean(row.new_value);
+    case "assignee_changed":
+      return Boolean(row.new_value);
+    case "priority_changed":
+      return Boolean(row.old_value) && Boolean(row.new_value);
+    default:
+      return false;
+  }
+}
+
+export async function loadOrganizationActivity(
+  ticketIds: string[],
+  limit = 10
+): Promise<OrganizationActivityResult> {
+  if (ticketIds.length === 0) return { status: "ready", events: [] };
+
+  const supabase = getSupabaseBrowserClient();
+
+  const { data: rows, error } = await supabase
+    .from("ticket_activity")
+    .select("id, ticket_id, actor_profile_id, event_type, old_value, new_value, created_at")
+    .in("ticket_id", ticketIds)
+    .order("created_at", { ascending: false })
+    .limit(ORG_ACTIVITY_RAW_FETCH_LIMIT)
+    .returns<OrgActivityRawRow[]>();
+
+  if (error) {
+    logDev("organization activity query failed", error);
+    return { status: "error", message: error.message };
+  }
+
+  const relevant = (rows ?? []).filter(isRelevantOrgActivityRow).slice(0, limit);
+
+  const profileIds = new Set<string>();
+  for (const row of relevant) {
+    if (row.actor_profile_id) profileIds.add(row.actor_profile_id);
+    if (row.event_type === "assignee_changed" && row.new_value) profileIds.add(row.new_value);
+  }
+  const profilesById = await loadProfilesByIds(supabase, Array.from(profileIds));
+
+  const events: OrganizationActivityEvent[] = relevant.map((row) => {
+    const actor = row.actor_profile_id ? profilesById.get(row.actor_profile_id) : undefined;
+    const base = {
+      id: row.id,
+      actorName: resolveProfileName(actor),
+      actorAvatar: (actor ? resolveAvatarUrl(actor.avatar_url, actor.updated_at) : null) ?? FALLBACK_AVATAR,
+      ticketId: row.ticket_id,
+      time: formatRelativeTime(row.created_at),
+    };
+
+    if (row.event_type === "status_changed") {
+      return { ...base, type: row.new_value === "blocked" ? "blocked" : "completed" };
+    }
+
+    if (row.event_type === "hours_changed") {
+      return { ...base, type: "hours", oldHours: row.old_value ?? undefined, newHours: row.new_value ?? undefined };
+    }
+
+    if (row.event_type === "assignee_changed") {
+      const newAssignee = row.new_value ? profilesById.get(row.new_value) : undefined;
+      return { ...base, type: "assigned", newAssigneeName: resolveProfileName(newAssignee) ?? "Unknown" };
+    }
+
+    // priority_changed
+    const oldIdx = PRIORITY_VALUES.indexOf((row.old_value ?? "") as TicketPriority);
+    const newIdx = PRIORITY_VALUES.indexOf((row.new_value ?? "") as TicketPriority);
+    return {
+      ...base,
+      type: "priority",
+      oldPriorityLabel: activityPriorityLabel(row.old_value),
+      newPriorityLabel: activityPriorityLabel(row.new_value),
+      // Lower index in PRIORITY_VALUES ("highest" first) means more urgent.
+      priorityRaised: oldIdx !== -1 && newIdx !== -1 && newIdx < oldIdx,
+    };
+  });
+
+  return { status: "ready", events };
 }

@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 import { useRouter } from "next/navigation";
-import type { TeamMember, TeamMemberRemovedEventDetail } from "@/lib/mock-team";
-import { TEAM_MEMBER_REMOVED_EVENT } from "@/lib/mock-team";
+import type { TeamMember, TeamMemberRemovedEventDetail, TeamProjectLeadChangedEventDetail } from "@/lib/mock-team";
+import { TEAM_MEMBER_REMOVED_EVENT, TEAM_PROJECT_LEAD_CHANGED_EVENT } from "@/lib/mock-team";
 import { FilterDropdown } from "@/components/tickets/filter-dropdown";
 import type { DropdownGroup } from "@/components/tickets/filter-dropdown";
 import { useCurrentUser } from "@/components/current-user-provider";
@@ -82,6 +82,24 @@ export function TeamScreen({ slug }: { slug: string }) {
     return () => window.removeEventListener(TEAM_MEMBER_REMOVED_EVENT, handleMemberRemoved);
   }, [slug, runFetch]);
 
+  // Make Project Lead (member-profile-modal.tsx's MemberMenu) — same
+  // window-event bridge and same "optimistic local update + real refetch"
+  // shape as the removal listener above: the new lead's projectRole flips
+  // to 'lead' immediately (and, since only one lead can exist, every other
+  // member on this same project flips to 'member' in the same pass, mirroring
+  // exactly what setProjectLead already did server-side), then runFetch()
+  // confirms it against real, current data the same way removal does.
+  useEffect(() => {
+    function handleLeadChanged(event: Event) {
+      const detail = (event as CustomEvent<TeamProjectLeadChangedEventDetail>).detail;
+      if (!detail || detail.slug !== slug) return;
+      setMembers((prev) => prev.map((m) => ({ ...m, projectRole: m.id === detail.profileId ? "lead" : "member" })));
+      runFetch();
+    }
+    window.addEventListener(TEAM_PROJECT_LEAD_CHANGED_EVENT, handleLeadChanged);
+    return () => window.removeEventListener(TEAM_PROJECT_LEAD_CHANGED_EVENT, handleLeadChanged);
+  }, [slug, runFetch]);
+
   // Combines project_memberships (roster + weekly capacity) with real
   // tickets (assigned hours + active ticket count, matched by the real
   // assigneeProfileId, never by name) — two already-existing real reads,
@@ -122,6 +140,7 @@ export function TeamScreen({ slug }: { slug: string }) {
             weeklyCapacity: member.weeklyCapacity,
             assignedHours,
             activeTicketIds: activeTickets.map((t) => t.id),
+            projectRole: member.projectRole,
           };
         });
 
@@ -314,6 +333,7 @@ export function TeamScreen({ slug }: { slug: string }) {
                   role: member.role,
                   projectSlug: member.projectSlug,
                   profileId: member.id,
+                  projectRole: member.projectRole,
                 })}
               />
             ))}
@@ -360,7 +380,14 @@ function MemberCard({ member, slug, onOpen }: { member: TeamMember; slug: string
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={member.avatar} alt={member.name} className="w-10 h-10 rounded-full flex-shrink-0" />
         <div className="flex-1 min-w-0">
-          <h3 className="text-sm font-semibold text-slate-900 dark:text-zinc-100 truncate">{member.name}</h3>
+          <div className="flex items-center gap-1.5 min-w-0">
+            <h3 className="text-sm font-semibold text-slate-900 dark:text-zinc-100 truncate">{member.name}</h3>
+            {member.projectRole === "lead" && (
+              <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold flex-shrink-0 bg-brand-50 text-brand-700 dark:bg-brand-500/10 dark:text-brand-400">
+                Project Lead
+              </span>
+            )}
+          </div>
           <p className="text-xs text-slate-400 dark:text-zinc-500 truncate">{member.role}</p>
         </div>
         <StatusBadge status={member.status} />

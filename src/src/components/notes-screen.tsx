@@ -1,32 +1,105 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
-import { getNotesByProjectSlug } from "@/lib/mock-notes";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type { ProjectNote } from "@/lib/mock-notes";
+import { loadProjectNotes, createNote, updateNote, deleteNote, duplicateNote } from "@/lib/notes";
+import { useCurrentUser } from "@/components/current-user-provider";
 import { NoteDetailModal } from "@/components/note-detail-modal";
+import { ErrorToast } from "@/components/tickets/ticket-ui";
 import { TAG_OPTIONS, TagBadge, INPUT, FIELD_LABEL } from "@/components/notes-shared";
 
+// Real replacement for src/lib/mock-notes.ts's hardcoded array — see
+// src/lib/notes.ts's header comment for the full data story (project_notes
+// in Supabase, RLS-scoped to the current org/project, Activity Log written
+// entirely by database triggers). Tag stays local-only/unwired, same
+// precedent as New Ticket's "More Options" fields — see notes.ts.
+
 export function NotesScreen({ slug, projectName }: { slug: string; projectName: string }) {
-  const [notes, setNotes] = useState<ProjectNote[]>(() => getNotesByProjectSlug(slug));
+  const { organization, isDevFallback } = useCurrentUser();
+
+  const [notes, setNotes] = useState<ProjectNote[]>([]);
+  const [loadState, setLoadState] = useState<"loading" | "ready" | "error">(isDevFallback ? "ready" : "loading");
+  const [loadErrorMessage, setLoadErrorMessage] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [requestId, setRequestId] = useState(0);
+
   const [search, setSearch] = useState("");
   const [showNewNote, setShowNewNote] = useState(false);
   const [activeNote, setActiveNote] = useState<ProjectNote | null>(null);
   const [activeNoteEditMode, setActiveNoteEditMode] = useState(false);
   const searchId = useId();
 
+  const runFetch = useCallback(() => setRequestId((id) => id + 1), []);
+
+  useEffect(() => {
+    if (isDevFallback || !organization) return;
+    let cancelled = false;
+
+    loadProjectNotes(organization.id, slug).then((result) => {
+      if (cancelled) return;
+      if (result.status === "error") {
+        setLoadState("error");
+        setLoadErrorMessage(result.message);
+        return;
+      }
+      setNotes(result.notes);
+      setLoadState("ready");
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isDevFallback, organization, slug, requestId]);
+
   const query = search.trim().toLowerCase();
   const filtered = notes.filter((note) => {
     if (query === "") return true;
-    return (
-      note.title.toLowerCase().includes(query) ||
-      note.body.toLowerCase().includes(query) ||
-      (note.tag ?? "").toLowerCase().includes(query)
-    );
+    return note.title.toLowerCase().includes(query) || note.body.toLowerCase().includes(query);
   });
 
-  function handleCreated(note: ProjectNote) {
-    setNotes((prev) => [note, ...prev]);
+  async function handleCreateNote(input: { title: string; body: string; tag?: string }): Promise<boolean> {
+    if (!organization) return false;
+    const result = await createNote(organization.id, slug, { title: input.title, body: input.body });
+    if (result.status === "error") {
+      setErrorMessage(result.message);
+      return false;
+    }
+    setNotes((prev) => [result.note, ...prev]);
     setShowNewNote(false);
+    return true;
+  }
+
+  async function handleSaveNote(input: { title: string; body: string; tag?: string }): Promise<boolean> {
+    if (!activeNote) return false;
+    const result = await updateNote(activeNote.id, slug, { title: input.title, body: input.body });
+    if (result.status === "error") {
+      setErrorMessage(result.message);
+      return false;
+    }
+    setNotes((prev) => prev.map((n) => (n.id === result.note.id ? result.note : n)));
+    setActiveNote(result.note);
+    return true;
+  }
+
+  async function handleDuplicateNote(note: ProjectNote): Promise<boolean> {
+    if (!organization) return false;
+    const result = await duplicateNote(organization.id, slug, note);
+    if (result.status === "error") {
+      setErrorMessage(result.message);
+      return false;
+    }
+    setNotes((prev) => [result.note, ...prev]);
+    return true;
+  }
+
+  async function handleDeleteNote(noteId: string): Promise<boolean> {
+    const result = await deleteNote(noteId);
+    if (result.status === "error") {
+      setErrorMessage(result.message);
+      return false;
+    }
+    setNotes((prev) => prev.filter((n) => n.id !== noteId));
+    return true;
   }
 
   function handleOpenNote(note: ProjectNote, opts?: { edit?: boolean }) {
@@ -34,12 +107,37 @@ export function NotesScreen({ slug, projectName }: { slug: string; projectName: 
     setActiveNoteEditMode(!!opts?.edit);
   }
 
-  function handleSaveNote(updated: ProjectNote) {
-    setNotes((prev) => prev.map((n) => (n.id === updated.id ? updated : n)));
-    setActiveNote(updated);
+  const hasAnyNotes = notes.length > 0;
+
+  if (loadState === "loading") {
+    return (
+      <div className="max-w-4xl mx-auto px-4 sm:px-8 py-10">
+        <div className="h-full flex items-center justify-center text-sm text-slate-400 dark:text-zinc-500 py-20">
+          Loading notes…
+        </div>
+      </div>
+    );
   }
 
-  const hasAnyNotes = notes.length > 0;
+  if (loadState === "error") {
+    return (
+      <div className="max-w-4xl mx-auto px-4 sm:px-8 py-10">
+        <div className="flex flex-col items-center justify-center text-center px-4 py-20">
+          <h3 className="text-sm font-semibold text-slate-700 dark:text-zinc-200">Couldn&apos;t load notes</h3>
+          <p className="text-sm text-slate-400 mt-1 max-w-xs dark:text-zinc-500">
+            {loadErrorMessage ?? "Something went wrong."}
+          </p>
+          <button
+            type="button"
+            onClick={runFetch}
+            className="mt-5 text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3.5 py-2 shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-500 dark:hover:bg-brand-600 dark:shadow-brand-500/20"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-4xl mx-auto px-4 sm:px-8 py-10">
@@ -88,7 +186,13 @@ export function NotesScreen({ slug, projectName }: { slug: string; projectName: 
         ) : (
           <div className="grid sm:grid-cols-2 gap-4">
             {filtered.map((note) => (
-              <NoteCard key={note.id} note={note} onOpen={handleOpenNote} />
+              <NoteCard
+                key={note.id}
+                note={note}
+                onOpen={handleOpenNote}
+                onDelete={handleDeleteNote}
+                onDuplicate={handleDuplicateNote}
+              />
             ))}
           </div>
         )}
@@ -96,10 +200,9 @@ export function NotesScreen({ slug, projectName }: { slug: string; projectName: 
 
       {showNewNote && (
         <NewNoteModal
-          slug={slug}
           projectName={projectName}
           onClose={() => setShowNewNote(false)}
-          onCreated={handleCreated}
+          onCreated={handleCreateNote}
         />
       )}
 
@@ -109,8 +212,12 @@ export function NotesScreen({ slug, projectName }: { slug: string; projectName: 
           startInEditMode={activeNoteEditMode}
           onClose={() => setActiveNote(null)}
           onSave={handleSaveNote}
+          onDuplicate={() => { void handleDuplicateNote(activeNote); }}
+          onDelete={() => handleDeleteNote(activeNote.id)}
         />
       )}
+
+      {errorMessage && <ErrorToast message={errorMessage} onDismiss={() => setErrorMessage(null)} />}
     </div>
   );
 }
@@ -118,9 +225,13 @@ export function NotesScreen({ slug, projectName }: { slug: string; projectName: 
 function NoteCard({
   note,
   onOpen,
+  onDelete,
+  onDuplicate,
 }: {
   note: ProjectNote;
   onOpen: (note: ProjectNote, opts?: { edit?: boolean }) => void;
+  onDelete: (noteId: string) => Promise<boolean>;
+  onDuplicate: (note: ProjectNote) => Promise<boolean>;
 }) {
   return (
     <div
@@ -141,7 +252,11 @@ function NoteCard({
         </h3>
         <div className="flex items-center gap-1.5 flex-shrink-0">
           {note.tag && <TagBadge tag={note.tag} />}
-          <NoteCardMenu onEdit={() => onOpen(note, { edit: true })} />
+          <NoteCardMenu
+            onEdit={() => onOpen(note, { edit: true })}
+            onDuplicate={() => { void onDuplicate(note); }}
+            onDelete={() => { void onDelete(note.id); }}
+          />
         </div>
       </div>
 
@@ -165,7 +280,15 @@ function NoteCard({
   );
 }
 
-function NoteCardMenu({ onEdit }: { onEdit: () => void }) {
+function NoteCardMenu({
+  onEdit,
+  onDuplicate,
+  onDelete,
+}: {
+  onEdit: () => void;
+  onDuplicate: () => void;
+  onDelete: () => void;
+}) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -180,8 +303,8 @@ function NoteCardMenu({ onEdit }: { onEdit: () => void }) {
 
   const items: { label: string; danger?: boolean; onSelect: () => void }[] = [
     { label: "Edit", onSelect: onEdit },
-    { label: "Duplicate", onSelect: () => {} },
-    { label: "Delete", danger: true, onSelect: () => {} },
+    { label: "Duplicate", onSelect: onDuplicate },
+    { label: "Delete", danger: true, onSelect: onDelete },
   ];
 
   return (
@@ -261,44 +384,37 @@ function EmptyState({ hasAnyNotes, onCreate }: { hasAnyNotes: boolean; onCreate:
   );
 }
 
-function NewNoteModal({
-  slug,
+export function NewNoteModal({
   projectName,
   onClose,
   onCreated,
 }: {
-  slug: string;
   projectName: string;
   onClose: () => void;
-  onCreated: (note: ProjectNote) => void;
+  onCreated: (input: { title: string; body: string; tag?: string }) => Promise<boolean>;
 }) {
   const [visible, setVisible] = useState(false);
   const [title, setTitle] = useState("");
   const [tag, setTag] = useState<string | undefined>(undefined);
   const [body, setBody] = useState("");
+  const [saving, setSaving] = useState(false);
   const titleRef = useRef<HTMLInputElement>(null);
 
-  const canSubmit = title.trim().length > 0;
+  const canSubmit = title.trim().length > 0 && !saving;
 
   function handleClose() {
     setVisible(false);
     setTimeout(onClose, 200);
   }
 
-  function handleSubmit() {
+  async function handleSubmit() {
     if (!canSubmit) {
       titleRef.current?.focus();
       return;
     }
-    onCreated({
-      id: `note-${Date.now()}`,
-      projectSlug: slug,
-      title: title.trim(),
-      body: body.trim() || "No additional details yet.",
-      tag,
-      updatedAt: "Just now",
-      author: { name: "You", avatar: "https://i.pravatar.cc/64?img=1" },
-    });
+    setSaving(true);
+    await onCreated({ title: title.trim(), tag, body: body.trim() || "No additional details yet." });
+    setSaving(false);
   }
 
   useEffect(() => {

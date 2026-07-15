@@ -95,24 +95,30 @@ export const ACTIVITY_META: Record<ActivityType, { label: string; dot: string }>
   priority:  { label: "Priority",  dot: "bg-amber-400" },
 };
 
-export const RECENT_ACTIVITY: Array<{
+export interface DashboardActivityEntry {
   id: string;
   type: ActivityType;
   avatar: string;
   name: string;
   /** The action fragment only — e.g. "marked", "completed". Never embeds the
-   *  ticket title; when `ticketId` is set, the title renders on its own
-   *  clickable line via getTicketDisplayKey instead. */
+   *  ticket title; when `ticketId`/`ticket` is set, the title renders on its
+   *  own clickable line via getTicketDisplayKey instead. */
   verb: ReactNode;
-  /** References Ticket.id in mock-tickets.ts. Omit for activity that isn't
-   *  about a specific ticket (e.g. project-level events) — those render as a
-   *  plain sentence with no ticket-reference line. */
+  /** References Ticket.id in mock-tickets.ts, resolved via getTicketById.
+   *  Omit for activity that isn't about a specific ticket (e.g. project-level
+   *  events) — those render as a plain sentence with no ticket-reference line. */
   ticketId?: string;
+  /** Already-resolved real ticket — set by real (Supabase-backed) callers
+   *  instead of `ticketId`, since getTicketById only knows the mock catalog.
+   *  Takes priority over `ticketId` when both are present. */
+  ticket?: Ticket;
   /** Extra context shown in the meta line, e.g. "8h → 12h" or "to Alejo Cadavid". */
   detail?: ReactNode;
   project: string;
   time: string;
-}> = [
+}
+
+export const RECENT_ACTIVITY: DashboardActivityEntry[] = [
   {
     id: "a1", type: "blocked", avatar: av(22), name: "David Kim",
     verb: "marked", ticketId: "kyc-vendor-outage",
@@ -248,7 +254,7 @@ export function RecentActivityList({
   items,
   onOpenTicket,
 }: {
-  items: typeof RECENT_ACTIVITY;
+  items: DashboardActivityEntry[];
   /** Opens the existing Ticket Detail preview/page — every clickable ticket
    *  reference in this list calls into it rather than inventing new navigation. */
   onOpenTicket: (ticket: Ticket) => void;
@@ -257,7 +263,7 @@ export function RecentActivityList({
     <ul className="space-y-4">
       {items.map((entry) => {
         const meta = ACTIVITY_META[entry.type];
-        const ticket = entry.ticketId ? getTicketById(entry.ticketId) : undefined;
+        const ticket = entry.ticket ?? (entry.ticketId ? getTicketById(entry.ticketId) : undefined);
         return (
           <li key={entry.id} className="flex items-start gap-3">
             <MemberTrigger name={entry.name} avatar={entry.avatar} className="flex-shrink-0 mt-0.5 rounded-full">

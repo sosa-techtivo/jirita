@@ -16,6 +16,18 @@ export interface TeamMemberRemovedEventDetail {
   profileId: string;
 }
 
+// Same window CustomEvent bridge as TEAM_MEMBER_REMOVED_EVENT above, fired
+// the moment project_memberships.project_role is actually confirmed changed
+// by the server (member-profile-modal.tsx's MemberMenu "Make Project Lead")
+// — team-screen.tsx listens for both the same way.
+export const TEAM_PROJECT_LEAD_CHANGED_EVENT = "jirita:project-lead-changed";
+
+export interface TeamProjectLeadChangedEventDetail {
+  slug: string;
+  /** The profile now leading this project. */
+  profileId: string;
+}
+
 export interface TeamMember {
   id: string;
   projectSlug: string;
@@ -28,6 +40,12 @@ export interface TeamMember {
   assignedHours: number;
   /** References Ticket.id in mock-tickets.ts */
   activeTicketIds: string[];
+  /** project_memberships.project_role ('lead' | 'member') — only ever set
+   *  for the real Team roster (loadProjectTeam); every other TeamMember
+   *  source in this app (mock rosters, resolveTeamMember's synthesized
+   *  stubs) leaves this undefined, which is also what gates "Make Project
+   *  Lead" off outside the real Team screen. */
+  projectRole?: "lead" | "member";
 }
 
 const avatar = (id: number) => `https://i.pravatar.cc/64?img=${id}`;
@@ -150,6 +168,12 @@ export interface MemberIdentity {
    *  history check in member-profile-modal.tsx). Every other existing
    *  caller never sets this and is unaffected. */
   profileId?: string;
+  /** project_memberships.project_role for this profileId, same "only
+   *  team-screen.tsx knows this" reasoning as profileId above — lets
+   *  MemberMenu's "Make Project Lead" gate correctly even though the modal
+   *  itself is opened through this narrow identity, not the full real
+   *  TeamMember team-screen.tsx already has. */
+  projectRole?: "lead" | "member";
 }
 
 // The single lookup every "click a member" trigger goes through before
@@ -176,6 +200,7 @@ export function resolveTeamMember(identity: MemberIdentity): TeamMember {
       weeklyCapacity: 40,
       assignedHours: 0,
       activeTicketIds: [],
+      projectRole: identity.projectRole,
     };
   }
 
