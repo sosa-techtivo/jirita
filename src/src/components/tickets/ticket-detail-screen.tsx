@@ -139,9 +139,10 @@ function EditableTitle({ value, onChange }: { value: string; onChange: (v: strin
 
 // ── Editable: Description ─────────────────────────────────────────────────────
 
-function EditableDescription({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+function EditableDescription({ value, onSave }: { value: string; onSave: (v: string) => Promise<boolean> }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
+  const [saving, setSaving] = useState(false);
   const ref = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -152,7 +153,17 @@ function EditableDescription({ value, onChange }: { value: string; onChange: (v:
     }
   }, [editing]);
 
-  const save = () => { onChange(draft.trim() || value); setEditing(false); };
+  const startEditing = () => { setDraft(value); setEditing(true); };
+
+  // Stays in edit mode with the typed draft intact on failure — the parent's
+  // shared ErrorToast surfaces the reason — so a rejected save never loses
+  // what was typed. Only exits edit mode once the save is confirmed.
+  const save = async () => {
+    setSaving(true);
+    const ok = await onSave(draft);
+    setSaving(false);
+    if (ok) setEditing(false);
+  };
   const cancel = () => { setDraft(value); setEditing(false); };
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Escape") { e.preventDefault(); cancel(); }
@@ -166,31 +177,57 @@ function EditableDescription({ value, onChange }: { value: string; onChange: (v:
 
   if (editing) {
     return (
-      <textarea
-        ref={ref}
-        className={
-          "w-full text-[14px] text-slate-700 dark:text-zinc-300 leading-relaxed " +
-          "bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-700 " +
-          "rounded-lg px-3 py-2.5 outline-none resize-none overflow-hidden " +
-          "focus:border-brand-500 dark:focus:border-brand-500 focus:ring-1 focus:ring-brand-500/30"
-        }
-        value={draft}
-        onChange={(e) => { setDraft(e.target.value); autoResize(); }}
-        onBlur={save}
-        onKeyDown={onKey}
-      />
+      <div>
+        <textarea
+          ref={ref}
+          className={
+            "w-full text-[14px] text-slate-700 dark:text-zinc-300 leading-relaxed " +
+            "bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-700 " +
+            "rounded-lg px-3 py-2.5 outline-none resize-none overflow-hidden " +
+            "focus:border-brand-500 dark:focus:border-brand-500 focus:ring-1 focus:ring-brand-500/30"
+          }
+          value={draft}
+          onChange={(e) => { setDraft(e.target.value); autoResize(); }}
+          onKeyDown={onKey}
+          disabled={saving}
+        />
+        <div className="flex items-center justify-end gap-2 mt-2">
+          <button
+            type="button"
+            onClick={cancel}
+            disabled={saving}
+            className="px-3.5 py-1.5 text-[13px] font-medium text-slate-600 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={save}
+            disabled={saving}
+            className={[
+              "px-3.5 py-1.5 text-[13px] font-semibold rounded-lg transition-all",
+              saving
+                ? "bg-slate-100 dark:bg-zinc-800 text-slate-400 dark:text-zinc-600 cursor-not-allowed"
+                : "bg-brand-500 hover:bg-brand-600 text-white shadow-sm shadow-brand-500/30 cursor-pointer",
+            ].join(" ")}
+          >
+            Save
+          </button>
+        </div>
+      </div>
     );
   }
 
   return (
-    <div
-      className="group relative cursor-text"
-      onClick={() => { setDraft(value); setEditing(true); }}
-    >
-      <p className="text-[14px] text-slate-700 dark:text-zinc-300 leading-relaxed">{value}</p>
+    <div className="group relative cursor-text" onClick={startEditing}>
+      {value ? (
+        <p className="text-[14px] text-slate-700 dark:text-zinc-300 leading-relaxed">{value}</p>
+      ) : (
+        <p className="text-[14px] text-slate-400 dark:text-zinc-600 italic leading-relaxed">Add a description...</p>
+      )}
       <button
         className={EDIT_BTN + " absolute -top-0.5 -right-5"}
-        onClick={(e) => { e.stopPropagation(); setDraft(value); setEditing(true); }}
+        onClick={(e) => { e.stopPropagation(); startEditing(); }}
         aria-label="Edit description"
       >
         <PencilIcon />
@@ -2563,23 +2600,29 @@ export function TicketDetailScreen({
   // the error is shown via the shared toast, not just logged. On success the
   // ticket is synced to the server's own confirmed row rather than trusting
   // the optimistic value stayed in sync.
-  const persist = (patch: UpdateTicketInput) => {
-    if (isDevFallback) return;
+  // Returns whether the save succeeded so call sites that need to know
+  // (e.g. EditableDescription, which keeps its draft on screen until a
+  // save is confirmed) can await it; existing fire-and-forget call sites
+  // are unaffected since they never read the returned promise.
+  const persist = (patch: UpdateTicketInput): Promise<boolean> => {
+    if (isDevFallback) return Promise.resolve(true);
     const previousTicket = ticket;
-    updateTicket(ticketId, slug, patch).then((result) => {
+    return updateTicket(ticketId, slug, patch).then((result) => {
       if (result.status === "error") {
         console.warn("[ticket-detail] failed to save change:", result.message);
         setTicket(previousTicket);
         showError(result.message);
-        return;
+        return false;
       }
       // Success path intentionally unchanged from before this fix — only
       // the failure branch above (and the .catch() below) are new.
       refreshActivity();
+      return true;
     }).catch((err) => {
       console.warn("[ticket-detail] failed to save change:", err);
       setTicket(previousTicket);
       showError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
+      return false;
     });
   };
 
@@ -2737,7 +2780,11 @@ export function TicketDetailScreen({
             <CollapsibleSection title="Description" defaultOpen={true}>
               <EditableDescription
                 value={ticket.description}
-                onChange={(v) => { update("description", v); persist({ description: v }); }}
+                onSave={async (v) => {
+                  const ok = await persist({ description: v });
+                  if (ok) update("description", v);
+                  return ok;
+                }}
               />
             </CollapsibleSection>
 
