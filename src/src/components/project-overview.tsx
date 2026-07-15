@@ -11,6 +11,7 @@ import { BoardView } from "@/components/tickets/board-view";
 import { MemberTrigger } from "@/components/member-profile";
 import { getTeamByProjectSlug } from "@/lib/mock-team";
 import { useCurrentUser } from "@/components/current-user-provider";
+import { useOrganizationProjects } from "@/components/organization-projects-provider";
 import { ProjectCategoryBadge } from "@/components/status-badge";
 import { TicketPreviewPanel } from "@/components/tickets/ticket-preview-panel";
 import { presetTicketsFilter } from "@/components/tickets-screen";
@@ -323,6 +324,28 @@ function MyActivityRow({
         </p>
       </div>
     </li>
+  );
+}
+
+// The /projects/[slug] page itself is a server component (so it can't call
+// useCurrentUser/useOrganizationProjects directly), so its breadcrumb is a
+// small client component instead — same "server page, client breadcrumb"
+// split already used by ProjectSettingsBreadcrumb (project-settings-
+// screen.tsx) and TicketDetailBreadcrumb (ticket-detail-screen.tsx). Reuses
+// the org's already-loaded real project list (OrganizationProjectsProvider,
+// mounted once in layout.tsx) rather than a new fetch — the exact same
+// source Sidebar/`/projects`/those other breadcrumbs already read from.
+export function ProjectOverviewBreadcrumb({ slug }: { slug: string }) {
+  const { projects } = useOrganizationProjects();
+  const projectName = projects.find((p) => p.slug === slug)?.name ?? slug;
+  return (
+    <>
+      <Link href="/projects" className="text-slate-400 hover:text-slate-600 dark:text-zinc-500 dark:hover:text-zinc-300">
+        Projects
+      </Link>
+      <span className="text-slate-300 dark:text-zinc-700">/</span>
+      <span className="text-slate-800 font-medium dark:text-zinc-200">{projectName}</span>
+    </>
   );
 }
 

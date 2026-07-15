@@ -3,7 +3,8 @@
 import { FilterChip } from "@/components/tickets/filter-chip";
 import { FilterDropdown, type DropdownGroup } from "@/components/tickets/filter-dropdown";
 import { DateRangeFilterDropdown, type DateRangeValue } from "@/components/tickets/date-range-filter-dropdown";
-import { PRIORITY_VALUES, PRIORITY_LABEL } from "@/components/tickets/ticket-ui";
+import { PRIORITY_VALUES, PRIORITY_LABEL, STATUS_LABEL } from "@/components/tickets/ticket-ui";
+import type { TicketStatus } from "@/lib/mock-tickets";
 import type { OrgMember } from "@/lib/projects";
 
 export type AddFilterKind = "labels" | "due-date" | "reporter" | "created-date" | "updated-date";
@@ -71,6 +72,18 @@ const ADD_FILTER_KINDS = Object.keys(ADD_FILTER_LABEL) as AddFilterKind[];
 
 const QUICK_FILTERS = ["Mine", "Blocked", "High Priority", "Due Soon", "Recently Updated"];
 
+// Labels for real URL-applied filters handed off from Project Overview's
+// Health Alert action and Project Reports' Delivery Progress cards
+// (?alerts=overdue,blocked,done,in-progress, etc. — see tickets-screen.tsx).
+// "overdue" isn't a real ticket status, so it keeps its own label; every
+// other type is a canonical TicketStatus and reuses the app's existing
+// STATUS_LABEL mapping instead of a parallel/duplicate label.
+const NON_STATUS_ALERT_LABEL: Record<string, string> = { overdue: "Overdue" };
+
+function alertChipLabel(type: string): string {
+  return STATUS_LABEL[type as TicketStatus] ?? NON_STATUS_ALERT_LABEL[type] ?? type;
+}
+
 // ── Props ─────────────────────────────────────────────────────────────────────
 
 export interface FilterBarState {
@@ -103,6 +116,8 @@ export function FilterBar({
   onCreatedDateRangeChange,
   updatedDateRange,
   onUpdatedDateRangeChange,
+  alertChipTypes,
+  onRemoveAlertChip,
 }: {
   activeChips: Set<string>;
   onToggleChip: (label: string) => void;
@@ -133,6 +148,11 @@ export function FilterBar({
   onCreatedDateRangeChange: (value: DateRangeValue) => void;
   updatedDateRange: DateRangeValue;
   onUpdatedDateRangeChange: (value: DateRangeValue) => void;
+  /** Real, already-applied URL filters (Project Overview's Health Alert
+   *  action) — rendered with the same FilterChip style as the quick
+   *  filters below, never a second chip design. */
+  alertChipTypes: string[];
+  onRemoveAlertChip: (type: string) => void;
 }) {
   const assignedGroups = buildAssignedGroups(members);
   const reporterGroups: DropdownGroup[] = [
@@ -268,6 +288,22 @@ export function FilterBar({
             onToggle={() => onToggleChip(label)}
           />
         ))}
+        {/* Real URL-applied filters (Project Overview's Health Alert action,
+            Project Reports' Delivery Progress cards) — same FilterChip
+            style/remove interaction as the quick filters above. Skips any
+            type whose label is already shown active via a quick filter
+            (e.g. "Blocked") so the same filter is never rendered as two
+            separate chips. */}
+        {alertChipTypes
+          .filter((type) => !activeChips.has(alertChipLabel(type)))
+          .map((type) => (
+            <FilterChip
+              key={`alert-${type}`}
+              label={alertChipLabel(type)}
+              active
+              onToggle={() => onRemoveAlertChip(type)}
+            />
+          ))}
       </div>
     </div>
   );

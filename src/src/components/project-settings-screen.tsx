@@ -109,7 +109,7 @@ export function ProjectSettingsScreen({ slug }: { slug: string }) {
   const initialDevProject: ProjectDetail | null = isDevFallback
     ? (() => {
         const mock = sharedProjects.find((p) => p.slug === slug);
-        return mock ? { ...mock, ownerProfileId: null } : null;
+        return mock ? { ...mock, ownerProfileId: null, createdAt: "—", createdAtISO: new Date(0).toISOString() } : null;
       })()
     : null;
 
@@ -191,7 +191,7 @@ export function ProjectSettingsScreen({ slug }: { slug: string }) {
     if (isDevFallback) {
       const mock = sharedProjects.find((p) => p.slug === slug);
       if (mock) {
-        const updated: ProjectDetail = { ...mock, ownerProfileId: null };
+        const updated: ProjectDetail = { ...mock, ownerProfileId: null, createdAt: "—", createdAtISO: new Date(0).toISOString() };
         setDetail({ status: "ready", project: updated });
         applyProject(updated);
       }

@@ -38,6 +38,10 @@ export type CreateProjectResult =
 // ever displays the resolved name/avatar, never the id).
 export interface ProjectDetail extends ProjectSummary {
   ownerProfileId: string | null;
+  /** Real projects.created_at, "Mar 3, 2026" — Project Overview header's "Started ..." line only. */
+  createdAt: string;
+  /** Same value as createdAt, raw ISO — Project Overview's health/alerts queries use it as their lower date bound. */
+  createdAtISO: string;
 }
 
 export type ProjectDetailResult =
@@ -100,6 +104,7 @@ interface ProjectRow {
   owner_profile_id: string | null;
   target_date: string | null;
   updated_at: string;
+  created_at: string;
 }
 
 interface OwnerProfileRow {
@@ -111,7 +116,7 @@ interface OwnerProfileRow {
 }
 
 const PROJECT_COLUMNS =
-  "slug, name, short_name, project_code, description, status, priority, health, category, client_name, default_hourly_rate, owner_profile_id, target_date, updated_at";
+  "slug, name, short_name, project_code, description, status, priority, health, category, client_name, default_hourly_rate, owner_profile_id, target_date, updated_at, created_at";
 
 // Kebab-cases a project name into a URL-safe slug (routes are
 // /projects/[slug]). Falls back to a timestamp if the name has no
@@ -178,6 +183,11 @@ function rowToProjectSummary(row: ProjectRow, ownerRow: OwnerProfileRow | undefi
 function formatTargetDate(isoDate: string | null): string {
   if (!isoDate) return "—";
   return new Date(`${isoDate}T00:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+// "Mar 3, 2026" — Project Overview header's "Started ..." line only.
+function formatCreatedAt(isoTimestamp: string): string {
+  return new Date(isoTimestamp).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
 function formatUpdatedAt(isoTimestamp: string): string {
@@ -417,7 +427,12 @@ export async function loadProjectDetail(organizationId: string, slug: string): P
 
   return {
     status: "ready",
-    project: { ...rowToProjectSummary(row, ownerRow), ownerProfileId: row.owner_profile_id },
+    project: {
+      ...rowToProjectSummary(row, ownerRow),
+      ownerProfileId: row.owner_profile_id,
+      createdAt: formatCreatedAt(row.created_at),
+      createdAtISO: row.created_at,
+    },
   };
 }
 

@@ -2015,6 +2015,122 @@ export async function loadOrganizationActivity(
   return { status: "ready", events };
 }
 
+// ── Project Activity History (project-activity-history-screen.tsx) ─────────
+// The full, real, comprehensive activity trail for one project — every real
+// event type (not just loadOrganizationActivity's narrower blocked/
+// completed/hours/assigned/priority dashboard categories), reusing the
+// exact same buildActivityLabel this file's own loadTicketActivity already
+// uses for one ticket's Activity Log, just resolved across every ticket in
+// the project and paginated server-side (LIMIT/OFFSET via .range()) instead
+// of loaded whole — same "?page=, 20/page, Previous/Next" real pagination
+// shape as loadProjectMemberWorkHistoryPage/work-history-screen.tsx. Never
+// synthesizes a ticket_created row the way loadTicketActivity does for
+// legacy pre-trigger tickets (that fabricated row lives outside the real
+// ticket_activity table's own ordering and would break correct
+// LIMIT/OFFSET pagination across pages).
+
+export interface ProjectActivityEntry {
+  id: string;
+  label: string;
+  timeAgo: string;
+  ticketKey: string;
+  ticketTitle: string;
+}
+
+export type ProjectActivityPageResult =
+  | { status: "ready"; entries: ProjectActivityEntry[]; totalCount: number }
+  | { status: "error"; message: string };
+
+interface ProjectActivityRawRow extends ActivityRow {
+  ticket_id: string;
+}
+
+export async function loadProjectActivityPage(
+  organizationId: string,
+  slug: string,
+  page: number,
+  pageSize: number
+): Promise<ProjectActivityPageResult> {
+  const supabase = getSupabaseBrowserClient();
+
+  const { data: project, error: projectError } = await supabase
+    .from("projects")
+    .select("id, project_code")
+    .eq("organization_id", organizationId)
+    .eq("slug", slug)
+    .maybeSingle<ProjectLookupRow>();
+
+  if (projectError) {
+    logDev("project activity project lookup failed", projectError);
+    return { status: "error", message: projectError.message };
+  }
+  if (!project) return { status: "ready", entries: [], totalCount: 0 };
+
+  const { data: ticketRows, error: ticketsError } = await supabase
+    .from("tickets")
+    .select("id, ticket_number, title")
+    .eq("project_id", project.id)
+    .returns<{ id: string; ticket_number: number; title: string }[]>();
+
+  if (ticketsError) {
+    logDev("project activity tickets lookup failed", ticketsError);
+    return { status: "error", message: ticketsError.message };
+  }
+  const ticketIds = (ticketRows ?? []).map((t) => t.id);
+  if (ticketIds.length === 0) return { status: "ready", entries: [], totalCount: 0 };
+
+  const ticketById = new Map((ticketRows ?? []).map((t) => [t.id, t]));
+
+  const offset = (page - 1) * pageSize;
+  const { data: rows, error, count } = await supabase
+    .from("ticket_activity")
+    .select("id, ticket_id, actor_profile_id, event_type, field_name, old_value, new_value, created_at", {
+      count: "exact",
+    })
+    .in("ticket_id", ticketIds)
+    .order("created_at", { ascending: false })
+    // Secondary tie-break so row order is fully deterministic even when
+    // several rows share the same created_at (e.g. a batch of field-change
+    // rows logged by one trigger in the same instant) — same reasoning as
+    // loadOrganizationProjects' own tie-break; without it, LIMIT/OFFSET
+    // pagination could show a tied row twice or skip it across pages.
+    .order("id", { ascending: true })
+    .range(offset, offset + pageSize - 1)
+    .returns<ProjectActivityRawRow[]>();
+
+  if (error) {
+    logDev("project activity page query failed", error);
+    return { status: "error", message: error.message };
+  }
+
+  // Every profile this page of activity could reference: each row's actor,
+  // plus assignee_changed's old/new profile ids — same resolution
+  // loadTicketActivity already uses for its own single-ticket page.
+  const profileIds = new Set<string>();
+  for (const row of rows ?? []) {
+    if (row.actor_profile_id) profileIds.add(row.actor_profile_id);
+    if (row.event_type === "assignee_changed") {
+      if (row.old_value) profileIds.add(row.old_value);
+      if (row.new_value) profileIds.add(row.new_value);
+    }
+  }
+  const profilesById = await loadProfilesByIds(supabase, Array.from(profileIds));
+  const resolveName = (id: string | null) => (id ? resolveProfileName(profilesById.get(id)) : null);
+
+  const entries: ProjectActivityEntry[] = (rows ?? []).map((row) => {
+    const ticket = ticketById.get(row.ticket_id);
+    return {
+      id: row.id,
+      label: buildActivityLabel(row, resolveName(row.actor_profile_id), resolveName),
+      timeAgo: formatRelativeTime(row.created_at),
+      ticketKey: `${project.project_code}-${ticket?.ticket_number ?? "?"}`,
+      ticketTitle: ticket?.title ?? "",
+    };
+  });
+
+  return { status: "ready", entries, totalCount: count ?? 0 };
+}
+
 // ── Member Dashboard reads ──────────────────────────────────────────────────
 // (src/components/member-dashboard.tsx). Admin's and Project Lead's own
 // dashboards are untouched.
@@ -2263,6 +2379,46 @@ export async function loadHoursAndAssigneeActivityForRange(
       newValue: row.new_value,
     })),
   };
+}
+
+export type TicketsCompletedInRangeResult =
+  | { status: "ready"; ticketIds: string[] }
+  | { status: "error"; message: string };
+
+// Real status_changed→done ticket_activity rows within an inclusive-start/
+// exclusive-end timestamp range — Project Reports' Delivery Snapshot uses
+// this (status activity) rather than a ticket's own updated_at, which can
+// be touched by any later field edit long after the ticket was actually
+// completed. Same uncapped/date-ranged shape as
+// loadHoursAndAssigneeActivityForRange above, just for a different event.
+export async function loadTicketsCompletedInRange(
+  ticketIds: string[],
+  startISO: string,
+  endExclusiveISO: string
+): Promise<TicketsCompletedInRangeResult> {
+  if (ticketIds.length === 0) return { status: "ready", ticketIds: [] };
+
+  const supabase = getSupabaseBrowserClient();
+
+  const { data: rows, error } = await supabase
+    .from("ticket_activity")
+    .select("ticket_id")
+    .in("ticket_id", ticketIds)
+    .eq("event_type", "status_changed")
+    .eq("new_value", "done")
+    .gte("created_at", startISO)
+    .lt("created_at", endExclusiveISO)
+    .returns<{ ticket_id: string }[]>();
+
+  if (error) {
+    logDev("tickets completed in range query failed", error);
+    return { status: "error", message: error.message };
+  }
+
+  // De-duplicated — a ticket could in theory be marked Done more than once
+  // in the same period (moved off Done and back), but it should still only
+  // count once.
+  return { status: "ready", ticketIds: Array.from(new Set((rows ?? []).map((r) => r.ticket_id))) };
 }
 
 export interface DeliveryActivityEvent {

@@ -278,10 +278,16 @@ via `project_memberships.project_role`, Make Project Lead, auto-membership
 on real contribution, Add/Remove Member, and a paginated Work History
 page), Project Notes (list, search, create, edit, Duplicate, and delete
 against real `project_notes`), the Dashboard for the Admin, Project Lead,
-and Member roles (every KPI, list, and quick action described below), and
+and Member roles (every KPI, list, and quick action described below),
 Reports for the Admin role (`/reports` — both the Delivery and Finance
-tabs, including filters, Health Alerts, and Export) are connected and
-**confirmed working end-to-end against a live Supabase project**. Users
+tabs, including filters, Health Alerts, and Export), the **Admin**
+Project Overview (`/projects/[slug]` — header, real Health Alerts, KPIs,
+Active Work, a paginated Project Activity history, Team, and Project
+Health, all described in their own section below), and per-project Reports
+(`/projects/[slug]/reports`, all roles — KPIs, Estimated vs Logged Hours,
+Team Workload, Delivery Progress with contextual ticket navigation, and a
+real current-month Delivery Snapshot) are connected and **confirmed working
+end-to-end against a live Supabase project**. Users
 (the `/users` list, Invite by email or by generated link, Disable/Enable,
 Edit, a generated Reset Password link, and the shared Member Profile
 Modal's Activity/Security tabs) is also fully implemented against the same
@@ -290,8 +296,12 @@ browser** — every migration, Server Action, and screen below passes
 `tsc`/`eslint`/`next build`, but this specific set of Users-only flows
 (Invite/Disable/Enable/Edit/Reset Password) hasn't itself been clicked
 through since it was built; treat that section as "should work, not yet
-verified" until it has. Project Lead's own Reports view (a separate
-component from Admin Reports) and the rest of Settings are still
+verified" until it has. The same "implemented and type/build-clean, not yet
+clicked through in a live browser" caveat now also applies to everything
+described below under Project Overview (Admin) and Reports (Project,
+per-project) — see those sections' own opening notes. The Project Lead's
+and Member's own Project Overview, Project Lead's own Reports view (a
+separate component from Admin Reports), and the rest of Settings are still
 unconnected mock data — see "Still mock" below for the exact boundaries
 within Projects, Reports, and the Dashboards themselves.
 
@@ -559,6 +569,40 @@ Reports are untouched — see "Still mock".
   New Ticket/Comment/Log Time all guard against a stuck spinner on a
   rejected (not just `{status:"error"}`) request; Ticket Detail's own load
   failure now has a Retry button, matching the ticket list's.
+- **Description is now inline-editable on Ticket Detail** — click-to-edit,
+  a textarea prefilled with the current value, explicit Save/Cancel actions
+  (mirroring the Comment box's own button styling), and a placeholder
+  ("Add a description…") when empty. Persists through the same
+  `updateTicket()` every other inline edit already uses (still logged by
+  the existing `description_changed` Activity trigger, no new logging
+  code). Real bug fixed: saving used to silently fall back to the previous
+  value instead of actually allowing an empty description; on a failed
+  save the typed draft now stays on screen (editing mode doesn't exit)
+  instead of being discarded.
+- **New tickets default to Backlog, not To Do** — the real
+  `createTicket()` insert (`lib/tickets.ts`) and the New Ticket modal's own
+  "More Options" Status field both changed; the `tickets.status` database
+  column's own default was already `'backlog'` (unused until now, since the
+  application layer always overrode it) — no migration needed.
+- **Real URL-applied ticket filters** (`?alerts=<type,type,...>`, e.g.
+  `overdue`, `blocked`, or any canonical `TicketStatus` like `done`/
+  `in-progress`) — the query-state handoff Project Overview's Health Alert
+  action and Project Reports' Delivery Progress cards both use (see their
+  own sections). `tickets-screen.tsx` reads it via `useSearchParams()` and
+  ORs matching tickets into the existing filter pipeline (still ANDed with
+  everything else, same as every other filter here); `filter-bar.tsx`
+  renders each active type as a real, removable chip in the same Quick
+  Filters row, using the app's own existing `STATUS_LABEL` map for the
+  label (no parallel/hardcoded label table) and skipping any type already
+  shown active via a manual quick filter (e.g. "Blocked") so the same
+  filter is never rendered twice. Removing a chip rewrites the URL via
+  `router.push`, so — unlike the pre-existing sessionStorage-based
+  `presetTicketsFilter` below (still used as-is by its own existing
+  callers) — this filter is real URL/browser-history state and survives a
+  refresh or back/forward navigation, the same way Work History's own
+  `?page=` already does. The Tickets page (`app/projects/[slug]/tickets/
+  page.tsx`) is now wrapped in `<Suspense>` for this reason, same
+  requirement Work History's `?page=` already has.
 - Migrations (all confirmed against the live project, in order):
   `20260717000000_grant_authenticated_tickets_read.sql`,
   `20260718000000_grant_authenticated_tickets_insert.sql`,
@@ -897,6 +941,89 @@ below), no existing field/behavior changed.
   test-data creation/cleanup to freshly-generated, uniquely-stamped
   slugs/emails — never broad/unscoped deletes against any real table).
 
+## Confirmed working (Project Overview — Admin)
+
+Implemented and type/build-clean (`tsc`/`eslint`/`next build` all pass),
+**not yet clicked through in a live browser** — treat as "should work, not
+yet verified" until it has. Scoped to the **Admin** role's
+`admin-project-overview.tsx` only — its section names (Active Work,
+Project Activity, Team, Project Health) match this work's own requirements
+exactly. The Project Lead's (`project-lead-project-overview.tsx`) and
+Member's (`project-overview.tsx`) own Project Overview views are untouched
+and still read mock data — see "Still mock" below.
+
+- **Header** — real project name, description, status (`StatusBadge`),
+  category (`ProjectCategoryBadge`), and creation date ("Started …", from
+  the real `projects.created_at` column — added to `ProjectDetail` as
+  `createdAt`/`createdAtISO` in `lib/projects.ts`, no schema change), all
+  from `loadProjectDetail`. The header's initials badge now shows the
+  project's own real `shortName` instead of a hardcoded "MB". The
+  description is expandable/collapsible: clamped to 2 lines
+  (`ExpandableDescription`, measured via `scrollHeight`/`clientHeight`, not
+  a character count, so it stays correct across widths — re-measured on
+  resize) with a "View more"/"View less" toggle shown only when the text
+  actually overflows. The "Owned by" field was removed outright (not
+  replaced, not modified in the database — `ProjectSummary.owner` still
+  exists and is used elsewhere, just no longer read here).
+- **Breadcrumb** — `ProjectOverviewBreadcrumb` (`project-overview.tsx`),
+  the same "server page, client breadcrumb" split as
+  `ProjectSettingsBreadcrumb`/`TicketDetailBreadcrumb`, reusing the org's
+  already-loaded real project list (`OrganizationProjectsProvider`) instead
+  of the page's old server-side mock lookup.
+- **Alert Banner (Health Alerts)** — reuses Delivery Reports' own real
+  `buildDeliveryStatusItems`/`buildDeliveryKpiSummary`/
+  `buildHoursByPersonRows` (exported from `reports-screen.tsx` for this
+  reuse — no second health calculation), scoped to this one project's
+  tickets/team/time entries. The Review action's target covers every
+  actionable alert type currently shown (never just the first one, and
+  never an arbitrary ticket when more than one alert/ticket is present):
+  exactly one alert type resolving to exactly one real ticket links
+  straight to that ticket; every other actionable combination hands off to
+  the Tickets page via `?alerts=<type,type,...>` (see the Tickets section's
+  own real query-state handoff below); no actionable ticket (e.g. only the
+  capacity-only "overloaded" signal) hides the action link entirely, and
+  the banner itself is hidden when there's nothing real to flag.
+- **KPIs** — Open Tickets (`status !== "done"`), Progress (real
+  done/total-ticket-count percentage — the same formula already
+  established by the Admin Dashboard's "Projects at Risk" widget and the
+  Project Lead Dashboard's "Delivery Progress" KPI, not the Delivery
+  Reports' hours-based "Hours Burn"), Blocked, and Closed This Month (the
+  same real `updatedAtISO`-in-the-current-calendar-month signal Delivery
+  Reports/Admin Dashboard already use for this exact problem).
+- **Active Work** — real Blocked/In Progress/In Review ticket groups from
+  `loadProjectTickets`, with the existing empty state when none exist.
+- **Project Activity** — capped at the 10 most recent real events
+  (`loadOrganizationActivity`, the same curated blocked/completed/hours/
+  assigned/priority categories the Dashboards already use), newest first;
+  fetches 11 to detect whether an 11th exists without ever paginating
+  inside the card. A "View all activity →" link (shown only when that 11th
+  event exists) opens a new, dedicated, fully paginated
+  `/projects/[slug]/activity` page (`project-activity-history-screen.tsx`)
+  — the real, comprehensive activity trail (every event type, not just the
+  5 curated categories), reusing `lib/tickets.ts`'s own `buildActivityLabel`
+  (the same label-building function Ticket Detail's own Activity Log
+  already uses) rather than a second formatting function, resolved across
+  every ticket in the project and paginated server-side via a new
+  `loadProjectActivityPage` (`.range()` + `{count:"exact"}`, no new
+  migration — a secondary `.order("id")` tie-break guarantees no
+  duplicated/skipped rows across pages). Same real `?page=`, 20/page,
+  Previous/Next pattern as Work History.
+- **Team** — real roster from `loadProjectTeam`, with the existing "View
+  all →" link to `/projects/[slug]/team`.
+- **Project Health** — reuses Delivery Reports' own `buildProjectHealthRows`
+  (scoped to this one project) for the real risk verdict, rather than a
+  second calculation. The existing 4-row Schedule/Capacity/Scope/Risks
+  layout is preserved as-is; since the reused function returns one combined
+  verdict rather than 4 independent sub-scores, Schedule and Risks are
+  driven by its real blocked/overdue signals, Capacity by the real
+  over-capacity team member (`buildHoursByPersonRows`, the same result
+  already computed for the Alert Banner above), and Scope — which has no
+  real signal anywhere in this schema — shows an honest "No scope tracking
+  available yet" note rather than a fabricated one.
+- No new migrations — pure application-layer query/rendering work on top of
+  already-real `projects`/`tickets`/`ticket_activity`/`ticket_time_entries`/
+  `project_memberships` tables.
+
 ## Confirmed working (Dashboard — Admin)
 
 Real KPIs, lists, and quick actions for the Admin role's `/dashboard` — no
@@ -1140,6 +1267,73 @@ instead — see "Still mock" below.
   of already-real `tickets`/`ticket_activity`/`ticket_time_entries`/
   `projects`/`organization_memberships`/`project_memberships` tables.
 
+## Confirmed working (Reports — Project, per-project)
+
+Implemented and type/build-clean (`tsc`/`eslint`/`next build` all pass),
+**not yet clicked through in a live browser** — treat as "should work, not
+yet verified" until it has. Real replacement for
+`/projects/[slug]/reports`'s (`project-reports-screen.tsx`) previous
+org-wide mock ticket list and `mock-team.ts` roster, for every role that
+can open it. Project Lead's own, separate Reports view
+(`project-lead-reports-screen.tsx`) is untouched and still mock — see
+"Still mock" below.
+
+- **Data loading** — `loadProjectDetail`, `loadProjectTickets`,
+  `loadProjectTeam` (Team's own data source), and
+  `loadOrganizationLoggedTimeForRange` (Delivery Reports/Project Overview's
+  own time-entry query — called once all-time, for Estimated/Logged Hours
+  and Project Health, and once for the current calendar month, for the
+  Delivery Snapshot), all scoped to the route's own `slug` and refetched on
+  organization/slug change so switching projects refreshes every metric.
+  Real loading/error+Retry states (none existed before, since the page was
+  previously synchronous mock data).
+- **Project Health KPI** — now calls Delivery Reports' own
+  `buildProjectHealthRows`, scoped to this one project, rather than a
+  second calculation; its `risk` is mapped to the existing `HealthBadge`
+  component's vocabulary. Real bug fixed here: this KPI card was previously
+  showing `project.status` (Planning/Active/…) mislabeled as "Project
+  Health" — it now shows a real computed health verdict instead.
+- **Weekly Capacity / Assigned Hours / Team Utilization** — Team Workload's
+  member list uses the exact same per-member `TeamMember` construction and
+  `assignedHours` formula (open tickets' estimated hours) already used by
+  `team-screen.tsx`, summed/divided with this screen's own pre-existing
+  formula (`0%` when capacity is `0`). `utilizationOf`/`capacityTextColor`/
+  `CapacityBar` (Team's own utilization rules, `member-profile-modal.tsx`)
+  are unchanged, just now fed real members.
+- **Estimated vs Logged Hours** — Estimated = sum of real ticket estimates;
+  Logged = sum of real time entries (all-time); Remaining =
+  `max(estimated - logged, 0)`; percentage = `0` when estimated is `0`.
+- **Team Workload** — real roster, with the existing empty state when the
+  project has no active members.
+- **Delivery Progress** — real ticket-status counts (Total/Done/In
+  Progress/Blocked) and completion percentage (`0%` when there are no
+  tickets). The Completed/In Progress/Blocked cards now navigate
+  contextually instead of the old, non-functional `?status=` query param
+  (never read anywhere): zero matching tickets never navigates; exactly one
+  links straight to that ticket; more than one hands off to the Tickets
+  page via the same real `?alerts=<status>` query-state mechanism the
+  Project Overview Health Alert action above uses, using the app's own
+  canonical `TicketStatus` values, never a parallel/hardcoded one. Total
+  Tickets is unchanged — always the plain, unfiltered Tickets page.
+- **Delivery Snapshot** — a new `loadTicketsCompletedInRange` (`lib/
+  tickets.ts`, mirroring the existing `loadHoursAndAssigneeActivityForRange`
+  query shape) finds tickets with a real `status_changed → done`
+  `ticket_activity` row within the current calendar month, rather than
+  trusting a ticket's own `updated_at`. Completed Hours sums real logged
+  time for just those tickets within that same month (a second, narrower
+  call to `loadOrganizationLoggedTimeForRange`, not a client-side re-slice
+  of the all-time fetch, which doesn't carry its own per-entry date back to
+  the client). Reporting Period is computed via a local
+  `getCurrentMonthBounds()` helper (first-of-month through today) and
+  displayed with the existing `formatISODate` formatter already used
+  throughout the app.
+- **Breadcrumb** — `ProjectReportsBreadcrumb`, the same real-project-name
+  pattern as Project Overview's/Project Settings' own breadcrumbs, replacing
+  the page's old server-side mock lookup.
+- No new migrations — pure application-layer query/rendering work on top of
+  already-real `projects`/`tickets`/`ticket_activity`/`ticket_time_entries`/
+  `project_memberships` tables.
+
 ## Still mock
 
 - The rest of Settings (`/settings/*`) all still reads from
@@ -1154,14 +1348,16 @@ instead — see "Still mock" below.
 - `src/components/member-projects-screen.tsx` ("My Projects," Member
   role) still reads `MEMBER_WORK` directly from `member-dashboard.tsx` —
   unaffected by the Member Dashboard becoming real above.
-- Within Projects itself: Project Overview (`/projects/[slug]`) and
-  per-project Reports still import `src/lib/mock-projects.ts` directly —
-  only the Sidebar, `/projects`, `/projects/[slug]/settings`,
-  `/projects/[slug]/team`, and `/projects/[slug]/notes` are real (see
-  above). `admin-project-overview.tsx` and `project-lead-project-overview.tsx`
-  (the Project Overview dashboards) still render `NewTicketModal`/
-  `TicketDetailScreen` against their own local mock ticket state — real
-  Tickets data doesn't reach these two screens.
+- Within Projects itself: the Sidebar, `/projects`, `/projects/[slug]/settings`,
+  `/projects/[slug]/team`, `/projects/[slug]/notes`, the **Admin** Project
+  Overview (`/projects/[slug]`), `/projects/[slug]/activity`, and
+  `/projects/[slug]/reports` (all roles) are all real now — see their own
+  sections above. `project-lead-project-overview.tsx` (Project Lead's own
+  Project Overview) and `project-overview.tsx` (the Member's own Project
+  Overview) still import `src/lib/mock-projects.ts`/`mock-team.ts` directly
+  and still render `NewTicketModal`/`TicketDetailScreen` against their own
+  local mock ticket state — real Tickets/Team/Reports data doesn't reach
+  either of these two screens.
 - Within Tickets/Ticket Detail specifically, still mock/unimplemented on
   purpose (see the section above for what's real):
   - New Ticket's "More Options" fields (Type, Status, Priority, Labels, Due

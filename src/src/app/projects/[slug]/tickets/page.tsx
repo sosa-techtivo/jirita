@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Suspense } from "react";
 import { AppShell } from "@/components/app-shell";
 import { TicketsScreen } from "@/components/tickets-screen";
 import { getProjectBySlug, projects } from "@/lib/mock-projects";
@@ -33,7 +34,10 @@ export default async function TicketsPage(props: PageProps<"/projects/[slug]/tic
         </>
       }
     >
-      <TicketsScreen slug={slug} projectName={projectName} />
+      {/* useSearchParams() (for ?alerts=) requires a Suspense boundary */}
+      <Suspense fallback={null}>
+        <TicketsScreen slug={slug} projectName={projectName} />
+      </Suspense>
     </AppShell>
   );
 }

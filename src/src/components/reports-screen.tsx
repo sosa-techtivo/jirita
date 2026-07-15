@@ -32,10 +32,10 @@ import type { OrgWorkloadMember, MemberWeeklyCapacityEntry } from "@/lib/project
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-type Risk          = "on-track" | "at-risk" | "blocked";
+export type Risk    = "on-track" | "at-risk" | "blocked";
 type PersonSortKey = "assignedTickets" | "estimatedHours" | "completedHours" | "remainingHours" | "blockedHours" | "capacity";
 
-interface PersonRow {
+export interface PersonRow {
   id:              string;
   name:            string;
   avatar:          string;
@@ -46,7 +46,7 @@ interface PersonRow {
   capacity:        number;
 }
 
-interface ProjectRow {
+export interface ProjectRow {
   id:             string;
   name:           string;
   shortName:      string;
@@ -604,7 +604,7 @@ function round1(n: number): number {
 // Project/Assignee/etc. filter bar above is cosmetic everywhere else on
 // this page too, not just here). "member" lookup skips a profile with no
 // resolvable name/avatar rather than fabricating one.
-function buildHoursByPersonRows(
+export function buildHoursByPersonRows(
   tickets: Ticket[],
   members: { id: string; name: string; avatar: string }[],
   capacities: { profileId: string; weeklyCapacity: number }[],
@@ -676,7 +676,7 @@ function buildHoursByPersonRows(
 // definition for "Projects at Risk" (blocked takes priority over at-risk;
 // at-risk = has an overdue, still-open ticket) rather than inventing a new
 // one — this table's third state, blocked > 0, is exactly that widget's.
-function buildProjectHealthRows(
+export function buildProjectHealthRows(
   projects: { slug: string; name: string; projectCode: string }[],
   tickets: Ticket[],
   timeEntries: { ticketId: string; minutes: number }[],
@@ -726,7 +726,7 @@ function buildProjectHealthRows(
   return rows;
 }
 
-interface DeliveryKpiSummary {
+export interface DeliveryKpiSummary {
   activeProjects:     number;
   activeTickets:      number;
   loggedHours:        number;
@@ -751,7 +751,7 @@ interface DeliveryKpiSummary {
 // own updated_at falling in the real current calendar month — never the
 // selected report period, since this KPI is explicitly about the current
 // calendar month regardless of what period is selected elsewhere.
-function buildDeliveryKpiSummary(
+export function buildDeliveryKpiSummary(
   tickets: Ticket[],
   projects: { status: ProjectStatus }[],
   timeEntries: { minutes: number }[],
@@ -1009,7 +1009,7 @@ function buildBillableHoursByMemberRows(
 // alerts" item only when there is truly nothing real to show — including
 // while the KPI strip's own fetch hasn't resolved yet (kpiSummary is null
 // only during loading/error, matching that section's own real state).
-function buildDeliveryStatusItems(
+export function buildDeliveryStatusItems(
   personRows: PersonRow[],
   kpiSummary: DeliveryKpiSummary | null
 ): StatusItem[] {

@@ -1,12 +1,21 @@
 "use client";
 
+import Link from "next/link";
+import { useCallback, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { getTeamByProjectSlug } from "@/lib/mock-team";
-import { tickets } from "@/lib/mock-tickets";
-import type { TicketStatus } from "@/lib/mock-tickets";
-import { getProjectBySlug } from "@/lib/mock-projects";
-import { StatusBadge as ProjectStatusBadge } from "@/components/status-badge";
+import type { TeamMember } from "@/lib/mock-team";
+import { getTicketDisplayKey } from "@/lib/mock-tickets";
+import type { Ticket } from "@/lib/mock-tickets";
+import { useCurrentUser } from "@/components/current-user-provider";
+import { useOrganizationProjects } from "@/components/organization-projects-provider";
+import { loadProjectDetail, loadProjectTeam } from "@/lib/projects";
+import type { ProjectDetail, ProjectTeamMember } from "@/lib/projects";
+import { loadProjectTickets, loadOrganizationLoggedTimeForRange, loadTicketsCompletedInRange } from "@/lib/tickets";
+import type { OrganizationTimeEntry } from "@/lib/tickets";
+import { getTodayISO, formatISODate } from "@/components/tickets/ticket-ui";
+import { HealthBadge } from "@/components/status-badge";
+import { buildProjectHealthRows } from "@/components/reports-screen";
 import {
   StatusBadge as MemberStatusBadge,
   CapacityBar,
@@ -15,31 +24,38 @@ import {
 } from "@/components/member-profile-modal";
 import { useMemberProfile } from "@/components/member-profile";
 
-// ── Mock/derived data helpers ────────────────────────────────────────────────
-//
-// Tickets aren't split per project in this mock dataset yet (TicketsScreen and
-// ProjectOverview treat the same list as "this project's tickets"), so Reports
-// follows the same convention. Team membership IS scoped per project.
+// Real replacement for this screen's previous org-wide mock ticket list and
+// mock-team.ts roster — every KPI below is scoped to this one project via
+// the real loaders already used elsewhere in the app (loadProjectTickets/
+// loadProjectTeam/loadOrganizationLoggedTimeForRange/loadProjectDetail —
+// Tickets, Team, and Project Overview's own data sources), and Project
+// Health specifically reuses Delivery Reports' own buildProjectHealthRows
+// rather than a second calculation. Round hasn't changed: 0%/0h/"—" are
+// real zero states computed from real (empty) data, never a fabricated
+// fallback.
 
-// No real time-tracking source exists per ticket yet, so "logged hours" is
-// approximated from ticket status until that data is available.
-const STATUS_LOG_RATIO: Record<TicketStatus, number> = {
-  backlog: 0,
-  "to-do": 0.05,
-  "in-progress": 0.5,
-  review: 0.85,
-  blocked: 0.35,
-  done: 1,
-};
+// Total Tickets always opens the plain, unfiltered Tickets page — the other
+// three Delivery Progress cards (Completed/In Progress/Blocked) each get
+// their own contextual navigation below (goToTicketsForStatus), never a
+// parallel status value of their own.
+const DELIVERY_STATUS_FILTER: Record<"total", null> = { total: null };
 
-const REPORTING_PERIOD = "Jun 23 – Jul 4";
-
-const DELIVERY_STATUS_FILTER: Record<"total" | "completed" | "in-progress" | "blocked", string | null> = {
-  total: null,
-  completed: "done",
-  "in-progress": "in-progress",
-  blocked: "blocked",
-};
+// Local calendar "this month" — first day of the month through today, same
+// local-date (not UTC) reasoning getTodayISO/reports-screen.tsx's own
+// getCurrentWeekBounds already documents. `end` is the exclusive upper
+// bound for the status-activity range query (tomorrow, so today's own
+// events are included); the time-entry query's own bounds are inclusive,
+// so it's given `getTodayISO()` directly instead.
+function getCurrentMonthBounds(): { start: string; end: string } {
+  const todayISO = getTodayISO();
+  const today = new Date(`${todayISO}T00:00:00`);
+  const firstOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+  const tomorrow = new Date(today);
+  tomorrow.setDate(today.getDate() + 1);
+  const toISODate = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return { start: toISODate(firstOfMonth), end: toISODate(tomorrow) };
+}
 
 // ── Shared shells (mirrors the visual language of the global Reports page) ──
 
@@ -106,36 +122,244 @@ function ClickableStat({
 
 // ── Main component ────────────────────────────────────────────────────────────
 
+// Same "server page, client breadcrumb" split as ProjectSettingsBreadcrumb/
+// ProjectOverviewBreadcrumb — the real project name comes from the org's
+// already-loaded project list (OrganizationProjectsProvider), not a new
+// fetch, replacing the page's previous mock-projects.ts lookup.
+export function ProjectReportsBreadcrumb({ slug }: { slug: string }) {
+  const { projects } = useOrganizationProjects();
+  const projectName = projects.find((p) => p.slug === slug)?.name ?? slug;
+  return (
+    <>
+      <Link href="/projects" className="text-slate-400 hover:text-slate-600 dark:text-zinc-500 dark:hover:text-zinc-300">
+        Projects
+      </Link>
+      <span className="text-slate-300 dark:text-zinc-700">/</span>
+      <Link
+        href={`/projects/${slug}`}
+        className="text-slate-400 hover:text-slate-600 dark:text-zinc-500 dark:hover:text-zinc-300"
+      >
+        {projectName}
+      </Link>
+      <span className="text-slate-300 dark:text-zinc-700">/</span>
+      <span className="text-slate-800 font-medium dark:text-zinc-200">Reports</span>
+    </>
+  );
+}
+
 export function ProjectReportsScreen({ slug }: { slug: string }) {
   const router = useRouter();
-  const project = getProjectBySlug(slug);
-  const members = getTeamByProjectSlug(slug);
+  const { organization, isDevFallback } = useCurrentUser();
   const { openMemberProfile } = useMemberProfile();
 
-  // Team capacity — same computation as the Team page.
+  const [loadState, setLoadState] = useState<"loading" | "ready" | "error">(isDevFallback ? "ready" : "loading");
+  const [loadErrorMessage, setLoadErrorMessage] = useState<string | null>(null);
+  const [project, setProject] = useState<ProjectDetail | null>(null);
+  const [tickets, setTickets] = useState<Ticket[]>([]);
+  const [teamMembers, setTeamMembers] = useState<ProjectTeamMember[]>([]);
+  const [allTimeEntries, setAllTimeEntries] = useState<OrganizationTimeEntry[]>([]);
+  const [completedThisMonthTicketIds, setCompletedThisMonthTicketIds] = useState<string[]>([]);
+  const [completedThisMonthMinutes, setCompletedThisMonthMinutes] = useState(0);
+  const [requestId, setRequestId] = useState(0);
+
+  const runFetch = useCallback(() => setRequestId((id) => id + 1), []);
+
+  useEffect(() => {
+    if (isDevFallback || !organization) return;
+    let cancelled = false;
+
+    (async () => {
+      const projectResult = await loadProjectDetail(organization.id, slug);
+      if (cancelled) return;
+      if (projectResult.status === "error") {
+        setLoadState("error");
+        setLoadErrorMessage(projectResult.message);
+        return;
+      }
+      if (projectResult.status === "not-found") {
+        setLoadState("error");
+        setLoadErrorMessage("Project not found.");
+        return;
+      }
+
+      const ticketsResult = await loadProjectTickets(organization.id, slug);
+      if (cancelled) return;
+      if (ticketsResult.status === "error") {
+        setLoadState("error");
+        setLoadErrorMessage(ticketsResult.message);
+        return;
+      }
+      const projectTickets = ticketsResult.status === "ready" ? ticketsResult.tickets : [];
+      const ticketIds = projectTickets.map((t) => t.id);
+      const monthBounds = getCurrentMonthBounds();
+      const todayISO = getTodayISO();
+
+      const [teamResult, allTimeResult, completedResult] = await Promise.all([
+        loadProjectTeam(organization.id, slug),
+        // All-time logged minutes, per ticket — feeds both "Logged Hours"
+        // below and buildProjectHealthRows' own real health verdict, one
+        // real fetch for both instead of two overlapping queries.
+        loadOrganizationLoggedTimeForRange(ticketIds, projectResult.project.createdAtISO.slice(0, 10), todayISO),
+        // Real status_changed→done rows this calendar month — the actual
+        // "moved to Done during the reporting period" signal, never
+        // ticket.updatedAtISO.
+        loadTicketsCompletedInRange(ticketIds, monthBounds.start, monthBounds.end),
+      ]);
+      if (cancelled) return;
+
+      if (teamResult.status === "error") {
+        setLoadState("error");
+        setLoadErrorMessage(teamResult.message);
+        return;
+      }
+      if (allTimeResult.status === "error") {
+        setLoadState("error");
+        setLoadErrorMessage(allTimeResult.message);
+        return;
+      }
+      if (completedResult.status === "error") {
+        setLoadState("error");
+        setLoadErrorMessage(completedResult.message);
+        return;
+      }
+
+      // Logged time within the reporting period, for only the tickets that
+      // were actually completed within that same period — a second,
+      // narrower call to the same real function above (different bounds),
+      // never a client-side re-slice of the all-time fetch (which doesn't
+      // carry its own per-entry date back to the client).
+      const completedMinutesResult =
+        completedResult.ticketIds.length > 0
+          ? await loadOrganizationLoggedTimeForRange(completedResult.ticketIds, monthBounds.start, todayISO)
+          : { status: "ready" as const, entries: [] as OrganizationTimeEntry[] };
+      if (cancelled) return;
+      if (completedMinutesResult.status === "error") {
+        setLoadState("error");
+        setLoadErrorMessage(completedMinutesResult.message);
+        return;
+      }
+
+      setProject(projectResult.project);
+      setTickets(projectTickets);
+      setTeamMembers(teamResult.members);
+      setAllTimeEntries(allTimeResult.entries);
+      setCompletedThisMonthTicketIds(completedResult.ticketIds);
+      setCompletedThisMonthMinutes(completedMinutesResult.entries.reduce((sum, e) => sum + e.minutes, 0));
+      setLoadState("ready");
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [organization, isDevFallback, slug, requestId]);
+
+  if (loadState === "loading") {
+    return (
+      <div className="max-w-5xl mx-auto px-4 sm:px-8 py-10">
+        <div className="flex items-center justify-center text-sm text-slate-400 dark:text-zinc-500 py-20">
+          Loading reports…
+        </div>
+      </div>
+    );
+  }
+
+  if (loadState === "error" || !project) {
+    return (
+      <div className="max-w-5xl mx-auto px-4 sm:px-8 py-10">
+        <div className="flex flex-col items-center justify-center text-center px-4 py-20">
+          <h3 className="text-sm font-semibold text-slate-700 dark:text-zinc-200">Couldn&apos;t load reports</h3>
+          <p className="text-sm text-slate-400 mt-1 max-w-xs dark:text-zinc-500">
+            {loadErrorMessage ?? "Something went wrong."}
+          </p>
+          <button
+            type="button"
+            onClick={runFetch}
+            className="mt-5 text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3.5 py-2 shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-500 dark:hover:bg-brand-600 dark:shadow-brand-500/20"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const todayISO = getTodayISO();
+
+  // Team capacity — same real per-member construction/formula team-
+  // screen.tsx already uses (assignedHours = estimated hours of this
+  // member's own currently-open tickets).
+  const members: TeamMember[] = teamMembers.map((m) => {
+    const ownTickets = tickets.filter((t) => t.assigneeProfileId === m.id);
+    const activeTickets = ownTickets.filter((t) => t.status !== "done");
+    const assignedHours = activeTickets.reduce((sum, t) => sum + (t.hours ?? 0), 0);
+    return {
+      id: m.id,
+      projectSlug: slug,
+      name: m.name,
+      role: m.title,
+      email: m.email,
+      avatar: m.avatar,
+      status: "Available",
+      weeklyCapacity: m.weeklyCapacity,
+      assignedHours,
+      activeTicketIds: activeTickets.map((t) => t.id),
+      projectRole: m.projectRole,
+    };
+  });
   const totalWeeklyCapacity = members.reduce((sum, m) => sum + m.weeklyCapacity, 0);
   const totalAssignedHours = members.reduce((sum, m) => sum + m.assignedHours, 0);
   const teamUtilization = totalWeeklyCapacity === 0 ? 0 : Math.round((totalAssignedHours / totalWeeklyCapacity) * 100);
 
+  // Project Health — reuses Delivery Reports' own real per-project risk
+  // verdict, scoped to this one project, never a second calculation.
+  const healthRows = buildProjectHealthRows(
+    [{ slug: project.slug, name: project.name, projectCode: project.projectCode }],
+    tickets,
+    allTimeEntries,
+    todayISO
+  );
+  const risk = healthRows[0]?.risk ?? "on-track";
+  const projectHealth = risk === "blocked" ? "critical" : risk === "at-risk" ? "needs-attention" : "healthy";
+
   // Hours
   const estimatedHours = tickets.reduce((sum, t) => sum + (t.hours ?? 0), 0);
-  const loggedHours = Math.round(
-    tickets.reduce((sum, t) => sum + (t.hours ?? 0) * STATUS_LOG_RATIO[t.status], 0)
-  );
+  const loggedHours = Math.round(allTimeEntries.reduce((sum, e) => sum + e.minutes, 0) / 60);
   const remainingHours = Math.max(estimatedHours - loggedHours, 0);
   const loggedPct = estimatedHours === 0 ? 0 : Math.round((loggedHours / estimatedHours) * 100);
 
   // Delivery
   const totalTickets = tickets.length;
   const completedTickets = tickets.filter((t) => t.status === "done");
-  const inProgressCount = tickets.filter((t) => t.status === "in-progress").length;
-  const blockedCount = tickets.filter((t) => t.status === "blocked").length;
+  const inProgressTickets = tickets.filter((t) => t.status === "in-progress");
+  const blockedTickets = tickets.filter((t) => t.status === "blocked");
+  const inProgressCount = inProgressTickets.length;
+  const blockedCount = blockedTickets.length;
   const completionPct = totalTickets === 0 ? 0 : Math.round((completedTickets.length / totalTickets) * 100);
 
-  const completedHours = completedTickets.reduce((sum, t) => sum + (t.hours ?? 0), 0);
+  // Delivery Snapshot — real current-month reporting period.
+  const monthBounds = getCurrentMonthBounds();
+  const reportingPeriodLabel = `${formatISODate(monthBounds.start)} – ${formatISODate(todayISO)}`;
+  const completedThisMonthCount = completedThisMonthTicketIds.length;
+  const completedThisMonthHours = Math.round(completedThisMonthMinutes / 60);
 
   function goToTickets(status: string | null) {
     router.push(status ? `/projects/${slug}/tickets?status=${status}` : `/projects/${slug}/tickets`);
+  }
+
+  // Completed/In Progress/Blocked cards: never pick an arbitrary ticket
+  // when more than one matches. Exactly one real match opens that ticket
+  // directly; more than one hands off to the Tickets page via the same
+  // real `?alerts=` query-state infrastructure Project Overview's own
+  // Health Alert action already uses (tickets-screen.tsx ORs across
+  // whatever canonical statuses are listed there — a single type here
+  // behaves as a plain status filter). Zero matches never navigates.
+  function goToTicketsForStatus(status: "done" | "in-progress" | "blocked", matchingTickets: Ticket[]) {
+    if (matchingTickets.length === 0) return;
+    if (matchingTickets.length === 1) {
+      router.push(`/projects/${slug}/tickets/${getTicketDisplayKey(matchingTickets[0])}`);
+      return;
+    }
+    router.push(`/projects/${slug}/tickets?alerts=${status}`);
   }
 
   return (
@@ -153,7 +377,7 @@ export function ProjectReportsScreen({ slug }: { slug: string }) {
         <div className="flex-1 px-5 py-4">
           <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600">Project Health</p>
           <div className="mt-2">
-            <ProjectStatusBadge status={project?.status ?? "active"} />
+            <HealthBadge health={projectHealth} />
           </div>
         </div>
         <div className="flex-1 px-5 py-4">
@@ -263,19 +487,19 @@ export function ProjectReportsScreen({ slug }: { slug: string }) {
               label="Completed"
               value={completedTickets.length}
               valueClass="text-emerald-600 dark:text-emerald-400"
-              onClick={() => goToTickets(DELIVERY_STATUS_FILTER.completed)}
+              onClick={() => goToTicketsForStatus("done", completedTickets)}
             />
             <ClickableStat
               label="In Progress"
               value={inProgressCount}
               valueClass="text-amber-600 dark:text-amber-400"
-              onClick={() => goToTickets(DELIVERY_STATUS_FILTER["in-progress"])}
+              onClick={() => goToTicketsForStatus("in-progress", inProgressTickets)}
             />
             <ClickableStat
               label="Blocked"
               value={blockedCount}
               valueClass="text-red-600 dark:text-red-400"
-              onClick={() => goToTickets(DELIVERY_STATUS_FILTER.blocked)}
+              onClick={() => goToTicketsForStatus("blocked", blockedTickets)}
             />
           </div>
           <div className="flex items-center justify-between text-xs mb-1">
@@ -297,9 +521,9 @@ export function ProjectReportsScreen({ slug }: { slug: string }) {
           }
         >
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            <Stat label="Reporting Period" value={<span className="text-sm">{REPORTING_PERIOD}</span>} />
-            <Stat label="Completed Tickets" value={completedTickets.length} />
-            <Stat label="Completed Hours" value={`${completedHours}h`} />
+            <Stat label="Reporting Period" value={<span className="text-sm">{reportingPeriodLabel}</span>} />
+            <Stat label="Completed Tickets" value={completedThisMonthCount} />
+            <Stat label="Completed Hours" value={`${completedThisMonthHours}h`} />
             <Stat label="Remaining Hours" value={`${remainingHours}h`} />
           </div>
         </Section>

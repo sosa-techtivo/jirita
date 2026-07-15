@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { tickets as MOCK_TICKETS, getTicketDisplayKey } from "@/lib/mock-tickets";
 import type { Ticket } from "@/lib/mock-tickets";
 import { loadProjectTickets, loadOrganizationLabels, createOrganizationLabel } from "@/lib/tickets";
@@ -71,6 +72,39 @@ export function presetTicketsFilter(slug: string, chips: string[]) {
 export function TicketsScreen({ slug, projectName }: { slug: string; projectName: string }) {
   const { user, userId, organization, isDevFallback } = useCurrentUser();
   const canCreateTicket = canManage(user.role);
+  // Real query-state handoff from Project Overview's Health Alert action
+  // (admin-project-overview.tsx) and Project Reports' Delivery Progress
+  // cards (project-reports-screen.tsx) — carried in the URL itself, unlike
+  // the sessionStorage-based presetTicketsFilter below, so it survives a
+  // refresh or browser back/forward the same way Work History's own
+  // `?page=` query param already does.
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const alertsParam = searchParams.get("alerts");
+  // De-duplicated (a malformed `?alerts=blocked,blocked` must never apply
+  // or display a filter twice) — the single source both the OR-filter below
+  // and FilterBar's visible alert chips read from, so they can never drift
+  // out of sync with each other.
+  const alertTypes = useMemo(
+    () => (alertsParam ? Array.from(new Set(alertsParam.split(",").filter(Boolean))) : []),
+    [alertsParam]
+  );
+  // Removes just one alert type from the URL (never touches activeChips,
+  // which stays the quick filters' own separate state) — same router.push
+  // query-state convention Work History's own `?page=` Previous/Next
+  // already uses, so this stays part of browser history like every other
+  // real navigation here (back restores the removed chip).
+  const removeAlertType = useCallback(
+    (type: string) => {
+      const remaining = alertTypes.filter((t) => t !== type);
+      const params = new URLSearchParams(searchParams.toString());
+      if (remaining.length > 0) params.set("alerts", remaining.join(","));
+      else params.delete("alerts");
+      const qs = params.toString();
+      router.push(`/projects/${slug}/tickets${qs ? `?${qs}` : ""}`);
+    },
+    [alertTypes, searchParams, router, slug]
+  );
   const [showNewTicket, setShowNewTicket] = useState(false);
   // Read saved state once per mount (useMemo with [] deps).
   // We keep it in sessionStorage until useEffect clears it, so strict-mode
@@ -267,6 +301,10 @@ export function TicketsScreen({ slug, projectName }: { slug: string; projectName
       return diffMs >= 0 && diffMs <= 7 * 24 * 60 * 60 * 1000;
     };
 
+    // Overdue — same real definition Project Overview's own Health Alerts
+    // already use (status !== done, a real due date, in the past).
+    const isOverdue = (t: Ticket) => t.status !== "done" && Boolean(t.dueDate) && parseDisplayDate(t.dueDate!) < todayISO;
+
     // Local calendar date (not UTC — same reasoning as getTodayISO) behind a
     // full timestamp, so Created/Updated Date ranges compare day-to-day like
     // the date-only inputs that set them, not exact instants.
@@ -328,11 +366,26 @@ export function TicketsScreen({ slug, projectName }: { slug: string; projectName
       if (activeChips.has("Due Soon") && !isDueSoon(t)) return false;
       if (activeChips.has("Recently Updated") && !isRecentlyUpdated(t)) return false;
 
+      // Real URL query-state handoff (`?alerts=overdue,blocked`, etc.) from
+      // both Project Overview's Health Alert action and Project Reports'
+      // Delivery Progress cards — a ticket matches if it satisfies ANY of
+      // the requested types (OR between types), still ANDed with
+      // everything else above like every other filter here; in practice
+      // nothing else is active when arriving from either link. "done"/
+      // "in-progress"/"blocked" are the same canonical ticket statuses
+      // used everywhere else in this app, never a parallel value.
+      if (alertTypes.length > 0) {
+        const matchesAlert = alertTypes.some((type) =>
+          type === "overdue" ? isOverdue(t) : t.status === type
+        );
+        if (!matchesAlert) return false;
+      }
+
       return true;
     });
   }, [
     ticketList, searchQuery, assigned, priority, status, activeChips, isDevFallback, user.name, userId,
-    labelsFilter, reporterFilter, dueDateFilter, createdDateFilter, updatedDateFilter,
+    labelsFilter, reporterFilter, dueDateFilter, createdDateFilter, updatedDateFilter, alertTypes,
   ]);
 
   function openPreview(ticket: Ticket) {
@@ -469,6 +522,8 @@ export function TicketsScreen({ slug, projectName }: { slug: string; projectName
           onCreatedDateRangeChange={handleCreatedDateRangeChange}
           updatedDateRange={updatedDateFilter}
           onUpdatedDateRangeChange={handleUpdatedDateRangeChange}
+          alertChipTypes={alertTypes}
+          onRemoveAlertChip={removeAlertType}
         />
 
         {/* Quick stats — recalculated from the filtered results, same as every view below */}
