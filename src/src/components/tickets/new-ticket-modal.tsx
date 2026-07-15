@@ -254,7 +254,7 @@ export function NewTicketModal({
   const [title, setTitle]               = useState("");
   const [description, setDescription]   = useState("");
   const [criteria, setCriteria]         = useState<string[]>([]);
-  const [status, setStatus]             = useState<TicketStatus>("to-do");
+  const [status, setStatus]             = useState<TicketStatus>("backlog");
   const [priority, setPriority]         = useState<TicketPriority>("medium");
   const [ticketType, setTicketType]     = useState<TicketType>("TASK");
   const [assigneeId, setAssigneeId]     = useState("");

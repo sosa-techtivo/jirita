@@ -330,7 +330,7 @@ export async function loadTicketByCode(
 // existing per-project counter design, just backed by a real query instead
 // of an in-memory Map. Every field the modal doesn't yet expose as
 // configurable is written with the same fixed defaults the modal's own
-// initial state already uses (to_do / normal / task / unassigned / no due
+// initial state already uses (backlog / normal / task / unassigned / no due
 // date) — see CreateTicketInput above.
 export async function createTicket(
   organizationId: string,
@@ -376,7 +376,7 @@ export async function createTicket(
       ticket_number: ticketNumber,
       title: input.title,
       description: input.description ?? null,
-      status: "to_do",
+      status: "backlog",
       priority: "medium",
       type: "task",
       acceptance_criteria: acceptanceCriteria,
