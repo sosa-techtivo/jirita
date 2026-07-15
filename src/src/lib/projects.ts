@@ -1077,3 +1077,108 @@ export async function hasProjectMemberHistory(
 
   return Boolean(data);
 }
+
+// ── Member Dashboard reads ──────────────────────────────────────────────────
+// (src/components/member-dashboard.tsx).
+
+export type MemberWeeklyCapacityResult =
+  | { status: "ready"; weeklyCapacity: number }
+  | { status: "error"; message: string };
+
+// A member's real weekly capacity, resolved across every project they're
+// staffed on — same fallback loadProjectTeam already uses per project
+// (project_memberships.weekly_capacity ?? organization_memberships.weekly_capacity),
+// just without a single project to scope to. In practice every
+// project_memberships row resolves to the same real number
+// (ensure_project_membership seeds a new row from the org-level value, and
+// there's no UI to diverge it per project), so the maximum across a
+// member's own rows is a safe, deterministic single value — never lower
+// than their real capacity, and exactly the org-level value when they have
+// no project memberships yet. organizationWeeklyCapacity is passed in
+// (already loaded by useCurrentUser, itself organization_memberships.weekly_capacity)
+// instead of re-querying it here.
+export async function loadMemberWeeklyCapacity(
+  profileId: string,
+  organizationWeeklyCapacity: number
+): Promise<MemberWeeklyCapacityResult> {
+  const supabase = getSupabaseBrowserClient();
+
+  const { data: rows, error } = await supabase
+    .from("project_memberships")
+    .select("weekly_capacity")
+    .eq("profile_id", profileId)
+    .returns<{ weekly_capacity: number | null }[]>();
+
+  if (error) {
+    logDev("member weekly capacity query failed", error);
+    return { status: "error", message: error.message };
+  }
+
+  if (!rows || rows.length === 0) {
+    return { status: "ready", weeklyCapacity: organizationWeeklyCapacity };
+  }
+
+  const weeklyCapacity = Math.max(...rows.map((row) => row.weekly_capacity ?? organizationWeeklyCapacity));
+  return { status: "ready", weeklyCapacity };
+}
+
+export interface MemberWeeklyCapacityEntry {
+  profileId: string;
+  weeklyCapacity: number;
+}
+
+export type OrganizationMemberWeeklyCapacitiesResult =
+  | { status: "ready"; capacities: MemberWeeklyCapacityEntry[] }
+  | { status: "error"; message: string };
+
+// Same fallback as loadMemberWeeklyCapacity above (project_memberships.weekly_capacity
+// ?? organization_memberships.weekly_capacity, max across a member's own
+// project rows when they have more than one), batched for every active org
+// member at once — backs Admin Reports' "Hours by Person" Capacity column.
+export async function loadOrganizationMemberWeeklyCapacities(
+  organizationId: string
+): Promise<OrganizationMemberWeeklyCapacitiesResult> {
+  const supabase = getSupabaseBrowserClient();
+
+  const { data: orgRows, error: orgError } = await supabase
+    .from("organization_memberships")
+    .select("profile_id, weekly_capacity")
+    .eq("organization_id", organizationId)
+    .eq("status", "active")
+    .returns<{ profile_id: string; weekly_capacity: number | null }[]>();
+
+  if (orgError) {
+    logDev("organization member weekly capacities query failed", orgError);
+    return { status: "error", message: orgError.message };
+  }
+
+  const orgCapacityByProfileId = new Map((orgRows ?? []).map((row) => [row.profile_id, row.weekly_capacity ?? 0]));
+  const profileIds = Array.from(orgCapacityByProfileId.keys());
+  if (profileIds.length === 0) return { status: "ready", capacities: [] };
+
+  const { data: projectRows, error: projectError } = await supabase
+    .from("project_memberships")
+    .select("profile_id, weekly_capacity")
+    .in("profile_id", profileIds)
+    .returns<{ profile_id: string; weekly_capacity: number | null }[]>();
+
+  if (projectError) {
+    logDev("member project memberships capacities query failed", projectError);
+    return { status: "error", message: projectError.message };
+  }
+
+  const resolvedByProfileId = new Map(orgCapacityByProfileId);
+  for (const row of projectRows ?? []) {
+    const orgCapacity = orgCapacityByProfileId.get(row.profile_id) ?? 0;
+    const resolved = row.weekly_capacity ?? orgCapacity;
+    const current = resolvedByProfileId.get(row.profile_id) ?? orgCapacity;
+    resolvedByProfileId.set(row.profile_id, Math.max(current, resolved));
+  }
+
+  const capacities = Array.from(resolvedByProfileId.entries()).map(([profileId, weeklyCapacity]) => ({
+    profileId,
+    weeklyCapacity,
+  }));
+
+  return { status: "ready", capacities };
+}

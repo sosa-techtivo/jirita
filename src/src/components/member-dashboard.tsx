@@ -1,15 +1,23 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useMemo } from "react";
 import type { ReactNode } from "react";
 import { useCurrentUser } from "@/components/current-user-provider";
 import { TicketListRow } from "@/components/tickets/ticket-card";
 import { TicketPreviewPanel } from "@/components/tickets/ticket-preview-panel";
-import { StatusBadge, PriorityBadge, TicketTypeIcon } from "@/components/tickets/ticket-ui";
-import { getProjectBySlug } from "@/lib/mock-projects";
+import { StatusBadge, PriorityBadge, TicketTypeIcon, getTodayISO, parseDisplayDate } from "@/components/tickets/ticket-ui";
 import { statusMeta } from "@/components/status-badge";
 import type { Ticket } from "@/lib/mock-tickets";
 import { getTicketDisplayKey } from "@/lib/mock-tickets";
+import type { ProjectStatus } from "@/lib/mock-projects";
+import {
+  loadOrganizationTickets,
+  loadProfileLoggedTimeForDate,
+  loadProfileLoggedMinutesForRange,
+  loadMemberAttentionEvents,
+} from "@/lib/tickets";
+import type { ProfileTimeEntry, MemberAttentionEvent } from "@/lib/tickets";
+import { loadMemberWeeklyCapacity } from "@/lib/projects";
 import {
   Card,
   ActiveTicketRow,
@@ -25,11 +33,6 @@ import {
 // title, the same way "Resolve login crash / Mobile Banking App" would
 // read in a personal work queue.
 
-// Same "urgent window" convention the rest of the dashboards use for red
-// due-date styling — today plus the two days right before it.
-const URGENT_LABELS = new Set(["Jun 28", "Jun 29", "Jun 30"]);
-const TODAY_LABEL = "Jun 30";
-
 export interface Project {
   slug: string;
   name: string;
@@ -44,31 +47,15 @@ const PROJECTS = {
   ipm: { slug: "internal-platform-migration", name: "Internal Platform Migration", shortLabel: "Internal Platform" },
 } satisfies Record<string, Project>;
 
-// Every project always renders with the same accent color everywhere in the
-// app — that color already exists as the status dot next to this project in
-// the sidebar (see sidebar.tsx / status-badge.tsx), so it's reused here
-// rather than inventing a separate per-project color scheme.
-function ProjectBadge({ project }: { project: Project }) {
-  const status = getProjectBySlug(project.slug)?.status;
-  const meta = status ? statusMeta[status] : undefined;
-  return (
-    <span className={`inline-flex items-center gap-1 text-[10px] font-semibold flex-shrink-0 ${meta?.text ?? "text-slate-400 dark:text-zinc-500"}`}>
-      <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${meta?.dot ?? "bg-slate-300 dark:bg-zinc-600"}`} />
-      {project.shortLabel}
-    </span>
-  );
-}
-
 export interface WorkItem {
   ticket: Ticket;
   project: Project;
 }
 
-// ── Data (David Kim, QA Engineer — the mock MEMBER user, staffed across
-//    three projects at once) ───────────────────────────────────────────────
-// Exported so other Member-scoped views (e.g. the Projects list) can derive
-// "what am I staffed on / what's assigned to me per project" from the same
-// source instead of re-deriving it.
+// ── Mock scaffolding kept for src/components/member-projects-screen.tsx
+//    ("My Projects"), which still reads MEMBER_WORK/WorkItem directly and is
+//    out of scope for this pass — MemberDashboard() below no longer reads
+//    any of this and is fully real. ─────────────────────────────────────────
 
 export const MEMBER_WORK: WorkItem[] = [
   {
@@ -157,22 +144,10 @@ export const MEMBER_WORK: WorkItem[] = [
   },
 ];
 
-const WORK_BY_TICKET_ID = new Map(MEMBER_WORK.map((w) => [w.ticket.id, w]));
-
-// No real time-tracking source exists yet — mirrors the approximation
-// approach already used for "logged hours" on the Reports pages.
-const LOGGED_TODAY_BY_PROJECT: { project: Project; hours: number }[] = [
-  { project: PROJECTS.mba, hours: 3 },
-  { project: PROJECTS.cwd, hours: 2 },
-  { project: PROJECTS.ipm, hours: 1 },
-];
-const LOGGED_TODAY = LOGGED_TODAY_BY_PROJECT.reduce((sum, p) => sum + p.hours, 0);
-const PLANNED_TODAY = 7;
-
 // Only actionable, ticket-specific events belong here — never general
 // project activity. If it doesn't ask the member to do something (review,
-// pick up reassigned work, respond to a mention, notice a changed estimate,
-// or notice a new blocker), it doesn't qualify.
+// pick up reassigned work, or notice a changed estimate/new blocker), it
+// doesn't qualify.
 type AttentionType = "mention" | "reassigned" | "review" | "estimate" | "blocked";
 
 const ATTENTION_META: Record<AttentionType, { dot: string; label: string }> = {
@@ -195,58 +170,112 @@ interface AttentionItem {
   ticketId?: string;
 }
 
-// Every item here traces back to one of the member's own tickets — never
-// unrelated project-wide activity.
-const ATTENTION_ITEMS: AttentionItem[] = [
-  {
-    id: "n1", type: "mention", time: "1h ago", ticketId: "dk-kyc-outage",
-    verb: <><span className="font-medium">Sarah Chen</span> mentioned you in a comment</>,
-  },
-  {
-    id: "n2", type: "review", time: "3h ago", ticketId: "dk-homepage-review",
-    verb: <><span className="font-medium">Elena Rossi</span> requested your review</>,
-  },
-  {
-    id: "n3", type: "blocked", time: "5h ago", ticketId: "dk-regression-ios",
-    verb: <><span className="font-medium">Marcus Lee</span> marked</>,
-  },
-  {
-    id: "n4", type: "reassigned", time: "Yesterday", ticketId: "dk-regression-ios",
-    verb: <><span className="font-medium">Marcus Lee</span> reassigned</>,
-    detail: "to you",
-  },
-  {
-    id: "n5", type: "estimate", time: "Yesterday", ticketId: "dk-a11y-audit",
+// No @mention-detection exists in this schema (comments aren't parsed for
+// mentions), so real MemberAttentionEvents never carry type "mention" — it
+// stays a defined category for the shared dict/type below and simply never
+// renders, same "kept but unreachable until real data exists" precedent
+// used elsewhere in this app (e.g. Project Notes' Tag field).
+function attentionItemFromEvent(event: MemberAttentionEvent): AttentionItem {
+  const name = event.actorName ?? "Someone";
+
+  if (event.type === "blocked") {
+    return {
+      id: event.id, type: "blocked", time: event.time, ticketId: event.ticketId,
+      verb: <><span className="font-medium">{name}</span> marked</>,
+    };
+  }
+  if (event.type === "reassigned") {
+    return {
+      id: event.id, type: "reassigned", time: event.time, ticketId: event.ticketId,
+      verb: <><span className="font-medium">{name}</span> reassigned</>,
+      detail: "to you",
+    };
+  }
+  if (event.type === "review") {
+    return {
+      id: event.id, type: "review", time: event.time, ticketId: event.ticketId,
+      verb: <><span className="font-medium">{name}</span> moved to review</>,
+    };
+  }
+  // estimate
+  return {
+    id: event.id, type: "estimate", time: event.time, ticketId: event.ticketId,
     verb: "Estimate changed",
-    detail: <span className="font-medium">8h → 6h</span>,
-  },
-];
+    detail: <span className="font-medium">{event.oldHours}h → {event.newHours}h</span>,
+  };
+}
 
 // ── Sort: Blocked → Due Today → High Priority → In Progress → Ready to
 //    Start → In Review. Also drives "Recommended Next" (its top result). ──
+//    Operates on real Ticket.dueDate (a display string like "Jun 30") and
+//    the real, current local date — never a fixed/mock date.
 
-function tierOf(item: WorkItem): number {
-  const { ticket } = item;
+function round1(n: number): number {
+  return Math.round(n * 10) / 10;
+}
+
+// Same "urgent window" convention the rest of the dashboards use for red
+// due-date styling — today plus the two days right before it.
+const URGENT_WINDOW_DAYS = 2;
+
+function isUrgentDue(dueDate: string | undefined, todayISO: string): boolean {
+  if (!dueDate) return false;
+  const iso = parseDisplayDate(dueDate);
+  if (!iso || iso > todayISO) return false;
+  const diffDays = Math.round(
+    (new Date(`${todayISO}T00:00:00`).getTime() - new Date(`${iso}T00:00:00`).getTime()) / 86_400_000
+  );
+  return diffDays <= URGENT_WINDOW_DAYS;
+}
+
+function tierOf(ticket: Ticket, todayISO: string): number {
   if (ticket.status === "blocked") return 0;
-  if (ticket.dueDate && URGENT_LABELS.has(ticket.dueDate)) return 1;
-  if (ticket.priority === "high") return 2;
+  if (isUrgentDue(ticket.dueDate, todayISO)) return 1;
+  if (ticket.priority === "high" || ticket.priority === "highest") return 2;
   if (ticket.status === "in-progress") return 3;
   if (ticket.status === "to-do") return 4;
   if (ticket.status === "review") return 5;
   return 6;
 }
 
-function parseDue(d?: string): number {
-  return d ? new Date(`${d}, 2026`).getTime() : Infinity;
+function dueSortValue(dueDate?: string): number {
+  if (!dueDate) return Infinity;
+  const iso = parseDisplayDate(dueDate);
+  return iso ? new Date(`${iso}T00:00:00`).getTime() : Infinity;
 }
 
-function compareWork(a: WorkItem, b: WorkItem): number {
-  const diff = tierOf(a) - tierOf(b);
-  return diff !== 0 ? diff : parseDue(a.ticket.dueDate) - parseDue(b.ticket.dueDate);
+function compareWork(a: Ticket, b: Ticket, todayISO: string): number {
+  const diff = tierOf(a, todayISO) - tierOf(b, todayISO);
+  return diff !== 0 ? diff : dueSortValue(a.dueDate) - dueSortValue(b.dueDate);
 }
 
-function isFuture(dueDate?: string): boolean {
-  return dueDate !== undefined && !URGENT_LABELS.has(dueDate);
+function isFuture(dueDate: string | undefined, todayISO: string): boolean {
+  return dueDate !== undefined && !isUrgentDue(dueDate, todayISO);
+}
+
+// Matches the header's original "Tuesday, June 30" style, built from the
+// user's real local date instead of a fixed string.
+function formatFullDate(todayISO: string): string {
+  return new Date(`${todayISO}T00:00:00`).toLocaleDateString("en-US", {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+  });
+}
+
+// Monday–Sunday — same "This Week" convention reports-screen.tsx already
+// uses (rangeForPreset's "this-week" case), just built from the real
+// current date instead of a fixed mock TODAY.
+function getWeekRangeISO(todayISO: string): { start: string; end: string } {
+  const today = new Date(`${todayISO}T00:00:00`);
+  const day = today.getDay();
+  const monday = new Date(today);
+  monday.setDate(today.getDate() + (day === 0 ? -6 : 1 - day));
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+  const toISO = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return { start: toISO(monday), end: toISO(sunday) };
 }
 
 // ── Sub-components ────────────────────────────────────────────────────────────
@@ -264,9 +293,32 @@ function HeroStat({ label, value, danger }: { label: string; value: ReactNode; d
   );
 }
 
-function AttentionRow({ item, onOpen }: { item: AttentionItem; onOpen: (id: string) => void }) {
+// Every project always renders with the same accent color everywhere in the
+// app — that color already exists as the status dot next to this project in
+// the sidebar (see sidebar.tsx / status-badge.tsx), so it's reused here
+// rather than inventing a separate per-project color scheme. Real project
+// data has no shortened-label field, so the badge shows the real project
+// name in full.
+function ProjectBadge({ name, status }: { name: string; status?: ProjectStatus }) {
+  const meta = status ? statusMeta[status] : undefined;
+  return (
+    <span className={`inline-flex items-center gap-1 text-[10px] font-semibold flex-shrink-0 ${meta?.text ?? "text-slate-400 dark:text-zinc-500"}`}>
+      <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${meta?.dot ?? "bg-slate-300 dark:bg-zinc-600"}`} />
+      {name}
+    </span>
+  );
+}
+
+function AttentionRow({
+  item,
+  ticket,
+  onOpen,
+}: {
+  item: AttentionItem;
+  ticket: Ticket | undefined;
+  onOpen: (id: string) => void;
+}) {
   const meta = ATTENTION_META[item.type];
-  const ticket = item.ticketId ? WORK_BY_TICKET_ID.get(item.ticketId)?.ticket : undefined;
 
   const content = (
     <>
@@ -317,20 +369,168 @@ function AttentionRow({ item, onOpen }: { item: AttentionItem; onOpen: (id: stri
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function MemberDashboard() {
-  const { user } = useCurrentUser();
-  const [preview, setPreview] = useState<WorkItem | null>(null);
+  const { user, userId, organization, isDevFallback } = useCurrentUser();
+  const [preview, setPreview] = useState<Ticket | null>(null);
 
-  const activeWork = MEMBER_WORK.filter((w) => w.ticket.status !== "done").sort(compareWork);
+  const [loadState, setLoadState] = useState<"loading" | "ready" | "error">(isDevFallback ? "ready" : "loading");
+  const [loadErrorMessage, setLoadErrorMessage] = useState<string | null>(null);
+  const [tickets, setTickets] = useState<Ticket[]>([]);
+  const [projects, setProjects] = useState<{ slug: string; name: string; status: ProjectStatus }[]>([]);
+  const [todayEntries, setTodayEntries] = useState<ProfileTimeEntry[]>([]);
+  const [attentionEvents, setAttentionEvents] = useState<MemberAttentionEvent[]>([]);
+  const [weeklyCapacity, setWeeklyCapacity] = useState(0);
+  const [weekLoggedMinutes, setWeekLoggedMinutes] = useState(0);
+  const [requestId, setRequestId] = useState(0);
+
+  const runFetch = () => setRequestId((id) => id + 1);
+  const todayISO = getTodayISO();
+
+  useEffect(() => {
+    if (isDevFallback || !organization || !userId) return;
+    let cancelled = false;
+
+    (async () => {
+      const ticketsResult = await loadOrganizationTickets(organization.id);
+      if (cancelled) return;
+      if (ticketsResult.status === "error") {
+        setLoadState("error");
+        setLoadErrorMessage(ticketsResult.message);
+        return;
+      }
+
+      const myActiveTicketIds = ticketsResult.tickets
+        .filter((t) => t.assigneeProfileId === userId && t.status !== "done")
+        .map((t) => t.id);
+
+      const { start: weekStart, end: weekEnd } = getWeekRangeISO(getTodayISO());
+      const [timeResult, attentionResult, capacityResult, weekMinutesResult] = await Promise.all([
+        loadProfileLoggedTimeForDate(userId, getTodayISO()),
+        loadMemberAttentionEvents(myActiveTicketIds, userId),
+        loadMemberWeeklyCapacity(userId, user.weeklyCapacity),
+        loadProfileLoggedMinutesForRange(userId, weekStart, weekEnd),
+      ]);
+      if (cancelled) return;
+
+      if (timeResult.status === "error") {
+        setLoadState("error");
+        setLoadErrorMessage(timeResult.message);
+        return;
+      }
+      if (attentionResult.status === "error") {
+        setLoadState("error");
+        setLoadErrorMessage(attentionResult.message);
+        return;
+      }
+      if (capacityResult.status === "error") {
+        setLoadState("error");
+        setLoadErrorMessage(capacityResult.message);
+        return;
+      }
+      if (weekMinutesResult.status === "error") {
+        setLoadState("error");
+        setLoadErrorMessage(weekMinutesResult.message);
+        return;
+      }
+
+      setTickets(ticketsResult.tickets);
+      setProjects(ticketsResult.projects);
+      setTodayEntries(timeResult.entries);
+      setAttentionEvents(attentionResult.events);
+      setWeeklyCapacity(capacityResult.weeklyCapacity);
+      setWeekLoggedMinutes(weekMinutesResult.totalMinutes);
+      setLoadState("ready");
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isDevFallback, organization, userId, requestId, user.weeklyCapacity]);
+
+  const ticketsById = useMemo(() => new Map(tickets.map((t) => [t.id, t])), [tickets]);
+  const projectsBySlug = useMemo(() => new Map(projects.map((p) => [p.slug, p])), [projects]);
+
+  const activeWork = useMemo(
+    () =>
+      userId
+        ? tickets.filter((t) => t.assigneeProfileId === userId && t.status !== "done").sort((a, b) => compareWork(a, b, todayISO))
+        : [],
+    [tickets, userId, todayISO]
+  );
+
   const recommended = activeWork[0] ?? null;
-  const dueTodayCount = activeWork.filter((w) => w.ticket.dueDate === TODAY_LABEL).length;
 
-  const upcoming = activeWork
-    .filter((w) => isFuture(w.ticket.dueDate))
-    .sort((a, b) => parseDue(a.ticket.dueDate) - parseDue(b.ticket.dueDate));
+  const dueTodayCount = useMemo(
+    () => activeWork.filter((t) => t.dueDate && parseDisplayDate(t.dueDate) === todayISO).length,
+    [activeWork, todayISO]
+  );
+
+  const loggedTodayMinutes = useMemo(() => todayEntries.reduce((sum, e) => sum + e.minutes, 0), [todayEntries]);
+  const loggedTodayHours = round1(loggedTodayMinutes / 60);
+
+  const weekLoggedHours = round1(weekLoggedMinutes / 60);
+  const remainingThisWeekHours = Math.max(round1(weeklyCapacity - weekLoggedHours), 0);
+  const weekProgressPct = weeklyCapacity > 0 ? Math.min(100, Math.round((weekLoggedHours / weeklyCapacity) * 100)) : 0;
+
+  const loggedTodayByProject = useMemo(() => {
+    const bySlug = new Map<string, number>();
+    for (const entry of todayEntries) {
+      const ticket = ticketsById.get(entry.ticketId);
+      if (!ticket) continue;
+      bySlug.set(ticket.projectSlug, (bySlug.get(ticket.projectSlug) ?? 0) + entry.minutes);
+    }
+    return Array.from(bySlug.entries())
+      .map(([slug, minutes]) => ({
+        slug,
+        name: projectsBySlug.get(slug)?.name ?? slug,
+        status: projectsBySlug.get(slug)?.status,
+        hours: round1(minutes / 60),
+      }))
+      .sort((a, b) => b.hours - a.hours);
+  }, [todayEntries, ticketsById, projectsBySlug]);
+
+  const upcoming = useMemo(
+    () =>
+      activeWork
+        .filter((t) => isFuture(t.dueDate, todayISO))
+        .sort((a, b) => dueSortValue(a.dueDate) - dueSortValue(b.dueDate)),
+    [activeWork, todayISO]
+  );
+
+  const attentionItems = useMemo(() => attentionEvents.map(attentionItemFromEvent), [attentionEvents]);
 
   function openTicket(id: string) {
-    const item = WORK_BY_TICKET_ID.get(id);
-    if (item) setPreview(item);
+    const ticket = ticketsById.get(id);
+    if (ticket) setPreview(ticket);
+  }
+
+  if (loadState === "loading") {
+    return (
+      <div className="max-w-5xl mx-auto px-6 py-8 pb-16">
+        <div className="h-full flex items-center justify-center text-sm text-slate-400 dark:text-zinc-500 py-20">
+          Loading dashboard…
+        </div>
+      </div>
+    );
+  }
+
+  if (loadState === "error") {
+    return (
+      <div className="max-w-5xl mx-auto px-6 py-8 pb-16">
+        <div className="flex flex-col items-center justify-center text-center px-4 py-20">
+          <h3 className="text-sm font-semibold text-slate-700 dark:text-zinc-200">Couldn&apos;t load dashboard</h3>
+          <p className="text-sm text-slate-400 mt-1 max-w-xs dark:text-zinc-500">
+            {loadErrorMessage ?? "Something went wrong."}
+          </p>
+          <button
+            type="button"
+            onClick={runFetch}
+            className="mt-5 text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3.5 py-2 shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-500 dark:hover:bg-brand-600 dark:shadow-brand-500/20"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -343,13 +543,13 @@ export function MemberDashboard() {
             Good morning, {user.name.split(" ")[0]} 👋
           </h1>
           <span className="text-slate-300 dark:text-zinc-700" aria-hidden="true">·</span>
-          <p className="text-xs text-slate-400 dark:text-zinc-500">Tuesday, June 30</p>
+          <p className="text-xs text-slate-400 dark:text-zinc-500">{formatFullDate(todayISO)}</p>
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           <HeroStat label="Assigned Tickets" value={activeWork.length} />
-          <HeroStat label="Planned Today" value={`${PLANNED_TODAY}h`} />
-          <HeroStat label="Logged Today" value={`${LOGGED_TODAY}h`} />
+          <HeroStat label="Weekly Capacity" value={`${weeklyCapacity}h`} />
+          <HeroStat label="Logged Today" value={`${loggedTodayHours}h`} />
           <HeroStat label="Due Today" value={dueTodayCount} danger={dueTodayCount > 0} />
         </div>
       </section>
@@ -364,26 +564,29 @@ export function MemberDashboard() {
           <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-5">
             <div className="min-w-0">
               <div className="flex items-center gap-2.5 mb-2.5">
-                <StatusBadge status={recommended.ticket.status} />
-                <PriorityBadge priority={recommended.ticket.priority} />
+                <StatusBadge status={recommended.status} />
+                <PriorityBadge priority={recommended.priority} />
               </div>
               <div className="mb-1">
-                <ProjectBadge project={recommended.project} />
+                <ProjectBadge
+                  name={projectsBySlug.get(recommended.projectSlug)?.name ?? recommended.projectSlug}
+                  status={projectsBySlug.get(recommended.projectSlug)?.status}
+                />
               </div>
               <p className="flex items-center gap-1 text-[11px] font-mono font-medium text-slate-400 dark:text-zinc-500 mb-1 leading-none">
-                <TicketTypeIcon type={recommended.ticket.type} />
-                {getTicketDisplayKey(recommended.ticket)}
+                <TicketTypeIcon type={recommended.type} />
+                {getTicketDisplayKey(recommended)}
               </p>
               <h2 className="text-xl font-bold text-slate-900 dark:text-zinc-50 leading-snug">
-                {recommended.ticket.title}
+                {recommended.title}
               </h2>
               <div className="flex items-center gap-4 mt-3 text-sm text-slate-600 dark:text-zinc-400">
-                {recommended.ticket.hours !== undefined && (
-                  <span className="font-medium">{recommended.ticket.hours}h remaining</span>
+                {recommended.hours !== undefined && (
+                  <span className="font-medium">{recommended.hours}h remaining</span>
                 )}
-                {recommended.ticket.dueDate && (
-                  <span className={URGENT_LABELS.has(recommended.ticket.dueDate) ? "font-semibold text-red-600 dark:text-red-400" : "font-medium"}>
-                    Due {recommended.ticket.dueDate}
+                {recommended.dueDate && (
+                  <span className={isUrgentDue(recommended.dueDate, todayISO) ? "font-semibold text-red-600 dark:text-red-400" : "font-medium"}>
+                    Due {recommended.dueDate}
                   </span>
                 )}
               </div>
@@ -430,12 +633,17 @@ export function MemberDashboard() {
               <p className="text-sm text-slate-400 dark:text-zinc-500 py-2">You&apos;re all clear — no active tickets.</p>
             ) : (
               <div className="rounded-xl border border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900 overflow-hidden divide-y divide-slate-100 dark:divide-zinc-800">
-                {activeWork.map((w) => (
+                {activeWork.map((ticket) => (
                   <TicketListRow
-                    key={w.ticket.id}
-                    ticket={w.ticket}
-                    projectBadge={<ProjectBadge project={w.project} />}
-                    onTicketClick={() => setPreview(w)}
+                    key={ticket.id}
+                    ticket={ticket}
+                    projectBadge={
+                      <ProjectBadge
+                        name={projectsBySlug.get(ticket.projectSlug)?.name ?? ticket.projectSlug}
+                        status={projectsBySlug.get(ticket.projectSlug)?.status}
+                      />
+                    }
+                    onTicketClick={setPreview}
                   />
                 ))}
               </div>
@@ -443,12 +651,21 @@ export function MemberDashboard() {
           </section>
 
           {/* Section 5: Needs Your Attention */}
-          <Card title="Needs Your Attention" count={ATTENTION_ITEMS.length}>
-            <div className="space-y-0.5">
-              {ATTENTION_ITEMS.map((item) => (
-                <AttentionRow key={item.id} item={item} onOpen={openTicket} />
-              ))}
-            </div>
+          <Card title="Needs Your Attention" count={attentionItems.length}>
+            {attentionItems.length === 0 ? (
+              <p className="text-sm text-slate-400 dark:text-zinc-500 py-2">Nothing needs your attention right now.</p>
+            ) : (
+              <div className="space-y-0.5">
+                {attentionItems.map((item) => (
+                  <AttentionRow
+                    key={item.id}
+                    item={item}
+                    ticket={item.ticketId ? ticketsById.get(item.ticketId) : undefined}
+                    onOpen={openTicket}
+                  />
+                ))}
+              </div>
+            )}
           </Card>
 
         </div>
@@ -461,33 +678,37 @@ export function MemberDashboard() {
             <div className="flex items-center justify-between mb-3">
               <div>
                 <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600 mb-1">Logged Today</p>
-                <p className="text-lg font-bold text-emerald-600 dark:text-emerald-400 tabular-nums leading-none">{LOGGED_TODAY}h</p>
+                <p className="text-lg font-bold text-emerald-600 dark:text-emerald-400 tabular-nums leading-none">{loggedTodayHours}h</p>
               </div>
               <div>
-                <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600 mb-1">Planned Today</p>
-                <p className="text-lg font-bold text-slate-900 dark:text-zinc-50 tabular-nums leading-none">{PLANNED_TODAY}h</p>
+                <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600 mb-1">Weekly Capacity</p>
+                <p className="text-lg font-bold text-slate-900 dark:text-zinc-50 tabular-nums leading-none">{weeklyCapacity}h</p>
               </div>
               <div>
-                <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600 mb-1">Remaining Today</p>
+                <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600 mb-1">Remaining This Week</p>
                 <p className="text-lg font-bold text-slate-900 dark:text-zinc-50 tabular-nums leading-none">
-                  {Math.max(PLANNED_TODAY - LOGGED_TODAY, 0)}h
+                  {remainingThisWeekHours}h
                 </p>
               </div>
             </div>
             <div className="h-1.5 rounded-full bg-slate-100 dark:bg-zinc-800 overflow-hidden">
               <div
                 className="h-full rounded-full bg-brand-500 transition-all duration-500"
-                style={{ width: `${Math.min(100, Math.round((LOGGED_TODAY / PLANNED_TODAY) * 100))}%` }}
+                style={{ width: `${weekProgressPct}%` }}
               />
             </div>
             <div className="h-px bg-slate-100 dark:bg-zinc-800 my-3" />
             <div className="space-y-1.5">
-              {LOGGED_TODAY_BY_PROJECT.map((p) => (
-                <div key={p.project.slug} className="flex items-center justify-between gap-2">
-                  <ProjectBadge project={p.project} />
-                  <span className="text-[12px] font-semibold text-slate-700 dark:text-zinc-300 tabular-nums flex-shrink-0">{p.hours}h</span>
-                </div>
-              ))}
+              {loggedTodayByProject.length === 0 ? (
+                <p className="text-sm text-slate-400 dark:text-zinc-500 py-1">No time logged yet today.</p>
+              ) : (
+                loggedTodayByProject.map((p) => (
+                  <div key={p.slug} className="flex items-center justify-between gap-2">
+                    <ProjectBadge name={p.name} status={p.status} />
+                    <span className="text-[12px] font-semibold text-slate-700 dark:text-zinc-300 tabular-nums flex-shrink-0">{p.hours}h</span>
+                  </div>
+                ))
+              )}
             </div>
           </Card>
 
@@ -497,12 +718,17 @@ export function MemberDashboard() {
               <p className="text-sm text-slate-400 dark:text-zinc-500 py-2">Nothing else on the horizon.</p>
             ) : (
               <div className="space-y-1">
-                {upcoming.map((w) => (
+                {upcoming.map((ticket) => (
                   <ActiveTicketRow
-                    key={w.ticket.id}
-                    ticket={w.ticket}
-                    projectBadge={<ProjectBadge project={w.project} />}
-                    onOpen={() => setPreview(w)}
+                    key={ticket.id}
+                    ticket={ticket}
+                    projectBadge={
+                      <ProjectBadge
+                        name={projectsBySlug.get(ticket.projectSlug)?.name ?? ticket.projectSlug}
+                        status={projectsBySlug.get(ticket.projectSlug)?.status}
+                      />
+                    }
+                    onOpen={setPreview}
                   />
                 ))}
               </div>
@@ -515,8 +741,8 @@ export function MemberDashboard() {
       {/* ── Ticket preview panel ────────────────────────────────────────────── */}
       {preview !== null && (
         <TicketPreviewPanel
-          ticket={preview.ticket}
-          slug={preview.project.slug}
+          ticket={preview}
+          slug={preview.projectSlug}
           onClose={() => setPreview(null)}
         />
       )}

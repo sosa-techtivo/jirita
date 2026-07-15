@@ -40,7 +40,11 @@ export type CreateTicketResult =
   | { status: "success"; ticket: Ticket }
   | { status: "error"; message: string };
 
-const STATUS_FROM_DB: Record<string, TicketStatus> = {
+// Exported for reuse wherever a raw DB status string (snake_case, e.g. the
+// old_value/new_value ticket_activity stores for status_changed) needs to
+// become the app's own display-domain TicketStatus (hyphenated) — e.g.
+// Admin Reports' Recent Changes.
+export const STATUS_FROM_DB: Record<string, TicketStatus> = {
   backlog: "backlog",
   to_do: "to-do",
   in_progress: "in-progress",
@@ -146,9 +150,10 @@ function formatTicketUpdatedAt(isoTimestamp: string): string {
 }
 
 // Same relative-time buckets as formatTicketUpdatedAt, minus the "Updated "
-// prefix — used for Comments/Activity in the Ticket Preview Drawer, which
-// render their own leading text ("· 3 days ago") instead of that prefix.
-function formatRelativeTime(isoTimestamp: string): string {
+// prefix — used for Comments/Activity in the Ticket Preview Drawer (and,
+// exported, for Admin Reports' Recent Changes) which render their own
+// leading text ("· 3 days ago") instead of that prefix.
+export function formatRelativeTime(isoTimestamp: string): string {
   return formatTicketUpdatedAt(isoTimestamp).replace(/^Updated /, "");
 }
 
@@ -2004,6 +2009,350 @@ export async function loadOrganizationActivity(
       newPriorityLabel: activityPriorityLabel(row.new_value),
       // Lower index in PRIORITY_VALUES ("highest" first) means more urgent.
       priorityRaised: oldIdx !== -1 && newIdx !== -1 && newIdx < oldIdx,
+    };
+  });
+
+  return { status: "ready", events };
+}
+
+// ── Member Dashboard reads ──────────────────────────────────────────────────
+// (src/components/member-dashboard.tsx). Admin's and Project Lead's own
+// dashboards are untouched.
+
+export interface ProfileTimeEntry {
+  ticketId: string;
+  minutes: number;
+}
+
+export type ProfileLoggedTimeResult =
+  | { status: "ready"; entries: ProfileTimeEntry[] }
+  | { status: "error"; message: string };
+
+// Real "time logged today" for one profile, across every ticket they have
+// access to (not just tickets assigned to them — pairing/helping on someone
+// else's ticket still counts). Grouping by project is left to the caller,
+// which already has the ticket→project mapping from loadOrganizationTickets.
+export async function loadProfileLoggedTimeForDate(
+  profileId: string,
+  workDate: string
+): Promise<ProfileLoggedTimeResult> {
+  const supabase = getSupabaseBrowserClient();
+
+  const { data: rows, error } = await supabase
+    .from("ticket_time_entries")
+    .select("ticket_id, minutes")
+    .eq("logged_by", profileId)
+    .eq("work_date", workDate)
+    .returns<{ ticket_id: string; minutes: number }[]>();
+
+  if (error) {
+    logDev("profile logged time query failed", error);
+    return { status: "error", message: error.message };
+  }
+
+  return {
+    status: "ready",
+    entries: (rows ?? []).map((row) => ({ ticketId: row.ticket_id, minutes: row.minutes })),
+  };
+}
+
+export type ProfileLoggedMinutesResult =
+  | { status: "ready"; totalMinutes: number }
+  | { status: "error"; message: string };
+
+// Real total minutes logged by one profile within an inclusive ISO date
+// range (yyyy-mm-dd) — backs the Member Dashboard's "Remaining This Week"
+// (Weekly Capacity minus this week's real logged hours). Same "every ticket
+// they have access to, not just their own assignments" scope as
+// loadProfileLoggedTimeForDate above, just totaled server-side instead of
+// returned per-entry since no per-project breakdown is needed here.
+export async function loadProfileLoggedMinutesForRange(
+  profileId: string,
+  startDate: string,
+  endDate: string
+): Promise<ProfileLoggedMinutesResult> {
+  const supabase = getSupabaseBrowserClient();
+
+  const { data: rows, error } = await supabase
+    .from("ticket_time_entries")
+    .select("minutes")
+    .eq("logged_by", profileId)
+    .gte("work_date", startDate)
+    .lte("work_date", endDate)
+    .returns<{ minutes: number }[]>();
+
+  if (error) {
+    logDev("profile logged minutes range query failed", error);
+    return { status: "error", message: error.message };
+  }
+
+  const totalMinutes = (rows ?? []).reduce((sum, row) => sum + row.minutes, 0);
+  return { status: "ready", totalMinutes };
+}
+
+export interface OrganizationTimeEntry {
+  ticketId: string;
+  loggedBy: string | null;
+  minutes: number;
+}
+
+export type OrganizationLoggedTimeResult =
+  | { status: "ready"; entries: OrganizationTimeEntry[] }
+  | { status: "error"; message: string };
+
+// Real per-ticket, per-logger time entries within an inclusive ISO date
+// range — backs Admin Reports' "Hours by Person" table (Completed/Blocked
+// need to know not just how many minutes were logged, but by whom and on
+// which ticket, not just a single aggregate like loadOrganizationLoggedMinutes
+// above). Grouping by person/ticket is left to the caller.
+export async function loadOrganizationLoggedTimeForRange(
+  ticketIds: string[],
+  startDate: string,
+  endDate: string
+): Promise<OrganizationLoggedTimeResult> {
+  if (ticketIds.length === 0) return { status: "ready", entries: [] };
+
+  const supabase = getSupabaseBrowserClient();
+
+  const { data: rows, error } = await supabase
+    .from("ticket_time_entries")
+    .select("ticket_id, logged_by, minutes")
+    .in("ticket_id", ticketIds)
+    .gte("work_date", startDate)
+    .lte("work_date", endDate)
+    .returns<{ ticket_id: string; logged_by: string | null; minutes: number }[]>();
+
+  if (error) {
+    logDev("organization logged time range query failed", error);
+    return { status: "error", message: error.message };
+  }
+
+  return {
+    status: "ready",
+    entries: (rows ?? []).map((row) => ({ ticketId: row.ticket_id, loggedBy: row.logged_by, minutes: row.minutes })),
+  };
+}
+
+export type MemberAttentionEventType = "blocked" | "reassigned" | "review" | "estimate";
+
+export interface MemberAttentionEvent {
+  id: string;
+  type: MemberAttentionEventType;
+  actorName: string | null;
+  ticketId: string;
+  time: string;
+  oldHours?: string;
+  newHours?: string;
+}
+
+export type MemberAttentionResult =
+  | { status: "ready"; events: MemberAttentionEvent[] }
+  | { status: "error"; message: string };
+
+// The real "Needs Your Attention" feed — the subset of ticket_activity on
+// this member's own active tickets that asks them to actually do something:
+// one of their tickets got blocked, was reassigned to them, moved into
+// review, or had its estimate change. No @mention-detection exists in this
+// schema (comments aren't parsed), so that mock category is simply never
+// populated here — never fabricated.
+export async function loadMemberAttentionEvents(
+  ticketIds: string[],
+  profileId: string,
+  limit = 10
+): Promise<MemberAttentionResult> {
+  if (ticketIds.length === 0) return { status: "ready", events: [] };
+
+  const supabase = getSupabaseBrowserClient();
+
+  const { data: rows, error } = await supabase
+    .from("ticket_activity")
+    .select("id, ticket_id, actor_profile_id, event_type, old_value, new_value, created_at")
+    .in("ticket_id", ticketIds)
+    .order("created_at", { ascending: false })
+    .limit(ORG_ACTIVITY_RAW_FETCH_LIMIT)
+    .returns<OrgActivityRawRow[]>();
+
+  if (error) {
+    logDev("member attention activity query failed", error);
+    return { status: "error", message: error.message };
+  }
+
+  const relevant: { row: OrgActivityRawRow; type: MemberAttentionEventType }[] = [];
+  for (const row of rows ?? []) {
+    if (relevant.length >= limit) break;
+    if (row.event_type === "status_changed" && row.new_value === "blocked") {
+      relevant.push({ row, type: "blocked" });
+    } else if (row.event_type === "status_changed" && row.new_value === "review") {
+      relevant.push({ row, type: "review" });
+    } else if (row.event_type === "assignee_changed" && row.new_value === profileId) {
+      relevant.push({ row, type: "reassigned" });
+    } else if (row.event_type === "hours_changed" && row.old_value && row.new_value) {
+      relevant.push({ row, type: "estimate" });
+    }
+  }
+
+  const actorIds = Array.from(
+    new Set(relevant.map((r) => r.row.actor_profile_id).filter((id): id is string => Boolean(id)))
+  );
+  const actorsById = await loadProfilesByIds(supabase, actorIds);
+
+  const events: MemberAttentionEvent[] = relevant.map(({ row, type }) => {
+    const actor = row.actor_profile_id ? actorsById.get(row.actor_profile_id) : undefined;
+    return {
+      id: row.id,
+      type,
+      actorName: resolveProfileName(actor),
+      ticketId: row.ticket_id,
+      time: formatRelativeTime(row.created_at),
+      oldHours: type === "estimate" ? row.old_value ?? undefined : undefined,
+      newHours: type === "estimate" ? row.new_value ?? undefined : undefined,
+    };
+  });
+
+  return { status: "ready", events };
+}
+
+export interface HoursOrAssigneeActivityEvent {
+  ticketId: string;
+  eventType: "hours_changed" | "assignee_changed";
+  oldValue: string | null;
+  newValue: string | null;
+}
+
+export type HoursOrAssigneeActivityResult =
+  | { status: "ready"; events: HoursOrAssigneeActivityEvent[] }
+  | { status: "error"; message: string };
+
+// Real hours_changed/assignee_changed ticket_activity rows within an
+// inclusive-start/exclusive-end timestamp range — backs Admin Reports'
+// Workload "variación de esta semana" (the real net change in a person's
+// assigned estimated hours during the current calendar week). Unlike
+// loadOrganizationActivity above (curated to a handful of event types and
+// capped for the Recent Activity widget's small display limit), this
+// returns every matching row in the range uncapped, since a weekly sum
+// can't silently drop events past a display limit.
+export async function loadHoursAndAssigneeActivityForRange(
+  ticketIds: string[],
+  startISO: string,
+  endExclusiveISO: string
+): Promise<HoursOrAssigneeActivityResult> {
+  if (ticketIds.length === 0) return { status: "ready", events: [] };
+
+  const supabase = getSupabaseBrowserClient();
+
+  const { data: rows, error } = await supabase
+    .from("ticket_activity")
+    .select("ticket_id, event_type, old_value, new_value")
+    .in("ticket_id", ticketIds)
+    .in("event_type", ["hours_changed", "assignee_changed"])
+    .gte("created_at", startISO)
+    .lt("created_at", endExclusiveISO)
+    .returns<{ ticket_id: string; event_type: string; old_value: string | null; new_value: string | null }[]>();
+
+  if (error) {
+    logDev("hours/assignee activity range query failed", error);
+    return { status: "error", message: error.message };
+  }
+
+  return {
+    status: "ready",
+    events: (rows ?? []).map((row) => ({
+      ticketId: row.ticket_id,
+      eventType: row.event_type as "hours_changed" | "assignee_changed",
+      oldValue: row.old_value,
+      newValue: row.new_value,
+    })),
+  };
+}
+
+export interface DeliveryActivityEvent {
+  id: string;
+  ticketId: string;
+  actorId: string | null;
+  actorName: string | null;
+  actorAvatar: string;
+  eventType: string;
+  fieldName: string | null;
+  oldValue: string | null;
+  newValue: string | null;
+  createdAt: string;
+}
+
+export type DeliveryActivityResult =
+  | { status: "ready"; events: DeliveryActivityEvent[] }
+  | { status: "error"; message: string };
+
+// The subset of real ticket_activity event types that matter for delivery
+// tracking (Admin Reports' "Recent Changes") — deliberately excludes
+// title/description edits, labels, acceptance criteria, attachments, time
+// entries, and comments, which are real too but low-value for this widget.
+const DELIVERY_ACTIVITY_EVENT_TYPES = [
+  "ticket_created",
+  "status_changed",
+  "assignee_changed",
+  "hours_changed",
+  "priority_changed",
+  "due_date_changed",
+  "relation_added",
+  "relation_removed",
+];
+
+const DELIVERY_ACTIVITY_FETCH_LIMIT = 100;
+
+// Real, uncurated delivery-relevant activity rows across a ticket set, most
+// recent first — the caller (reports-screen.tsx) resolves each row against
+// the tickets already in its own filtered scope, builds the display text,
+// and dedupes relation_added/relation_removed's own two-rows-per-action
+// shape. Reuses the same profile-resolution helpers as the rest of this
+// file rather than a new lookup mechanism.
+export async function loadDeliveryActivityForTickets(ticketIds: string[]): Promise<DeliveryActivityResult> {
+  if (ticketIds.length === 0) return { status: "ready", events: [] };
+
+  const supabase = getSupabaseBrowserClient();
+
+  const { data: rows, error } = await supabase
+    .from("ticket_activity")
+    .select("id, ticket_id, actor_profile_id, event_type, field_name, old_value, new_value, created_at")
+    .in("ticket_id", ticketIds)
+    .in("event_type", DELIVERY_ACTIVITY_EVENT_TYPES)
+    .order("created_at", { ascending: false })
+    .limit(DELIVERY_ACTIVITY_FETCH_LIMIT)
+    .returns<
+      {
+        id: string;
+        ticket_id: string;
+        actor_profile_id: string | null;
+        event_type: string;
+        field_name: string | null;
+        old_value: string | null;
+        new_value: string | null;
+        created_at: string;
+      }[]
+    >();
+
+  if (error) {
+    logDev("delivery activity query failed", error);
+    return { status: "error", message: error.message };
+  }
+
+  const actorIds = Array.from(
+    new Set((rows ?? []).map((row) => row.actor_profile_id).filter((id): id is string => Boolean(id)))
+  );
+  const actorsById = await loadProfilesByIds(supabase, actorIds);
+
+  const events: DeliveryActivityEvent[] = (rows ?? []).map((row) => {
+    const actor = row.actor_profile_id ? actorsById.get(row.actor_profile_id) : undefined;
+    return {
+      id: row.id,
+      ticketId: row.ticket_id,
+      actorId: row.actor_profile_id,
+      actorName: resolveProfileName(actor),
+      actorAvatar: (actor ? resolveAvatarUrl(actor.avatar_url, actor.updated_at) : null) ?? FALLBACK_AVATAR,
+      eventType: row.event_type,
+      fieldName: row.field_name,
+      oldValue: row.old_value,
+      newValue: row.new_value,
+      createdAt: row.created_at,
     };
   });
 

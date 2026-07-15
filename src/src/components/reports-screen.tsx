@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import type { ReactNode } from "react";
 import { FilterDropdown } from "@/components/tickets/filter-dropdown";
 import type { DropdownGroup } from "@/components/tickets/filter-dropdown";
@@ -8,11 +8,27 @@ import { useCurrentUser } from "@/components/current-user-provider";
 import { ReportStatusBar, KpiCard, Section, BlockCompletion, AnimatedBar } from "@/components/reports-shared";
 import type { StatusItem } from "@/components/reports-shared";
 import { ProjectLeadReportsScreen } from "@/components/project-lead-reports-screen";
-import { getTicketById, getTicketDisplayKey } from "@/lib/mock-tickets";
-import type { Ticket } from "@/lib/mock-tickets";
+import { getTicketDisplayKey } from "@/lib/mock-tickets";
+import type { Ticket, TicketStatus, TicketPriority } from "@/lib/mock-tickets";
+import type { ProjectStatus, ProjectSummary } from "@/lib/mock-projects";
 import { TicketPreviewPanel } from "@/components/tickets/ticket-preview-panel";
-import { TicketTypeIcon } from "@/components/tickets/ticket-ui";
+import { TicketTypeIcon, getTodayISO, parseDisplayDate, formatISODate } from "@/components/tickets/ticket-ui";
 import { MemberTrigger } from "@/components/member-profile";
+import {
+  loadOrganizationTickets,
+  loadOrganizationLoggedTimeForRange,
+  loadHoursAndAssigneeActivityForRange,
+  loadDeliveryActivityForTickets,
+  formatRelativeTime,
+  STATUS_FROM_DB,
+} from "@/lib/tickets";
+import type { OrganizationTimeEntry, HoursOrAssigneeActivityEvent, DeliveryActivityEvent } from "@/lib/tickets";
+import {
+  loadOrganizationProjects,
+  loadOrganizationWorkloadMembers,
+  loadOrganizationMemberWeeklyCapacities,
+} from "@/lib/projects";
+import type { OrgWorkloadMember, MemberWeeklyCapacityEntry } from "@/lib/projects";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -42,14 +58,18 @@ interface ProjectRow {
   risk:           Risk;
 }
 
-interface WorkloadEntry {
+interface WorkloadRow {
   id:             string;
   name:           string;
   avatar:         string;
-  hours:          number;
-  sprintCapacity: number;
-  weekDelta:      number;
-  capacity:       number;
+  assignedHours:  number;
+  weeklyCapacity: number;
+  /** Uncapped real percentage — the bar clamps visually, the text never does. */
+  utilizationPct: number;
+  /** Real net change in assigned estimated hours this calendar week, derived
+   *  only from real ticket_activity rows — null when there's no real signal
+   *  to derive it from (never fabricated as 0). */
+  weekDelta: number | null;
 }
 
 interface HoursEntry {
@@ -66,6 +86,9 @@ interface ActivityEntry {
   /** The action fragment only — the ticket title never appears here; when
    *  `ticket` is set it renders on its own clickable line instead. */
   action: ReactNode;
+  /** Plain-text mirror of `action` — same underlying real values, just not
+   *  JSX — used only by Export (CSV/Excel/PDF can't render ReactNode). */
+  actionText?: string;
   time:   string;
   group:  "today" | "yesterday" | "earlier";
   ticket?: Ticket;
@@ -73,66 +96,7 @@ interface ActivityEntry {
 
 type PeriodKey = "this-month" | "last-month" | "this-quarter" | "custom";
 
-// Billing rows carry hours + a rate; the invoice/revenue figure is always
-// derived (billableHours × avgRate) rather than stored, so the numbers can
-// never drift out of sync with each other.
-interface ClientBillingRow {
-  id:               string;
-  client:           string;
-  billableHours:    number;
-  nonBillableHours: number;
-  avgRate:          number;
-}
-
-interface MemberBillingRow {
-  id:               string;
-  name:             string;
-  avatar:           string;
-  billableHours:    number;
-  nonBillableHours: number;
-  avgRate:          number;
-}
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-const av = (id: number) => `https://i.pravatar.cc/64?img=${id}`;
-
-// ── Mock data ─────────────────────────────────────────────────────────────────
-
-const KPI_SUMMARY = {
-  projects:           7,
-  activeTickets:      97,
-  estimatedHours:     320,
-  completedHours:     212,
-  blockedTickets:     11,
-  completedThisMonth: 23,
-  overdueTickets:     4,
-};
-
-const HOURS_BY_PERSON: PersonRow[] = [
-  { id: "marcus", name: "Marcus Lee",  avatar: av(12), assignedTickets: 14, estimatedHours: 112, completedHours: 68, blockedHours: 24, capacity: 104 },
-  { id: "sarah",  name: "Sarah Chen",  avatar: av(47), assignedTickets: 11, estimatedHours: 84,  completedHours: 52, blockedHours: 0,  capacity: 89  },
-  { id: "david",  name: "David Kim",   avatar: av(22), assignedTickets: 9,  estimatedHours: 52,  completedHours: 31, blockedHours: 16, capacity: 72  },
-  { id: "priya",  name: "Alejo Cadavid", avatar: av(33), assignedTickets: 8,  estimatedHours: 44,  completedHours: 38, blockedHours: 0,  capacity: 65  },
-  { id: "elena",  name: "Elena Rossi", avatar: av(5),  assignedTickets: 6,  estimatedHours: 28,  completedHours: 18, blockedHours: 8,  capacity: 45  },
-];
-
-const PROJECT_HEALTH: ProjectRow[] = [
-  { id: "mba", name: "Mobile Banking App",          shortName: "MBA", tickets: 29, completedHours: 77,  estimatedHours: 184, blocked: 3, completion: 42, risk: "at-risk"  },
-  { id: "ipm", name: "Internal Platform Migration", shortName: "IPM", tickets: 14, completedHours: 42,  estimatedHours: 62,  blocked: 0, completion: 68, risk: "on-track" },
-  { id: "csp", name: "Customer Support Portal",     shortName: "CSP", tickets: 18, completedHours: 48,  estimatedHours: 88,  blocked: 2, completion: 54, risk: "on-track" },
-  { id: "dwr", name: "Data Warehouse Revamp",       shortName: "DWR", tickets: 9,  completedHours: 23,  estimatedHours: 32,  blocked: 0, completion: 71, risk: "on-track" },
-  { id: "msl", name: "Marketing Site Relaunch",     shortName: "MSL", tickets: 21, completedHours: 23,  estimatedHours: 96,  blocked: 5, completion: 24, risk: "blocked"  },
-  { id: "cwd", name: "Client Website Redesign",     shortName: "CWD", tickets: 6,  completedHours: 6,   estimatedHours: 18,  blocked: 1, completion: 35, risk: "at-risk"  },
-  { id: "pai", name: "Partner API Integration",     shortName: "PAI", tickets: 4,  completedHours: 8,   estimatedHours: 16,  blocked: 0, completion: 50, risk: "on-track" },
-];
-
 // ── Billing (Admin-only) ─────────────────────────────────────────────────────
-// Mock only — hours/rates below are illustrative placeholders standing in for
-// a future Time Tracking + invoicing integration. Billable + non-billable
-// hours across clients (and separately across members) both total 212h, the
-// same figure as KPI_SUMMARY.completedHours above — same underlying hours,
-// just sliced two different ways.
 
 const PERIOD_OPTIONS: { key: PeriodKey; label: string }[] = [
   { key: "this-month",   label: "This Month" },
@@ -160,6 +124,20 @@ function formatShortDate(iso: string): string {
 
 function formatRangeLabel(range: CustomRange): string {
   return `${formatShortDate(range.from)} – ${formatShortDate(range.to)}`;
+}
+
+// Real page-header date — "Weekday, Month Day, Year" (e.g. "Wednesday,
+// July 15, 2026"). Same real-local-date source (getTodayISO) and the same
+// toLocaleDateString pattern already used for this exact style elsewhere
+// (the Member Dashboard's own header), just with the year included to
+// match this header's existing format.
+function formatHeaderDate(todayISO: string): string {
+  return new Date(`${todayISO}T00:00:00`).toLocaleDateString("en-US", {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
 }
 
 // Same mock "today" the rest of this report is dated against.
@@ -211,55 +189,73 @@ function rangeForPreset(preset: PresetKey): CustomRange {
   }
 }
 
-const BILLING_BY_CLIENT: ClientBillingRow[] = [
-  { id: "meridian",  client: "Meridian Bank", billableHours: 120, nonBillableHours: 8,  avgRate: 110 },
-  { id: "retail-co", client: "RetailCo",      billableHours: 40,  nonBillableHours: 6,  avgRate: 85  },
-  { id: "partner-a", client: "Partner A",     billableHours: 18,  nonBillableHours: 4,  avgRate: 90  },
-  { id: "internal",  client: "Internal",      billableHours: 0,   nonBillableHours: 16, avgRate: 0   },
-];
-
-const BILLING_BY_MEMBER: MemberBillingRow[] = [
-  { id: "marcus", name: "Marcus Lee",  avatar: av(12), billableHours: 64, nonBillableHours: 6, avgRate: 105 },
-  { id: "sarah",  name: "Sarah Chen",  avatar: av(47), billableHours: 48, nonBillableHours: 6, avgRate: 115 },
-  { id: "david",  name: "David Kim",   avatar: av(22), billableHours: 26, nonBillableHours: 6, avgRate: 80  },
-  { id: "priya",  name: "Alejo Cadavid", avatar: av(33), billableHours: 32, nonBillableHours: 8, avgRate: 90  },
-  { id: "elena",  name: "Elena Rossi", avatar: av(5),  billableHours: 8,  nonBillableHours: 8, avgRate: 100 },
-];
-
-const BILLING_TOTALS = BILLING_BY_CLIENT.reduce(
-  (acc, row) => ({
-    billableHours:    acc.billableHours + row.billableHours,
-    nonBillableHours: acc.nonBillableHours + row.nonBillableHours,
-    revenue:          acc.revenue + row.billableHours * row.avgRate,
-  }),
-  { billableHours: 0, nonBillableHours: 0, revenue: 0 }
-);
-
-const UTILIZATION_PCT = Math.round(
-  (BILLING_TOTALS.billableHours / (BILLING_TOTALS.billableHours + BILLING_TOTALS.nonBillableHours)) * 100
-);
+// Real date range for the shared "Billing Period" selector — separate from
+// rangeForPreset above (which stays dated against the mock TODAY, unrelated
+// to Hours by Person and used only to prefill the custom-range popover's
+// own quick-pick buttons) so Hours by Person's real Supabase query is
+// scoped to the user's actual current date, not the mock report date.
+function realRangeForPeriod(period: PeriodKey, customRange: CustomRange, todayISO: string): CustomRange {
+  if (period === "custom") return customRange;
+  const [y, m] = todayISO.split("-").map(Number);
+  const year = y;
+  const month = m - 1;
+  if (period === "this-month") {
+    return { from: toISO(new Date(year, month, 1)), to: toISO(new Date(year, month + 1, 0)) };
+  }
+  if (period === "last-month") {
+    return { from: toISO(new Date(year, month - 1, 1)), to: toISO(new Date(year, month, 0)) };
+  }
+  const quarterStartMonth = Math.floor(month / 3) * 3;
+  return { from: toISO(new Date(year, quarterStartMonth, 1)), to: toISO(new Date(year, quarterStartMonth + 3, 0)) };
+}
 
 function formatCurrency(amount: number): string {
   return `$${amount.toLocaleString("en-US")}`;
 }
 
-const WORKLOAD: WorkloadEntry[] = [
-  { id: "marcus", name: "Marcus Lee",  avatar: av(12), hours: 112, sprintCapacity: 120, weekDelta: +18, capacity: 104 },
-  { id: "sarah",  name: "Sarah Chen",  avatar: av(47), hours: 84,  sprintCapacity: 100, weekDelta: -6,  capacity: 89  },
-  { id: "david",  name: "David Kim",   avatar: av(22), hours: 52,  sprintCapacity: 80,  weekDelta: +4,  capacity: 72  },
-  { id: "priya",  name: "Alejo Cadavid", avatar: av(33), hours: 44,  sprintCapacity: 80,  weekDelta: +2,  capacity: 65  },
-  { id: "elena",  name: "Elena Rossi", avatar: av(5),  hours: 28,  sprintCapacity: 60,  weekDelta: -2,  capacity: 45  },
+// Bucket visual config (id/label/color) — same 5 categories, same order,
+// same colors as before. Only "hours" becomes real; which real
+// TicketStatus values roll into each bucket reuses the exact same
+// single-status-per-column mapping the real ticket Board already uses
+// (board-view.tsx's COLUMNS) rather than text-matching a status label.
+// "backlog" has no column of its own here (Board keeps it as its own
+// separate column too) — it's the one real status this widget can't map
+// safely to any of these five, so it's excluded from the total/bars
+// rather than folded into "To Do".
+interface HoursDistributionBucket {
+  id:       string;
+  label:    string;
+  barClass: string;
+  statuses: TicketStatus[];
+}
+
+const HOURS_DIST_BUCKETS: HoursDistributionBucket[] = [
+  { id: "done",        label: "Done",        barClass: "bg-emerald-500",                statuses: ["done"] },
+  { id: "in-progress", label: "In Progress", barClass: "bg-amber-400",                  statuses: ["in-progress"] },
+  { id: "to-do",       label: "To Do",       barClass: "bg-slate-300 dark:bg-zinc-600", statuses: ["to-do"] },
+  { id: "blocked",     label: "Blocked",     barClass: "bg-red-400",                    statuses: ["blocked"] },
+  { id: "review",      label: "In Review",   barClass: "bg-violet-500",                 statuses: ["review"] },
 ];
 
-const HOURS_DIST: HoursEntry[] = [
-  { id: "done",        label: "Done",        hours: 210, barClass: "bg-emerald-500" },
-  { id: "in-progress", label: "In Progress", hours: 180, barClass: "bg-amber-400"  },
-  { id: "to-do",       label: "To Do",       hours: 88,  barClass: "bg-slate-300 dark:bg-zinc-600" },
-  { id: "blocked",     label: "Blocked",     hours: 60,  barClass: "bg-red-400"    },
-  { id: "review",      label: "In Review",   hours: 42,  barClass: "bg-violet-500" },
-];
-
-const HOURS_DIST_TOTAL = HOURS_DIST.reduce((s, h) => s + h.hours, 0);
+// Real estimated-hours distribution across the five buckets above, scoped
+// to whatever tickets are already in the report's current scope/filters
+// (tickets is expected to be the same filteredTickets every other Delivery
+// widget already uses). Uses each ticket's own total estimate (never
+// logged/remaining hours), 0h for a ticket with no estimate, and counts
+// each ticket in at most one bucket (a ticket's status is single-valued,
+// so this can never double-count).
+function buildHoursDistribution(tickets: Ticket[]): HoursEntry[] {
+  return HOURS_DIST_BUCKETS.map((bucket) => ({
+    id: bucket.id,
+    label: bucket.label,
+    barClass: bucket.barClass,
+    hours: round1(
+      tickets
+        .filter((t) => (bucket.statuses as string[]).includes(t.status))
+        .reduce((sum, t) => sum + (t.hours ?? 0), 0)
+    ),
+  }));
+}
 
 const ACTIVITY_GROUPS = [
   { id: "today",     label: "Today",            key: "today"     as const },
@@ -267,104 +263,7 @@ const ACTIVITY_GROUPS = [
   { id: "earlier",   label: "Earlier This Week", key: "earlier"   as const },
 ];
 
-const RECENT_CHANGES: ActivityEntry[] = [
-  {
-    id: "rc-1",
-    name: "Alejo Cadavid",
-    avatar: av(33),
-    action: <>changed Hours — <span className="font-medium">8h → 12h</span></>,
-    time: "2 hours ago",
-    group: "today",
-    ticket: getTicketById("accessibility-audit"),
-  },
-  {
-    id: "rc-2",
-    name: "Marcus Lee",
-    avatar: av(12),
-    action: <>moved to <span className="text-emerald-600 dark:text-emerald-400 font-medium">Done</span></>,
-    time: "4 hours ago",
-    group: "today",
-    ticket: getTicketById("biometric-login-crash"),
-  },
-  {
-    id: "rc-3",
-    name: "Sarah Chen",
-    avatar: av(47),
-    action: "linked a PR to",
-    time: "6 hours ago",
-    group: "today",
-    ticket: getTicketById("transaction-history-pagination"),
-  },
-  {
-    id: "rc-4",
-    name: "David Kim",
-    avatar: av(22),
-    action: <>changed assignee — <span className="font-medium">Marcus Lee</span></>,
-    time: "Yesterday, 3pm",
-    group: "yesterday",
-    ticket: getTicketById("kyc-vendor-outage"),
-  },
-  {
-    id: "rc-5",
-    name: "Elena Rossi",
-    avatar: av(5),
-    action: <>changed Hours — <span className="font-medium">4h → 6h</span></>,
-    time: "Yesterday, 11am",
-    group: "yesterday",
-    ticket: getTicketById("dark-mode-charts"),
-  },
-  {
-    id: "rc-6",
-    name: "Marcus Lee",
-    avatar: av(12),
-    action: "completed",
-    time: "2 days ago",
-    group: "earlier",
-    ticket: getTicketById("mfa-onboarding"),
-  },
-  {
-    id: "rc-7",
-    name: "Sarah Chen",
-    avatar: av(47),
-    action: <>moved to <span className="text-amber-600 dark:text-amber-400 font-medium">In Progress</span></>,
-    time: "2 days ago",
-    group: "earlier",
-    ticket: getTicketById("push-notification-setup"),
-  },
-];
-
 // ── Filter groups ─────────────────────────────────────────────────────────────
-
-const PROJECT_GROUPS: DropdownGroup[] = [{
-  options: [
-    { value: "mobile-banking",    label: "Mobile Banking App" },
-    { value: "internal-platform", label: "Internal Platform Migration" },
-    { value: "customer-support",  label: "Customer Support Portal" },
-    { value: "data-warehouse",    label: "Data Warehouse Revamp" },
-    { value: "marketing-site",    label: "Marketing Site Relaunch" },
-    { value: "client-website",    label: "Client Website Redesign" },
-    { value: "partner-api",       label: "Partner API Integration" },
-  ],
-}];
-
-const ASSIGNEE_GROUPS: DropdownGroup[] = [{
-  options: [
-    { value: "marcus", label: "Marcus Lee",  avatar: av(12) },
-    { value: "sarah",  label: "Sarah Chen",  avatar: av(47) },
-    { value: "david",  label: "David Kim",   avatar: av(22) },
-    { value: "priya",  label: "Alejo Cadavid", avatar: av(33) },
-    { value: "elena",  label: "Elena Rossi", avatar: av(5)  },
-  ],
-}];
-
-const CLIENT_GROUPS: DropdownGroup[] = [{
-  options: [
-    { value: "meridian",  label: "Meridian Bank" },
-    { value: "retail-co", label: "RetailCo" },
-    { value: "internal",  label: "Internal" },
-    { value: "partner-a", label: "Partner A" },
-  ],
-}];
 
 // Used by Project Lead's filter bar only — Admin has the Billing Period
 // selector as the single source of truth for the reporting window instead.
@@ -377,36 +276,10 @@ const DATE_GROUPS: DropdownGroup[] = [{
   ],
 }];
 
-const STATUS_GROUPS: DropdownGroup[] = [{
-  options: [
-    { value: "backlog",     label: "Inbox" },
-    { value: "to-do",       label: "To Do" },
-    { value: "in-progress", label: "In Progress" },
-    { value: "blocked",     label: "Blocked" },
-    { value: "review",      label: "In Review" },
-    { value: "done",        label: "Done" },
-  ],
-}];
-
-const PRIORITY_GROUPS: DropdownGroup[] = [{
-  options: [
-    { value: "high",   label: "High"   },
-    { value: "normal", label: "Normal" },
-    { value: "low",    label: "Low"    },
-  ],
-}];
-
-const LABEL_GROUPS: DropdownGroup[] = [{
-  options: [
-    { value: "Security",    label: "Security"    },
-    { value: "Bug",         label: "Bug"         },
-    { value: "Performance", label: "Performance" },
-    { value: "Design",      label: "Design"      },
-    { value: "API",         label: "API"         },
-    { value: "Compliance",  label: "Compliance"  },
-  ],
-}];
-
+// Fixed numeric buckets (not a catalog of real "existing values" the way
+// Project/Assignee/Client/Status/Priority/Labels are) — kept static, same
+// as the period presets. Real filtering against a ticket's actual hours
+// happens in hoursInBucket below.
 const HOURS_GROUPS: DropdownGroup[] = [{
   options: [
     { value: "0-8",   label: "0 – 8h"   },
@@ -416,41 +289,42 @@ const HOURS_GROUPS: DropdownGroup[] = [{
   ],
 }];
 
-// ── Report Status Bar ─────────────────────────────────────────────────────────
-// ReportStatusBar itself lives in reports-shared.tsx (reused by the Project
-// Lead's Reports page too); this function only derives Admin-specific items.
-
-function deriveStatusItems(): StatusItem[] {
-  const items: StatusItem[] = [];
-
-  const overloaded = HOURS_BY_PERSON.filter((p) => p.estimatedHours > 80);
-  if (overloaded.length > 0) {
-    items.push({
-      id:    "overloaded",
-      level: "warning",
-      text:  `${overloaded.length} developers overloaded`,
-    });
+function hoursInBucket(hours: number | undefined, bucket: string): boolean {
+  const h = hours ?? 0;
+  switch (bucket) {
+    case "0-8":   return h <= 8;
+    case "8-24":  return h > 8 && h <= 24;
+    case "24-48": return h > 24 && h <= 48;
+    case "48+":   return h > 48;
+    default:      return true;
   }
-
-  const mostBlocked = [...PROJECT_HEALTH].sort((a, b) => b.blocked - a.blocked)[0];
-  if (mostBlocked.blocked > 0) {
-    items.push({
-      id:    "blocked-project",
-      level: "critical",
-      text:  `${mostBlocked.name} blocked`,
-    });
-  }
-
-  items.push({
-    id:    "completed",
-    level: "ok",
-    text:  `${KPI_SUMMARY.completedThisMonth} tickets completed`,
-  });
-
-  return items.slice(0, 3);
 }
 
-const STATUS_ITEMS = deriveStatusItems();
+// Real Project/Assignee/Client/Status/Priority/Labels filter option lists
+// are built from the org's own real data (see AdminReportsScreen below) —
+// no static catalog for any of these six, since the task requires each
+// filter to show only values that actually exist in the current report
+// scope. Status/Priority keep a fixed real display order/label map (the
+// full domain, same labels the rest of the app already uses — e.g.
+// "Inbox" for backlog, "In Review" for review) but only the values
+// actually present on a real ticket ever appear as options.
+const STATUS_FILTER_ORDER: TicketStatus[] = ["backlog", "to-do", "in-progress", "blocked", "review", "done"];
+const STATUS_FILTER_LABELS: Record<TicketStatus, string> = {
+  backlog:       "Inbox",
+  "to-do":       "To Do",
+  "in-progress": "In Progress",
+  blocked:       "Blocked",
+  review:        "In Review",
+  done:          "Done",
+};
+
+const PRIORITY_FILTER_ORDER: TicketPriority[] = ["highest", "high", "medium", "low"];
+const PRIORITY_FILTER_LABELS: Record<TicketPriority, string> = {
+  highest: "Highest",
+  high:    "High",
+  medium:  "Medium",
+  low:     "Low",
+};
 
 // ReportStatusBar, KpiCard, Section, BlockCompletion, and AnimatedBar all live
 // in reports-shared.tsx now — reused as-is by the Project Lead's Reports page.
@@ -531,10 +405,23 @@ function ReportTabs({ tab, onChange }: { tab: ReportTab; onChange: (t: ReportTab
 // Global period selector — cosmetic only for now. Selecting a period doesn't
 // recompute any figures yet; it's here to establish where a real Time
 // Tracking date-range integration will plug in later.
-function PeriodSelector({ value, onChange }: { value: PeriodKey; onChange: (key: PeriodKey) => void }) {
+function PeriodSelector({
+  value,
+  onChange,
+  customRange,
+  onCustomRangeChange,
+}: {
+  value: PeriodKey;
+  onChange: (key: PeriodKey) => void;
+  /** The applied custom range — lifted to the parent (rather than kept
+   *  purely local) so real-data consumers of the shared period (e.g. Hours
+   *  by Person) can read the actual chosen dates, not just that "custom"
+   *  was picked. */
+  customRange: CustomRange;
+  onCustomRangeChange: (range: CustomRange) => void;
+}) {
   const [popoverOpen, setPopoverOpen] = useState(false);
-  const [appliedRange, setAppliedRange] = useState<CustomRange>(DEFAULT_CUSTOM_RANGE);
-  const [draftRange, setDraftRange] = useState<CustomRange>(DEFAULT_CUSTOM_RANGE);
+  const [draftRange, setDraftRange] = useState<CustomRange>(customRange);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -554,12 +441,12 @@ function PeriodSelector({ value, onChange }: { value: PeriodKey; onChange: (key:
   }, [popoverOpen]);
 
   function openCustomRange() {
-    setDraftRange(appliedRange);
+    setDraftRange(customRange);
     setPopoverOpen(true);
   }
 
   function applyCustomRange() {
-    setAppliedRange(draftRange);
+    onCustomRangeChange(draftRange);
     onChange("custom");
     setPopoverOpen(false);
   }
@@ -570,7 +457,7 @@ function PeriodSelector({ value, onChange }: { value: PeriodKey; onChange: (key:
         {PERIOD_OPTIONS.map((option) => {
           const active = option.key === value;
           const isCustom = option.key === "custom";
-          const label = isCustom && active ? formatRangeLabel(appliedRange) : option.label;
+          const label = isCustom && active ? formatRangeLabel(customRange) : option.label;
           return (
             <button
               key={option.key}
@@ -707,7 +594,1154 @@ function SortTh({
   );
 }
 
-function ExportDropdown() {
+function round1(n: number): number {
+  return Math.round(n * 10) / 10;
+}
+
+// Real "Hours by Person" rows — only people with at least one real ticket
+// assigned to them within the current report scope (org-wide, same
+// unfiltered scope every other Delivery section already uses — the
+// Project/Assignee/etc. filter bar above is cosmetic everywhere else on
+// this page too, not just here). "member" lookup skips a profile with no
+// resolvable name/avatar rather than fabricating one.
+function buildHoursByPersonRows(
+  tickets: Ticket[],
+  members: { id: string; name: string; avatar: string }[],
+  capacities: { profileId: string; weeklyCapacity: number }[],
+  timeEntries: { ticketId: string; loggedBy: string | null; minutes: number }[]
+): PersonRow[] {
+  const memberById = new Map(members.map((m) => [m.id, m]));
+  const capacityByProfileId = new Map(capacities.map((c) => [c.profileId, c.weeklyCapacity]));
+
+  // Minutes logged BY each person ON each ticket, within the period.
+  const minutesByPersonTicket = new Map<string, Map<string, number>>();
+  for (const entry of timeEntries) {
+    if (!entry.loggedBy) continue;
+    let byTicket = minutesByPersonTicket.get(entry.loggedBy);
+    if (!byTicket) {
+      byTicket = new Map();
+      minutesByPersonTicket.set(entry.loggedBy, byTicket);
+    }
+    byTicket.set(entry.ticketId, (byTicket.get(entry.ticketId) ?? 0) + entry.minutes);
+  }
+
+  const ticketsByAssignee = new Map<string, Ticket[]>();
+  for (const ticket of tickets) {
+    if (!ticket.assigneeProfileId) continue;
+    const list = ticketsByAssignee.get(ticket.assigneeProfileId) ?? [];
+    list.push(ticket);
+    ticketsByAssignee.set(ticket.assigneeProfileId, list);
+  }
+
+  const rows: PersonRow[] = [];
+  for (const [profileId, personTickets] of ticketsByAssignee) {
+    const member = memberById.get(profileId);
+    if (!member) continue;
+
+    const byTicket = minutesByPersonTicket.get(profileId) ?? new Map<string, number>();
+
+    const estimatedHours = personTickets.reduce((sum, t) => sum + (t.hours ?? 0), 0);
+    const completedHours = personTickets.reduce((sum, t) => sum + (byTicket.get(t.id) ?? 0) / 60, 0);
+    const blockedHours = personTickets
+      .filter((t) => t.status === "blocked")
+      .reduce((sum, t) => {
+        const loggedHours = (byTicket.get(t.id) ?? 0) / 60;
+        return sum + Math.max((t.hours ?? 0) - loggedHours, 0);
+      }, 0);
+
+    const weeklyCapacity = capacityByProfileId.get(profileId) ?? 0;
+    const capacity = weeklyCapacity > 0 ? Math.round((completedHours / weeklyCapacity) * 100) : 0;
+
+    rows.push({
+      id: profileId,
+      name: member.name,
+      avatar: member.avatar,
+      assignedTickets: personTickets.length,
+      estimatedHours: round1(estimatedHours),
+      completedHours: round1(completedHours),
+      blockedHours: round1(blockedHours),
+      capacity,
+    });
+  }
+
+  return rows;
+}
+
+// Real "Project Health" rows — only real projects with at least one real
+// ticket within the current report scope (same unfiltered org-wide scope
+// Hours by Person already uses). "Hours" is logged/estimated, where logged
+// is scoped to the shared report period and estimated is the real total
+// across the project's own tickets, same split Hours by Person uses.
+// Risk reuses dashboard-screen.tsx's own already-established real
+// definition for "Projects at Risk" (blocked takes priority over at-risk;
+// at-risk = has an overdue, still-open ticket) rather than inventing a new
+// one — this table's third state, blocked > 0, is exactly that widget's.
+function buildProjectHealthRows(
+  projects: { slug: string; name: string; projectCode: string }[],
+  tickets: Ticket[],
+  timeEntries: { ticketId: string; minutes: number }[],
+  todayISO: string
+): ProjectRow[] {
+  const minutesByTicketId = new Map<string, number>();
+  for (const entry of timeEntries) {
+    minutesByTicketId.set(entry.ticketId, (minutesByTicketId.get(entry.ticketId) ?? 0) + entry.minutes);
+  }
+
+  const ticketsByProjectSlug = new Map<string, Ticket[]>();
+  for (const ticket of tickets) {
+    const list = ticketsByProjectSlug.get(ticket.projectSlug) ?? [];
+    list.push(ticket);
+    ticketsByProjectSlug.set(ticket.projectSlug, list);
+  }
+
+  const rows: ProjectRow[] = [];
+  for (const project of projects) {
+    const projectTickets = ticketsByProjectSlug.get(project.slug) ?? [];
+    if (projectTickets.length === 0) continue;
+
+    const estimatedHours = projectTickets.reduce((sum, t) => sum + (t.hours ?? 0), 0);
+    const loggedHours = projectTickets.reduce((sum, t) => sum + (minutesByTicketId.get(t.id) ?? 0) / 60, 0);
+    const completion = estimatedHours > 0 ? Math.min(100, Math.round((loggedHours / estimatedHours) * 100)) : 0;
+
+    const blocked = projectTickets.filter((t) => t.status === "blocked").length;
+    const overdueOpenCount = projectTickets.filter(
+      (t) => t.status !== "done" && t.dueDate && parseDisplayDate(t.dueDate) < todayISO
+    ).length;
+
+    const risk: Risk = blocked > 0 ? "blocked" : overdueOpenCount > 0 ? "at-risk" : "on-track";
+
+    rows.push({
+      id: project.slug,
+      name: project.name,
+      shortName: project.projectCode,
+      tickets: projectTickets.length,
+      completedHours: round1(loggedHours),
+      estimatedHours: round1(estimatedHours),
+      blocked,
+      completion,
+      risk,
+    });
+  }
+
+  return rows;
+}
+
+interface DeliveryKpiSummary {
+  activeProjects:     number;
+  activeTickets:      number;
+  loggedHours:        number;
+  estimatedHours:     number;
+  hoursBurnPct:       number;
+  blockedTickets:     number;
+  completedThisMonth: number;
+  overdueTickets:     number;
+}
+
+// Real top KPI strip — reuses the exact same real rules already
+// implemented for Hours by Person and Project Health rather than inventing
+// new ones: "active" ticket = status !== "done" (same definition both
+// tables already use), "blocked" = status === "blocked", "overdue" =
+// status !== "done" && a real due date already in the past (same clause
+// buildProjectHealthRows uses for its own at-risk/overdue check), and
+// Hours Burn is the exact same registered/estimated/capped-at-100%/0%-
+// when-no-estimate formula Project Health's Completion column already
+// uses, just totaled org-wide instead of per-project. "Done This Month"
+// reuses the same real signal Admin Dashboard already established for
+// this exact problem (no completed_at column exists): a "done" ticket's
+// own updated_at falling in the real current calendar month — never the
+// selected report period, since this KPI is explicitly about the current
+// calendar month regardless of what period is selected elsewhere.
+function buildDeliveryKpiSummary(
+  tickets: Ticket[],
+  projects: { status: ProjectStatus }[],
+  timeEntries: { minutes: number }[],
+  todayISO: string
+): DeliveryKpiSummary {
+  const activeProjects = projects.filter((p) => p.status === "active").length;
+  const activeTickets = tickets.filter((t) => t.status !== "done").length;
+
+  const estimatedHours = round1(tickets.reduce((sum, t) => sum + (t.hours ?? 0), 0));
+  const loggedMinutes = timeEntries.reduce((sum, e) => sum + e.minutes, 0);
+  const loggedHours = round1(loggedMinutes / 60);
+  const hoursBurnPct = estimatedHours > 0 ? Math.min(100, Math.round((loggedHours / estimatedHours) * 100)) : 0;
+
+  const blockedTickets = tickets.filter((t) => t.status === "blocked").length;
+
+  const monthPrefix = todayISO.slice(0, 7);
+  const completedThisMonth = tickets.filter(
+    (t) => t.status === "done" && t.updatedAtISO?.slice(0, 7) === monthPrefix
+  ).length;
+
+  const overdueTickets = tickets.filter(
+    (t) => t.status !== "done" && t.dueDate && parseDisplayDate(t.dueDate) < todayISO
+  ).length;
+
+  return {
+    activeProjects,
+    activeTickets,
+    loggedHours,
+    estimatedHours,
+    hoursBurnPct,
+    blockedTickets,
+    completedThisMonth,
+    overdueTickets,
+  };
+}
+
+interface FinanceKpiSummary {
+  billableHours:     number;
+  nonBillableHours:  number;
+  utilizationPct:    number;
+  estimatedRevenue:  number;
+}
+
+// Real Finance KPI strip — billable/non-billable status is inherited
+// exclusively from the project's own real category (Project Settings'
+// "client"/"internal"), never a per-time-entry flag (none exists). Reuses
+// the exact same real tickets/projects/time-entries state Delivery's own
+// shared fetch already loads for the same Billing Period (no separate
+// query). A ticket whose project can no longer be resolved contributes to
+// neither total rather than being guessed into one.
+function buildFinanceKpiSummary(
+  tickets: Ticket[],
+  projects: { slug: string; category: string; defaultHourlyRate?: number }[],
+  timeEntries: { ticketId: string; minutes: number }[]
+): FinanceKpiSummary {
+  const projectBySlug = new Map(projects.map((p) => [p.slug, p]));
+  const ticketById = new Map(tickets.map((t) => [t.id, t]));
+
+  const minutesByProjectSlug = new Map<string, number>();
+  for (const entry of timeEntries) {
+    const ticket = ticketById.get(entry.ticketId);
+    if (!ticket) continue;
+    minutesByProjectSlug.set(ticket.projectSlug, (minutesByProjectSlug.get(ticket.projectSlug) ?? 0) + entry.minutes);
+  }
+
+  let billableMinutes = 0;
+  let nonBillableMinutes = 0;
+  let estimatedRevenue = 0;
+
+  for (const [slug, minutes] of minutesByProjectSlug) {
+    const project = projectBySlug.get(slug);
+    if (!project) continue;
+
+    if (project.category === "client") {
+      billableMinutes += minutes;
+      // A Client project with no real billing_rate contributes $0 revenue
+      // (its hours still count as billable) — never a guessed/default rate.
+      estimatedRevenue += (minutes / 60) * (project.defaultHourlyRate ?? 0);
+    } else {
+      nonBillableMinutes += minutes;
+    }
+  }
+
+  const billableHours = round1(billableMinutes / 60);
+  const nonBillableHours = round1(nonBillableMinutes / 60);
+  const totalLoggedHours = billableHours + nonBillableHours;
+  const utilizationPct = totalLoggedHours > 0 ? Math.round((billableHours / totalLoggedHours) * 100) : 0;
+
+  return {
+    billableHours,
+    nonBillableHours,
+    utilizationPct,
+    estimatedRevenue: Math.round(estimatedRevenue),
+  };
+}
+
+interface BillingClientRow {
+  id:                string;
+  client:            string;
+  billableHours:     number;
+  nonBillableHours:  number;
+  /** 0 => the existing "—" empty state (no billable hours, or no project of
+   *  this client's had a real rate). */
+  avgRate:           number;
+  estimatedInvoice:  number;
+}
+
+// Real "Billing Overview" rows — same real tickets/projects/timeEntries as
+// buildFinanceKpiSummary above (never a parallel query or a different
+// billable/internal rule). Client rows are grouped by each Client-category
+// project's own real client name; every Internal-category project's real
+// hours consolidate into one "Internal" row (never attributed to any
+// client — no real association exists in this schema). A client/Internal
+// group with zero real minutes in the period never gets a row at all.
+function buildBillingOverviewRows(
+  tickets: Ticket[],
+  projects: { slug: string; category: string; client?: string; defaultHourlyRate?: number }[],
+  timeEntries: { ticketId: string; minutes: number }[]
+): BillingClientRow[] {
+  const projectBySlug = new Map(projects.map((p) => [p.slug, p]));
+  const ticketById = new Map(tickets.map((t) => [t.id, t]));
+
+  const minutesByProjectSlug = new Map<string, number>();
+  for (const entry of timeEntries) {
+    const ticket = ticketById.get(entry.ticketId);
+    if (!ticket) continue;
+    minutesByProjectSlug.set(ticket.projectSlug, (minutesByProjectSlug.get(ticket.projectSlug) ?? 0) + entry.minutes);
+  }
+
+  const clientAgg = new Map<string, { billableHours: number; revenue: number }>();
+  let internalMinutes = 0;
+
+  for (const [slug, minutes] of minutesByProjectSlug) {
+    const project = projectBySlug.get(slug);
+    if (!project) continue;
+
+    if (project.category === "client") {
+      const clientName = project.client && project.client.trim() ? project.client : "Unassigned Client";
+      const hours = minutes / 60;
+      const revenue = hours * (project.defaultHourlyRate ?? 0);
+      const agg = clientAgg.get(clientName) ?? { billableHours: 0, revenue: 0 };
+      agg.billableHours += hours;
+      agg.revenue += revenue;
+      clientAgg.set(clientName, agg);
+    } else {
+      internalMinutes += minutes;
+    }
+  }
+
+  const rows: BillingClientRow[] = Array.from(clientAgg.entries()).map(([client, agg]) => ({
+    id: client,
+    client,
+    billableHours: round1(agg.billableHours),
+    nonBillableHours: 0,
+    avgRate: agg.billableHours > 0 ? Math.round(agg.revenue / agg.billableHours) : 0,
+    estimatedInvoice: Math.round(agg.revenue),
+  }));
+
+  rows.sort((a, b) => b.estimatedInvoice - a.estimatedInvoice);
+
+  if (internalMinutes > 0) {
+    rows.push({
+      id: "internal",
+      client: "Internal",
+      billableHours: 0,
+      nonBillableHours: round1(internalMinutes / 60),
+      avgRate: 0,
+      estimatedInvoice: 0,
+    });
+  }
+
+  return rows;
+}
+
+interface MemberBillingRowReal {
+  id:                string;
+  name:              string;
+  avatar:            string;
+  billableHours:     number;
+  nonBillableHours:  number;
+  utilizationPct:    number;
+  estimatedRevenue:  number;
+}
+
+// Real "Billable Hours by Member" rows — the exact same real
+// tickets/projects/timeEntries as buildFinanceKpiSummary/buildBillingOverviewRows
+// above, just grouped by who logged the time (timeEntries already carries
+// loggedBy — no new query). Revenue is computed per (person, project)
+// before summing, since one person can log time on several Client projects
+// at different rates. Only people who resolve to a real org member (never a
+// fabricated name/avatar) and have real logged minutes in the period get a
+// row.
+function buildBillableHoursByMemberRows(
+  tickets: Ticket[],
+  projects: { slug: string; category: string; defaultHourlyRate?: number }[],
+  timeEntries: { ticketId: string; loggedBy: string | null; minutes: number }[],
+  members: { id: string; name: string; avatar: string }[]
+): MemberBillingRowReal[] {
+  const projectBySlug = new Map(projects.map((p) => [p.slug, p]));
+  const ticketById = new Map(tickets.map((t) => [t.id, t]));
+  const memberById = new Map(members.map((m) => [m.id, m]));
+
+  const agg = new Map<string, { billableMinutes: number; nonBillableMinutes: number; revenue: number }>();
+
+  for (const entry of timeEntries) {
+    if (!entry.loggedBy) continue;
+    const ticket = ticketById.get(entry.ticketId);
+    if (!ticket) continue;
+    const project = projectBySlug.get(ticket.projectSlug);
+    if (!project) continue;
+
+    const personAgg = agg.get(entry.loggedBy) ?? { billableMinutes: 0, nonBillableMinutes: 0, revenue: 0 };
+    if (project.category === "client") {
+      personAgg.billableMinutes += entry.minutes;
+      personAgg.revenue += (entry.minutes / 60) * (project.defaultHourlyRate ?? 0);
+    } else {
+      personAgg.nonBillableMinutes += entry.minutes;
+    }
+    agg.set(entry.loggedBy, personAgg);
+  }
+
+  const rows: MemberBillingRowReal[] = [];
+  for (const [profileId, data] of agg) {
+    const member = memberById.get(profileId);
+    if (!member) continue;
+
+    const billableHours = round1(data.billableMinutes / 60);
+    const nonBillableHours = round1(data.nonBillableMinutes / 60);
+    const totalHours = billableHours + nonBillableHours;
+    const utilizationPct = totalHours > 0 ? Math.round((billableHours / totalHours) * 100) : 0;
+
+    rows.push({
+      id: profileId,
+      name: member.name,
+      avatar: member.avatar,
+      billableHours,
+      nonBillableHours,
+      utilizationPct,
+      estimatedRevenue: Math.round(data.revenue),
+    });
+  }
+
+  return rows.sort((a, b) => b.billableHours - a.billableHours);
+}
+
+// Real alerts banner — sourced directly from the exact same real values
+// already shown by the KPI strip (kpiSummary.overdueTickets/blockedTickets/
+// completedThisMonth) and Hours by Person (personRows' own capacity, for
+// "developers overloaded"), never re-derived with different queries/rules
+// (in particular, "blocked" here is the same real ticket-level count the
+// Blocked KPI shows — not a project-level derivation, which is what made
+// the banner disagree with the KPIs before). Every real condition that
+// applies is shown (no arbitrary cap), so a positive "tickets completed"
+// item can never crowd out a critical one. Falls back to the neutral "no
+// alerts" item only when there is truly nothing real to show — including
+// while the KPI strip's own fetch hasn't resolved yet (kpiSummary is null
+// only during loading/error, matching that section's own real state).
+function buildDeliveryStatusItems(
+  personRows: PersonRow[],
+  kpiSummary: DeliveryKpiSummary | null
+): StatusItem[] {
+  if (!kpiSummary) {
+    return [{ id: "none", level: "ok", text: "No health alerts right now." }];
+  }
+
+  const items: StatusItem[] = [];
+
+  if (kpiSummary.overdueTickets > 0) {
+    items.push({
+      id:    "overdue",
+      level: "critical",
+      text:  `${kpiSummary.overdueTickets} ticket${kpiSummary.overdueTickets !== 1 ? "s" : ""} overdue`,
+    });
+  }
+
+  if (kpiSummary.blockedTickets > 0) {
+    items.push({
+      id:    "blocked",
+      level: "critical",
+      text:  `${kpiSummary.blockedTickets} ticket${kpiSummary.blockedTickets !== 1 ? "s" : ""} blocked`,
+    });
+  }
+
+  const overloadedCount = personRows.filter((p) => p.capacity > 100).length;
+  if (overloadedCount > 0) {
+    items.push({
+      id:    "overloaded",
+      level: "warning",
+      text:  `${overloadedCount} developer${overloadedCount !== 1 ? "s" : ""} overloaded`,
+    });
+  }
+
+  if (kpiSummary.completedThisMonth > 0) {
+    items.push({
+      id:    "completed",
+      level: "ok",
+      text:  `${kpiSummary.completedThisMonth} ticket${kpiSummary.completedThisMonth !== 1 ? "s" : ""} completed`,
+    });
+  }
+
+  if (items.length === 0) {
+    return [{ id: "none", level: "ok", text: "No health alerts right now." }];
+  }
+
+  return items;
+}
+
+// Monday–Sunday bounds of the real current calendar week (never the
+// selected report period) — end is exclusive (next Monday), for a plain
+// timestamptz .gte/.lt range query. Same convention as the rest of this
+// app's "this week" calculations, just seeded from the real current date.
+function getCurrentWeekBounds(): { start: string; end: string } {
+  const todayISO = getTodayISO();
+  const today = new Date(`${todayISO}T00:00:00`);
+  const day = today.getDay();
+  const monday = new Date(today);
+  monday.setDate(today.getDate() + (day === 0 ? -6 : 1 - day));
+  const nextMonday = new Date(monday);
+  nextMonday.setDate(monday.getDate() + 7);
+  const toISODate = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return { start: toISODate(monday), end: toISODate(nextMonday) };
+}
+
+// Real "Workload" rows — only people with at least one real active
+// (status !== "done") ticket assigned to them within the current report
+// scope. Reuses the exact same real weekly-capacity source as Hours by
+// Person/Team (project_memberships.weekly_capacity, max across a member's
+// own project rows, falling back to organization_memberships.weekly_capacity
+// only when a project-level value is null — see loadOrganizationMemberWeeklyCapacities).
+// "Variación de esta semana" is derived only from real hours_changed/
+// assignee_changed ticket_activity rows on tickets currently in scope for
+// that person — a person with zero such events this week gets weekDelta:
+// null (never a fabricated 0).
+function buildWorkloadRows(
+  tickets: Ticket[],
+  members: { id: string; name: string; avatar: string }[],
+  capacities: { profileId: string; weeklyCapacity: number }[],
+  timeEntries: { ticketId: string; minutes: number }[],
+  activityEvents: HoursOrAssigneeActivityEvent[]
+): WorkloadRow[] {
+  const memberById = new Map(members.map((m) => [m.id, m]));
+  const capacityByProfileId = new Map(capacities.map((c) => [c.profileId, c.weeklyCapacity]));
+
+  const loggedMinutesByTicketId = new Map<string, number>();
+  for (const entry of timeEntries) {
+    loggedMinutesByTicketId.set(entry.ticketId, (loggedMinutesByTicketId.get(entry.ticketId) ?? 0) + entry.minutes);
+  }
+
+  const activeTicketById = new Map<string, Ticket>();
+  const activeTicketsByAssignee = new Map<string, Ticket[]>();
+  for (const ticket of tickets) {
+    if (ticket.status === "done" || !ticket.assigneeProfileId) continue;
+    activeTicketById.set(ticket.id, ticket);
+    const list = activeTicketsByAssignee.get(ticket.assigneeProfileId) ?? [];
+    list.push(ticket);
+    activeTicketsByAssignee.set(ticket.assigneeProfileId, list);
+  }
+
+  const deltaByProfileId = new Map<string, number>();
+  const hasSignalByProfileId = new Set<string>();
+  function addDelta(profileId: string | null, amount: number) {
+    if (!profileId) return;
+    deltaByProfileId.set(profileId, (deltaByProfileId.get(profileId) ?? 0) + amount);
+    hasSignalByProfileId.add(profileId);
+  }
+
+  for (const event of activityEvents) {
+    const ticket = activeTicketById.get(event.ticketId);
+    if (event.eventType === "hours_changed") {
+      if (!ticket || !ticket.assigneeProfileId) continue;
+      const oldHours = event.oldValue !== null ? Number(event.oldValue) : 0;
+      const newHours = event.newValue !== null ? Number(event.newValue) : 0;
+      if (!Number.isFinite(oldHours) || !Number.isFinite(newHours)) continue;
+      addDelta(ticket.assigneeProfileId, newHours - oldHours);
+    } else {
+      // assignee_changed — the ticket's own current real hours is the only
+      // real figure available for what it added/removed from each side.
+      const ticketHours = ticket?.hours ?? 0;
+      if (event.newValue) addDelta(event.newValue, ticketHours);
+      if (event.oldValue) addDelta(event.oldValue, -ticketHours);
+    }
+  }
+
+  const rows: WorkloadRow[] = [];
+  for (const [profileId, personTickets] of activeTicketsByAssignee) {
+    const member = memberById.get(profileId);
+    if (!member) continue;
+
+    const assignedHours = personTickets.reduce((sum, t) => {
+      const loggedHours = (loggedMinutesByTicketId.get(t.id) ?? 0) / 60;
+      return sum + Math.max((t.hours ?? 0) - loggedHours, 0);
+    }, 0);
+
+    const weeklyCapacity = capacityByProfileId.get(profileId) ?? 0;
+    const utilizationPct = weeklyCapacity > 0 ? Math.round((assignedHours / weeklyCapacity) * 100) : 0;
+    const weekDelta = hasSignalByProfileId.has(profileId) ? round1(deltaByProfileId.get(profileId) ?? 0) : null;
+
+    rows.push({
+      id: profileId,
+      name: member.name,
+      avatar: member.avatar,
+      assignedHours: round1(assignedHours),
+      weeklyCapacity,
+      utilizationPct,
+      weekDelta,
+    });
+  }
+
+  return rows.sort((a, b) => b.utilizationPct - a.utilizationPct);
+}
+
+// Real "today"/"yesterday"/"earlier" bucket for one event, using the
+// viewer's real local calendar day (never the raw UTC timestamp string) —
+// same convention getTodayISO() itself already uses.
+function localDateISO(iso: string): string {
+  const d = new Date(iso);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function groupForActivity(createdAtISO: string, todayISO: string): "today" | "yesterday" | "earlier" {
+  const eventDateISO = localDateISO(createdAtISO);
+  if (eventDateISO === todayISO) return "today";
+  const yesterday = new Date(`${todayISO}T00:00:00`);
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (eventDateISO === localDateISO(yesterday.toISOString())) return "yesterday";
+  return "earlier";
+}
+
+// Turns one real ticket_activity row into the action fragment Recent
+// Changes renders next to the actor's name — same wording/format already
+// established by this exact widget's design (e.g. "changed Hours — 8h →
+// 12h", "moved from To Do to In Progress"), built only from real
+// status/priority enum values and real resolved names — never the row's
+// raw text alone. Returns null when the event can't be honestly described
+// from what's actually available (e.g. an old/new profile id that doesn't
+// resolve to a real known member) — the caller skips those rather than
+// guessing.
+function describeDeliveryActivity(event: DeliveryActivityEvent, memberNameById: Map<string, string>): ReactNode | null {
+  switch (event.eventType) {
+    case "ticket_created":
+      return "created this ticket";
+
+    case "status_changed": {
+      // old_value/new_value here are the raw DB enum text (snake_case,
+      // e.g. "to_do"/"in_progress") — the same conversion rowToTicket
+      // itself already applies, needed before these can be looked up
+      // against the app's own display-domain TicketStatus values/labels.
+      const oldStatus = event.oldValue ? STATUS_FROM_DB[event.oldValue] : undefined;
+      const newStatus = event.newValue ? STATUS_FROM_DB[event.newValue] : undefined;
+      const oldLabel = oldStatus ? STATUS_FILTER_LABELS[oldStatus] : undefined;
+      const newLabel = newStatus ? STATUS_FILTER_LABELS[newStatus] : undefined;
+      if (!oldLabel || !newLabel) return null;
+      if (newStatus === "done") {
+        return <>moved to <span className="text-emerald-600 dark:text-emerald-400 font-medium">Done</span></>;
+      }
+      if (newStatus === "blocked") {
+        return <>moved to <span className="text-red-600 dark:text-red-400 font-medium">Blocked</span></>;
+      }
+      return <>moved from {oldLabel} to <span className="font-medium">{newLabel}</span></>;
+    }
+
+    case "hours_changed": {
+      if (event.oldValue && event.newValue) {
+        return <>changed Hours — <span className="font-medium">{event.oldValue}h → {event.newValue}h</span></>;
+      }
+      if (!event.oldValue && event.newValue) {
+        return <>estimated Hours — <span className="font-medium">{event.newValue}h</span></>;
+      }
+      if (event.oldValue && !event.newValue) {
+        return <>cleared the Hours estimate — <span className="font-medium">was {event.oldValue}h</span></>;
+      }
+      return null;
+    }
+
+    case "priority_changed": {
+      const oldLabel = event.oldValue ? PRIORITY_FILTER_LABELS[event.oldValue as TicketPriority] : undefined;
+      const newLabel = event.newValue ? PRIORITY_FILTER_LABELS[event.newValue as TicketPriority] : undefined;
+      if (!newLabel) return null;
+      if (oldLabel) return <>changed Priority — <span className="font-medium">{oldLabel} → {newLabel}</span></>;
+      return <>set Priority — <span className="font-medium">{newLabel}</span></>;
+    }
+
+    case "due_date_changed": {
+      const oldLabel = event.oldValue ? formatISODate(event.oldValue) : undefined;
+      const newLabel = event.newValue ? formatISODate(event.newValue) : undefined;
+      if (oldLabel && newLabel) return <>changed Due Date — <span className="font-medium">{oldLabel} → {newLabel}</span></>;
+      if (!oldLabel && newLabel) return <>set Due Date — <span className="font-medium">{newLabel}</span></>;
+      if (oldLabel && !newLabel) return <>cleared the Due Date — <span className="font-medium">was {oldLabel}</span></>;
+      return null;
+    }
+
+    case "assignee_changed": {
+      const oldName = event.oldValue ? memberNameById.get(event.oldValue) : undefined;
+      const newName = event.newValue ? memberNameById.get(event.newValue) : undefined;
+      if (event.oldValue && !oldName) return null;
+      if (event.newValue && !newName) return null;
+      if (oldName && newName) return <>changed assignee — <span className="font-medium">{oldName} → {newName}</span></>;
+      if (!oldName && newName) return <>assigned to <span className="font-medium">{newName}</span></>;
+      if (oldName && !newName) return <>unassigned — <span className="font-medium">was {oldName}</span></>;
+      return null;
+    }
+
+    case "relation_added":
+      if (!event.fieldName || !event.newValue) return null;
+      return <>linked this ticket to <span className="font-medium">{event.newValue}</span> ({event.fieldName})</>;
+
+    case "relation_removed":
+      if (!event.fieldName || !event.oldValue) return null;
+      return <>removed the link to <span className="font-medium">{event.oldValue}</span> ({event.fieldName})</>;
+
+    default:
+      return null;
+  }
+}
+
+// Plain-text mirror of describeDeliveryActivity above — same event types,
+// same real status/priority/name resolution, same conditions for "can't be
+// honestly described" (returns null) — only the output is a template
+// string instead of JSX, since Export (CSV/Excel/PDF) can't render
+// ReactNode. Kept as a literal sibling rather than deriving one from the
+// other so neither has to compromise its own output shape.
+function describeDeliveryActivityText(event: DeliveryActivityEvent, memberNameById: Map<string, string>): string | null {
+  switch (event.eventType) {
+    case "ticket_created":
+      return "created this ticket";
+
+    case "status_changed": {
+      const oldStatus = event.oldValue ? STATUS_FROM_DB[event.oldValue] : undefined;
+      const newStatus = event.newValue ? STATUS_FROM_DB[event.newValue] : undefined;
+      const oldLabel = oldStatus ? STATUS_FILTER_LABELS[oldStatus] : undefined;
+      const newLabel = newStatus ? STATUS_FILTER_LABELS[newStatus] : undefined;
+      if (!oldLabel || !newLabel) return null;
+      return `moved from ${oldLabel} to ${newLabel}`;
+    }
+
+    case "hours_changed": {
+      if (event.oldValue && event.newValue) return `changed Hours — ${event.oldValue}h → ${event.newValue}h`;
+      if (!event.oldValue && event.newValue) return `estimated Hours — ${event.newValue}h`;
+      if (event.oldValue && !event.newValue) return `cleared the Hours estimate — was ${event.oldValue}h`;
+      return null;
+    }
+
+    case "priority_changed": {
+      const oldLabel = event.oldValue ? PRIORITY_FILTER_LABELS[event.oldValue as TicketPriority] : undefined;
+      const newLabel = event.newValue ? PRIORITY_FILTER_LABELS[event.newValue as TicketPriority] : undefined;
+      if (!newLabel) return null;
+      if (oldLabel) return `changed Priority — ${oldLabel} → ${newLabel}`;
+      return `set Priority — ${newLabel}`;
+    }
+
+    case "due_date_changed": {
+      const oldLabel = event.oldValue ? formatISODate(event.oldValue) : undefined;
+      const newLabel = event.newValue ? formatISODate(event.newValue) : undefined;
+      if (oldLabel && newLabel) return `changed Due Date — ${oldLabel} → ${newLabel}`;
+      if (!oldLabel && newLabel) return `set Due Date — ${newLabel}`;
+      if (oldLabel && !newLabel) return `cleared the Due Date — was ${oldLabel}`;
+      return null;
+    }
+
+    case "assignee_changed": {
+      const oldName = event.oldValue ? memberNameById.get(event.oldValue) : undefined;
+      const newName = event.newValue ? memberNameById.get(event.newValue) : undefined;
+      if (event.oldValue && !oldName) return null;
+      if (event.newValue && !newName) return null;
+      if (oldName && newName) return `changed assignee — ${oldName} → ${newName}`;
+      if (!oldName && newName) return `assigned to ${newName}`;
+      if (oldName && !newName) return `unassigned — was ${oldName}`;
+      return null;
+    }
+
+    case "relation_added":
+      if (!event.fieldName || !event.newValue) return null;
+      return `linked this ticket to ${event.newValue} (${event.fieldName})`;
+
+    case "relation_removed":
+      if (!event.fieldName || !event.oldValue) return null;
+      return `removed the link to ${event.oldValue} (${event.fieldName})`;
+
+    default:
+      return null;
+  }
+}
+
+const RECENT_CHANGES_LIMIT = 15;
+
+// Real "Recent Changes" — every event is resolved against the same
+// filteredTickets every other Delivery widget already uses (a ticket
+// outside the current filters/scope silently drops its events), never
+// shown without a real resolved actor, and relation_added/relation_removed
+// (logged as one row per side of the same real action) are deduped to a
+// single entry per real link change.
+function buildRecentChanges(
+  events: DeliveryActivityEvent[],
+  ticketsById: Map<string, Ticket>,
+  memberNameById: Map<string, string>,
+  todayISO: string
+): ActivityEntry[] {
+  const seen = new Set<string>();
+  const entries: ActivityEntry[] = [];
+
+  for (const event of events) {
+    if (entries.length >= RECENT_CHANGES_LIMIT) break;
+
+    const ticket = ticketsById.get(event.ticketId);
+    if (!ticket) continue;
+    if (!event.actorName) continue;
+
+    const action = describeDeliveryActivity(event, memberNameById);
+    if (action === null) continue;
+
+    if (event.eventType === "relation_added" || event.eventType === "relation_removed") {
+      const myCode = getTicketDisplayKey(ticket);
+      const otherCode = event.newValue ?? event.oldValue ?? "";
+      const dedupeKey = `${event.eventType}|${event.actorId ?? ""}|${event.createdAt}|${[myCode, otherCode].sort().join("|")}`;
+      if (seen.has(dedupeKey)) continue;
+      seen.add(dedupeKey);
+    }
+
+    entries.push({
+      id: event.id,
+      name: event.actorName,
+      avatar: event.actorAvatar,
+      action,
+      actionText: describeDeliveryActivityText(event, memberNameById) ?? undefined,
+      time: formatRelativeTime(event.createdAt),
+      group: groupForActivity(event.createdAt, todayISO),
+      ticket,
+    });
+  }
+
+  return entries;
+}
+
+// ── Export (Delivery tab only) ───────────────────────────────────────────────
+// Every field below is read straight from state/memos AdminReportsScreen
+// already computed for the widgets themselves (kpiSummary, statusItems,
+// personRows, projectRows, workloadRows, hoursDistribution, recentChanges)
+// — no export-specific query, no recomputation with different rules.
+
+interface DeliveryExportData {
+  periodLabel:       string;
+  filterSummary:      string;
+  statusItems:        StatusItem[];
+  kpiSummary:         DeliveryKpiSummary | null;
+  personRows:         PersonRow[];
+  projectRows:        ProjectRow[];
+  workloadRows:       WorkloadRow[];
+  hoursDistribution:  HoursEntry[];
+  hoursDistTotal:     number;
+  recentChanges:      ActivityEntry[];
+}
+
+interface ExportSection {
+  title: string;
+  headers?: string[];
+  rows: string[][];
+}
+
+const RISK_EXPORT_LABEL: Record<Risk, string> = {
+  "on-track": "On Track",
+  "at-risk":  "At Risk",
+  "blocked":  "Blocked",
+};
+
+// Turns the same real data the widgets render into a flat, format-agnostic
+// section list — the one place CSV/Excel/PDF all read from, so the three
+// formats can never disagree with each other or with the page.
+function buildDeliveryExportSections(data: DeliveryExportData): ExportSection[] {
+  const sections: ExportSection[] = [];
+
+  sections.push({
+    title: "KPIs",
+    headers: ["Metric", "Value"],
+    rows: data.kpiSummary
+      ? [
+          ["Projects (active)", String(data.kpiSummary.activeProjects)],
+          ["Active Tickets", String(data.kpiSummary.activeTickets)],
+          [
+            "Hours Burn",
+            `${data.kpiSummary.loggedHours}h / ${data.kpiSummary.estimatedHours}h (${data.kpiSummary.hoursBurnPct}%)`,
+          ],
+          ["Blocked", String(data.kpiSummary.blockedTickets)],
+          ["Done This Month", String(data.kpiSummary.completedThisMonth)],
+          ["Overdue", String(data.kpiSummary.overdueTickets)],
+        ]
+      : [],
+  });
+
+  sections.push({
+    title: "Health Alerts",
+    headers: ["Alert"],
+    rows: data.statusItems.map((item) => [item.text]),
+  });
+
+  sections.push({
+    title: "Hours by Person",
+    headers: ["Person", "Tickets", "Est. Hours", "Completed", "Remaining", "Blocked", "Capacity"],
+    rows: data.personRows.map((r) => [
+      r.name,
+      String(r.assignedTickets),
+      `${r.estimatedHours}h`,
+      `${r.completedHours}h`,
+      `${round1(Math.max(r.estimatedHours - r.completedHours, 0))}h`,
+      r.blockedHours > 0 ? `${r.blockedHours}h` : "",
+      `${r.capacity}%`,
+    ]),
+  });
+
+  sections.push({
+    title: "Project Health",
+    headers: ["Project", "Tickets", "Hours (logged / est.)", "Blocked", "Completion", "Risk"],
+    rows: data.projectRows.map((r) => [
+      r.name,
+      String(r.tickets),
+      `${r.completedHours}h / ${r.estimatedHours}h`,
+      r.blocked > 0 ? String(r.blocked) : "",
+      `${r.completion}%`,
+      RISK_EXPORT_LABEL[r.risk],
+    ]),
+  });
+
+  sections.push({
+    title: "Workload",
+    headers: ["Person", "Assigned Hours", "Weekly Capacity", "Utilization", "Change This Week"],
+    rows: data.workloadRows.map((r) => [
+      r.name,
+      `${r.assignedHours}h`,
+      `${r.weeklyCapacity}h`,
+      `${r.utilizationPct}%`,
+      r.weekDelta === null ? "No data this week" : `${r.weekDelta > 0 ? "+" : ""}${r.weekDelta}h this week`,
+    ]),
+  });
+
+  sections.push({
+    title: "Hours Distribution",
+    headers: ["Category", "Hours", "Percent"],
+    rows: [
+      ...data.hoursDistribution.map((entry) => [
+        entry.label,
+        `${entry.hours}h`,
+        `${data.hoursDistTotal > 0 ? Math.round((entry.hours / data.hoursDistTotal) * 100) : 0}%`,
+      ]),
+      ["Total", `${data.hoursDistTotal}h`, ""],
+    ],
+  });
+
+  sections.push({
+    title: "Recent Changes",
+    headers: ["When", "Person", "Change", "Ticket"],
+    rows: data.recentChanges.map((entry) => [
+      entry.time,
+      entry.name,
+      entry.actionText ?? "",
+      entry.ticket ? `${getTicketDisplayKey(entry.ticket)} — ${entry.ticket.title}` : "",
+    ]),
+  });
+
+  return sections;
+}
+
+function buildExportMeta(data: DeliveryExportData): string[] {
+  return [
+    "Jirita — Delivery Report",
+    `Period: ${data.periodLabel}`,
+    `Filters: ${data.filterSummary}`,
+    `Generated: ${new Date().toLocaleString("en-US")}`,
+  ];
+}
+
+// ── Export (Finance tab) ─────────────────────────────────────────────────────
+// Same real state Finance's own widgets already render (KPI strip, Billing
+// Overview, Billable Hours by Member) — no export-specific query or rule.
+// Finance has no filter bar of its own (its data is scoped only by the org
+// and the Billing Period, same as its KPIs), so — unlike Delivery — there is
+// no "active filters" line to report; the Report Summary only ever contains
+// the four fields the task itself asks for.
+
+interface FinanceExportData {
+  organizationName:           string;
+  periodLabel:                string;
+  financeKpiSummary:          FinanceKpiSummary | null;
+  billingOverviewRows:        BillingClientRow[];
+  billableHoursByMemberRows:  MemberBillingRowReal[];
+}
+
+interface FinanceExportGroup {
+  name:     string;
+  fileSlug: string;
+  sections: ExportSection[];
+}
+
+function buildFinanceExportMeta(data: FinanceExportData): string[] {
+  return [
+    "Jirita — Finance Report",
+    `Organization: ${data.organizationName}`,
+    `Billing Period: ${data.periodLabel}`,
+    `Generated: ${new Date().toLocaleString("en-US")}`,
+    "Currency: USD",
+  ];
+}
+
+// One group per section shown on the Finance tab (Report Summary, KPIs,
+// Billing Overview, Billable Hours by Member) — CSV exports each as its own
+// file, Excel exports each as its own worksheet, PDF renders them in this
+// same order (matching the on-screen order top to bottom).
+function buildFinanceExportGroups(data: FinanceExportData): FinanceExportGroup[] {
+  const summarySection: ExportSection = {
+    title: "Report Summary",
+    headers: ["Field", "Value"],
+    rows: [
+      ["Organization", data.organizationName],
+      ["Billing Period", data.periodLabel],
+      ["Generated", new Date().toLocaleString("en-US")],
+      ["Currency", "USD"],
+    ],
+  };
+
+  const kpiSection: ExportSection = {
+    title: "KPIs",
+    headers: ["Metric", "Value"],
+    rows: data.financeKpiSummary
+      ? [
+          ["Billable Hours", `${data.financeKpiSummary.billableHours}h`],
+          ["Non-billable Hours", `${data.financeKpiSummary.nonBillableHours}h`],
+          ["Utilization", `${data.financeKpiSummary.utilizationPct}%`],
+          ["Estimated Revenue", formatCurrency(data.financeKpiSummary.estimatedRevenue)],
+        ]
+      : [],
+  };
+
+  const billingOverviewRows = data.billingOverviewRows.map((row) => [
+    row.client,
+    `${row.billableHours}h`,
+    row.nonBillableHours > 0 ? `${row.nonBillableHours}h` : "",
+    row.avgRate > 0 ? `${formatCurrency(row.avgRate)}/h` : "",
+    formatCurrency(row.estimatedInvoice),
+  ]);
+  if (data.financeKpiSummary) {
+    billingOverviewRows.push([
+      "Total",
+      `${data.financeKpiSummary.billableHours}h`,
+      `${data.financeKpiSummary.nonBillableHours}h`,
+      "",
+      formatCurrency(data.financeKpiSummary.estimatedRevenue),
+    ]);
+  }
+  const billingOverviewSection: ExportSection = {
+    title: "Billing Overview",
+    headers: ["Client", "Billable Hours", "Non-billable Hours", "Average Rate", "Estimated Invoice"],
+    rows: billingOverviewRows,
+  };
+
+  const billableByMemberSection: ExportSection = {
+    title: "Billable Hours by Member",
+    headers: ["Member", "Billable", "Non-billable", "Utilization %", "Estimated Revenue"],
+    rows: data.billableHoursByMemberRows.map((row) => [
+      row.name,
+      `${row.billableHours}h`,
+      `${row.nonBillableHours}h`,
+      `${row.utilizationPct}%`,
+      formatCurrency(row.estimatedRevenue),
+    ]),
+  };
+
+  return [
+    { name: "Summary", fileSlug: "summary", sections: [summarySection] },
+    { name: "KPIs", fileSlug: "kpis", sections: [kpiSection] },
+    { name: "Billing Overview", fileSlug: "billing-overview", sections: [billingOverviewSection] },
+    { name: "Billable Hours by Member", fileSlug: "billable-hours-by-member", sections: [billableByMemberSection] },
+  ];
+}
+
+function sectionToSheetTable(section: ExportSection): string {
+  const headerRow = section.headers
+    ? `<tr>${section.headers.map((h) => `<th>${escapeHtml(h)}</th>`).join("")}</tr>`
+    : "";
+  const bodyRows =
+    section.rows.length === 0
+      ? `<tr><td>No data</td></tr>`
+      : section.rows.map((row) => `<tr>${row.map((c) => `<td>${escapeHtml(c)}</td>`).join("")}</tr>`).join("");
+  return `<table border="1" cellspacing="0" cellpadding="4">${headerRow}${bodyRows}</table>`;
+}
+
+// Real, separate worksheets in one workbook (one per Finance section) via
+// Excel's own documented HTML + XML-namespace convention — no library. Each
+// top-level <table> in <body> becomes one named sheet, in the same order as
+// the <x:ExcelWorksheet> declarations.
+function buildFinanceExcelHtml(groups: FinanceExportGroup[]): string {
+  const worksheetDefs = groups
+    .map((g) => `<x:ExcelWorksheet><x:Name>${escapeHtml(g.name.slice(0, 31))}</x:Name></x:ExcelWorksheet>`)
+    .join("");
+  const sheetsHtml = groups.map((g) => sectionToSheetTable(g.sections[0])).join("");
+  return `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+<head>
+<meta charset="UTF-8">
+<!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets>${worksheetDefs}</x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]-->
+</head>
+<body>${sheetsHtml}</body>
+</html>`;
+}
+
+function escapeCsvCell(value: string): string {
+  return /[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
+}
+
+function sectionsToCsv(sections: ExportSection[], meta: string[]): string {
+  const lines: string[] = meta.map(escapeCsvCell);
+  lines.push("");
+  for (const section of sections) {
+    lines.push(escapeCsvCell(section.title));
+    if (section.headers) lines.push(section.headers.map(escapeCsvCell).join(","));
+    if (section.rows.length === 0) {
+      lines.push(escapeCsvCell("No data"));
+    } else {
+      for (const row of section.rows) lines.push(row.map(escapeCsvCell).join(","));
+    }
+    lines.push("");
+  }
+  return lines.join("\n");
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+function sectionsToHtml(sections: ExportSection[], meta: string[]): string {
+  const metaHtml = meta.map((line) => `<p>${escapeHtml(line)}</p>`).join("");
+  const sectionsHtml = sections
+    .map((section) => {
+      const headerRow = section.headers
+        ? `<tr>${section.headers.map((h) => `<th>${escapeHtml(h)}</th>`).join("")}</tr>`
+        : "";
+      const bodyRows =
+        section.rows.length === 0
+          ? `<tr><td>No data</td></tr>`
+          : section.rows.map((row) => `<tr>${row.map((c) => `<td>${escapeHtml(c)}</td>`).join("")}</tr>`).join("");
+      return `<h3>${escapeHtml(section.title)}</h3><table border="1" cellspacing="0" cellpadding="4">${headerRow}${bodyRows}</table>`;
+    })
+    .join("");
+  return `${metaHtml}${sectionsHtml}`;
+}
+
+function downloadTextFile(filename: string, content: string, mimeType: string) {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+// No PDF-generation library exists in this app (adding one would be an
+// architecture change) — this reuses the browser's own native print-to-PDF
+// pipeline instead: a plain printable HTML view the user's browser can
+// "Save as PDF" from, same real data as the other two formats. Reused by
+// both Delivery's and Finance's Export PDF, hence the plain `title` param.
+function openPrintableReport(title: string, sections: ExportSection[], meta: string[]) {
+  const win = window.open("", "_blank");
+  if (!win) return;
+  win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${escapeHtml(title)}</title>
+    <style>
+      body { font-family: -apple-system, Arial, sans-serif; color: #1e293b; padding: 24px; }
+      h3 { margin-top: 24px; }
+      table { border-collapse: collapse; width: 100%; margin-top: 8px; font-size: 13px; }
+      th, td { border: 1px solid #cbd5e1; padding: 4px 8px; text-align: left; }
+      th { background: #f1f5f9; }
+    </style>
+  </head><body>${sectionsToHtml(sections, meta)}</body></html>`);
+  win.document.close();
+  win.onload = () => win.print();
+}
+
+function labelsForSelected(groups: DropdownGroup[], selected: string[]): string {
+  const allOptions = groups.flatMap((g) => g.options);
+  return selected.map((v) => allOptions.find((o) => o.value === v)?.label ?? v).join(", ");
+}
+
+function ExportDropdown({
+  tab,
+  deliveryData,
+  financeData,
+}: {
+  tab: ReportTab;
+  deliveryData: DeliveryExportData;
+  financeData: FinanceExportData;
+}) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -720,16 +1754,66 @@ function ExportDropdown() {
     return () => document.removeEventListener("mousedown", onMouseDown);
   }, [open]);
 
-  const standardFormats = [
-    { label: "Export CSV",   path: "M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" },
-    { label: "Export Excel", path: "M3 10h18M3 14h18M10 3v18M3 7l2-2h14l2 2M3 17l2 2h14l2-2" },
-    { label: "Export PDF",   path: "M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" },
-  ];
-  const businessFormats = [
-    { label: "Export Client Report",   path: "M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" },
-    { label: "Export Invoice Summary", path: "M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" },
-  ];
+  // Real export on both Delivery and Finance, each from the exact same
+  // real data its own widgets already render — never a shared/blended
+  // computation between the two tabs.
+  function handleExportCsv() {
+    if (tab === "delivery") {
+      const sections = buildDeliveryExportSections(deliveryData);
+      downloadTextFile("jirita-delivery-report.csv", sectionsToCsv(sections, buildExportMeta(deliveryData)), "text/csv;charset=utf-8;");
+      return;
+    }
+    // Finance: one CSV file per section — never several differently-shaped
+    // tables mixed into a single file. The Summary file's own rows already
+    // are the report meta, so it isn't prefixed with the meta lines again.
+    const meta = buildFinanceExportMeta(financeData);
+    for (const group of buildFinanceExportGroups(financeData)) {
+      const csv = sectionsToCsv(group.sections, group.name === "Summary" ? [] : meta);
+      downloadTextFile(`jirita-finance-${group.fileSlug}.csv`, csv, "text/csv;charset=utf-8;");
+    }
+  }
+  function handleExportExcel() {
+    if (tab === "delivery") {
+      const sections = buildDeliveryExportSections(deliveryData);
+      const html = `<html><head><meta charset="UTF-8"></head><body>${sectionsToHtml(sections, buildExportMeta(deliveryData))}</body></html>`;
+      downloadTextFile("jirita-delivery-report.xls", html, "application/vnd.ms-excel;charset=utf-8;");
+      return;
+    }
+    // Finance: one real worksheet per section, in one workbook.
+    const html = buildFinanceExcelHtml(buildFinanceExportGroups(financeData));
+    downloadTextFile("jirita-finance-report.xls", html, "application/vnd.ms-excel;charset=utf-8;");
+  }
+  function handleExportPdf() {
+    if (tab === "delivery") {
+      const sections = buildDeliveryExportSections(deliveryData);
+      openPrintableReport("Jirita Delivery Report", sections, buildExportMeta(deliveryData));
+      return;
+    }
+    // Finance: same order as the screen (Summary meta first, then KPIs,
+    // Billing Overview, Billable Hours by Member) in one continuous page.
+    const sections = buildFinanceExportGroups(financeData)
+      .filter((g) => g.name !== "Summary")
+      .flatMap((g) => g.sections);
+    openPrintableReport("Jirita Finance Report", sections, buildFinanceExportMeta(financeData));
+  }
 
+  const standardFormats = [
+    {
+      label: "Export CSV",
+      path: "M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z",
+      onClick: handleExportCsv,
+    },
+    {
+      label: "Export Excel",
+      path: "M3 10h18M3 14h18M10 3v18M3 7l2-2h14l2 2M3 17l2 2h14l2-2",
+      onClick: handleExportExcel,
+    },
+    {
+      label: "Export PDF",
+      path: "M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z",
+      onClick: handleExportPdf,
+    },
+  ];
   return (
     <div ref={ref} className="relative">
       <button
@@ -760,11 +1844,14 @@ function ExportDropdown() {
         ].join(" ")}
       >
         <div className="py-1.5">
-          {standardFormats.map(({ label, path }) => (
+          {standardFormats.map(({ label, path, onClick }) => (
             <button
               key={label}
               type="button"
-              onClick={() => setOpen(false)}
+              onClick={() => {
+                onClick?.();
+                setOpen(false);
+              }}
               className="w-full flex items-center gap-2.5 px-3 py-1.5 text-sm text-left text-slate-700 dark:text-zinc-300 hover:bg-slate-50 dark:hover:bg-zinc-800/60 transition-colors duration-150 cursor-pointer"
             >
               <svg className="w-3.5 h-3.5 text-slate-400 dark:text-zinc-500 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
@@ -773,38 +1860,6 @@ function ExportDropdown() {
               {label}
             </button>
           ))}
-
-          <div className="my-1 mx-2 border-t border-slate-100 dark:border-zinc-800" />
-
-          {businessFormats.map(({ label, path }) => (
-            <button
-              key={label}
-              type="button"
-              onClick={() => setOpen(false)}
-              className="w-full flex items-center gap-2.5 px-3 py-1.5 text-sm text-left text-slate-700 dark:text-zinc-300 hover:bg-slate-50 dark:hover:bg-zinc-800/60 transition-colors duration-150 cursor-pointer"
-            >
-              <svg className="w-3.5 h-3.5 text-slate-400 dark:text-zinc-500 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" d={path} />
-              </svg>
-              {label}
-            </button>
-          ))}
-
-          <div className="my-1 mx-2 border-t border-slate-100 dark:border-zinc-800" />
-
-          <button
-            type="button"
-            disabled
-            className="w-full flex items-center gap-2.5 px-3 py-1.5 text-sm text-left text-slate-400 dark:text-zinc-600 cursor-default"
-          >
-            <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            <span className="flex-1">Schedule Report</span>
-            <span className="text-[9px] font-bold uppercase tracking-wide text-slate-300 dark:text-zinc-700 bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 px-1.5 py-0.5 rounded">
-              Soon
-            </span>
-          </button>
         </div>
       </div>
     </div>
@@ -828,13 +1883,16 @@ export function ReportsScreen() {
 }
 
 function AdminReportsScreen() {
-  const { user } = useCurrentUser();
+  const { user, organization } = useCurrentUser();
   const isAdmin = user.role === "ADMIN";
 
   const [tab, setTab] = useState<ReportTab>("delivery");
 
-  // Cosmetic only — see PeriodSelector.
+  // Shared report period — the only visible control for it today is the
+  // Finance tab's "Billing Period" selector, but the state itself (and now
+  // Hours by Person's real query below) is shared across both tabs.
   const [period, setPeriod] = useState<PeriodKey>("this-month");
+  const [customRange, setCustomRange] = useState<CustomRange>(DEFAULT_CUSTOM_RANGE);
 
   const [projectFilter,  setProjectFilter]  = useState<string[]>([]);
   const [assigneeFilter, setAssigneeFilter] = useState<string[]>([]);
@@ -864,12 +1922,354 @@ function AdminReportsScreen() {
     }, 110);
   }
 
-  const sortedPersonRows = [...HOURS_BY_PERSON].sort((a, b) => {
+  // ── Delivery tab: single shared real data source ──────────────────────────
+  // One fetch, scoped to the shared report period, backs every widget below
+  // (Health Alerts, KPI strip, Hours by Person, Project Health) — no widget
+  // issues its own query. The 7 filters above are applied client-side to
+  // this one raw dataset (see filteredTickets/filteredProjects below), and
+  // every widget derives from that same filtered result, so they can never
+  // disagree with each other.
+  const [rawTickets,        setRawTickets]        = useState<Ticket[]>([]);
+  const [rawProjects,       setRawProjects]       = useState<ProjectSummary[]>([]);
+  const [rawMembers,        setRawMembers]        = useState<OrgWorkloadMember[]>([]);
+  const [rawCapacities,     setRawCapacities]     = useState<MemberWeeklyCapacityEntry[]>([]);
+  const [rawTimeEntries,    setRawTimeEntries]    = useState<OrganizationTimeEntry[]>([]);
+  const [rawActivityEvents, setRawActivityEvents] = useState<HoursOrAssigneeActivityEvent[]>([]);
+  const [rawDeliveryActivity, setRawDeliveryActivity] = useState<DeliveryActivityEvent[]>([]);
+  const [deliveryLoadState, setDeliveryLoadState] = useState<"loading" | "ready" | "error">("loading");
+  const [deliveryLoadError, setDeliveryLoadError] = useState<string | null>(null);
+  const [deliveryRequestId, setDeliveryRequestId] = useState(0);
+
+  useEffect(() => {
+    if (!organization) return;
+    let cancelled = false;
+
+    (async () => {
+      const [ticketsResult, projectsResult, membersResult, capacitiesResult] = await Promise.all([
+        loadOrganizationTickets(organization.id),
+        loadOrganizationProjects(organization.id),
+        loadOrganizationWorkloadMembers(organization.id),
+        loadOrganizationMemberWeeklyCapacities(organization.id),
+      ]);
+      if (cancelled) return;
+
+      if (ticketsResult.status === "error") {
+        setDeliveryLoadState("error");
+        setDeliveryLoadError(ticketsResult.message);
+        return;
+      }
+      if (projectsResult.status === "error") {
+        setDeliveryLoadState("error");
+        setDeliveryLoadError(projectsResult.message);
+        return;
+      }
+      if (membersResult.status === "error") {
+        setDeliveryLoadState("error");
+        setDeliveryLoadError(membersResult.message);
+        return;
+      }
+      if (capacitiesResult.status === "error") {
+        setDeliveryLoadState("error");
+        setDeliveryLoadError(capacitiesResult.message);
+        return;
+      }
+
+      const ticketIds = ticketsResult.tickets.map((t) => t.id);
+      const { from, to } = realRangeForPeriod(period, customRange, getTodayISO());
+      const weekBounds = getCurrentWeekBounds();
+      const [timeResult, activityResult, deliveryActivityResult] = await Promise.all([
+        loadOrganizationLoggedTimeForRange(ticketIds, from, to),
+        loadHoursAndAssigneeActivityForRange(ticketIds, weekBounds.start, weekBounds.end),
+        loadDeliveryActivityForTickets(ticketIds),
+      ]);
+      if (cancelled) return;
+
+      if (timeResult.status === "error") {
+        setDeliveryLoadState("error");
+        setDeliveryLoadError(timeResult.message);
+        return;
+      }
+      if (activityResult.status === "error") {
+        setDeliveryLoadState("error");
+        setDeliveryLoadError(activityResult.message);
+        return;
+      }
+      if (deliveryActivityResult.status === "error") {
+        setDeliveryLoadState("error");
+        setDeliveryLoadError(deliveryActivityResult.message);
+        return;
+      }
+
+      setRawTickets(ticketsResult.tickets);
+      setRawProjects(projectsResult.projects);
+      setRawMembers(membersResult.members);
+      setRawCapacities(capacitiesResult.capacities);
+      setRawTimeEntries(timeResult.entries);
+      setRawActivityEvents(activityResult.events);
+      setRawDeliveryActivity(deliveryActivityResult.events);
+      setDeliveryLoadState("ready");
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [organization, period, customRange, deliveryRequestId]);
+
+  // ── Filter option lists — real values only, drawn from the unfiltered
+  //    raw org data above (never a static catalog), and restricted to
+  //    values that actually occur on a real ticket in scope — same "only
+  //    real work counts" precedent Hours by Person/Project Health already
+  //    use (e.g. an org member with zero tickets shouldn't appear as an
+  //    Assignee option). A filter with nothing real to offer gets an empty
+  //    groups array, which FilterDropdown already renders as its own
+  //    built-in "No results" empty state. ──────────────────────────────────
+  const projectSlugsWithTickets = useMemo(() => new Set(rawTickets.map((t) => t.projectSlug)), [rawTickets]);
+
+  const projectFilterGroups = useMemo<DropdownGroup[]>(() => {
+    const options = rawProjects
+      .filter((p) => projectSlugsWithTickets.has(p.slug))
+      .map((p) => ({ value: p.slug, label: p.name }));
+    return options.length === 0 ? [] : [{ options }];
+  }, [rawProjects, projectSlugsWithTickets]);
+
+  const assigneeFilterGroups = useMemo<DropdownGroup[]>(() => {
+    const assigneeIdsWithTickets = new Set(
+      rawTickets.map((t) => t.assigneeProfileId).filter((id): id is string => Boolean(id))
+    );
+    const options = rawMembers
+      .filter((m) => assigneeIdsWithTickets.has(m.id))
+      .map((m) => ({ value: m.id, label: m.name, avatar: m.avatar }));
+    return options.length === 0 ? [] : [{ options }];
+  }, [rawMembers, rawTickets]);
+
+  const clientFilterGroups = useMemo<DropdownGroup[]>(() => {
+    // ProjectSummary.client is typed as the closed ClientName union, but the
+    // real column behind it (client_name) is free text — rowToProjectSummary
+    // casts rather than validates, so this reads it back out as the real
+    // string it actually is instead of trusting the narrower type.
+    const clients = Array.from(
+      new Set(
+        rawProjects
+          .filter((p) => projectSlugsWithTickets.has(p.slug))
+          .map((p) => p.client as string | undefined)
+          .filter((c): c is string => Boolean(c))
+      )
+    );
+    return clients.length === 0 ? [] : [{ options: clients.map((c) => ({ value: c, label: c })) }];
+  }, [rawProjects, projectSlugsWithTickets]);
+
+  const statusFilterGroups = useMemo<DropdownGroup[]>(() => {
+    const present = new Set(rawTickets.map((t) => t.status));
+    const options = STATUS_FILTER_ORDER.filter((s) => present.has(s)).map((s) => ({
+      value: s,
+      label: STATUS_FILTER_LABELS[s],
+    }));
+    return options.length === 0 ? [] : [{ options }];
+  }, [rawTickets]);
+
+  const priorityFilterGroups = useMemo<DropdownGroup[]>(() => {
+    const present = new Set(rawTickets.map((t) => t.priority));
+    const options = PRIORITY_FILTER_ORDER.filter((p) => present.has(p)).map((p) => ({
+      value: p,
+      label: PRIORITY_FILTER_LABELS[p],
+    }));
+    return options.length === 0 ? [] : [{ options }];
+  }, [rawTickets]);
+
+  const labelFilterGroups = useMemo<DropdownGroup[]>(() => {
+    const labels = Array.from(new Set(rawTickets.flatMap((t) => t.labels))).sort();
+    return labels.length === 0 ? [] : [{ options: labels.map((l) => ({ value: l, label: l })) }];
+  }, [rawTickets]);
+
+  // ── Apply the 7 filters (AND across filters, OR within a multi-select's
+  //    own values) to the one shared raw dataset. Project + Client narrow
+  //    which projects are in scope first; a ticket only survives if its own
+  //    project survives, on top of its own Assignee/Status/Priority/Labels/
+  //    Hours checks. ────────────────────────────────────────────────────────
+  const filteredProjects = useMemo(
+    () =>
+      rawProjects.filter((p) => {
+        if (projectFilter.length > 0 && !projectFilter.includes(p.slug)) return false;
+        if (clientFilter.length > 0 && !(p.client && clientFilter.includes(p.client))) return false;
+        return true;
+      }),
+    [rawProjects, projectFilter, clientFilter]
+  );
+
+  const filteredProjectSlugs = useMemo(() => new Set(filteredProjects.map((p) => p.slug)), [filteredProjects]);
+
+  const filteredTickets = useMemo(
+    () =>
+      rawTickets.filter((t) => {
+        if (!filteredProjectSlugs.has(t.projectSlug)) return false;
+        if (assigneeFilter.length > 0 && !(t.assigneeProfileId && assigneeFilter.includes(t.assigneeProfileId))) return false;
+        if (statusFilter.length > 0 && !statusFilter.includes(t.status)) return false;
+        if (priorityFilter.length > 0 && !priorityFilter.includes(t.priority)) return false;
+        if (labelFilter.length > 0 && !t.labels.some((l) => labelFilter.includes(l))) return false;
+        if (hoursFilter.length > 0 && !hoursFilter.some((b) => hoursInBucket(t.hours, b))) return false;
+        return true;
+      }),
+    [rawTickets, filteredProjectSlugs, assigneeFilter, statusFilter, priorityFilter, labelFilter, hoursFilter]
+  );
+
+  const filteredTicketIds = useMemo(() => new Set(filteredTickets.map((t) => t.id)), [filteredTickets]);
+
+  const filteredTimeEntries = useMemo(
+    () => rawTimeEntries.filter((e) => filteredTicketIds.has(e.ticketId)),
+    [rawTimeEntries, filteredTicketIds]
+  );
+
+  const filteredActivityEvents = useMemo(
+    () => rawActivityEvents.filter((e) => filteredTicketIds.has(e.ticketId)),
+    [rawActivityEvents, filteredTicketIds]
+  );
+
+  // ── Every widget below derives from the same filtered slice above —
+  //    Hours by Person, Project Health, KPIs, alerts, Workload — no
+  //    independent queries or rules. ─────────────────────────────────────
+  const personRows = useMemo(
+    () => buildHoursByPersonRows(filteredTickets, rawMembers, rawCapacities, filteredTimeEntries),
+    [filteredTickets, rawMembers, rawCapacities, filteredTimeEntries]
+  );
+
+  const sortedPersonRows = [...personRows].sort((a, b) => {
     const mult = personSortDir === "asc" ? 1 : -1;
     const val  = (r: PersonRow) =>
-      personSort === "remainingHours" ? r.estimatedHours - r.completedHours : r[personSort];
+      personSort === "remainingHours" ? round1(Math.max(r.estimatedHours - r.completedHours, 0)) : r[personSort];
     return (val(a) - val(b)) * mult;
   });
+
+  const projectRows = useMemo(
+    () =>
+      buildProjectHealthRows(
+        filteredProjects.map((p) => ({ slug: p.slug, name: p.name, projectCode: p.projectCode })),
+        filteredTickets,
+        filteredTimeEntries,
+        getTodayISO()
+      ),
+    [filteredProjects, filteredTickets, filteredTimeEntries]
+  );
+
+  const kpiSummary = useMemo<DeliveryKpiSummary | null>(
+    () =>
+      deliveryLoadState === "ready"
+        ? buildDeliveryKpiSummary(filteredTickets, filteredProjects, filteredTimeEntries, getTodayISO())
+        : null,
+    [deliveryLoadState, filteredTickets, filteredProjects, filteredTimeEntries]
+  );
+
+  const kpiReady = kpiSummary !== null;
+  const currentMonthLabel = new Date(`${getTodayISO()}T00:00:00`).toLocaleDateString("en-US", { month: "long" });
+
+  // Finance KPI strip — reuses the exact same real rawTickets/rawProjects/
+  // rawTimeEntries Delivery's own shared fetch above already loaded for
+  // this same Billing Period (period/customRange is shared state — no
+  // separate query). Deliberately NOT filteredTickets/filteredProjects:
+  // Delivery's 7 filters are a Delivery-tab concept, Finance is scoped only
+  // by the org and the Billing Period.
+  const financeKpiSummary = useMemo<FinanceKpiSummary | null>(
+    () => (deliveryLoadState === "ready" ? buildFinanceKpiSummary(rawTickets, rawProjects, rawTimeEntries) : null),
+    [deliveryLoadState, rawTickets, rawProjects, rawTimeEntries]
+  );
+  const financeReady = financeKpiSummary !== null;
+
+  // Billing Overview — same real state/period/rules as the Finance KPI
+  // strip above; its own Total row reads financeKpiSummary directly
+  // (never a separate sum) so it can never disagree with the KPIs.
+  const billingOverviewRows = useMemo(
+    () => buildBillingOverviewRows(rawTickets, rawProjects, rawTimeEntries),
+    [rawTickets, rawProjects, rawTimeEntries]
+  );
+
+  // Billable Hours by Member — same real state/period/rules as the KPIs and
+  // Billing Overview above (rawTimeEntries already carries loggedBy — no
+  // new query); grouped by person instead of by client.
+  const billableHoursByMemberRows = useMemo(
+    () => buildBillableHoursByMemberRows(rawTickets, rawProjects, rawTimeEntries, rawMembers),
+    [rawTickets, rawProjects, rawTimeEntries, rawMembers]
+  );
+
+  const workloadRows = useMemo(
+    () => buildWorkloadRows(filteredTickets, rawMembers, rawCapacities, filteredTimeEntries, filteredActivityEvents),
+    [filteredTickets, rawMembers, rawCapacities, filteredTimeEntries, filteredActivityEvents]
+  );
+
+  const hoursDistribution = useMemo(() => buildHoursDistribution(filteredTickets), [filteredTickets]);
+  const hoursDistTotal = useMemo(
+    () => round1(hoursDistribution.reduce((sum, entry) => sum + entry.hours, 0)),
+    [hoursDistribution]
+  );
+
+  const filteredTicketsById = useMemo(() => new Map(filteredTickets.map((t) => [t.id, t])), [filteredTickets]);
+  const memberNameById = useMemo(() => new Map(rawMembers.map((m) => [m.id, m.name])), [rawMembers]);
+
+  const recentChanges = useMemo(
+    () => buildRecentChanges(rawDeliveryActivity, filteredTicketsById, memberNameById, getTodayISO()),
+    [rawDeliveryActivity, filteredTicketsById, memberNameById]
+  );
+
+  // Alerts banner — derived from the already-real personRows/kpiSummary
+  // above, no separate fetch or rule of its own.
+  const statusItems = useMemo(
+    () => buildDeliveryStatusItems(personRows, kpiSummary),
+    [personRows, kpiSummary]
+  );
+
+  // Export (Delivery tab) — the exact same real state/memos above, reused
+  // as-is; no export-specific fetch or recomputation.
+  const periodLabel =
+    period === "custom" ? formatRangeLabel(customRange) : PERIOD_OPTIONS.find((o) => o.key === period)?.label ?? period;
+
+  const filterSummary = useMemo(() => {
+    const parts = [
+      projectFilter.length  > 0 && `Project: ${labelsForSelected(projectFilterGroups, projectFilter)}`,
+      assigneeFilter.length > 0 && `Assignee: ${labelsForSelected(assigneeFilterGroups, assigneeFilter)}`,
+      clientFilter.length   > 0 && `Client: ${labelsForSelected(clientFilterGroups, clientFilter)}`,
+      statusFilter.length   > 0 && `Status: ${labelsForSelected(statusFilterGroups, statusFilter)}`,
+      priorityFilter.length > 0 && `Priority: ${labelsForSelected(priorityFilterGroups, priorityFilter)}`,
+      labelFilter.length    > 0 && `Labels: ${labelsForSelected(labelFilterGroups, labelFilter)}`,
+      hoursFilter.length    > 0 && `Hours: ${labelsForSelected(HOURS_GROUPS, hoursFilter)}`,
+    ].filter((p): p is string => Boolean(p));
+    return parts.length > 0 ? parts.join("; ") : "None";
+  }, [
+    projectFilter, projectFilterGroups,
+    assigneeFilter, assigneeFilterGroups,
+    clientFilter, clientFilterGroups,
+    statusFilter, statusFilterGroups,
+    priorityFilter, priorityFilterGroups,
+    labelFilter, labelFilterGroups,
+    hoursFilter,
+  ]);
+
+  const deliveryExportData = useMemo<DeliveryExportData>(
+    () => ({
+      periodLabel,
+      filterSummary,
+      statusItems,
+      kpiSummary,
+      personRows,
+      projectRows,
+      workloadRows,
+      hoursDistribution,
+      hoursDistTotal,
+      recentChanges,
+    }),
+    [
+      periodLabel, filterSummary, statusItems, kpiSummary, personRows, projectRows,
+      workloadRows, hoursDistribution, hoursDistTotal, recentChanges,
+    ]
+  );
+
+  const financeExportData = useMemo<FinanceExportData>(
+    () => ({
+      organizationName: organization?.name ?? "",
+      periodLabel,
+      financeKpiSummary,
+      billingOverviewRows,
+      billableHoursByMemberRows,
+    }),
+    [organization, periodLabel, financeKpiSummary, billingOverviewRows, billableHoursByMemberRows]
+  );
 
   return (
     <div className="max-w-5xl mx-auto px-6 py-6 pb-16">
@@ -880,9 +2280,9 @@ function AdminReportsScreen() {
           <h1 className="text-xl font-bold text-slate-900 dark:text-zinc-50 tracking-tight leading-none">
             Reports
           </h1>
-          <p className="text-xs text-slate-400 dark:text-zinc-500 mt-0.5">Monday, June 30, 2026</p>
+          <p className="text-xs text-slate-400 dark:text-zinc-500 mt-0.5">{formatHeaderDate(getTodayISO())}</p>
         </div>
-        <ExportDropdown />
+        <ExportDropdown tab={tab} deliveryData={deliveryExportData} financeData={financeExportData} />
       </div>
 
       {/* ── Report tabs (Admin only — Project Lead only ever sees Delivery) ─── */}
@@ -897,7 +2297,7 @@ function AdminReportsScreen() {
 
       {/* ── Status bar ───────────────────────────────────────────────────────── */}
       <div className="mb-4">
-        <ReportStatusBar items={STATUS_ITEMS} />
+        <ReportStatusBar items={statusItems} />
       </div>
 
       {/* ── Top filters ──────────────────────────────────────────────────────── */}
@@ -905,45 +2305,49 @@ function AdminReportsScreen() {
         <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600 mr-2">
           Filter
         </span>
-        <FilterDropdown label="Project"    mode="multi"  groups={PROJECT_GROUPS}  selected={projectFilter}  onChange={setProjectFilter} />
-        <FilterDropdown label="Assignee"   mode="multi"  groups={ASSIGNEE_GROUPS} selected={assigneeFilter} onChange={setAssigneeFilter} searchable />
-        <FilterDropdown label="Client"     mode="single" groups={CLIENT_GROUPS}   selected={clientFilter}   onChange={setClientFilter} />
+        <FilterDropdown label="Project"    mode="multi"  groups={projectFilterGroups}  selected={projectFilter}  onChange={setProjectFilter} />
+        <FilterDropdown label="Assignee"   mode="multi"  groups={assigneeFilterGroups} selected={assigneeFilter} onChange={setAssigneeFilter} searchable />
+        <FilterDropdown label="Client"     mode="single" groups={clientFilterGroups}   selected={clientFilter}   onChange={setClientFilter} />
         {!isAdmin && (
           <FilterDropdown label="Date Range" mode="single" groups={DATE_GROUPS} selected={dateFilter} onChange={setDateFilter} />
         )}
-        <FilterDropdown label="Status"     mode="multi"  groups={STATUS_GROUPS}   selected={statusFilter}   onChange={setStatusFilter} />
-        <FilterDropdown label="Priority"   mode="multi"  groups={PRIORITY_GROUPS} selected={priorityFilter} onChange={setPriorityFilter} />
-        <FilterDropdown label="Labels"     mode="multi"  groups={LABEL_GROUPS}    selected={labelFilter}    onChange={setLabelFilter} />
-        <FilterDropdown label="Hours"      mode="single" groups={HOURS_GROUPS}    selected={hoursFilter}    onChange={setHoursFilter} />
+        <FilterDropdown label="Status"     mode="multi"  groups={statusFilterGroups}   selected={statusFilter}   onChange={setStatusFilter} />
+        <FilterDropdown label="Priority"   mode="multi"  groups={priorityFilterGroups} selected={priorityFilter} onChange={setPriorityFilter} />
+        <FilterDropdown label="Labels"     mode="multi"  groups={labelFilterGroups}    selected={labelFilter}    onChange={setLabelFilter} />
+        <FilterDropdown label="Hours"      mode="single" groups={HOURS_GROUPS}         selected={hoursFilter}    onChange={setHoursFilter} />
       </div>
 
       {/* ── KPI strip ────────────────────────────────────────────────────────── */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-8">
-        <KpiCard label="Projects"        value={KPI_SUMMARY.projects}           sub="active" />
-        <KpiCard label="Active Tickets"  value={KPI_SUMMARY.activeTickets}      sub="open" />
+        <KpiCard label="Projects"        value={kpiReady ? kpiSummary.activeProjects : "—"}     sub="active" />
+        <KpiCard label="Active Tickets"  value={kpiReady ? kpiSummary.activeTickets : "—"}       sub="open" />
         <KpiCard
           label="Hours Burn"
           value={
-            <>
-              {KPI_SUMMARY.completedHours}
-              <span className="text-base font-medium ml-0.5">h</span>
-              <span className="text-sm font-normal text-brand-400 dark:text-brand-600 mx-1.5">/</span>
-              <span className="text-lg font-semibold text-brand-400 dark:text-brand-600">
-                {KPI_SUMMARY.estimatedHours}h
-              </span>
-            </>
+            kpiReady ? (
+              <>
+                {kpiSummary.loggedHours}
+                <span className="text-base font-medium ml-0.5">h</span>
+                <span className="text-sm font-normal text-brand-400 dark:text-brand-600 mx-1.5">/</span>
+                <span className="text-lg font-semibold text-brand-400 dark:text-brand-600">
+                  {kpiSummary.estimatedHours}h
+                </span>
+              </>
+            ) : (
+              "—"
+            )
           }
-          sub={`${Math.round((KPI_SUMMARY.completedHours / KPI_SUMMARY.estimatedHours) * 100)}% complete`}
-          progress={Math.round((KPI_SUMMARY.completedHours / KPI_SUMMARY.estimatedHours) * 100)}
+          sub={kpiReady ? `${kpiSummary.hoursBurnPct}% complete` : undefined}
+          progress={kpiReady ? kpiSummary.hoursBurnPct : undefined}
           accent
         />
-        <KpiCard label="Blocked"         value={KPI_SUMMARY.blockedTickets}     sub="need attention" danger />
-        <KpiCard label="Done This Month" value={KPI_SUMMARY.completedThisMonth} sub="in June" />
+        <KpiCard label="Blocked"         value={kpiReady ? kpiSummary.blockedTickets : "—"}      sub="need attention" danger />
+        <KpiCard label="Done This Month" value={kpiReady ? kpiSummary.completedThisMonth : "—"}  sub={kpiReady ? `in ${currentMonthLabel}` : undefined} />
         <KpiCard
           label="Overdue"
-          value={KPI_SUMMARY.overdueTickets}
+          value={kpiReady ? kpiSummary.overdueTickets : "—"}
           sub="past due date"
-          danger={KPI_SUMMARY.overdueTickets > 0}
+          danger={kpiReady && kpiSummary.overdueTickets > 0}
         />
       </div>
 
@@ -953,7 +2357,7 @@ function AdminReportsScreen() {
         {/* ── Hours by Person ───────────────────────────────────────────────── */}
         <Section
           title="Hours by Person"
-          count={HOURS_BY_PERSON.length}
+          count={personRows.length}
           icon={
             <svg className="w-3.5 h-3.5 text-slate-400 dark:text-zinc-500 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
               <circle cx="12" cy="8" r="4" />
@@ -980,42 +2384,69 @@ function AdminReportsScreen() {
                 className="divide-y divide-slate-50 dark:divide-zinc-800/60 transition-opacity duration-110"
                 style={{ opacity: personFading ? 0 : 1 }}
               >
-                {sortedPersonRows.map((row) => (
-                  <tr
-                    key={row.id}
-                    className="hover:bg-slate-50/60 dark:hover:bg-zinc-800/30 transition-colors duration-150 cursor-default"
-                  >
-                    <td className="py-2.5 pr-4">
-                      <MemberTrigger name={row.name} avatar={row.avatar} className="flex items-center gap-2.5">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={row.avatar} alt={row.name} className="w-6 h-6 rounded-full flex-shrink-0" />
-                        <span className="font-medium text-slate-800 dark:text-zinc-200">{row.name}</span>
-                      </MemberTrigger>
-                    </td>
-                    <td className="py-2.5 text-right text-slate-500 dark:text-zinc-400 tabular-nums">
-                      {row.assignedTickets}
-                    </td>
-                    <td className="py-2.5 text-right font-semibold text-slate-800 dark:text-zinc-200 tabular-nums">
-                      {row.estimatedHours}h
-                    </td>
-                    <td className="py-2.5 text-right font-medium text-emerald-600 dark:text-emerald-400 tabular-nums">
-                      {row.completedHours}h
-                    </td>
-                    <td className="py-2.5 text-right text-slate-500 dark:text-zinc-400 tabular-nums">
-                      {row.estimatedHours - row.completedHours}h
-                    </td>
-                    <td className="py-2.5 text-right tabular-nums">
-                      {row.blockedHours > 0 ? (
-                        <span className="font-medium text-red-600 dark:text-red-400">{row.blockedHours}h</span>
-                      ) : (
-                        <span className="text-slate-300 dark:text-zinc-600">—</span>
-                      )}
-                    </td>
-                    <td className="py-2.5 text-right">
-                      <CapacityCell pct={row.capacity} />
+                {deliveryLoadState === "loading" ? (
+                  <tr>
+                    <td colSpan={7} className="py-6 text-center text-sm text-slate-400 dark:text-zinc-500">
+                      Loading…
                     </td>
                   </tr>
-                ))}
+                ) : deliveryLoadState === "error" ? (
+                  <tr>
+                    <td colSpan={7} className="py-6 text-center text-sm text-slate-400 dark:text-zinc-500">
+                      {deliveryLoadError ?? "Couldn't load Hours by Person."}{" "}
+                      <button
+                        type="button"
+                        onClick={() => setDeliveryRequestId((id) => id + 1)}
+                        className="font-medium text-brand-600 dark:text-brand-400 hover:underline"
+                      >
+                        Retry
+                      </button>
+                    </td>
+                  </tr>
+                ) : sortedPersonRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="py-6 text-center text-sm text-slate-400 dark:text-zinc-500">
+                      No real work in the current report scope.
+                    </td>
+                  </tr>
+                ) : (
+                  sortedPersonRows.map((row) => (
+                    <tr
+                      key={row.id}
+                      className="hover:bg-slate-50/60 dark:hover:bg-zinc-800/30 transition-colors duration-150 cursor-default"
+                    >
+                      <td className="py-2.5 pr-4">
+                        <MemberTrigger name={row.name} avatar={row.avatar} className="flex items-center gap-2.5">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={row.avatar} alt={row.name} className="w-6 h-6 rounded-full flex-shrink-0" />
+                          <span className="font-medium text-slate-800 dark:text-zinc-200">{row.name}</span>
+                        </MemberTrigger>
+                      </td>
+                      <td className="py-2.5 text-right text-slate-500 dark:text-zinc-400 tabular-nums">
+                        {row.assignedTickets}
+                      </td>
+                      <td className="py-2.5 text-right font-semibold text-slate-800 dark:text-zinc-200 tabular-nums">
+                        {row.estimatedHours}h
+                      </td>
+                      <td className="py-2.5 text-right font-medium text-emerald-600 dark:text-emerald-400 tabular-nums">
+                        {row.completedHours}h
+                      </td>
+                      <td className="py-2.5 text-right text-slate-500 dark:text-zinc-400 tabular-nums">
+                        {round1(Math.max(row.estimatedHours - row.completedHours, 0))}h
+                      </td>
+                      <td className="py-2.5 text-right tabular-nums">
+                        {row.blockedHours > 0 ? (
+                          <span className="font-medium text-red-600 dark:text-red-400">{row.blockedHours}h</span>
+                        ) : (
+                          <span className="text-slate-300 dark:text-zinc-600">—</span>
+                        )}
+                      </td>
+                      <td className="py-2.5 text-right">
+                        <CapacityCell pct={row.capacity} />
+                      </td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>
@@ -1024,7 +2455,7 @@ function AdminReportsScreen() {
         {/* ── Project Health ────────────────────────────────────────────────── */}
         <Section
           title="Project Health"
-          count={PROJECT_HEALTH.length}
+          count={projectRows.length}
           icon={
             <svg className="w-3.5 h-3.5 text-slate-400 dark:text-zinc-500 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
               <path d="M3 7l4-4h6l4 4" />
@@ -1057,48 +2488,75 @@ function AdminReportsScreen() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50 dark:divide-zinc-800/60">
-                {PROJECT_HEALTH.map((row) => (
-                  <tr
-                    key={row.id}
-                    className="hover:bg-slate-50/60 dark:hover:bg-zinc-800/30 transition-colors duration-150 cursor-pointer group"
-                  >
-                    <td className="py-2.5 pr-4">
-                      <div className="flex items-center gap-2">
-                        <span className="w-6 h-6 rounded-md bg-slate-100 dark:bg-zinc-800 text-[9px] font-bold text-slate-500 dark:text-zinc-400 flex items-center justify-center flex-shrink-0 transition-colors duration-150 group-hover:bg-brand-50 group-hover:text-brand-600 dark:group-hover:bg-brand-500/10 dark:group-hover:text-brand-400">
-                          {row.shortName}
-                        </span>
-                        <span className="font-medium text-slate-800 dark:text-zinc-200 truncate group-hover:text-brand-700 dark:group-hover:text-brand-400 transition-colors duration-150">
-                          {row.name}
-                        </span>
-                      </div>
-                    </td>
-                    <td className="py-2.5 text-right text-slate-500 dark:text-zinc-400 tabular-nums">
-                      {row.tickets}
-                    </td>
-                    <td className="py-2.5 text-right tabular-nums whitespace-nowrap">
-                      <span className="font-semibold text-slate-800 dark:text-zinc-200">
-                        {row.completedHours}h
-                      </span>
-                      <span className="text-slate-400 dark:text-zinc-600 font-normal text-xs mx-1">/</span>
-                      <span className="text-slate-400 dark:text-zinc-500 text-xs">
-                        {row.estimatedHours}h
-                      </span>
-                    </td>
-                    <td className="py-2.5 text-right tabular-nums">
-                      {row.blocked > 0 ? (
-                        <span className="font-medium text-red-600 dark:text-red-400">{row.blocked}</span>
-                      ) : (
-                        <span className="text-slate-300 dark:text-zinc-600">—</span>
-                      )}
-                    </td>
-                    <td className="py-2.5 pl-4">
-                      <BlockCompletion pct={row.completion} />
-                    </td>
-                    <td className="py-2.5 text-right">
-                      <RiskBadge risk={row.risk} />
+                {deliveryLoadState === "loading" ? (
+                  <tr>
+                    <td colSpan={6} className="py-6 text-center text-sm text-slate-400 dark:text-zinc-500">
+                      Loading…
                     </td>
                   </tr>
-                ))}
+                ) : deliveryLoadState === "error" ? (
+                  <tr>
+                    <td colSpan={6} className="py-6 text-center text-sm text-slate-400 dark:text-zinc-500">
+                      {deliveryLoadError ?? "Couldn't load Project Health."}{" "}
+                      <button
+                        type="button"
+                        onClick={() => setDeliveryRequestId((id) => id + 1)}
+                        className="font-medium text-brand-600 dark:text-brand-400 hover:underline"
+                      >
+                        Retry
+                      </button>
+                    </td>
+                  </tr>
+                ) : projectRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="py-6 text-center text-sm text-slate-400 dark:text-zinc-500">
+                      No real projects in the current report scope.
+                    </td>
+                  </tr>
+                ) : (
+                  projectRows.map((row) => (
+                    <tr
+                      key={row.id}
+                      className="hover:bg-slate-50/60 dark:hover:bg-zinc-800/30 transition-colors duration-150 cursor-pointer group"
+                    >
+                      <td className="py-2.5 pr-4">
+                        <div className="flex items-center gap-2">
+                          <span className="w-6 h-6 rounded-md bg-slate-100 dark:bg-zinc-800 text-[9px] font-bold text-slate-500 dark:text-zinc-400 flex items-center justify-center flex-shrink-0 transition-colors duration-150 group-hover:bg-brand-50 group-hover:text-brand-600 dark:group-hover:bg-brand-500/10 dark:group-hover:text-brand-400">
+                            {row.shortName}
+                          </span>
+                          <span className="font-medium text-slate-800 dark:text-zinc-200 truncate group-hover:text-brand-700 dark:group-hover:text-brand-400 transition-colors duration-150">
+                            {row.name}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="py-2.5 text-right text-slate-500 dark:text-zinc-400 tabular-nums">
+                        {row.tickets}
+                      </td>
+                      <td className="py-2.5 text-right tabular-nums whitespace-nowrap">
+                        <span className="font-semibold text-slate-800 dark:text-zinc-200">
+                          {row.completedHours}h
+                        </span>
+                        <span className="text-slate-400 dark:text-zinc-600 font-normal text-xs mx-1">/</span>
+                        <span className="text-slate-400 dark:text-zinc-500 text-xs">
+                          {row.estimatedHours}h
+                        </span>
+                      </td>
+                      <td className="py-2.5 text-right tabular-nums">
+                        {row.blocked > 0 ? (
+                          <span className="font-medium text-red-600 dark:text-red-400">{row.blocked}</span>
+                        ) : (
+                          <span className="text-slate-300 dark:text-zinc-600">—</span>
+                        )}
+                      </td>
+                      <td className="py-2.5 pl-4">
+                        <BlockCompletion pct={row.completion} />
+                      </td>
+                      <td className="py-2.5 text-right">
+                        <RiskBadge risk={row.risk} />
+                      </td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>
@@ -1117,53 +2575,71 @@ function AdminReportsScreen() {
             }
           >
             <div className="space-y-4">
-              {WORKLOAD.map((entry) => {
-                const barPct        = Math.round((entry.hours / entry.sprintCapacity) * 100);
-                const clampedBarPct = Math.min(barPct, 100);
-                const barColor  =
-                  entry.capacity > 100 ? "bg-red-400" :
-                  entry.capacity > 80  ? "bg-amber-400" :
-                                         "bg-brand-500";
-                const pctColor  =
-                  entry.capacity > 100 ? "text-red-600 dark:text-red-400" :
-                  entry.capacity > 80  ? "text-amber-600 dark:text-amber-400" :
-                                         "text-brand-600 dark:text-brand-500";
-                const deltaPositive = entry.weekDelta > 0;
-                const deltaColor    = deltaPositive
-                  ? "text-amber-500 dark:text-amber-500"
-                  : "text-slate-400 dark:text-zinc-500";
+              {deliveryLoadState === "loading" ? (
+                <p className="text-sm text-slate-400 dark:text-zinc-500">Loading…</p>
+              ) : deliveryLoadState === "error" ? (
+                <p className="text-sm text-slate-400 dark:text-zinc-500">
+                  {deliveryLoadError ?? "Couldn't load Workload."}{" "}
+                  <button
+                    type="button"
+                    onClick={() => setDeliveryRequestId((id) => id + 1)}
+                    className="font-medium text-brand-600 dark:text-brand-400 hover:underline"
+                  >
+                    Retry
+                  </button>
+                </p>
+              ) : workloadRows.length === 0 ? (
+                <p className="text-sm text-slate-400 dark:text-zinc-500">No real work in the current report scope.</p>
+              ) : (
+                workloadRows.map((entry) => {
+                  const clampedBarPct = Math.min(entry.utilizationPct, 100);
+                  const barColor  =
+                    entry.utilizationPct > 100 ? "bg-red-400" :
+                    entry.utilizationPct >= 80 ? "bg-amber-400" :
+                                                 "bg-brand-500";
+                  const pctColor  =
+                    entry.utilizationPct > 100 ? "text-red-600 dark:text-red-400" :
+                    entry.utilizationPct >= 80 ? "text-amber-600 dark:text-amber-400" :
+                                                 "text-brand-600 dark:text-brand-500";
+                  const deltaPositive = entry.weekDelta !== null && entry.weekDelta > 0;
+                  const deltaColor    = deltaPositive
+                    ? "text-amber-500 dark:text-amber-500"
+                    : "text-slate-400 dark:text-zinc-500";
 
-                return (
-                  <div key={entry.id}>
-                    <div className="flex items-center justify-between mb-1">
-                      <MemberTrigger name={entry.name} avatar={entry.avatar} className="flex items-center gap-2">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={entry.avatar} alt={entry.name} className="w-5 h-5 rounded-full flex-shrink-0" />
-                        <span className="text-sm font-medium text-slate-700 dark:text-zinc-300">
-                          {entry.name}
-                        </span>
-                      </MemberTrigger>
-                      <div className="text-right">
-                        <p className="text-sm font-semibold text-slate-700 dark:text-zinc-200 tabular-nums leading-tight">
-                          {entry.hours}h
-                          <span className="font-normal text-slate-400 dark:text-zinc-600">
-                            {" / "}{entry.sprintCapacity}h
+                  return (
+                    <div key={entry.id}>
+                      <div className="flex items-center justify-between mb-1">
+                        <MemberTrigger name={entry.name} avatar={entry.avatar} className="flex items-center gap-2">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={entry.avatar} alt={entry.name} className="w-5 h-5 rounded-full flex-shrink-0" />
+                          <span className="text-sm font-medium text-slate-700 dark:text-zinc-300">
+                            {entry.name}
                           </span>
-                        </p>
-                        <p className={`text-xs font-semibold tabular-nums leading-tight mt-0.5 ${pctColor}`}>
-                          {barPct}%
-                        </p>
-                        <p className={`text-[10px] tabular-nums leading-tight mt-0.5 ${deltaColor}`}>
-                          {deltaPositive ? "+" : ""}{entry.weekDelta}h this week
-                        </p>
+                        </MemberTrigger>
+                        <div className="text-right">
+                          <p className="text-sm font-semibold text-slate-700 dark:text-zinc-200 tabular-nums leading-tight">
+                            {entry.assignedHours}h
+                            <span className="font-normal text-slate-400 dark:text-zinc-600">
+                              {" / "}{entry.weeklyCapacity}h
+                            </span>
+                          </p>
+                          <p className={`text-xs font-semibold tabular-nums leading-tight mt-0.5 ${pctColor}`}>
+                            {entry.utilizationPct}%
+                          </p>
+                          <p className={`text-[10px] tabular-nums leading-tight mt-0.5 ${deltaColor}`}>
+                            {entry.weekDelta === null
+                              ? "No data this week"
+                              : `${deltaPositive ? "+" : ""}${entry.weekDelta}h this week`}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="h-1.5 rounded-full bg-slate-100 dark:bg-zinc-800 overflow-hidden">
+                        <AnimatedBar pct={clampedBarPct} className={barColor} />
                       </div>
                     </div>
-                    <div className="h-1.5 rounded-full bg-slate-100 dark:bg-zinc-800 overflow-hidden">
-                      <AnimatedBar pct={clampedBarPct} className={barColor} />
-                    </div>
-                  </div>
-                );
-              })}
+                  );
+                })
+              )}
             </div>
             <p className="mt-4 text-[11px] text-slate-400 dark:text-zinc-600 flex items-center gap-3">
               <span className="flex items-center gap-1">
@@ -1191,8 +2667,8 @@ function AdminReportsScreen() {
             }
           >
             <div className="space-y-4">
-              {HOURS_DIST.map((entry) => {
-                const pct = Math.round((entry.hours / HOURS_DIST_TOTAL) * 100);
+              {hoursDistribution.map((entry) => {
+                const pct = hoursDistTotal > 0 ? Math.round((entry.hours / hoursDistTotal) * 100) : 0;
                 return (
                   <div key={entry.id}>
                     <div className="flex items-center justify-between mb-1.5">
@@ -1216,7 +2692,7 @@ function AdminReportsScreen() {
             <p className="mt-4 text-[11px] text-slate-400 dark:text-zinc-600 tabular-nums">
               Total:{" "}
               <span className="font-semibold text-slate-600 dark:text-zinc-400">
-                {HOURS_DIST_TOTAL}h
+                {hoursDistTotal}h
               </span>
             </p>
           </Section>
@@ -1233,8 +2709,24 @@ function AdminReportsScreen() {
           }
         >
           <div className="space-y-5">
-            {ACTIVITY_GROUPS.map((ag) => {
-              const entries = RECENT_CHANGES.filter((e) => e.group === ag.key);
+            {deliveryLoadState === "loading" ? (
+              <p className="text-sm text-slate-400 dark:text-zinc-500">Loading…</p>
+            ) : deliveryLoadState === "error" ? (
+              <p className="text-sm text-slate-400 dark:text-zinc-500">
+                {deliveryLoadError ?? "Couldn't load Recent Changes."}{" "}
+                <button
+                  type="button"
+                  onClick={() => setDeliveryRequestId((id) => id + 1)}
+                  className="font-medium text-brand-600 dark:text-brand-400 hover:underline"
+                >
+                  Retry
+                </button>
+              </p>
+            ) : recentChanges.length === 0 ? (
+              <p className="text-sm text-slate-400 dark:text-zinc-500">No real changes in the current report scope.</p>
+            ) : (
+            ACTIVITY_GROUPS.map((ag) => {
+              const entries = recentChanges.filter((e) => e.group === ag.key);
               if (entries.length === 0) return null;
               return (
                 <div key={ag.id}>
@@ -1283,7 +2775,8 @@ function AdminReportsScreen() {
                   </ul>
                 </div>
               );
-            })}
+            })
+            )}
           </div>
         </Section>
       </div>
@@ -1300,31 +2793,31 @@ function AdminReportsScreen() {
             <h2 className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600">
               Billing Period
             </h2>
-            <PeriodSelector value={period} onChange={setPeriod} />
+            <PeriodSelector value={period} onChange={setPeriod} customRange={customRange} onCustomRangeChange={setCustomRange} />
           </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-8">
             <KpiCard
               label="Billable Hours"
-              value={<>{BILLING_TOTALS.billableHours}<span className="text-base font-medium ml-0.5">h</span></>}
+              value={financeReady ? <>{financeKpiSummary.billableHours}<span className="text-base font-medium ml-0.5">h</span></> : "—"}
               sub="this period"
               accent
             />
             <KpiCard
               label="Non-billable Hours"
-              value={<>{BILLING_TOTALS.nonBillableHours}<span className="text-base font-medium ml-0.5">h</span></>}
+              value={financeReady ? <>{financeKpiSummary.nonBillableHours}<span className="text-base font-medium ml-0.5">h</span></> : "—"}
               sub="internal / overhead"
             />
             <KpiCard
               label="Utilization"
-              value={`${UTILIZATION_PCT}%`}
+              value={financeReady ? `${financeKpiSummary.utilizationPct}%` : "—"}
               sub="billable ÷ logged"
-              progress={UTILIZATION_PCT}
+              progress={financeReady ? Math.min(financeKpiSummary.utilizationPct, 100) : undefined}
               accent
             />
             <KpiCard
               label="Estimated Revenue"
-              value={formatCurrency(BILLING_TOTALS.revenue)}
+              value={financeReady ? formatCurrency(financeKpiSummary.estimatedRevenue) : "—"}
               sub="billable hours × rate"
               accent
             />
@@ -1334,7 +2827,7 @@ function AdminReportsScreen() {
           <div className="space-y-5">
             <Section
               title="Billing Overview"
-              count={BILLING_BY_CLIENT.length}
+              count={billingOverviewRows.length}
               icon={
                 <svg className="w-3.5 h-3.5 text-slate-400 dark:text-zinc-500 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.66 0-3 .672-3 1.5S10.34 11 12 11s3 .672 3 1.5-1.34 1.5-3 1.5m0-6V6m0 1v6m0 0v1m0-1c-1.66 0-3-.672-3-1.5M17 7H9a2 2 0 00-2 2v6a2 2 0 002 2h8a2 2 0 002-2V9a2 2 0 00-2-2z" />
@@ -1363,46 +2856,73 @@ function AdminReportsScreen() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-50 dark:divide-zinc-800/60">
-                    {BILLING_BY_CLIENT.map((row) => (
-                      <tr key={row.id} className="hover:bg-slate-50/60 dark:hover:bg-zinc-800/30 transition-colors duration-150 cursor-default">
-                        <td className="py-2.5 pr-4 font-medium text-slate-800 dark:text-zinc-200">
-                          {row.client}
-                        </td>
-                        <td className="py-2.5 text-right font-semibold text-slate-800 dark:text-zinc-200 tabular-nums">
-                          {row.billableHours}h
-                        </td>
-                        <td className="py-2.5 text-right tabular-nums">
-                          {row.nonBillableHours > 0 ? (
-                            <span className="text-slate-500 dark:text-zinc-400">{row.nonBillableHours}h</span>
-                          ) : (
-                            <span className="text-slate-300 dark:text-zinc-600">—</span>
-                          )}
-                        </td>
-                        <td className="py-2.5 text-right tabular-nums">
-                          {row.avgRate > 0 ? (
-                            <span className="text-slate-500 dark:text-zinc-400">{formatCurrency(row.avgRate)}/h</span>
-                          ) : (
-                            <span className="text-slate-300 dark:text-zinc-600">—</span>
-                          )}
-                        </td>
-                        <td className="py-2.5 text-right font-semibold text-brand-700 dark:text-brand-400 tabular-nums">
-                          {formatCurrency(row.billableHours * row.avgRate)}
+                    {deliveryLoadState === "loading" ? (
+                      <tr>
+                        <td colSpan={5} className="py-6 text-center text-sm text-slate-400 dark:text-zinc-500">
+                          Loading…
                         </td>
                       </tr>
-                    ))}
+                    ) : deliveryLoadState === "error" ? (
+                      <tr>
+                        <td colSpan={5} className="py-6 text-center text-sm text-slate-400 dark:text-zinc-500">
+                          {deliveryLoadError ?? "Couldn't load Billing Overview."}{" "}
+                          <button
+                            type="button"
+                            onClick={() => setDeliveryRequestId((id) => id + 1)}
+                            className="font-medium text-brand-600 dark:text-brand-400 hover:underline"
+                          >
+                            Retry
+                          </button>
+                        </td>
+                      </tr>
+                    ) : billingOverviewRows.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="py-6 text-center text-sm text-slate-400 dark:text-zinc-500">
+                          No real billing activity in the current report scope.
+                        </td>
+                      </tr>
+                    ) : (
+                      billingOverviewRows.map((row) => (
+                        <tr key={row.id} className="hover:bg-slate-50/60 dark:hover:bg-zinc-800/30 transition-colors duration-150 cursor-default">
+                          <td className="py-2.5 pr-4 font-medium text-slate-800 dark:text-zinc-200">
+                            {row.client}
+                          </td>
+                          <td className="py-2.5 text-right font-semibold text-slate-800 dark:text-zinc-200 tabular-nums">
+                            {row.billableHours}h
+                          </td>
+                          <td className="py-2.5 text-right tabular-nums">
+                            {row.nonBillableHours > 0 ? (
+                              <span className="text-slate-500 dark:text-zinc-400">{row.nonBillableHours}h</span>
+                            ) : (
+                              <span className="text-slate-300 dark:text-zinc-600">—</span>
+                            )}
+                          </td>
+                          <td className="py-2.5 text-right tabular-nums">
+                            {row.avgRate > 0 ? (
+                              <span className="text-slate-500 dark:text-zinc-400">{formatCurrency(row.avgRate)}/h</span>
+                            ) : (
+                              <span className="text-slate-300 dark:text-zinc-600">—</span>
+                            )}
+                          </td>
+                          <td className="py-2.5 text-right font-semibold text-brand-700 dark:text-brand-400 tabular-nums">
+                            {formatCurrency(row.estimatedInvoice)}
+                          </td>
+                        </tr>
+                      ))
+                    )}
                   </tbody>
                   <tfoot>
                     <tr className="border-t border-slate-100 dark:border-zinc-800">
                       <td className="pt-2.5 font-semibold text-slate-600 dark:text-zinc-300">Total</td>
                       <td className="pt-2.5 text-right font-semibold text-slate-800 dark:text-zinc-200 tabular-nums">
-                        {BILLING_TOTALS.billableHours}h
+                        {financeReady ? financeKpiSummary.billableHours : 0}h
                       </td>
                       <td className="pt-2.5 text-right text-slate-500 dark:text-zinc-400 tabular-nums">
-                        {BILLING_TOTALS.nonBillableHours}h
+                        {financeReady ? financeKpiSummary.nonBillableHours : 0}h
                       </td>
                       <td className="pt-2.5" />
                       <td className="pt-2.5 text-right font-bold text-brand-700 dark:text-brand-400 tabular-nums">
-                        {formatCurrency(BILLING_TOTALS.revenue)}
+                        {formatCurrency(financeReady ? financeKpiSummary.estimatedRevenue : 0)}
                       </td>
                     </tr>
                   </tfoot>
@@ -1412,7 +2932,7 @@ function AdminReportsScreen() {
 
             <Section
               title="Billable Hours by Member"
-              count={BILLING_BY_MEMBER.length}
+              count={billableHoursByMemberRows.length}
               icon={
                 <svg className="w-3.5 h-3.5 text-slate-400 dark:text-zinc-500 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
                   <circle cx="12" cy="8" r="4" />
@@ -1442,9 +2962,33 @@ function AdminReportsScreen() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-50 dark:divide-zinc-800/60">
-                    {BILLING_BY_MEMBER.map((row) => {
-                      const utilization = Math.round((row.billableHours / (row.billableHours + row.nonBillableHours)) * 100);
-                      return (
+                    {deliveryLoadState === "loading" ? (
+                      <tr>
+                        <td colSpan={5} className="py-6 text-center text-sm text-slate-400 dark:text-zinc-500">
+                          Loading…
+                        </td>
+                      </tr>
+                    ) : deliveryLoadState === "error" ? (
+                      <tr>
+                        <td colSpan={5} className="py-6 text-center text-sm text-slate-400 dark:text-zinc-500">
+                          {deliveryLoadError ?? "Couldn't load Billable Hours by Member."}{" "}
+                          <button
+                            type="button"
+                            onClick={() => setDeliveryRequestId((id) => id + 1)}
+                            className="font-medium text-brand-600 dark:text-brand-400 hover:underline"
+                          >
+                            Retry
+                          </button>
+                        </td>
+                      </tr>
+                    ) : billableHoursByMemberRows.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="py-6 text-center text-sm text-slate-400 dark:text-zinc-500">
+                          No real billing activity in the current report scope.
+                        </td>
+                      </tr>
+                    ) : (
+                      billableHoursByMemberRows.map((row) => (
                         <tr key={row.id} className="hover:bg-slate-50/60 dark:hover:bg-zinc-800/30 transition-colors duration-150 cursor-default">
                           <td className="py-2.5 pr-4">
                             <MemberTrigger name={row.name} avatar={row.avatar} className="flex items-center gap-2.5">
@@ -1460,14 +3004,14 @@ function AdminReportsScreen() {
                             {row.nonBillableHours}h
                           </td>
                           <td className="py-2.5 text-right">
-                            <UtilizationCell pct={utilization} />
+                            <UtilizationCell pct={row.utilizationPct} />
                           </td>
                           <td className="py-2.5 text-right font-semibold text-brand-700 dark:text-brand-400 tabular-nums">
-                            {formatCurrency(row.billableHours * row.avgRate)}
+                            {formatCurrency(row.estimatedRevenue)}
                           </td>
                         </tr>
-                      );
-                    })}
+                      ))
+                    )}
                   </tbody>
                 </table>
               </div>

@@ -277,21 +277,23 @@ panel), Project → Team (the real roster, project-scoped Lead/Member role
 via `project_memberships.project_role`, Make Project Lead, auto-membership
 on real contribution, Add/Remove Member, and a paginated Work History
 page), Project Notes (list, search, create, edit, Duplicate, and delete
-against real `project_notes`), and the Dashboard for both the Admin and
-Project Lead roles (every KPI, list, and quick action described below) are
-connected and **confirmed working end-to-end against a live Supabase
-project**. Users (the `/users` list, Invite by email or by generated link,
-Disable/Enable, Edit, a generated Reset Password link, and the shared
-Member Profile Modal's Activity/Security tabs) is also fully implemented
-against the same schema, but **not yet confirmed end-to-end against a live
-project or in a browser** — every migration, Server Action, and screen
-below passes `tsc`/`eslint`/`next build`, but this specific set of
-Users-only flows (Invite/Disable/Enable/Edit/Reset Password) hasn't itself
-been clicked through since it was built; treat that section as "should
-work, not yet verified" until it has. The Member Dashboard, Reports, and
-the rest of Settings are still unconnected mock data — see "Still mock"
-below for the exact boundaries within Projects and the Admin/Project Lead
-Dashboards themselves.
+against real `project_notes`), the Dashboard for the Admin, Project Lead,
+and Member roles (every KPI, list, and quick action described below), and
+Reports for the Admin role (`/reports` — both the Delivery and Finance
+tabs, including filters, Health Alerts, and Export) are connected and
+**confirmed working end-to-end against a live Supabase project**. Users
+(the `/users` list, Invite by email or by generated link, Disable/Enable,
+Edit, a generated Reset Password link, and the shared Member Profile
+Modal's Activity/Security tabs) is also fully implemented against the same
+schema, but **not yet confirmed end-to-end against a live project or in a
+browser** — every migration, Server Action, and screen below passes
+`tsc`/`eslint`/`next build`, but this specific set of Users-only flows
+(Invite/Disable/Enable/Edit/Reset Password) hasn't itself been clicked
+through since it was built; treat that section as "should work, not yet
+verified" until it has. Project Lead's own Reports view (a separate
+component from Admin Reports) and the rest of Settings are still
+unconnected mock data — see "Still mock" below for the exact boundaries
+within Projects, Reports, and the Dashboards themselves.
 
 ## Confirmed working (login/logout, profile, avatar, change password)
 
@@ -934,8 +936,8 @@ a data source).
   `ActiveTicketRow` / `Card` themselves are unchanged, just now also fed
   real data by this screen and by the Project Lead Dashboard below.
   `MY_ACTIVE`/`RECENT_ACTIVITY` (the mock constants) are no longer read by
-  this screen, but stay exported/defined because `member-dashboard.tsx` and
-  `project-lead-reports-screen.tsx` still import them.
+  this screen, but stay exported/defined because `project-lead-dashboard.tsx`
+  and `project-lead-reports-screen.tsx` still import them.
 - No new migrations — this section is pure application-layer
   query/rendering work on top of the already-real
   `tickets`/`ticket_activity`/`organization_memberships` tables.
@@ -1010,12 +1012,148 @@ import them directly).
 - No new migrations — this section is pure application-layer
   query/rendering work on top of already-real tables.
 
+## Confirmed working (Dashboard — Member)
+
+Real greeting/date, KPIs, Recommended Next, My Active Work, Needs Your
+Attention, Time Today, and Upcoming Work for the Member role's
+`/dashboard` — no mock data remains on this screen itself. `MEMBER_WORK`/
+`WorkItem` stay defined/exported in this same file only because
+`member-projects-screen.tsx` ("My Projects") still reads them directly and
+is out of scope for this pass.
+
+- `src/lib/tickets.ts` gained the Member-Dashboard-specific reads:
+  `loadProfileLoggedTimeForDate` (today's real logged time entries for one
+  profile, across every ticket they have access to — not just tickets
+  assigned to them, so pairing/helping on someone else's ticket still
+  counts), `loadProfileLoggedMinutesForRange` (same scope, totaled over an
+  inclusive date range — backs "Remaining This Week"), and
+  `loadMemberAttentionEvents` (the real "Needs Your Attention" feed: the
+  subset of `ticket_activity` on this member's own active tickets that asks
+  them to actually do something — blocked, reassigned to them, moved to
+  review, or estimate changed. The mock "mention" category has no real
+  source in this schema — comments aren't parsed for @mentions — so it
+  stays a defined type/dict entry but is never populated, the same "kept
+  but unreachable until real data exists" precedent as Project Notes' Tag
+  field).
+- `src/lib/projects.ts` gained `loadMemberWeeklyCapacity` (a member's real
+  weekly capacity, resolved as the max across their own
+  `project_memberships.weekly_capacity` rows, falling back to their real
+  `organization_memberships.weekly_capacity` when unset or when they have
+  no project memberships yet — the same fallback `loadProjectTeam` already
+  uses per project, just without a single project to scope to).
+- `src/components/member-dashboard.tsx`'s `MemberDashboard()` — real load
+  state (`loading`/`ready`/`error` with Retry, same convention as every
+  other real screen) backed by `loadOrganizationTickets` (My Active Work:
+  real tickets assigned to the signed-in member, excluding `done`) plus the
+  three loaders above. Assigned Tickets, Weekly Capacity (renamed from the
+  old hardcoded "Planned Today"), Logged Today, and Due Today (the 4 hero
+  stats), Recommended Next, My Active Work, Needs Your Attention, the Time
+  Today panel (Logged Today / Weekly Capacity / Remaining This Week, plus a
+  real per-project breakdown of today's logged time), and Upcoming Work are
+  all computed from real data — previously hardcoded mock (`ATTENTION_ITEMS`,
+  `LOGGED_TODAY_BY_PROJECT`, a fixed `PLANNED_TODAY = 7`). Real empty states
+  throughout ("You're all clear", "Nothing needs your attention right now",
+  "No time logged yet today", "Nothing else on the horizon"). Sorting
+  (`tierOf`/`dueSortValue`/`isUrgentDue`) now uses the real current local
+  date (`getTodayISO()`/`parseDisplayDate()`) instead of a hardcoded mock
+  date/label set. The header's date subtitle (previously the hardcoded
+  string "Tuesday, June 30") now shows the real current date via
+  `formatFullDate(todayISO)` — the same pattern the Project Lead Dashboard
+  and (see below) the Reports header both use.
+- No new migrations — pure application-layer query/rendering work on top of
+  already-real tables.
+
+## Confirmed working (Reports — Admin, Delivery and Finance tabs)
+
+Real KPIs, tables, filters, alerts, and Export for both tabs of `/reports`
+(`AdminReportsScreen` — used by both the Admin and Member roles; the
+Finance tab itself is Admin-only, gated inside the component). Project
+Lead gets a separate, still-mock component (`ProjectLeadReportsScreen`)
+instead — see "Still mock" below.
+
+- **Shared filters and period** — the Project/Assignee/Client/Date filters
+  plus the Period selector (This Week/This Month/This Quarter/Custom) all
+  read from one shared fetch (`rawTickets`/`rawProjects`/`rawMembers`/
+  `rawCapacities`/`rawTimeEntries`/`rawActivityEvents`) rather than a
+  separate query per widget; every KPI, table, and chip on both tabs
+  derives from the same filtered ticket set via `useMemo` chains. Filter
+  option lists (Project/Assignee/Client) are restricted to values that
+  actually occur on a real ticket in the current unfiltered scope — a real
+  org member with zero tickets never appears as a filter option.
+- **Delivery KPIs, Health Alerts, Project Health, Hours by Person** —
+  `buildDeliveryKpiSummary`, `buildProjectHealthRows`,
+  `buildHoursByPersonRows` compute Projects/Active Tickets/Hours
+  Burn/Blocked/Done/Overdue and per-person/per-project rollups from real
+  tickets plus real logged time (`loadOrganizationLoggedTimeForRange` in
+  `lib/tickets.ts`) plus real weekly capacity
+  (`loadOrganizationMemberWeeklyCapacities` in `lib/projects.ts`, the same
+  org-then-project-capacity fallback used elsewhere in the app). The
+  alerts banner's critical/informational thresholds are derived from these
+  same real KPI numbers, never a parallel computation.
+- **Workload** — `buildWorkloadRows`: real assigned hours/capacity/
+  utilization per person, plus a real "change this week" delta computed
+  from `loadHoursAndAssigneeActivityForRange` (real `hours_changed`/
+  `assignee_changed` activity in the current calendar week, uncapped — a
+  weekly sum can't silently drop events past a display limit the way the
+  curated Recent Activity widgets do). Heavy/Moderate/Light classification
+  uses an inclusive `>=80` threshold.
+- **Hours Distribution** — `buildHoursDistribution`: real hours bucketed by
+  ticket status (`to_do`/`in_progress`/`blocked`/`review`/`done`),
+  excluding backlog on purpose (mirrors the Board view's own status
+  columns).
+- **Recent Changes** — `buildRecentChanges` +
+  `loadDeliveryActivityForTickets` (`lib/tickets.ts`): real, deduped,
+  date-grouped activity for the current filtered ticket set, covering
+  ticket creation, status/assignee/hours/priority/due-date changes, and
+  related-ticket add/remove. `STATUS_FROM_DB` (exported from
+  `lib/tickets.ts`) converts a `status_changed` row's raw DB enum value
+  (snake_case) to the app's own display labels before rendering.
+- **Delivery Export** — the Export dropdown's CSV/Excel/PDF options build 7
+  sections (KPIs, Health Alerts, Hours by Person, Project Health, Workload,
+  Hours Distribution, Recent Changes) from the exact same in-memory state
+  every widget already reads, with no extra queries; the menu itself was
+  simplified down to only these 3 real options (no disabled/placeholder
+  items).
+- **Finance KPIs, Billing Overview, Billable Hours by Member** —
+  `buildFinanceKpiSummary`/`buildBillingOverviewRows`/
+  `buildBillableHoursByMemberRows`: real Billable/Non-Billable hours,
+  Utilization, and Estimated Revenue from real logged time × each
+  project's real billing rate; Billing Overview's per-client
+  weighted-average rate and Billable Hours by Member's per-member revenue
+  are both computed per-project-then-summed (never re-derived from
+  already-rounded display values, which would introduce rounding error) so
+  their totals match the KPI card and each other to the dollar/hour.
+- **Finance Export** — `buildFinanceExportGroups`/`buildFinanceExcelHtml`:
+  CSV keeps sections un-mixed, Excel puts each section in its own
+  worksheet (via the `xmlns:x="urn:schemas-microsoft-com:office:excel"`
+  HTML-table convention — no new npm dependency), and PDF
+  (`openPrintableReport`, via `window.print()` on a popup, parametrized
+  with a `title` so Delivery/Finance never share a hardcoded report title)
+  preserves on-screen order; the Report Summary section always includes
+  Organization/Billing Period/Generated/Currency.
+- **Header date** — `formatHeaderDate(getTodayISO())` replaces the page
+  header's old hardcoded "Monday, June 30, 2026" with the real current
+  local date, formatted "Weekday, Month Day, Year"; reuses the same
+  `getTodayISO()` source (and the same `toLocaleDateString` pattern) the
+  Member and Project Lead Dashboards' own header dates already use.
+- No new migrations — pure application-layer query/rendering work on top
+  of already-real `tickets`/`ticket_activity`/`ticket_time_entries`/
+  `projects`/`organization_memberships`/`project_memberships` tables.
+
 ## Still mock
 
-- The Member Dashboard, Reports, and the rest of Settings (`/settings/*`)
-  all still read from `src/lib/mock-*.ts` — do not assume otherwise. The
-  Admin and Project Lead Dashboards are both fully real now — see their own
-  sections above.
+- The rest of Settings (`/settings/*`) all still reads from
+  `src/lib/mock-*.ts` — do not assume otherwise. The Admin, Project Lead,
+  and Member Dashboards, and Admin Reports (Delivery and Finance), are all
+  fully real now — see their own sections above.
+- `src/components/project-lead-reports-screen.tsx` — the Project Lead
+  role's own Reports view, a separate component from `AdminReportsScreen`
+  above (routed by `ReportsScreen()`'s own role check). Still reads
+  `PROJECT_TICKETS`/`RECENT_ACTIVITY`/`MY_PROJECT_NAMES` and other
+  `mock-*.ts` data untouched by this work.
+- `src/components/member-projects-screen.tsx` ("My Projects," Member
+  role) still reads `MEMBER_WORK` directly from `member-dashboard.tsx` —
+  unaffected by the Member Dashboard becoming real above.
 - Within Projects itself: Project Overview (`/projects/[slug]`) and
   per-project Reports still import `src/lib/mock-projects.ts` directly —
   only the Sidebar, `/projects`, `/projects/[slug]/settings`,
