@@ -788,7 +788,7 @@ export function buildDeliveryKpiSummary(
   };
 }
 
-interface FinanceKpiSummary {
+export interface FinanceKpiSummary {
   billableHours:     number;
   nonBillableHours:  number;
   utilizationPct:    number;
@@ -802,7 +802,9 @@ interface FinanceKpiSummary {
 // shared fetch already loads for the same Billing Period (no separate
 // query). A ticket whose project can no longer be resolved contributes to
 // neither total rather than being guessed into one.
-function buildFinanceKpiSummary(
+// Exported so Time Tracking (a separate module/page) can reuse this exact
+// billable/non-billable rule instead of a second implementation of it.
+export function buildFinanceKpiSummary(
   tickets: Ticket[],
   projects: { slug: string; category: string; defaultHourlyRate?: number }[],
   timeEntries: { ticketId: string; minutes: number }[]
@@ -848,7 +850,7 @@ function buildFinanceKpiSummary(
   };
 }
 
-interface BillingClientRow {
+export interface BillingClientRow {
   id:                string;
   client:            string;
   billableHours:     number;
@@ -866,7 +868,9 @@ interface BillingClientRow {
 // hours consolidate into one "Internal" row (never attributed to any
 // client — no real association exists in this schema). A client/Internal
 // group with zero real minutes in the period never gets a row at all.
-function buildBillingOverviewRows(
+// Exported for Time Tracking's own Billing by Client widget — see the note
+// on buildFinanceKpiSummary above.
+export function buildBillingOverviewRows(
   tickets: Ticket[],
   projects: { slug: string; category: string; client?: string; defaultHourlyRate?: number }[],
   timeEntries: { ticketId: string; minutes: number }[]
@@ -926,7 +930,7 @@ function buildBillingOverviewRows(
   return rows;
 }
 
-interface MemberBillingRowReal {
+export interface MemberBillingRowReal {
   id:                string;
   name:              string;
   avatar:            string;
@@ -944,7 +948,9 @@ interface MemberBillingRowReal {
 // at different rates. Only people who resolve to a real org member (never a
 // fabricated name/avatar) and have real logged minutes in the period get a
 // row.
-function buildBillableHoursByMemberRows(
+// Exported for Time Tracking's per-member Billable/Non-Billable columns —
+// see the note on buildFinanceKpiSummary above.
+export function buildBillableHoursByMemberRows(
   tickets: Ticket[],
   projects: { slug: string; category: string; defaultHourlyRate?: number }[],
   timeEntries: { ticketId: string; loggedBy: string | null; minutes: number }[],

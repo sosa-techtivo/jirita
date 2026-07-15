@@ -2131,6 +2131,117 @@ export async function loadProjectActivityPage(
   return { status: "ready", entries, totalCount: count ?? 0 };
 }
 
+// ── Organization Activity History (organization-activity-history-screen.tsx) ─
+// The org-wide sibling of loadProjectActivityPage above — same real,
+// comprehensive activity trail (every real event type, the same
+// buildActivityLabel, the same server-side LIMIT/OFFSET pagination), just
+// resolved across every project in the organization instead of one project's
+// tickets. Backs Dashboard's "View all activity →" action. Each entry also
+// carries its own project (projectSlug/projectName), since — unlike the
+// single-project screen — entries here can come from any project.
+
+export interface OrganizationActivityEntry {
+  id: string;
+  label: string;
+  timeAgo: string;
+  ticketKey: string;
+  ticketTitle: string;
+  projectSlug: string;
+  projectName: string;
+}
+
+export type OrganizationActivityPageResult =
+  | { status: "ready"; entries: OrganizationActivityEntry[]; totalCount: number }
+  | { status: "error"; message: string };
+
+interface OrganizationActivityRawRow extends ActivityRow {
+  ticket_id: string;
+}
+
+export async function loadOrganizationActivityPage(
+  organizationId: string,
+  page: number,
+  pageSize: number
+): Promise<OrganizationActivityPageResult> {
+  const supabase = getSupabaseBrowserClient();
+
+  const { data: projectRows, error: projectsError } = await supabase
+    .from("projects")
+    .select("id, slug, name, project_code")
+    .eq("organization_id", organizationId)
+    .returns<{ id: string; slug: string; name: string; project_code: string }[]>();
+
+  if (projectsError) {
+    logDev("organization activity projects lookup failed", projectsError);
+    return { status: "error", message: projectsError.message };
+  }
+  if (!projectRows || projectRows.length === 0) return { status: "ready", entries: [], totalCount: 0 };
+
+  const projectIds = projectRows.map((p) => p.id);
+  const projectById = new Map(projectRows.map((p) => [p.id, p]));
+
+  const { data: ticketRows, error: ticketsError } = await supabase
+    .from("tickets")
+    .select("id, ticket_number, title, project_id")
+    .in("project_id", projectIds)
+    .returns<{ id: string; ticket_number: number; title: string; project_id: string }[]>();
+
+  if (ticketsError) {
+    logDev("organization activity tickets lookup failed", ticketsError);
+    return { status: "error", message: ticketsError.message };
+  }
+  const ticketIds = (ticketRows ?? []).map((t) => t.id);
+  if (ticketIds.length === 0) return { status: "ready", entries: [], totalCount: 0 };
+
+  const ticketById = new Map((ticketRows ?? []).map((t) => [t.id, t]));
+
+  const offset = (page - 1) * pageSize;
+  const { data: rows, error, count } = await supabase
+    .from("ticket_activity")
+    .select("id, ticket_id, actor_profile_id, event_type, field_name, old_value, new_value, created_at", {
+      count: "exact",
+    })
+    .in("ticket_id", ticketIds)
+    .order("created_at", { ascending: false })
+    // Same tie-break as loadProjectActivityPage — keeps LIMIT/OFFSET
+    // pagination stable when several rows share the same created_at.
+    .order("id", { ascending: true })
+    .range(offset, offset + pageSize - 1)
+    .returns<OrganizationActivityRawRow[]>();
+
+  if (error) {
+    logDev("organization activity page query failed", error);
+    return { status: "error", message: error.message };
+  }
+
+  const profileIds = new Set<string>();
+  for (const row of rows ?? []) {
+    if (row.actor_profile_id) profileIds.add(row.actor_profile_id);
+    if (row.event_type === "assignee_changed") {
+      if (row.old_value) profileIds.add(row.old_value);
+      if (row.new_value) profileIds.add(row.new_value);
+    }
+  }
+  const profilesById = await loadProfilesByIds(supabase, Array.from(profileIds));
+  const resolveName = (id: string | null) => (id ? resolveProfileName(profilesById.get(id)) : null);
+
+  const entries: OrganizationActivityEntry[] = (rows ?? []).map((row) => {
+    const ticket = ticketById.get(row.ticket_id);
+    const project = ticket ? projectById.get(ticket.project_id) : undefined;
+    return {
+      id: row.id,
+      label: buildActivityLabel(row, resolveName(row.actor_profile_id), resolveName),
+      timeAgo: formatRelativeTime(row.created_at),
+      ticketKey: `${project?.project_code ?? "?"}-${ticket?.ticket_number ?? "?"}`,
+      ticketTitle: ticket?.title ?? "",
+      projectSlug: project?.slug ?? "",
+      projectName: project?.name ?? "",
+    };
+  });
+
+  return { status: "ready", entries, totalCount: count ?? 0 };
+}
+
 // ── Member Dashboard reads ──────────────────────────────────────────────────
 // (src/components/member-dashboard.tsx). Admin's and Project Lead's own
 // dashboards are untouched.

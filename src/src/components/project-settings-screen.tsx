@@ -8,8 +8,8 @@ import { statusMeta, ProjectCategoryBadge } from "@/components/status-badge";
 import { SettingGroup, SettingRow, TextField, NumberField, SelectField } from "@/components/settings-ui";
 import { useCurrentUser } from "@/components/current-user-provider";
 import { useOrganizationProjects } from "@/components/organization-projects-provider";
-import { loadProjectDetail, loadOrganizationMembers, loadOrganizationClients, createOrganizationClient } from "@/lib/projects";
-import type { ProjectDetail, OrgMember, EditableProjectStatus, Client } from "@/lib/projects";
+import { loadProjectDetail, loadOrganizationClients, createOrganizationClient } from "@/lib/projects";
+import type { ProjectDetail, EditableProjectStatus, Client } from "@/lib/projects";
 import { ArchiveProjectModal } from "@/components/archive-project-modal";
 import { AddClientModal } from "@/components/add-client-modal";
 
@@ -79,7 +79,6 @@ function CategoryToggle({ value, onChange }: { value: ProjectCategory; onChange:
 // through the Danger Zone's Archive/Restore action below, reusing
 // ArchiveProjectModal/restoreProject exactly as-is, never a parallel path.
 const EDITABLE_STATUSES: EditableProjectStatus[] = ["planning", "active", "on-hold", "completed"];
-const UNASSIGNED_LEAD = "";
 const ADD_NEW_CLIENT = "__add_new_client__";
 
 // Dev-only fallback roster (no real organization to query `clients` from)
@@ -116,14 +115,12 @@ export function ProjectSettingsScreen({ slug }: { slug: string }) {
   const [detail, setDetail] = useState<DetailState>(
     isDevFallback ? toDetail(initialDevProject) : { status: "loading" }
   );
-  const [members, setMembers] = useState<OrgMember[]>([]);
   const [clients, setClients] = useState<Client[]>(isDevFallback ? DEV_CLIENTS : []);
 
   const [name, setName] = useState(initialDevProject?.name ?? "");
   const [description, setDescription] = useState(initialDevProject?.description ?? "");
   const [projectCode, setProjectCode] = useState(initialDevProject?.projectCode ?? "");
   const [status, setStatus] = useState<ProjectStatus>(initialDevProject?.status ?? "active");
-  const [ownerProfileId, setOwnerProfileId] = useState(initialDevProject?.ownerProfileId ?? UNASSIGNED_LEAD);
   const [category, setCategory] = useState<ProjectCategory>(initialDevProject?.category ?? "internal");
   const [client, setClient] = useState(initialDevProject?.client ?? "");
   const [billingRate, setBillingRate] = useState(initialDevProject?.defaultHourlyRate ?? 0);
@@ -142,7 +139,6 @@ export function ProjectSettingsScreen({ slug }: { slug: string }) {
     setDescription(project.description);
     setProjectCode(project.projectCode);
     setStatus(project.status);
-    setOwnerProfileId(project.ownerProfileId ?? UNASSIGNED_LEAD);
     setCategory(project.category);
     setClient(project.client ?? "");
     setBillingRate(project.defaultHourlyRate ?? 0);
@@ -173,11 +169,8 @@ export function ProjectSettingsScreen({ slug }: { slug: string }) {
   useEffect(() => {
     if (isDevFallback || !organization) return; // dev fallback handled synchronously above — no fetch needed
     runFetch();
-    // Members/clients only need loading once — they don't change as a
-    // side effect of saving this project's settings.
-    loadOrganizationMembers(organization.id).then((result) => {
-      if (result.status === "ready") setMembers(result.members);
-    });
+    // Clients only need loading once — they don't change as a side effect
+    // of saving this project's settings.
     loadOrganizationClients(organization.id).then((result) => {
       if (result.status === "ready") setClients(result.clients);
     });
@@ -240,7 +233,6 @@ export function ProjectSettingsScreen({ slug }: { slug: string }) {
       status: status as EditableProjectStatus,
       category,
       ...(isClient ? { client: client || null, defaultHourlyRate: billingRate } : {}),
-      ownerProfileId: ownerProfileId || null,
     });
 
     setSaving(false);
@@ -294,17 +286,6 @@ export function ProjectSettingsScreen({ slug }: { slug: string }) {
     setClient(value);
   }
 
-  const leadOptions = [
-    { value: UNASSIGNED_LEAD, label: "Unassigned" },
-    ...members.map((member) => ({ value: member.id, label: member.name })),
-    // The current lead may not be in the active roster (e.g. a disabled
-    // membership) — still show their name so the field never silently
-    // switches to someone else.
-    ...(project.ownerProfileId && !members.some((m) => m.id === project.ownerProfileId)
-      ? [{ value: project.ownerProfileId, label: project.owner.name }]
-      : []),
-  ];
-
   const clientOptions = [
     { value: "", label: "Select a client" },
     ...clients.map((c) => ({ value: c.name, label: c.name })),
@@ -348,13 +329,6 @@ export function ProjectSettingsScreen({ slug }: { slug: string }) {
                 options={EDITABLE_STATUSES.map((s) => ({ value: s, label: statusMeta[s].label }))}
               />
             )}
-          </SettingRow>
-          <SettingRow label="Project Lead">
-            <div className="flex items-center gap-2">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={project.owner.avatar} alt={project.owner.name} className="w-6 h-6 rounded-full flex-shrink-0" />
-              <SelectField value={ownerProfileId} onChange={setOwnerProfileId} options={leadOptions} />
-            </div>
           </SettingRow>
         </SettingGroup>
 

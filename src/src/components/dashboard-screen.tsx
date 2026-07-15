@@ -32,6 +32,13 @@ import {
 } from "@/components/dashboard-shared";
 import type { DashboardActivityEntry } from "@/components/dashboard-shared";
 
+// Same cap + "fetch one extra to detect more" convention as Project
+// Overview's own Project Activity widget (PROJECT_ACTIVITY_PREVIEW_LIMIT in
+// admin-project-overview.tsx) — kept as its own constant here since this
+// widget is org-wide, not project-scoped, and has no route to reuse that
+// component's own state/props from.
+const RECENT_ACTIVITY_LIMIT = 10;
+
 // ── Sub-components ────────────────────────────────────────────────────────────
 
 export interface OrgHealthInsight {
@@ -254,7 +261,11 @@ function AdminDashboard() {
       const ticketIds = ticketsResult.tickets.map((t) => t.id);
       const [minutesResult, activityResult, workloadResult] = await Promise.all([
         loadOrganizationLoggedMinutes(ticketIds),
-        loadOrganizationActivity(ticketIds),
+        // Fetch one extra (11) past the 10 actually shown — same probe
+        // Project Overview's own Project Activity widget uses to know
+        // whether a "View all activity →" link is warranted, without a
+        // second/paginated query just to check.
+        loadOrganizationActivity(ticketIds, RECENT_ACTIVITY_LIMIT + 1),
         loadOrganizationWorkloadMembers(organization.id),
       ]);
       if (cancelled) return;
@@ -499,9 +510,14 @@ function AdminDashboard() {
     return items.length > 0 ? items : [{ id: "none", level: "ok", text: "No health alerts right now." }];
   }, [blockedProjects, membersOverCapacity, completedThisMonthCount, hoursBurnInsight]);
 
+  // Only ever an 11th probe event past RECENT_ACTIVITY_LIMIT — never
+  // rendered, just used to decide whether "View all activity →" appears
+  // (same pattern as Project Overview's hasMoreActivity).
+  const hasMoreActivity = activityEvents.length > RECENT_ACTIVITY_LIMIT;
+
   const recentActivityEntries = useMemo<DashboardActivityEntry[]>(
     () =>
-      activityEvents.map((event) => {
+      activityEvents.slice(0, RECENT_ACTIVITY_LIMIT).map((event) => {
         const ticket = ticketsById.get(event.ticketId);
         const project = ticket ? projectNameBySlug.get(ticket.projectSlug) ?? ticket.projectSlug : "";
         const base = {
@@ -678,7 +694,16 @@ function AdminDashboard() {
             )}
           </Card>
 
-          <Card title="Recent Activity">
+          <Card
+            title="Recent Activity"
+            action={
+              hasMoreActivity ? (
+                <Link href="/activity" className="text-[11px] font-medium text-brand-600 dark:text-brand-400 hover:underline">
+                  View all activity →
+                </Link>
+              ) : undefined
+            }
+          >
             {recentActivityEntries.length === 0 ? (
               <p className="text-xs text-slate-400 dark:text-zinc-600 py-2">No recent activity yet.</p>
             ) : (

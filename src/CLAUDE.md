@@ -283,11 +283,15 @@ Reports for the Admin role (`/reports` — both the Delivery and Finance
 tabs, including filters, Health Alerts, and Export), the **Admin**
 Project Overview (`/projects/[slug]` — header, real Health Alerts, KPIs,
 Active Work, a paginated Project Activity history, Team, and Project
-Health, all described in their own section below), and per-project Reports
+Health, all described in their own section below), per-project Reports
 (`/projects/[slug]/reports`, all roles — KPIs, Estimated vs Logged Hours,
 Team Workload, Delivery Progress with contextual ticket navigation, and a
-real current-month Delivery Snapshot) are connected and **confirmed working
-end-to-end against a live Supabase project**. Users
+real current-month Delivery Snapshot), and Time Tracking for the Admin and
+Member roles (`/time-tracking` — real KPIs, the Member/Project/Client/
+Billing/Date-Range filters, the real Timesheets table, Hours Missing,
+Weekly Utilization, and Billing by Client, all described in their own
+section below) are connected and **confirmed working end-to-end against a
+live Supabase project**. Users
 (the `/users` list, Invite by email or by generated link, Disable/Enable,
 Edit, a generated Reset Password link, and the shared Member Profile
 Modal's Activity/Security tabs) is also fully implemented against the same
@@ -298,12 +302,20 @@ browser** — every migration, Server Action, and screen below passes
 through since it was built; treat that section as "should work, not yet
 verified" until it has. The same "implemented and type/build-clean, not yet
 clicked through in a live browser" caveat now also applies to everything
-described below under Project Overview (Admin) and Reports (Project,
-per-project) — see those sections' own opening notes. The Project Lead's
-and Member's own Project Overview, Project Lead's own Reports view (a
-separate component from Admin Reports), and the rest of Settings are still
-unconnected mock data — see "Still mock" below for the exact boundaries
-within Projects, Reports, and the Dashboards themselves.
+described below under Project Overview (Admin), Reports (Project,
+per-project), and Time Tracking (Admin/Member) — see those sections' own
+opening notes. Project Settings' General section no longer has its own
+"Project Lead" field/picker — it was the only writer of the older
+`projects.owner_profile_id`, and the real "who leads this project" signal
+is Team's own `project_memberships.project_role`, set exclusively via
+Team's "Make Project Lead" action (see "Confirmed working (Projects...)"
+below for the exact boundary this leaves around `owner_profile_id`). The
+Project Lead's and Member's own
+Project Overview, Project Lead's own Reports view and own Time Tracking
+view (both separate components from the now-real Admin/Member ones), and
+the rest of Settings are still unconnected mock data — see "Still mock"
+below for the exact boundaries within Projects, Reports, Time Tracking, and
+the Dashboards themselves.
 
 ## Confirmed working (login/logout, profile, avatar, change password)
 
@@ -398,12 +410,14 @@ this one.)
   `restoreProject` (status only — nothing is ever deleted), plus, for
   Project Settings specifically: `loadProjectDetail` + `updateProjectSettings`
   (name, description, project code, status, category, client, billing
-  rate, project lead — `updateProjectSettings`'s status field is typed to
-  exclude `"archived"`, so that transition is structurally only reachable
-  through `archiveProject`/`restoreProject`, never a parallel path),
-  `loadOrganizationMembers` (Project Lead picker roster), and
+  rate — `updateProjectSettings`'s status field is typed to exclude
+  `"archived"`, so that transition is structurally only reachable through
+  `archiveProject`/`restoreProject`, never a parallel path) and
   `loadOrganizationClients` / `createOrganizationClient` (Billing → Client,
-  backed by the `clients` table below).
+  backed by the `clients` table below). `updateProjectSettings`'s optional
+  `ownerProfileId` field and the `projects.owner_profile_id` column it
+  writes both still exist (no schema change), but nothing calls it with
+  that key anymore — see the Project Lead removal note below.
 - `src/components/organization-projects-provider.tsx` —
   `OrganizationProjectsProvider`, mounted in `layout.tsx` next to
   `CurrentUserProvider`, holds the org's project list once so Sidebar and
@@ -423,11 +437,25 @@ this one.)
   Settings' Danger Zone (never duplicated). Restore has no confirmation
   step — the menu item / Danger Zone button call `restoreProject` directly.
 - `src/components/project-settings-screen.tsx` — real General (Project
-  Name, Description, Project Code, Status, Project Lead) and Billing
-  (Project Category, Client, Billing Rate) editing, plus a real "Save
-  Changes" button (none existed before this). Also exports
-  `ProjectSettingsBreadcrumb`, a client component reading from the shared
-  provider so the breadcrumb never shows a stale server-rendered name.
+  Name, Description, Project Code, Status) and Billing (Project Category,
+  Client, Billing Rate) editing, plus a real "Save Changes" button (none
+  existed before this). Also exports `ProjectSettingsBreadcrumb`, a client
+  component reading from the shared provider so the breadcrumb never shows
+  a stale server-rendered name. **The General section's "Project Lead"
+  row was removed outright** (not hidden, not disabled) — it was the only
+  UI that read/wrote `projects.owner_profile_id`, and the real,
+  authoritative "who leads this project" signal is
+  `project_memberships.project_role` (see Team below), set exclusively via
+  Team's own "Make Project Lead" action. The `loadOrganizationMembers`
+  fetch that only existed to populate this picker's roster was removed
+  along with it. Note this is a targeted removal, not a full migration off
+  `owner_profile_id`: `ProjectSummary.owner` (still `owner_profile_id`-
+  backed, per `loadOrganizationProjects` above) is what the `/projects`
+  list's own Lead column/filter and Member's "My Projects" still display —
+  those were untouched and out of scope for this change, so `owner_profile_id`
+  now has no remaining writer anywhere in the app (Project Settings was it),
+  while Team's real `project_role` has its own separate writer and is what
+  Project Overview/Team/the Dashboards already show as the lead.
 - `src/components/settings-ui.tsx` — `SelectField`/`TextField`/
   `NumberField` gained an optional `onChange` (`SelectField` also gained
   `options`) to become real controlled inputs; every existing call site
@@ -1065,9 +1093,29 @@ a data source).
   `MY_ACTIVE`/`RECENT_ACTIVITY` (the mock constants) are no longer read by
   this screen, but stay exported/defined because `project-lead-dashboard.tsx`
   and `project-lead-reports-screen.tsx` still import them.
-- No new migrations — this section is pure application-layer
-  query/rendering work on top of the already-real
-  `tickets`/`ticket_activity`/`organization_memberships` tables.
+- **Recent Activity now also gets a real "View all activity →" action**,
+  matching the same cap-plus-probe behavior the Admin Project Overview's
+  own Project Activity widget already used: `loadOrganizationActivity` is
+  called with `RECENT_ACTIVITY_LIMIT + 1` (11) instead of its default 10,
+  purely to detect whether an 11th real event exists (`hasMoreActivity`);
+  only the first 10 are ever rendered by the unchanged `RecentActivityList`
+  — no second implementation of activity rendering was introduced. The
+  link goes to a new, org-wide `/activity` page
+  (`OrganizationActivityHistoryScreen`, in
+  `organization-activity-history-screen.tsx`) — the org-wide sibling of the
+  existing per-project `/projects/[slug]/activity` history page, built the
+  same way: a new `loadOrganizationActivityPage` in `lib/tickets.ts`
+  mirrors `loadProjectActivityPage`'s query/pagination shape verbatim (same
+  `buildActivityLabel`, the same real `?page=`/20-per-page/Previous-Next
+  server-side pagination), just resolved across every project in the
+  organization instead of one, with each entry additionally carrying its
+  own project name/slug since entries here can come from any project. Not
+  added to the Sidebar's main nav (reached only via the Dashboard's own
+  link, same "link-only, not a nav item" precedent as Work History).
+- No new migrations — this section (including the new Activity History
+  page above) is pure application-layer query/rendering work on top of the
+  already-real `tickets`/`ticket_activity`/`organization_memberships`
+  tables.
 
 ## Confirmed working (Dashboard — Project Lead)
 
@@ -1334,12 +1382,98 @@ can open it. Project Lead's own, separate Reports view
   already-real `projects`/`tickets`/`ticket_activity`/`ticket_time_entries`/
   `project_memberships` tables.
 
+## Confirmed working (Time Tracking — Admin/Member)
+
+Real replacement for `/time-tracking`'s (`time-tracking-screen.tsx`)
+previous fully-mock data source (`src/lib/mock-time-tracking.ts`), for the
+Admin and Member roles — the Project Lead's own Time Tracking view
+(`project-lead-time-tracking-screen.tsx`, a separate, purpose-built
+component with every billing/revenue concept stripped out) is untouched and
+still mock, same "Still mock" boundary as its own Reports view — see below.
+Not yet clicked through in a live browser this session — treat as "should
+work, not yet verified" until it has, same caveat as Project Overview
+(Admin)/Reports (Project) above.
+
+- **Data load** — real active org users (`loadOrganizationUsers`, same
+  source Users' own list uses — filtered to `status === "Active"` here),
+  org-wide tickets/projects (`loadOrganizationTickets`/
+  `loadOrganizationProjects`), and real per-member weekly capacity
+  (`loadOrganizationMemberWeeklyCapacities` — the exact same org-then-
+  project-capacity fallback Team/Reports' own Hours by Person already use,
+  reused rather than a second capacity calculation) are all fetched once
+  per organization. Real logged time (`loadOrganizationLoggedTimeForRange`)
+  is fetched for four fixed ranges up front — Today, Yesterday, This Week,
+  This Month — so switching the Period selector between them is instant;
+  a Custom Range is fetched separately, only once one is actually applied.
+- **Billing is reused verbatim from Reports → Finance, never recalculated**
+  — `buildFinanceKpiSummary`/`buildBillingOverviewRows`/
+  `buildBillableHoursByMemberRows` were exported from `reports-screen.tsx`
+  specifically for this reuse (previously module-local to that file) and
+  are imported here unchanged: Billable Hours, Non-Billable Hours,
+  Projected Billing, Billing by Client (filtered to real clients with
+  billable hours in scope; the "Internal" rollup row is excluded here,
+  this widget only ever lists real clients), and the Timesheets table's
+  own Billable/Non-Billable columns all come from these same three
+  functions — project `category` ("client" vs "internal") is still the
+  only billability signal, exactly as Finance already established.
+- **Capacity-based metrics are deliberately independent of the Billing
+  filter** — Hours Missing (the KPI and its panel), Weekly Utilization, and
+  the Timesheets table's Capacity %/Status column always use a member's
+  *total* logged hours (regardless of billable/non-billable) against their
+  real Weekly Capacity, reusing Team's own capacity/workload convention;
+  only Project/Client/Member and the Date Range/Period selector narrow
+  their scope. This is enforced structurally, not just by convention: two
+  separate ticket-id scopes are computed — `capacityTicketIds` (Project +
+  Client only) feeds every capacity-based figure, `billingTicketIds`
+  (Project + Client + Billing) feeds only the Finance-reused calculations
+  above — so the Billing filter has no code path into capacity math at
+  all, and no separate "expected Billable/Non-Billable capacity" concept
+  was introduced.
+- **Filters are real and URL-persisted** — Member (multi, searchable),
+  Project (multi), Client (single), and Billing (single: All/Billable/
+  Non-Billable) all filter real data and compose with AND, same as every
+  other filter bar in this app; the Date Range filter is the existing
+  Period selector (Today/This Week/This Month/Custom Range). All five are
+  round-tripped through the URL (`?period=`/`from=`/`to=`/`members=`/
+  `projects=`/`client=`/`billing=`), so they survive a refresh or
+  navigating away and back — same real query-state precedent as Tickets'
+  own `?alerts=` filter, including the same `<Suspense>` wrapper
+  requirement on `app/time-tracking/page.tsx` for `useSearchParams()`.
+- **Timesheets table** — one real row per active org member: Today/
+  Yesterday/This Week/Month Total columns (whichever three are most
+  relevant to the selected period, unchanged column-picking logic),
+  Billable/Non-Billable (Finance-reused, see above), Capacity % and Status
+  (capacity-only, see above — Status shares the exact same missing-hours
+  comparison Hours Missing itself uses, never a second calculation), and a
+  real "Review →" action navigating to the existing per-project Work
+  History route (`/projects/[slug]/team/[userId]/work-history`), reusing
+  that page as-is.
+- **KPI labels** — the top KPI and the lower panel were both renamed from
+  "Hours Missing" to **"Members Missing Hours"**, since the value they show
+  is a count of affected team members, not a count of hours (each
+  individual row's own "`Xh` missing" text is unchanged — that one really
+  is an hours value). Purely a copy change; the underlying calculation,
+  data, and variable/field names are untouched.
+- No new migrations — pure application-layer query/rendering work on top
+  of already-real `tickets`/`ticket_time_entries`/`projects`/
+  `organization_memberships`/`project_memberships` tables, plus the
+  Finance functions' own export.
+
 ## Still mock
 
 - The rest of Settings (`/settings/*`) all still reads from
   `src/lib/mock-*.ts` — do not assume otherwise. The Admin, Project Lead,
-  and Member Dashboards, and Admin Reports (Delivery and Finance), are all
-  fully real now — see their own sections above.
+  and Member Dashboards, Admin Reports (Delivery and Finance), and Time
+  Tracking for the Admin/Member roles are all fully real now — see their
+  own sections above.
+- `src/components/project-lead-time-tracking-screen.tsx` — the Project
+  Lead role's own Time Tracking view, a separate component from the now-real
+  Admin/Member `time-tracking-screen.tsx` (routed by `TimeTrackingScreen()`'s
+  own role check). Still reads `timesheetRows`/`computeSummary`/other
+  `mock-time-tracking.ts` data untouched by this work — it only keeps the
+  three mock-sourced `MEMBER_GROUPS`/`PROJECT_GROUPS`/`CLIENT_GROUPS`
+  exports in `time-tracking-screen.tsx` alive (the real screen builds its
+  own real filter groups instead).
 - `src/components/project-lead-reports-screen.tsx` — the Project Lead
   role's own Reports view, a separate component from `AdminReportsScreen`
   above (routed by `ReportsScreen()`'s own role check). Still reads

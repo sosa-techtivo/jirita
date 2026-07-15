@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { AppShell } from "@/components/app-shell";
 import { TimeTrackingScreen } from "@/components/time-tracking-screen";
 
@@ -13,7 +14,10 @@ export default function TimeTrackingPage() {
         <span className="text-slate-800 font-medium dark:text-zinc-200">Time Tracking</span>
       }
     >
-      <TimeTrackingScreen />
+      {/* useSearchParams() (for filter/period persistence) requires a Suspense boundary */}
+      <Suspense fallback={null}>
+        <TimeTrackingScreen />
+      </Suspense>
     </AppShell>
   );
 }
