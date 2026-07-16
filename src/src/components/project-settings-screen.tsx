@@ -108,7 +108,9 @@ export function ProjectSettingsScreen({ slug }: { slug: string }) {
   const initialDevProject: ProjectDetail | null = isDevFallback
     ? (() => {
         const mock = sharedProjects.find((p) => p.slug === slug);
-        return mock ? { ...mock, ownerProfileId: null, createdAt: "—", createdAtISO: new Date(0).toISOString() } : null;
+        return mock
+          ? { ...mock, ownerProfileId: null, createdAt: "—", createdAtISO: new Date(0).toISOString(), targetDateISO: null }
+          : null;
       })()
     : null;
 
@@ -124,6 +126,11 @@ export function ProjectSettingsScreen({ slug }: { slug: string }) {
   const [category, setCategory] = useState<ProjectCategory>(initialDevProject?.category ?? "internal");
   const [client, setClient] = useState(initialDevProject?.client ?? "");
   const [billingRate, setBillingRate] = useState(initialDevProject?.defaultHourlyRate ?? 0);
+  // Raw ISO `yyyy-mm-dd` (native <input type="date"> format), never the
+  // "Jul 16"-formatted ProjectSummary.targetDate display string — empty
+  // string when unset, same "no value" convention as Description/Client
+  // above.
+  const [targetDate, setTargetDate] = useState(initialDevProject?.targetDateISO ?? "");
 
   const [showArchiveModal, setShowArchiveModal] = useState(false);
   const [showAddClientModal, setShowAddClientModal] = useState(false);
@@ -142,6 +149,7 @@ export function ProjectSettingsScreen({ slug }: { slug: string }) {
     setCategory(project.category);
     setClient(project.client ?? "");
     setBillingRate(project.defaultHourlyRate ?? 0);
+    setTargetDate(project.targetDateISO ?? "");
   }, []);
 
   // Refetches just this project — every setState lives inside its .then()
@@ -184,14 +192,20 @@ export function ProjectSettingsScreen({ slug }: { slug: string }) {
     if (isDevFallback) {
       const mock = sharedProjects.find((p) => p.slug === slug);
       if (mock) {
-        const updated: ProjectDetail = { ...mock, ownerProfileId: null, createdAt: "—", createdAtISO: new Date(0).toISOString() };
+        const updated: ProjectDetail = {
+          ...mock,
+          ownerProfileId: null,
+          createdAt: "—",
+          createdAtISO: new Date(0).toISOString(),
+          targetDateISO: targetDate || null,
+        };
         setDetail({ status: "ready", project: updated });
         applyProject(updated);
       }
       return;
     }
     runFetch();
-  }, [isDevFallback, sharedProjects, slug, runFetch, applyProject]);
+  }, [isDevFallback, sharedProjects, slug, runFetch, applyProject, targetDate]);
 
   if (detail.status === "loading") {
     return (
@@ -232,6 +246,7 @@ export function ProjectSettingsScreen({ slug }: { slug: string }) {
       projectCode,
       status: status as EditableProjectStatus,
       category,
+      targetDate: targetDate || null,
       ...(isClient ? { client: client || null, defaultHourlyRate: billingRate } : {}),
     });
 
@@ -329,6 +344,14 @@ export function ProjectSettingsScreen({ slug }: { slug: string }) {
                 options={EDITABLE_STATUSES.map((s) => ({ value: s, label: statusMeta[s].label }))}
               />
             )}
+          </SettingRow>
+          <SettingRow label="Target Date" hint="Optional — used as the project's planned delivery date">
+            <input
+              type="date"
+              value={targetDate}
+              onChange={(e) => setTargetDate(e.target.value)}
+              className="text-[13px] text-slate-800 dark:text-zinc-200 bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-700 rounded-lg px-2.5 py-1.5 outline-none focus:border-brand-500 dark:focus:border-brand-400 disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-slate-50 dark:disabled:bg-zinc-900 w-40"
+            />
           </SettingRow>
         </SettingGroup>
 

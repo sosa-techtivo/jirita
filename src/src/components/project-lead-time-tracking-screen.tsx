@@ -1,7 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { FilterDropdown } from "@/components/tickets/filter-dropdown";
+import type { DropdownGroup } from "@/components/tickets/filter-dropdown";
 import { KpiCard, Section } from "@/components/reports-shared";
 import {
   PeriodSelector,
@@ -9,54 +11,465 @@ import {
   CapacityCell,
   formatHours,
   periodSubLabel,
-  MEMBER_GROUPS,
-  PROJECT_GROUPS,
-  CLIENT_GROUPS,
+  getCurrentWeekRange,
+  getCurrentMonthRange,
+  expectedHoursForPeriod,
+  scopeEntries,
+  hoursByMember,
+  parseListParam,
+  round1,
 } from "@/components/time-tracking-screen";
-import {
-  timesheetRows,
-  computeSummary,
-  computeMissingHours,
-  computeProjectHours,
-  weeklyCapacityPct,
-  statusForPeriod,
-  DEFAULT_CUSTOM_RANGE,
-} from "@/lib/mock-time-tracking";
-import type { CustomRange, TimePeriod, TimesheetRow } from "@/lib/mock-time-tracking";
+import { buildFinanceKpiSummary } from "@/components/reports-screen";
+import { periodDisplayLabel } from "@/lib/mock-time-tracking";
+import type { CustomRange, TimePeriod, TimesheetStatus } from "@/lib/mock-time-tracking";
+import type { ProjectSummary } from "@/lib/mock-projects";
+import type { Ticket } from "@/lib/mock-tickets";
+import { getTodayISO } from "@/components/tickets/ticket-ui";
 import { MemberTrigger } from "@/components/member-profile";
+import { useCurrentUser } from "@/components/current-user-provider";
+import { loadLeadProjects, loadOrganizationProjects, loadProjectTeam } from "@/lib/projects";
+import type { LeadProject, ProjectTeamMember } from "@/lib/projects";
+import { loadProjectTickets, loadOrganizationLoggedTimeForRange } from "@/lib/tickets";
+import type { OrganizationTimeEntry } from "@/lib/tickets";
 
 // Project Leads manage delivery and team capacity, not company finances — no
-// revenue, invoicing, hourly rates, or billing-by-client here. Every widget
-// on this page answers a delivery question (who's overloaded, who's missing
-// hours, which projects are consuming the most effort), never a financial
-// one. See time-tracking-screen.tsx for the Admin/finance version this page
-// is deliberately not a filtered copy of.
+// invoicing, hourly rates, or billing-by-client here. Every widget on this
+// page answers a delivery question (who's overloaded, who's missing hours,
+// which projects are consuming the most effort), never a financial one. See
+// time-tracking-screen.tsx for the Admin/finance version this page is
+// deliberately not a filtered copy of.
+//
+// Real data source: scoped to exactly the projects this profile *leads*
+// (project_memberships.project_role = 'lead', via loadLeadProjects — the
+// same authoritative definition project-lead-dashboard.tsx's own project
+// scope selector already uses), never every project this profile happens to
+// be staffed on. Tickets/team come from loadProjectTickets/loadProjectTeam
+// per led project (the same per-project loaders the Dashboard already uses),
+// merged client-side; time entries reuse loadOrganizationLoggedTimeForRange
+// verbatim, just fed a ticket-id set already narrowed to led projects only.
+// Every KPI/section computation below (scopeEntries, hoursByMember,
+// expectedHoursForPeriod, the per-row view-model shape, missing-hours/
+// weekly-utilization math, and Logged/Internal Hours via
+// buildFinanceKpiSummary) is imported and reused verbatim from the real,
+// connected Admin/Member Time Tracking screen — never re-implemented here.
+
+interface LedTeamMember {
+  id: string;
+  name: string;
+  avatar: string;
+  role: string;
+  weeklyCapacity: number;
+  projectSlugs: string[];
+}
+
+// Merges a member's roster entries across every led project they're staffed
+// on — same "sum weeklyCapacity, concat project ids" convention already
+// established for cross-project merges in this app (see
+// project-lead-dashboard.tsx's own team-merge helper).
+function mergeLedTeams(perProject: { slug: string; members: ProjectTeamMember[] }[]): LedTeamMember[] {
+  const merged = new Map<string, LedTeamMember>();
+  for (const { slug, members } of perProject) {
+    for (const m of members) {
+      const existing = merged.get(m.id);
+      if (existing) {
+        existing.weeklyCapacity += m.weeklyCapacity;
+        existing.projectSlugs.push(slug);
+      } else {
+        merged.set(m.id, {
+          id: m.id,
+          name: m.name,
+          avatar: m.avatar,
+          role: m.title,
+          weeklyCapacity: m.weeklyCapacity,
+          projectSlugs: [slug],
+        });
+      }
+    }
+  }
+  return Array.from(merged.values()).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+interface LedTimesheetViewRow {
+  id: string;
+  name: string;
+  avatar: string;
+  role: string;
+  projectSlug?: string;
+  hoursToday: number;
+  hoursWeek: number;
+  hoursMonth: number;
+  hoursSelected: number;
+  capacityPct: number;
+  status: TimesheetStatus;
+}
+
+interface ProjectHoursRow {
+  projectSlug: string;
+  projectName: string;
+  hours: number;
+}
 
 export function ProjectLeadTimeTrackingScreen() {
+  const { organization, userId, isDevFallback } = useCurrentUser();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
   const [period, setPeriod] = useState<TimePeriod>("week");
-  const [customRange, setCustomRange] = useState<CustomRange>(DEFAULT_CUSTOM_RANGE);
+  const [customRange, setCustomRange] = useState<CustomRange>({ from: getTodayISO(-13), to: getTodayISO() });
   const [memberFilter, setMemberFilter] = useState<string[]>([]);
-  const [projectFilter, setProjectFilter] = useState<string[]>([]);
+  const [projectFilter, setProjectFilter] = useState<string[]>(() => parseListParam(searchParams.get("projects")));
   const [clientFilter, setClientFilter] = useState<string[]>([]);
 
-  const rows = timesheetRows;
+  // `?projects=` is the same real query-state convention the Admin/Member
+  // Time Tracking screen already uses — kept in sync both ways so a link
+  // like `/time-tracking?projects=jirita` lands with that project applied
+  // and visible, and so switching the Project filter here updates the URL.
+  useEffect(() => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (projectFilter.length > 0) params.set("projects", projectFilter.join(","));
+    else params.delete("projects");
+    const qs = params.toString();
+    if (qs === searchParams.toString()) return;
+    router.replace(`/time-tracking${qs ? `?${qs}` : ""}`, { scroll: false });
+  }, [projectFilter, router, searchParams]);
 
-  const summary = useMemo(
-    () => computeSummary(rows, period, customRange),
-    [rows, period, customRange]
+  // ── Real data load — scoped to exactly the projects this profile leads. ──
+  const [leadProjects, setLeadProjects] = useState<LeadProject[]>([]);
+  const [rawProjects, setRawProjects] = useState<ProjectSummary[]>([]);
+  const [rawTeam, setRawTeam] = useState<LedTeamMember[]>([]);
+  const [rawTickets, setRawTickets] = useState<Ticket[]>([]);
+  const [entriesToday, setEntriesToday] = useState<OrganizationTimeEntry[]>([]);
+  const [entriesWeek, setEntriesWeek] = useState<OrganizationTimeEntry[]>([]);
+  const [entriesMonth, setEntriesMonth] = useState<OrganizationTimeEntry[]>([]);
+  const [entriesCustom, setEntriesCustom] = useState<OrganizationTimeEntry[]>([]);
+  const [loadState, setLoadState] = useState<"loading" | "ready" | "error">(isDevFallback ? "ready" : "loading");
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadRequestId, setLoadRequestId] = useState(0);
+
+  useEffect(() => {
+    if (isDevFallback || !organization || !userId) return;
+    let cancelled = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: same "clear before the async fetch below resolves" pattern used elsewhere in this app (e.g. project-lead-dashboard.tsx)
+    setLoadState("loading");
+
+    (async () => {
+      const leadResult = await loadLeadProjects(organization.id, userId);
+      if (cancelled) return;
+      if (leadResult.status === "error") {
+        setLoadState("error");
+        setLoadError(leadResult.message);
+        return;
+      }
+
+      const ledSlugs = leadResult.projects.map((p) => p.slug);
+      if (ledSlugs.length === 0) {
+        setLeadProjects([]);
+        setRawProjects([]);
+        setRawTeam([]);
+        setRawTickets([]);
+        setEntriesToday([]);
+        setEntriesWeek([]);
+        setEntriesMonth([]);
+        setEntriesCustom([]);
+        setLoadState("ready");
+        return;
+      }
+
+      const [projectsResult, ticketsPerProject, teamPerProject] = await Promise.all([
+        loadOrganizationProjects(organization.id),
+        Promise.all(ledSlugs.map((slug) => loadProjectTickets(organization.id, slug))),
+        Promise.all(ledSlugs.map((slug) => loadProjectTeam(organization.id, slug))),
+      ]);
+      if (cancelled) return;
+
+      if (projectsResult.status === "error") {
+        setLoadState("error");
+        setLoadError(projectsResult.message);
+        return;
+      }
+      const failedTickets = ticketsPerProject.find((r) => r.status === "error");
+      if (failedTickets && failedTickets.status === "error") {
+        setLoadState("error");
+        setLoadError(failedTickets.message);
+        return;
+      }
+      const failedTeam = teamPerProject.find((r) => r.status === "error");
+      if (failedTeam && failedTeam.status === "error") {
+        setLoadState("error");
+        setLoadError(failedTeam.message);
+        return;
+      }
+
+      const ledSlugSet = new Set(ledSlugs);
+      const scopedProjects = projectsResult.projects.filter((p) => ledSlugSet.has(p.slug));
+      const tickets = ticketsPerProject.flatMap((r) => (r.status === "ready" ? r.tickets : []));
+      const team = mergeLedTeams(
+        ledSlugs.map((slug, i) => ({
+          slug,
+          members: teamPerProject[i].status === "ready" ? teamPerProject[i].members : [],
+        }))
+      );
+
+      const ticketIds = tickets.map((t) => t.id);
+      const todayISO = getTodayISO();
+      const week = getCurrentWeekRange();
+      const month = getCurrentMonthRange();
+
+      const [todayResult, weekResult, monthResult] = await Promise.all([
+        loadOrganizationLoggedTimeForRange(ticketIds, todayISO, todayISO),
+        loadOrganizationLoggedTimeForRange(ticketIds, week.from, week.to),
+        loadOrganizationLoggedTimeForRange(ticketIds, month.from, month.to),
+      ]);
+      if (cancelled) return;
+
+      if (todayResult.status === "error") {
+        setLoadState("error");
+        setLoadError(todayResult.message);
+        return;
+      }
+      if (weekResult.status === "error") {
+        setLoadState("error");
+        setLoadError(weekResult.message);
+        return;
+      }
+      if (monthResult.status === "error") {
+        setLoadState("error");
+        setLoadError(monthResult.message);
+        return;
+      }
+
+      setLeadProjects(leadResult.projects);
+      setRawProjects(scopedProjects);
+      setRawTeam(team);
+      setRawTickets(tickets);
+      setEntriesToday(todayResult.entries);
+      setEntriesWeek(weekResult.entries);
+      setEntriesMonth(monthResult.entries);
+      setLoadState("ready");
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isDevFallback, organization, userId, loadRequestId]);
+
+  // Custom Range has no fixed window, so it's fetched on its own — only once
+  // the core load above is ready, and only while Custom Range is selected.
+  useEffect(() => {
+    if (isDevFallback || !organization) return;
+    if (period !== "custom" || loadState !== "ready") return;
+    let cancelled = false;
+    const ticketIds = rawTickets.map((t) => t.id);
+
+    (async () => {
+      const result = await loadOrganizationLoggedTimeForRange(ticketIds, customRange.from, customRange.to);
+      if (cancelled) return;
+      if (result.status === "ready") setEntriesCustom(result.entries);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isDevFallback, organization, period, customRange, loadState, rawTickets]);
+
+  const visibleMembers = useMemo(() => {
+    if (memberFilter.length === 0) return rawTeam;
+    const selected = new Set(memberFilter);
+    return rawTeam.filter((m) => selected.has(m.id));
+  }, [rawTeam, memberFilter]);
+
+  const capacityByMember = useMemo(() => new Map(rawTeam.map((m) => [m.id, m.weeklyCapacity])), [rawTeam]);
+
+  // Project/Client scoping — narrows the ticket set every time-entry
+  // aggregate below reads from, same "Project/Client narrow the ticket-id
+  // set, Member narrows scopeEntries on top of that" mechanism the real
+  // Admin/Member screen already uses (capacityTicketIds there); collapsed to
+  // one set here since there's no separate Billing filter on this page.
+  const projectBySlug = useMemo(() => new Map(rawProjects.map((p) => [p.slug, p])), [rawProjects]);
+
+  const scopedTicketIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const t of rawTickets) {
+      if (projectFilter.length > 0 && !projectFilter.includes(t.projectSlug)) continue;
+      const project = projectBySlug.get(t.projectSlug);
+      if (clientFilter.length > 0) {
+        const client = project?.client as string | undefined;
+        if (project?.category !== "client" || client !== clientFilter[0]) continue;
+      }
+      ids.add(t.id);
+    }
+    return ids;
+  }, [rawTickets, projectBySlug, projectFilter, clientFilter]);
+
+  const scopedToday = useMemo(() => scopeEntries(entriesToday, scopedTicketIds, memberFilter), [entriesToday, scopedTicketIds, memberFilter]);
+  const scopedWeek = useMemo(() => scopeEntries(entriesWeek, scopedTicketIds, memberFilter), [entriesWeek, scopedTicketIds, memberFilter]);
+  const scopedMonth = useMemo(() => scopeEntries(entriesMonth, scopedTicketIds, memberFilter), [entriesMonth, scopedTicketIds, memberFilter]);
+  const scopedCustom = useMemo(() => scopeEntries(entriesCustom, scopedTicketIds, memberFilter), [entriesCustom, scopedTicketIds, memberFilter]);
+
+  const todayHours = useMemo(() => hoursByMember(scopedToday), [scopedToday]);
+  const weekHours = useMemo(() => hoursByMember(scopedWeek), [scopedWeek]);
+  const monthHours = useMemo(() => hoursByMember(scopedMonth), [scopedMonth]);
+  const customHours = useMemo(() => hoursByMember(scopedCustom), [scopedCustom]);
+
+  const entriesForSelectedPeriod = useMemo(() => {
+    const raw =
+      period === "today" ? entriesToday :
+      period === "month" ? entriesMonth :
+      period === "custom" ? entriesCustom :
+      entriesWeek;
+    return scopeEntries(raw, scopedTicketIds, memberFilter);
+  }, [period, entriesToday, entriesWeek, entriesMonth, entriesCustom, scopedTicketIds, memberFilter]);
+
+  // Reused verbatim from Reports → Finance (via the real Admin Time Tracking
+  // screen's own import of it) — project category is the only billability
+  // signal, never re-derived here. Labeled "Logged"/"Internal" below instead
+  // of "Billable"/"Non-Billable" (same split, delivery-framed wording, no
+  // dollar amounts shown anywhere on this page).
+  const financeSummary = useMemo(
+    () => buildFinanceKpiSummary(rawTickets, rawProjects, entriesForSelectedPeriod),
+    [rawTickets, rawProjects, entriesForSelectedPeriod]
   );
-  const projectHours = useMemo(
-    () => computeProjectHours(rows, period, customRange),
-    [rows, period, customRange]
-  );
-  const missingHours = useMemo(
-    () => computeMissingHours(rows, period, customRange),
-    [rows, period, customRange]
-  );
-  const overCapacityCount = useMemo(
-    () => rows.filter((r) => weeklyCapacityPct(r) > 100).length,
-    [rows]
-  );
+
+  const viewRows = useMemo<LedTimesheetViewRow[]>(() => {
+    return visibleMembers.map((m): LedTimesheetViewRow => {
+      const hoursToday = todayHours.get(m.id) ?? 0;
+      const hoursWeek = weekHours.get(m.id) ?? 0;
+      const hoursMonth = monthHours.get(m.id) ?? 0;
+      const hoursSelected =
+        period === "today" ? hoursToday :
+        period === "month" ? hoursMonth :
+        period === "custom" ? (customHours.get(m.id) ?? 0) :
+        hoursWeek;
+
+      const weeklyCapacity = capacityByMember.get(m.id) ?? 0;
+      const capacityPct = weeklyCapacity > 0 ? Math.round((hoursWeek / weeklyCapacity) * 100) : 0;
+      const expected = expectedHoursForPeriod(weeklyCapacity, period, customRange);
+      const status: TimesheetStatus = hoursSelected + 0.01 < expected ? "Missing" : "Complete";
+
+      return {
+        id: m.id,
+        name: m.name,
+        avatar: m.avatar,
+        role: m.role,
+        projectSlug: m.projectSlugs[0],
+        hoursToday,
+        hoursWeek,
+        hoursMonth,
+        hoursSelected,
+        capacityPct,
+        status,
+      };
+    });
+  }, [visibleMembers, todayHours, weekHours, monthHours, customHours, capacityByMember, period, customRange]);
+
+  const missingHours = useMemo(() => {
+    return viewRows
+      .filter((r) => r.status === "Missing")
+      .map((r) => {
+        const weeklyCapacity = capacityByMember.get(r.id) ?? 0;
+        const expected = expectedHoursForPeriod(weeklyCapacity, period, customRange);
+        return {
+          id: r.id,
+          name: r.name,
+          avatar: r.avatar,
+          periodLabel: periodDisplayLabel(period),
+          missingHours: round1(Math.max(0, expected - r.hoursSelected)),
+        };
+      })
+      .sort((a, b) => b.missingHours - a.missingHours);
+  }, [viewRows, capacityByMember, period, customRange]);
+
+  const weeklyUtilizationPct = useMemo(() => {
+    let totalWeekHours = 0;
+    let totalCapacity = 0;
+    for (const r of viewRows) {
+      totalWeekHours += r.hoursWeek;
+      totalCapacity += capacityByMember.get(r.id) ?? 0;
+    }
+    return totalCapacity > 0 ? Math.round((totalWeekHours / totalCapacity) * 100) : 0;
+  }, [viewRows, capacityByMember]);
+
+  const overCapacityCount = useMemo(() => viewRows.filter((r) => r.capacityPct > 100).length, [viewRows]);
+
+  const summary = {
+    billableHours: financeSummary.billableHours,
+    nonBillableHours: financeSummary.nonBillableHours,
+    hoursMissing: missingHours.length,
+    weeklyUtilizationPct,
+  };
+
+  // Delivery-focused breakdown of the same entriesForSelectedPeriod every
+  // other widget on this page reads from — never a second query.
+  const projectHours = useMemo<ProjectHoursRow[]>(() => {
+    const projectSlugByTicketId = new Map(rawTickets.map((t) => [t.id, t.projectSlug]));
+    const nameBySlug = new Map(rawProjects.map((p) => [p.slug, p.name]));
+    const minutesBySlug = new Map<string, number>();
+    for (const entry of entriesForSelectedPeriod) {
+      const slug = projectSlugByTicketId.get(entry.ticketId);
+      if (!slug) continue;
+      minutesBySlug.set(slug, (minutesBySlug.get(slug) ?? 0) + entry.minutes);
+    }
+    return Array.from(minutesBySlug.entries())
+      .map(([projectSlug, minutes]) => ({
+        projectSlug,
+        projectName: nameBySlug.get(projectSlug) ?? projectSlug,
+        hours: round1(minutes / 60),
+      }))
+      .sort((a, b) => b.hours - a.hours);
+  }, [rawTickets, rawProjects, entriesForSelectedPeriod]);
+
+  // ── Real filter option lists — scoped to led projects/their own team only. ──
+  const memberGroups = useMemo<DropdownGroup[]>(() => {
+    const options = rawTeam.map((m) => ({ value: m.id, label: m.name, avatar: m.avatar }));
+    return options.length === 0 ? [] : [{ options }];
+  }, [rawTeam]);
+
+  const projectGroups = useMemo<DropdownGroup[]>(() => {
+    const options = leadProjects.map((p) => ({ value: p.slug, label: p.name }));
+    return options.length === 0 ? [] : [{ options }];
+  }, [leadProjects]);
+
+  const clientGroups = useMemo<DropdownGroup[]>(() => {
+    const clients = Array.from(
+      new Set(
+        rawProjects
+          .filter((p) => p.category === "client")
+          .map((p) => p.client as string | undefined)
+          .filter((c): c is string => Boolean(c))
+      )
+    );
+    return clients.length === 0 ? [] : [{ options: clients.map((c) => ({ value: c, label: c })) }];
+  }, [rawProjects]);
+
+  if (loadState === "loading") {
+    return (
+      <div className="max-w-5xl mx-auto px-6 py-6 pb-16">
+        <div className="h-full flex items-center justify-center text-sm text-slate-400 dark:text-zinc-500 py-20">
+          Loading time tracking…
+        </div>
+      </div>
+    );
+  }
+
+  if (loadState === "error") {
+    return (
+      <div className="max-w-5xl mx-auto px-6 py-6 pb-16">
+        <div className="flex flex-col items-center justify-center text-center px-4 py-20">
+          <h3 className="text-sm font-semibold text-slate-700 dark:text-zinc-200">Couldn&apos;t load time tracking</h3>
+          <p className="text-sm text-slate-400 mt-1 max-w-xs dark:text-zinc-500">
+            {loadError ?? "Something went wrong."}
+          </p>
+          <button
+            type="button"
+            onClick={() => setLoadRequestId((id) => id + 1)}
+            className="mt-5 text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3.5 py-2 shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-500 dark:hover:bg-brand-600 dark:shadow-brand-500/20"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-5xl mx-auto px-6 py-6 pb-16">
@@ -77,9 +490,9 @@ export function ProjectLeadTimeTrackingScreen() {
         <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600 mr-2">
           Filter
         </span>
-        <FilterDropdown label="Member"  mode="multi"  groups={MEMBER_GROUPS}  selected={memberFilter}  onChange={setMemberFilter} searchable />
-        <FilterDropdown label="Project" mode="multi"  groups={PROJECT_GROUPS} selected={projectFilter} onChange={setProjectFilter} />
-        <FilterDropdown label="Client"  mode="single" groups={CLIENT_GROUPS}  selected={clientFilter}  onChange={setClientFilter} />
+        <FilterDropdown label="Member"  mode="multi"  groups={memberGroups}  selected={memberFilter}  onChange={setMemberFilter} searchable />
+        <FilterDropdown label="Project" mode="multi"  groups={projectGroups} selected={projectFilter} onChange={setProjectFilter} />
+        <FilterDropdown label="Client"  mode="single" groups={clientGroups}  selected={clientFilter}  onChange={setClientFilter} />
       </div>
 
       {/* ── Overview ─────────────────────────────────────────────────────── */}
@@ -99,7 +512,7 @@ export function ProjectLeadTimeTrackingScreen() {
       {/* ── Timesheets ───────────────────────────────────────────────────── */}
       <Section
         title="Timesheets"
-        count={rows.length}
+        count={viewRows.length}
         icon={
           <svg className="w-3.5 h-3.5 text-slate-400 dark:text-zinc-500 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
             <circle cx="12" cy="12" r="9" />
@@ -135,8 +548,8 @@ export function ProjectLeadTimeTrackingScreen() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50 dark:divide-zinc-800/60">
-              {rows.map((row) => (
-                <TimesheetTableRow key={row.id} row={row} period={period} customRange={customRange} />
+              {viewRows.map((row) => (
+                <TimesheetTableRow key={row.id} row={row} />
               ))}
             </tbody>
           </table>
@@ -216,18 +629,7 @@ export function ProjectLeadTimeTrackingScreen() {
   );
 }
 
-function TimesheetTableRow({
-  row,
-  period,
-  customRange,
-}: {
-  row: TimesheetRow;
-  period: TimePeriod;
-  customRange: CustomRange;
-}) {
-  const capacityPct = weeklyCapacityPct(row);
-  const status = statusForPeriod(row, period, customRange);
-
+function TimesheetTableRow({ row }: { row: LedTimesheetViewRow }) {
   return (
     <tr className="hover:bg-slate-50/60 dark:hover:bg-zinc-800/30 transition-colors duration-150">
       <td className="py-2.5 pr-4">
@@ -235,7 +637,7 @@ function TimesheetTableRow({
           name={row.name}
           avatar={row.avatar}
           role={row.role}
-          projectSlug={row.projectSlugs[0]}
+          projectSlug={row.projectSlug}
           className="flex items-center gap-2.5"
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -256,10 +658,10 @@ function TimesheetTableRow({
         {formatHours(row.hoursMonth)}
       </td>
       <td className="py-2.5 pl-4 text-right">
-        <CapacityCell pct={capacityPct} />
+        <CapacityCell pct={row.capacityPct} />
       </td>
       <td className="py-2.5 pl-4 text-right">
-        <StatusPill status={status} />
+        <StatusPill status={row.status} />
       </td>
       <td className="py-2.5 pl-4 text-right">
         <button

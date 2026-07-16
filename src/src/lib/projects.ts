@@ -42,6 +42,8 @@ export interface ProjectDetail extends ProjectSummary {
   createdAt: string;
   /** Same value as createdAt, raw ISO — Project Overview's health/alerts queries use it as their lower date bound. */
   createdAtISO: string;
+  /** Same value as ProjectSummary.targetDate, raw ISO (`yyyy-mm-dd`) or null — Project Settings' own `<input type="date">` needs this instead of the "Jul 16"-formatted display string. */
+  targetDateISO: string | null;
 }
 
 export type ProjectDetailResult =
@@ -180,7 +182,7 @@ function rowToProjectSummary(row: ProjectRow, ownerRow: OwnerProfileRow | undefi
   };
 }
 
-function formatTargetDate(isoDate: string | null): string {
+export function formatTargetDate(isoDate: string | null): string {
   if (!isoDate) return "—";
   return new Date(`${isoDate}T00:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
@@ -432,6 +434,7 @@ export async function loadProjectDetail(organizationId: string, slug: string): P
       ownerProfileId: row.owner_profile_id,
       createdAt: formatCreatedAt(row.created_at),
       createdAtISO: row.created_at,
+      targetDateISO: row.target_date,
     },
   };
 }
@@ -671,6 +674,8 @@ export interface ProjectSettingsUpdate {
   client?: string | null;
   defaultHourlyRate?: number | null;
   ownerProfileId?: string | null;
+  /** Raw ISO `yyyy-mm-dd`, or null to clear — writes projects.target_date directly, the same real column Project Overview/the Project Lead Dashboard already read. */
+  targetDate?: string | null;
 }
 
 // Settings-only write: only the keys present on `updates` are sent to
@@ -695,6 +700,7 @@ export async function updateProjectSettings(
   if (updates.client !== undefined) payload.client_name = updates.client;
   if (updates.defaultHourlyRate !== undefined) payload.default_hourly_rate = updates.defaultHourlyRate;
   if (updates.ownerProfileId !== undefined) payload.owner_profile_id = updates.ownerProfileId;
+  if (updates.targetDate !== undefined) payload.target_date = updates.targetDate;
 
   const { data, error } = await supabase
     .from("projects")

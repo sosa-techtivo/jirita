@@ -17,6 +17,7 @@ import {
   updateProjectSettings as updateProjectSettingsRemote,
   slugify,
   generateProjectCode,
+  formatTargetDate,
 } from "@/lib/projects";
 import type { ProjectSettingsUpdate } from "@/lib/projects";
 import { projects as MOCK_PROJECTS } from "@/lib/mock-projects";
@@ -238,6 +239,7 @@ export function OrganizationProjectsProvider({ children }: { children: ReactNode
               ...(updates.defaultHourlyRate !== undefined
                 ? { defaultHourlyRate: updates.defaultHourlyRate ?? undefined }
                 : {}),
+              ...(updates.targetDate !== undefined ? { targetDate: formatTargetDate(updates.targetDate ?? null) } : {}),
             };
           })
         );

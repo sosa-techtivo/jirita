@@ -268,28 +268,30 @@ However, simplicity must remain the defining characteristic of the platform.
 # Backend Integration Status
 
 Most of the application is now connected to a live Supabase project:
-Auth/Profile, Projects (Sidebar, `/projects`, Project Settings), Tickets
-(all five views, New Ticket, full Ticket Detail, Related Tickets,
-Attachments, Time Tracking, Comments, Activity Log), ticket-assignment
-restriction to active project members, Project → Team, Project Notes, the
-Admin/Project Lead/Member Dashboards (including their project scope
-selectors), company-wide Reports (Admin role), Project Overview (all three
-roles), per-project Reports (all roles), Time Tracking (Admin/Member), My
-Work (Member), Users, and global Search are all real.
+Auth/Profile, Projects (Sidebar, `/projects`, Project Settings — including
+an editable Target Date), Tickets (all five views, New Ticket, full Ticket
+Detail, Related Tickets, Attachments, Time Tracking, Comments, Activity
+Log), ticket-assignment restriction to active project members, Project →
+Team, Project Notes, the Admin/Project Lead/Member Dashboards (including
+their project scope selectors, and the Project Lead Dashboard's real,
+independently clickable Current Delivery/Attention Required KPI cards),
+company-wide Reports (Admin role), Project Overview (all three roles),
+per-project Reports (all roles), Time Tracking (all three roles), My Work
+(Member), Users, and global Search are all real.
 
 Auth/Profile through company-wide Reports (Admin) are confirmed working
 end-to-end against a live Supabase project. Everything from the Admin
 Project Overview onward in the list above (per-project Reports, Time
 Tracking, the Project Lead's/Member's own Project Overview, the Dashboard
-scope selectors, My Work, ticket-assignment restriction, Member's "My
-Projects", and Search) is implemented and passes `tsc`/`eslint`/`next
-build`, but has not yet been clicked through in a live browser — treat it
-as "should work, not yet verified."
+scope selectors and KPI click-throughs, Project Settings' Target Date
+field, My Work, ticket-assignment restriction, Member's "My Projects", and
+Search) is implemented and passes `tsc`/`eslint`/`next build`, but has not
+yet been clicked through in a live browser — treat it as "should work, not
+yet verified."
 
 Only the Project Lead's own scoped Reports view
-(`project-lead-reports-screen.tsx`), the Project Lead's own scoped Time
-Tracking view (`project-lead-time-tracking-screen.tsx`), and the rest of
-Settings (`/settings/*`) still run entirely on mock data.
+(`project-lead-reports-screen.tsx`) and the rest of Settings
+(`/settings/*`) still run entirely on mock data.
 
 **For the authoritative, feature-by-feature breakdown — every Server
 Action, migration, and real bug fixed along the way, and the exact

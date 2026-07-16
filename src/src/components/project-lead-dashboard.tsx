@@ -32,8 +32,8 @@ import {
 import { useMemberProfile } from "@/components/member-profile";
 import { loadLeadProjects, loadProjectTeam, loadOrganizationMembers, addProjectMember } from "@/lib/projects";
 import type { LeadProject, ProjectTeamMember, OrgMember } from "@/lib/projects";
-import { loadProjectTickets, loadOrganizationLoggedMinutes, loadOrganizationActivity } from "@/lib/tickets";
-import type { OrganizationActivityEvent } from "@/lib/tickets";
+import { loadProjectTickets, loadOrganizationLoggedMinutes, loadOrganizationLoggedTimeForRange, loadOrganizationActivity } from "@/lib/tickets";
+import type { OrganizationActivityEvent, OrganizationTimeEntry } from "@/lib/tickets";
 import { AddTeamMemberModal } from "@/components/add-team-member-modal";
 import { NewNoteModal } from "@/components/notes-screen";
 import { createNote } from "@/lib/notes";
@@ -66,6 +66,13 @@ export const LEAD_PROJECT_SLUGS = ["mobile-banking-app", "client-website-redesig
 // by Current Delivery/Attention Required/Upcoming Deadlines elsewhere in
 // this component: backlog tickets are excluded here on purpose, per spec.
 const ACTIVE_WORK_STATUSES: Ticket["status"][] = ["to-do", "in-progress", "blocked", "review"];
+
+// "All time" lower bound for loadOrganizationLoggedTimeForRange, so its
+// per-ticket entries cover the same unbounded history
+// loadOrganizationLoggedMinutes already sums for the Remaining Hours KPI's
+// own displayed total — same convention dashboard-screen.tsx's own
+// ALL_TIME_FROM_DATE already established, not a new one.
+const ALL_TIME_FROM_DATE = "2000-01-01";
 
 // Per-project ticket pools that feed the still-mock Upcoming Deadlines
 // section only (Attention Required's own "Awaiting Review" is real — see
@@ -172,13 +179,17 @@ function AttentionCard({
   label,
   detail,
   href,
+  onClick,
+  disabled,
 }: {
   tone:    AttentionTone;
   icon:    ReactNode;
-  count:   number;
-  label:   string;
-  detail:  string;
+  count:   ReactNode;
+  label:   ReactNode;
+  detail:  ReactNode;
   href:    string;
+  onClick?: () => void;
+  disabled?: boolean;
 }) {
   const toneStyles: Record<AttentionTone, string> = {
     critical: "border-red-100 dark:border-red-900/40 bg-red-50/50 dark:bg-red-950/10",
@@ -189,11 +200,10 @@ function AttentionCard({
     warning:  "text-amber-500 dark:text-amber-400",
   };
 
-  return (
-    <Link
-      href={href}
-      className={`group h-full flex flex-col rounded-xl border p-4 shadow-sm shadow-slate-200/40 dark:shadow-black/20 transition-colors hover:border-brand-300 dark:hover:border-brand-700 ${toneStyles[tone]}`}
-    >
+  const className = `group h-full flex flex-col rounded-xl border p-4 shadow-sm shadow-slate-200/40 dark:shadow-black/20 transition-colors hover:border-brand-300 dark:hover:border-brand-700 ${toneStyles[tone]}`;
+
+  const content = (
+    <>
       <div className="flex items-center justify-between mb-2">
         <span className={iconTone[tone]}>{icon}</span>
         <svg className="w-3.5 h-3.5 text-slate-300 dark:text-zinc-700 group-hover:text-brand-400 transition-colors" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true">
@@ -203,6 +213,31 @@ function AttentionCard({
       <p className="text-2xl font-bold text-slate-900 dark:text-zinc-50 leading-none">{count}</p>
       <p className="text-[13px] font-medium text-slate-700 dark:text-zinc-300 mt-1.5">{label}</p>
       <p className="text-[11px] text-slate-500 dark:text-zinc-500 mt-0.5 truncate">{detail}</p>
+    </>
+  );
+
+  // Same visual card in every case — same className/content throughout.
+  // `disabled` renders a plain, non-interactive <div> (no navigation, no
+  // click handler) for an empty state that must not be clickable. A plain
+  // `onClick` (used to open the Ticket Preview panel directly instead of
+  // navigating) renders a <button> instead of a <Link>. Every existing
+  // caller (no onClick, no disabled) keeps rendering the exact same <Link>
+  // as before.
+  if (disabled) {
+    return <div className={className}>{content}</div>;
+  }
+
+  if (onClick) {
+    return (
+      <button type="button" onClick={onClick} className={`${className} text-left w-full`}>
+        {content}
+      </button>
+    );
+  }
+
+  return (
+    <Link href={href} className={className}>
+      {content}
     </Link>
   );
 }
@@ -327,6 +362,7 @@ export function ProjectLeadDashboard() {
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [team, setTeam] = useState<ProjectTeamMember[]>([]);
   const [activeLoggedMinutes, setActiveLoggedMinutes] = useState(0);
+  const [activeTimeEntries, setActiveTimeEntries] = useState<OrganizationTimeEntry[]>([]);
   const [activityEvents, setActivityEvents] = useState<OrganizationActivityEvent[]>([]);
   const [requestId, setRequestId] = useState(0);
   const runFetch = () => setRequestId((id) => id + 1);
@@ -354,10 +390,17 @@ export function ProjectLeadDashboard() {
       const projectTicketsReal = ticketsResult.status === "ready" ? ticketsResult.tickets : [];
       const activeTicketIds = projectTicketsReal.filter((t) => t.status !== "done").map((t) => t.id);
       const allTicketIds = projectTicketsReal.map((t) => t.id);
+      const todayISOForLoad = getTodayISO();
 
-      const [teamResult, minutesResult, activityResult] = await Promise.all([
+      const [teamResult, minutesResult, activeTimeEntriesResult, activityResult] = await Promise.all([
         loadProjectTeam(organization.id, activeSlug),
         loadOrganizationLoggedMinutes(activeTicketIds),
+        // Per-ticket breakdown of the exact same historical, unbounded
+        // window loadOrganizationLoggedMinutes already aggregates above —
+        // needed to determine which individual tickets actually contribute
+        // to the Remaining Hours KPI (see handleRemainingHoursClick below),
+        // never a second definition of "logged minutes".
+        loadOrganizationLoggedTimeForRange(activeTicketIds, ALL_TIME_FROM_DATE, todayISOForLoad),
         loadOrganizationActivity(allTicketIds),
       ]);
       if (cancelled) return;
@@ -372,6 +415,11 @@ export function ProjectLeadDashboard() {
         setDeliveryErrorMessage(minutesResult.message);
         return;
       }
+      if (activeTimeEntriesResult.status === "error") {
+        setDeliveryLoadState("error");
+        setDeliveryErrorMessage(activeTimeEntriesResult.message);
+        return;
+      }
       if (activityResult.status === "error") {
         setDeliveryLoadState("error");
         setDeliveryErrorMessage(activityResult.message);
@@ -381,6 +429,7 @@ export function ProjectLeadDashboard() {
       setTickets(projectTicketsReal);
       setTeam(teamResult.members);
       setActiveLoggedMinutes(minutesResult.totalMinutes);
+      setActiveTimeEntries(activeTimeEntriesResult.entries);
       setActivityEvents(activityResult.events);
       setDeliveryLoadState("ready");
     })();
@@ -455,7 +504,8 @@ export function ProjectLeadDashboard() {
   const contextTitle = activeProject?.name ?? "Project";
 
   const totalTickets = tickets.length;
-  const completedTickets = tickets.filter((t) => t.status === "done").length;
+  const completedTicketsList = tickets.filter((t) => t.status === "done");
+  const completedTickets = completedTicketsList.length;
   const deliveryPct = totalTickets === 0 ? 0 : Math.round((completedTickets / totalTickets) * 100);
 
   const activeTickets = useMemo(() => tickets.filter((t) => t.status !== "done"), [tickets]);
@@ -466,8 +516,31 @@ export function ProjectLeadDashboard() {
   // project's active tickets only (see the effect above).
   const remainingHours = Math.max(0, Math.round(estimatedActiveHours - activeLoggedMinutes / 60));
 
-  const blockedTickets = tickets.filter((t) => t.status === "blocked").length;
-  const dueToday = activeTickets.filter((t) => t.dueDate && parseDisplayDate(t.dueDate) === todayISO).length;
+  // Per-ticket breakdown for the Remaining Hours KPI's own navigation only —
+  // the displayed value/formula above is untouched. A ticket "contributes"
+  // when its own remaining (hours minus its own logged minutes, floored at
+  // 0) is greater than 0; done tickets are already excluded via
+  // `activeTickets` above.
+  const minutesByTicketId = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const entry of activeTimeEntries) {
+      map.set(entry.ticketId, (map.get(entry.ticketId) ?? 0) + entry.minutes);
+    }
+    return map;
+  }, [activeTimeEntries]);
+
+  const remainingHoursTickets = useMemo(() => {
+    return activeTickets.filter((t) => {
+      const loggedMinutesForTicket = minutesByTicketId.get(t.id) ?? 0;
+      const remainingIndividual = Math.max(0, (t.hours ?? 0) - loggedMinutesForTicket / 60);
+      return remainingIndividual > 0;
+    });
+  }, [activeTickets, minutesByTicketId]);
+
+  const blockedTicketsList = tickets.filter((t) => t.status === "blocked");
+  const blockedTickets = blockedTicketsList.length;
+  const dueTodayList = activeTickets.filter((t) => t.dueDate && parseDisplayDate(t.dueDate) === todayISO);
+  const dueToday = dueTodayList.length;
 
   // Over Capacity — same assignedHours (active tickets only) + utilizationOf
   // calculation already used by Team/the Admin Dashboard, just scoped to
@@ -490,7 +563,14 @@ export function ProjectLeadDashboard() {
           assignedHours,
           activeTicketIds: [],
         });
-        return { name: member.name, pct };
+        return {
+          id: member.id,
+          name: member.name,
+          avatar: member.avatar,
+          role: member.title,
+          projectRole: member.projectRole,
+          pct,
+        };
       })
       .filter((m) => m.pct > 100);
   }, [team, activeTickets, activeSlug]);
@@ -610,15 +690,71 @@ export function ProjectLeadDashboard() {
     [tickets]
   );
 
-  // ── Target Date: the nearest deadline among this project's own active
-  // tickets — reuses `deadlines` above (already sorted ascending) instead of
-  // a second date computation. Falls back to the existing empty dash when no
-  // active ticket has a due date, same as before.
-  const targetDate = deadlines[0]?.dueDate ?? "—";
+  // ── Target Date: the project's own real `projects.target_date`, already
+  // queried and formatted (including its own "—" empty fallback) by
+  // loadLeadProjects — never a ticket due date. `?? "—"` only covers
+  // `activeProject` itself being momentarily unresolved, same "—" empty
+  // state as before.
+  const targetDate = activeProject?.targetDate ?? "—";
 
   const linkSlug = activeSlug || null;
   function projectHref(path: string): string {
     return linkSlug ? `/projects/${linkSlug}/${path}` : "/projects";
+  }
+
+  // Completed Tickets KPI (Current Delivery): reuses `completedTicketsList`,
+  // the exact same source of truth already driving the KPI's count above —
+  // no second query, no duplicated status filter. Zero matches stays
+  // non-interactive; exactly one opens it directly in the existing Ticket
+  // Preview panel (`preview` state, same as every other single-ticket click
+  // on this dashboard); more than one hands off to the Tickets page scoped
+  // to this project via the same `?alerts=` query-state convention used
+  // elsewhere (e.g. Reports' own Completed card).
+  function handleCompletedTicketsClick() {
+    if (completedTicketsList.length === 0) return;
+    if (completedTicketsList.length === 1) {
+      setPreview(completedTicketsList[0]);
+      return;
+    }
+    router.push(`/projects/${activeSlug}/tickets?alerts=done`);
+  }
+
+  // Estimated Hours Remaining KPI (Current Delivery): navigation is driven
+  // by `remainingHoursTickets` (the per-ticket breakdown above), never by
+  // the displayed `remainingHours` aggregate itself — the two can diverge
+  // (per-ticket remaining is floored at 0 *before* summing, the displayed
+  // total only after), so which tickets actually "contribute" has to be
+  // determined individually. Zero contributing tickets stays
+  // non-interactive; exactly one opens it directly in the existing Ticket
+  // Preview panel (`preview` state, same as every other single-ticket click
+  // on this dashboard); more than one hands off to the Tickets page scoped
+  // to this project via the same `?alerts=` query-state convention Completed
+  // Tickets above already uses — the union of the contributing tickets' own
+  // statuses, never Time Tracking.
+  function handleRemainingHoursClick() {
+    if (remainingHoursTickets.length === 0) return;
+    if (remainingHoursTickets.length === 1) {
+      setPreview(remainingHoursTickets[0]);
+      return;
+    }
+    const statuses = Array.from(new Set(remainingHoursTickets.map((t) => t.status)));
+    router.push(`/projects/${activeSlug}/tickets?alerts=${statuses.join(",")}`);
+  }
+
+  // Blocked Tickets KPI (Current Delivery): reuses `blockedTicketsList`, the
+  // exact same source of truth already driving the KPI's count above — no
+  // second query, no duplicated status filter. Zero matches stays
+  // non-interactive; exactly one opens it directly in the existing Ticket
+  // Preview panel; more than one hands off to the Tickets page scoped to
+  // this project via the same `?alerts=` query-state convention Completed
+  // Tickets/Remaining Work already use.
+  function handleBlockedTicketsClick() {
+    if (blockedTicketsList.length === 0) return;
+    if (blockedTicketsList.length === 1) {
+      setPreview(blockedTicketsList[0]);
+      return;
+    }
+    router.push(`/projects/${activeSlug}/tickets?alerts=blocked`);
   }
 
   const loading = projectsLoadState === "loading" || (leadProjects.length > 0 && deliveryLoadState === "loading");
@@ -763,9 +899,39 @@ export function ProjectLeadDashboard() {
           </div>
 
           <div className={`flex-1 grid grid-cols-2 sm:grid-cols-3 gap-4 lg:pl-6 lg:border-l ${HERO_BORDER_CLASS}`}>
-            <HeroStat label="Completed Tickets" value={`${completedTickets} / ${totalTickets}`} />
-            <HeroStat label="Remaining Hours" value={`${remainingHours}h`} />
-            <HeroStat label="Blocked Tickets" value={blockedTickets} danger />
+            {completedTickets > 0 ? (
+              <button
+                type="button"
+                onClick={handleCompletedTicketsClick}
+                className="w-full text-left p-0 cursor-pointer"
+              >
+                <HeroStat label="Completed Tickets" value={`${completedTickets} / ${totalTickets}`} />
+              </button>
+            ) : (
+              <HeroStat label="Completed Tickets" value={`${completedTickets} / ${totalTickets}`} />
+            )}
+            {remainingHoursTickets.length > 0 ? (
+              <button
+                type="button"
+                onClick={handleRemainingHoursClick}
+                className="w-full text-left p-0 cursor-pointer"
+              >
+                <HeroStat label="Remaining Work (Open Tickets)" value={`${remainingHours}h`} />
+              </button>
+            ) : (
+              <HeroStat label="Remaining Work (Open Tickets)" value={`${remainingHours}h`} />
+            )}
+            {blockedTickets > 0 ? (
+              <button
+                type="button"
+                onClick={handleBlockedTicketsClick}
+                className="w-full text-left p-0 cursor-pointer"
+              >
+                <HeroStat label="Blocked Tickets" value={blockedTickets} danger />
+              </button>
+            ) : (
+              <HeroStat label="Blocked Tickets" value={blockedTickets} danger />
+            )}
           </div>
         </div>
       </section>
@@ -777,10 +943,25 @@ export function ProjectLeadDashboard() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
         <AttentionCard
           tone="critical"
-          count={blockedTickets}
-          label="Blocked Tickets"
-          detail="Needs unblocking"
-          href={projectHref("tickets")}
+          count={blockedTickets === 1 ? getTicketDisplayKey(blockedTicketsList[0]) : blockedTickets}
+          label={blockedTickets === 1 ? blockedTicketsList[0].title : "Blocked Tickets"}
+          detail={
+            blockedTickets === 1 ? (
+              <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600">
+                BLOCKED TICKET
+              </span>
+            ) : (
+              "Needs unblocking"
+            )
+          }
+          href={
+            blockedTickets === 0
+              ? projectHref("tickets")
+              : blockedTickets === 1
+                ? projectHref(`tickets/${getTicketDisplayKey(blockedTicketsList[0])}`)
+                : projectHref("tickets?alerts=blocked")
+          }
+          onClick={blockedTickets === 1 ? () => setPreview(blockedTicketsList[0]) : undefined}
           icon={
             <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
               <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z" clipRule="evenodd" />
@@ -789,10 +970,26 @@ export function ProjectLeadDashboard() {
         />
         <AttentionCard
           tone="warning"
-          count={dueToday}
-          label="Due Today"
-          detail={formatISODate(todayISO)}
-          href={projectHref("tickets")}
+          count={dueToday === 1 ? getTicketDisplayKey(dueTodayList[0]) : dueToday}
+          label={dueToday === 1 ? dueTodayList[0].title : "Due Today"}
+          detail={
+            dueToday === 1 ? (
+              <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600">
+                DUE TODAY
+              </span>
+            ) : (
+              formatISODate(todayISO)
+            )
+          }
+          href={
+            dueToday === 0
+              ? projectHref("tickets")
+              : dueToday === 1
+                ? projectHref(`tickets/${getTicketDisplayKey(dueTodayList[0])}`)
+                : projectHref("tickets?alerts=due-today")
+          }
+          onClick={dueToday === 1 ? () => setPreview(dueTodayList[0]) : undefined}
+          disabled={dueToday === 0}
           icon={
             <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true">
               <circle cx="12" cy="12" r="9" />
@@ -802,10 +999,24 @@ export function ProjectLeadDashboard() {
         />
         <AttentionCard
           tone="warning"
-          count={overCapacityMembers.length}
+          count={overCapacityMembers.length === 1 ? "" : overCapacityMembers.length}
           label="Over Capacity"
           detail={overCapacityMembers.length > 0 ? overCapacityMembers.map((m) => m.name).join(", ") : "Team is balanced"}
           href={projectHref("team")}
+          onClick={
+            overCapacityMembers.length === 1
+              ? () =>
+                  openMemberProfile({
+                    name: overCapacityMembers[0].name,
+                    avatar: overCapacityMembers[0].avatar,
+                    role: overCapacityMembers[0].role,
+                    projectSlug: activeSlug,
+                    profileId: overCapacityMembers[0].id,
+                    projectRole: overCapacityMembers[0].projectRole,
+                  })
+              : undefined
+          }
+          disabled={overCapacityMembers.length === 0}
           icon={
             <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true">
               <path strokeLinecap="round" d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" />
@@ -816,10 +1027,26 @@ export function ProjectLeadDashboard() {
         />
         <AttentionCard
           tone="warning"
-          count={awaitingReview.length}
-          label="Awaiting Review"
-          detail={awaitingReview[0]?.title ?? "High priority"}
-          href={projectHref("tickets")}
+          count={awaitingReview.length === 1 ? getTicketDisplayKey(awaitingReview[0]) : awaitingReview.length}
+          label={awaitingReview.length === 1 ? awaitingReview[0].title : "Awaiting Review"}
+          detail={
+            awaitingReview.length === 1 ? (
+              <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600">
+                AWAITING REVIEW
+              </span>
+            ) : (
+              awaitingReview[0]?.title ?? "High priority"
+            )
+          }
+          href={
+            awaitingReview.length === 0
+              ? projectHref("tickets")
+              : awaitingReview.length === 1
+                ? projectHref(`tickets/${getTicketDisplayKey(awaitingReview[0])}`)
+                : projectHref("tickets?alerts=review")
+          }
+          onClick={awaitingReview.length === 1 ? () => setPreview(awaitingReview[0]) : undefined}
+          disabled={awaitingReview.length === 0}
           icon={
             <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true">
               <path strokeLinecap="round" strokeLinejoin="round" d="M5 3v18M5 4h11l-1.5 4L16 12H5" />

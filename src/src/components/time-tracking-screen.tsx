@@ -10,7 +10,7 @@ import { ProjectLeadTimeTrackingScreen } from "@/components/project-lead-time-tr
 import { MemberTrigger } from "@/components/member-profile";
 import { getTodayISO } from "@/components/tickets/ticket-ui";
 import { ROLE_LABELS } from "@/lib/current-user";
-import { periodDisplayLabel, timesheetRows } from "@/lib/mock-time-tracking";
+import { periodDisplayLabel } from "@/lib/mock-time-tracking";
 import type { CustomRange, TimePeriod, TimesheetStatus } from "@/lib/mock-time-tracking";
 import type { Ticket } from "@/lib/mock-tickets";
 import type { ProjectSummary } from "@/lib/mock-projects";
@@ -45,34 +45,6 @@ function logDev(...args: unknown[]): void {
 }
 
 // ── Filter groups ─────────────────────────────────────────────────────────────
-// Still sourced from mock-time-tracking.ts — kept only for
-// project-lead-time-tracking-screen.tsx, which is still a fully mock,
-// out-of-scope screen (see PROJECT_STATUS.md's "Still mock" section). The
-// real TimeTrackingScreen below builds its own real memberGroups/
-// projectGroups/clientGroups instead of these.
-export const MEMBER_GROUPS: DropdownGroup[] = [{
-  options: timesheetRows.map((r) => ({ value: r.id, label: r.name, avatar: r.avatar })),
-}];
-
-export const PROJECT_GROUPS: DropdownGroup[] = [{
-  options: [
-    { value: "mobile-banking-app",          label: "Mobile Banking App" },
-    { value: "internal-platform-migration", label: "Internal Platform Migration" },
-    { value: "customer-support-portal",     label: "Customer Support Portal" },
-    { value: "data-warehouse-revamp",        label: "Data Warehouse Revamp" },
-    { value: "client-website-redesign",      label: "Client Website Redesign" },
-    { value: "marketing-site-relaunch",      label: "Marketing Site Relaunch" },
-  ],
-}];
-
-export const CLIENT_GROUPS: DropdownGroup[] = [{
-  options: [
-    { value: "Meridian Bank", label: "Meridian Bank" },
-    { value: "RetailCo",      label: "RetailCo" },
-    { value: "Internal",      label: "Internal" },
-  ],
-}];
-
 // Billing is real now — project.category is a closed 2-value domain, so
 // this stays a fixed 3-option list ("All" plus the 2 real categories)
 // rather than a catalog derived from data, same convention as the Hours
@@ -288,7 +260,7 @@ function formatHeaderDate(todayISO: string): string {
 
 // ── Real data helpers ────────────────────────────────────────────────────────
 
-function round1(n: number): number {
+export function round1(n: number): number {
   return Math.round(n * 10) / 10;
 }
 
@@ -303,7 +275,7 @@ function toISODate(d: Date): string {
 // "real current date, not the selected period" convention as Reports'
 // getCurrentWeekBounds, just inclusive-end since loadOrganizationLoggedTimeForRange
 // filters work_date with .lte, not a timestamptz .lt.
-function getCurrentWeekRange(): CustomRange {
+export function getCurrentWeekRange(): CustomRange {
   const today = new Date(`${getTodayISO()}T00:00:00`);
   const day = today.getDay();
   const monday = new Date(today);
@@ -313,7 +285,7 @@ function getCurrentWeekRange(): CustomRange {
   return { from: toISODate(monday), to: toISODate(sunday) };
 }
 
-function getCurrentMonthRange(): CustomRange {
+export function getCurrentMonthRange(): CustomRange {
   const [y, m] = getTodayISO().split("-").map(Number);
   return { from: toISODate(new Date(y, m - 1, 1)), to: toISODate(new Date(y, m, 0)) };
 }
@@ -337,7 +309,7 @@ function countWeekdays(fromISO: string, toISO: string): number {
 
 const MONTH_WEEKS = 4.33;
 
-function expectedHoursForPeriod(weeklyCapacity: number, period: TimePeriod, customRange: CustomRange): number {
+export function expectedHoursForPeriod(weeklyCapacity: number, period: TimePeriod, customRange: CustomRange): number {
   const dailyRate = weeklyCapacity / 5;
   if (period === "today") return dailyRate;
   if (period === "week") return weeklyCapacity;
@@ -350,7 +322,7 @@ function expectedHoursForPeriod(weeklyCapacity: number, period: TimePeriod, cust
 // scoping rule every widget on this page shares, so Billing by Client,
 // Hours Missing, and the Timesheets table can never disagree about "what's
 // in scope right now."
-function scopeEntries(
+export function scopeEntries(
   entries: OrganizationTimeEntry[],
   ticketIds: Set<string>,
   memberIds: string[]
@@ -363,7 +335,7 @@ function scopeEntries(
   });
 }
 
-function hoursByMember(entries: OrganizationTimeEntry[]): Map<string, number> {
+export function hoursByMember(entries: OrganizationTimeEntry[]): Map<string, number> {
   const minutes = new Map<string, number>();
   for (const e of entries) {
     if (!e.loggedBy) continue;
@@ -374,7 +346,7 @@ function hoursByMember(entries: OrganizationTimeEntry[]): Map<string, number> {
   return hours;
 }
 
-function parseListParam(value: string | null): string[] {
+export function parseListParam(value: string | null): string[] {
   if (!value) return [];
   return value.split(",").filter(Boolean);
 }
