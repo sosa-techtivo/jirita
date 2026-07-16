@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import type { Ticket, TicketStatus } from "@/lib/mock-tickets";
 import { getTicketDisplayKey } from "@/lib/mock-tickets";
@@ -9,221 +9,39 @@ import { BoardView } from "@/components/tickets/board-view";
 import { TicketPreviewPanel } from "@/components/tickets/ticket-preview-panel";
 import { FilterDropdown } from "@/components/tickets/filter-dropdown";
 import type { DropdownGroup } from "@/components/tickets/filter-dropdown";
-import { StatusBadge, TicketTypeIcon } from "@/components/tickets/ticket-ui";
+import {
+  StatusBadge,
+  TicketTypeIcon,
+  STATUS_LABEL,
+  PRIORITY_LABEL,
+  PRIORITY_VALUES,
+  getTodayISO,
+  parseDisplayDate,
+  formatISODate,
+} from "@/components/tickets/ticket-ui";
 import { MemberTrigger } from "@/components/member-profile";
 import { useCurrentUser } from "@/components/current-user-provider";
-import { timesheetRows, weeklyCapacityPct } from "@/lib/mock-time-tracking";
+import {
+  loadOrganizationTickets,
+  loadOrganizationActivity,
+  loadProfileLoggedTimeForDate,
+  loadProfileLoggedMinutesForRange,
+  loadProfileTimeEntries,
+} from "@/lib/tickets";
+import type { OrganizationActivityEvent, ProfileTimeEntryRecord } from "@/lib/tickets";
+import { loadMemberWeeklyCapacity } from "@/lib/projects";
 import { CapacityCell, formatHours } from "@/components/time-tracking-screen";
 import { PersonalTimesheetPanel } from "@/components/personal-timesheet-panel";
 import type { PersonalTimesheetEntry } from "@/components/personal-timesheet-panel";
 
-// ── Mock current user ─────────────────────────────────────────────────────────
-
-const CURRENT_USER = {
-  name: "Marcus Lee",
-  avatar: "https://i.pravatar.cc/64?img=12",
-};
-
-// ── Mock tickets assigned to current user ─────────────────────────────────────
-
-const MY_TICKETS: Ticket[] = [
-  {
-    id: "mw-pci",
-    projectSlug: "mobile-banking-app",
-    ticketNumber: 1,
-    title: "Resolve PCI compliance gap in card storage",
-    description: "Card storage flow needs to meet updated PCI-DSS encryption requirements.",
-    status: "blocked",
-    priority: "high",
-    type: "TASK",
-    assignee: CURRENT_USER,
-    milestone: "Security Audit",
-    labels: ["Security", "Compliance"],
-    storyPoints: 13,
-    hours: 24,
-    dueDate: "Jun 28",
-    commentCount: 7,
-    updatedAt: "Updated 2h ago",
-  },
-  {
-    id: "mw-kyc",
-    projectSlug: "mobile-banking-app",
-    ticketNumber: 8,
-    title: "Third-party KYC vendor API outage response plan",
-    description: "Vendor integration has been failing intermittently. Need contingency plan and escalation.",
-    status: "blocked",
-    priority: "high",
-    type: "BUG",
-    assignee: CURRENT_USER,
-    milestone: "Security Audit",
-    labels: ["Integration"],
-    storyPoints: 8,
-    hours: 16,
-    dueDate: "Jul 1",
-    commentCount: 5,
-    updatedAt: "Updated 1 day ago",
-  },
-  {
-    id: "mw-pagination",
-    projectSlug: "mobile-banking-app",
-    ticketNumber: 4,
-    title: "Implement transaction history pagination",
-    description: "Paginate the transaction list to keep load times fast for high-volume accounts.",
-    status: "in-progress",
-    priority: "medium",
-    type: "TASK",
-    assignee: CURRENT_USER,
-    milestone: "Beta Release",
-    labels: ["Performance"],
-    storyPoints: 5,
-    hours: 8,
-    dueDate: "Jul 2",
-    commentCount: 3,
-    updatedAt: "Updated yesterday",
-  },
-  {
-    id: "mw-push",
-    projectSlug: "mobile-banking-app",
-    ticketNumber: 3,
-    title: "Push notification setup for transaction alerts",
-    description: "Wire up push notification delivery for transaction and security alerts.",
-    status: "in-progress",
-    priority: "medium",
-    type: "TASK",
-    assignee: CURRENT_USER,
-    milestone: "Beta Release",
-    labels: ["Notifications"],
-    storyPoints: 5,
-    hours: 8,
-    dueDate: "Jul 5",
-    commentCount: 2,
-    updatedAt: "Updated 3h ago",
-  },
-  {
-    id: "mw-offline",
-    projectSlug: "mobile-banking-app",
-    ticketNumber: 15,
-    title: "Offline mode for balance viewing",
-    description: "Allow users to view their last cached balance and recent transactions without a network connection.",
-    status: "in-progress",
-    priority: "medium",
-    type: "TASK",
-    assignee: CURRENT_USER,
-    milestone: "App Store Submission",
-    labels: ["Enhancement"],
-    storyPoints: 8,
-    hours: 16,
-    dueDate: "Jul 20",
-    commentCount: 3,
-    updatedAt: "Updated 3 days ago",
-  },
-  {
-    id: "mw-session",
-    projectSlug: "mobile-banking-app",
-    ticketNumber: 13,
-    title: "Configurable session timeout settings",
-    description: "Let users choose how long before the app locks after inactivity.",
-    status: "to-do",
-    priority: "low",
-    type: "TASK",
-    assignee: CURRENT_USER,
-    milestone: "Security Audit",
-    labels: ["Security"],
-    storyPoints: 5,
-    hours: 8,
-    dueDate: "Jul 15",
-    commentCount: 1,
-    updatedAt: "Updated 5 days ago",
-  },
-  {
-    id: "mw-dark",
-    projectSlug: "mobile-banking-app",
-    ticketNumber: 14,
-    title: "Dark mode for spend analytics charts",
-    description: "Update chart color palette so graphs look polished in dark mode.",
-    status: "to-do",
-    priority: "low",
-    type: "TASK",
-    assignee: CURRENT_USER,
-    milestone: "App Store Submission",
-    labels: ["Design", "Dark Mode"],
-    storyPoints: 3,
-    hours: 6,
-    dueDate: "Aug 3",
-    updatedAt: "Updated 4 days ago",
-  },
-  {
-    id: "mw-api",
-    projectSlug: "mobile-banking-app",
-    ticketNumber: 7,
-    title: "API rate limiting implementation",
-    description: "Add per-client rate limits to protect the transfers API from abuse.",
-    status: "review",
-    priority: "medium",
-    type: "TASK",
-    assignee: CURRENT_USER,
-    milestone: "Security Audit",
-    labels: ["Security", "API"],
-    storyPoints: 3,
-    hours: 4,
-    dueDate: "Jul 3",
-    updatedAt: "Updated 3h ago",
-  },
-  {
-    id: "mw-a11y",
-    projectSlug: "mobile-banking-app",
-    ticketNumber: 12,
-    title: "Accessibility audit and WCAG 2.1 fixes",
-    description: "Ensure VoiceOver and TalkBack compatibility for WCAG 2.1 AA compliance.",
-    status: "review",
-    priority: "high",
-    type: "TASK",
-    assignee: CURRENT_USER,
-    milestone: "Beta Release",
-    labels: ["Accessibility", "Compliance"],
-    storyPoints: 8,
-    hours: 12,
-    dueDate: "Jul 10",
-    commentCount: 4,
-    updatedAt: "Updated 1 day ago",
-  },
-  {
-    id: "mw-biometric",
-    projectSlug: "mobile-banking-app",
-    ticketNumber: 6,
-    title: "Fix biometric login crash on iOS 18",
-    description: "Face ID login intermittently crashes the app on iOS 18 devices.",
-    status: "done",
-    priority: "high",
-    type: "BUG",
-    assignee: CURRENT_USER,
-    milestone: "Beta Release",
-    labels: ["Bug", "iOS"],
-    storyPoints: 3,
-    hours: 4,
-    dueDate: "Jun 18",
-    commentCount: 6,
-    updatedAt: "Updated 12 minutes ago",
-  },
-  {
-    id: "mw-mfa",
-    projectSlug: "mobile-banking-app",
-    ticketNumber: 5,
-    title: "Add MFA onboarding step",
-    description: "Guide new users through enabling multi-factor authentication on first login.",
-    status: "done",
-    priority: "medium",
-    type: "TASK",
-    assignee: CURRENT_USER,
-    milestone: "Beta Release",
-    labels: ["Security", "Onboarding"],
-    storyPoints: 5,
-    hours: 6,
-    dueDate: "Jun 20",
-    commentCount: 4,
-    updatedAt: "Updated yesterday",
-  },
-];
+// My Work is the Member's own cross-project work queue — every KPI, ticket,
+// hour, and activity entry below is scoped to the signed-in member's own
+// real assignments (assignee_profile_id = their profile id). Project
+// membership itself is never checked client-side: loadOrganizationTickets
+// composes loadOrganizationProjects + loadProjectTickets, both RLS-scoped to
+// "projects this profile can see" (is_project_member for a Member), so a
+// ticket from a project this member doesn't currently belong to can never
+// come back from the query in the first place.
 
 // ── Recent activity (with time groups) ───────────────────────────────────────
 
@@ -239,104 +57,54 @@ interface ActivityEntry {
   ticket?: Ticket;
 }
 
-const av = (id: number) => `https://i.pravatar.cc/64?img=${id}`;
-
-const MY_TICKETS_BY_ID = new Map(MY_TICKETS.map((t) => [t.id, t]));
-
-const RECENT_ACTIVITY: ActivityEntry[] = [
-  {
-    id: "ra-1",
-    name: "Sarah Chen",
-    avatar: av(47),
-    action: "commented on",
-    time: "2 hours ago",
-    group: "today",
-    ticket: MY_TICKETS_BY_ID.get("mw-pagination"),
-  },
-  {
-    id: "ra-2",
-    name: "Alejo Cadavid",
-    avatar: av(33),
-    action: <>changed Hours — <span className="font-medium">8h → 12h</span></>,
-    time: "5 hours ago",
-    group: "today",
-    ticket: MY_TICKETS_BY_ID.get("mw-a11y"),
-  },
-  {
-    id: "ra-3",
-    name: "Elena Rossi",
-    avatar: av(5),
-    action: "linked a PR to",
-    time: "Yesterday",
-    group: "yesterday",
-    ticket: MY_TICKETS_BY_ID.get("mw-dark"),
-  },
-  {
-    id: "ra-4",
-    name: "Marcus Lee",
-    avatar: av(12),
-    action: <>moved to <span className="text-emerald-600 dark:text-emerald-400 font-medium">Done</span></>,
-    time: "Yesterday",
-    group: "yesterday",
-    ticket: MY_TICKETS_BY_ID.get("mw-biometric"),
-  },
-  {
-    id: "ra-5",
-    name: "David Kim",
-    avatar: av(22),
-    action: "commented on",
-    time: "2 days ago",
-    group: "earlier",
-    ticket: MY_TICKETS_BY_ID.get("mw-pci"),
-  },
-];
-
 const ACTIVITY_GROUPS: { id: string; label: string; key: ActivityEntry["group"] }[] = [
   { id: "today",     label: "Today",              key: "today" },
   { id: "yesterday", label: "Yesterday",           key: "yesterday" },
   { id: "earlier",   label: "Earlier This Week",   key: "earlier" },
 ];
 
-// ── Filter group data ─────────────────────────────────────────────────────────
+const RECENT_ACTIVITY_LIMIT = 10;
+const TIMESHEET_ENTRY_LIMIT = 20;
 
-const STATUS_GROUPS: DropdownGroup[] = [{
-  options: [
-    { value: "backlog",      label: "Inbox" },
-    { value: "to-do",        label: "To Do" },
-    { value: "in-progress",  label: "In Progress" },
-    { value: "blocked",      label: "Blocked" },
-    { value: "review",       label: "In Review" },
-    { value: "done",         label: "Done" },
-  ],
-}];
+// Only the 5 real event categories loadOrganizationActivity already exposes
+// (blocked/completed/hours/assigned/priority) — same vocabulary Admin/Project
+// Lead Project Overview's own activity feeds use (activityEventToEntry in
+// admin-project-overview.tsx); this file keeps its own local mapping since
+// this section's shape (action fragment + day `group`) differs from theirs.
+function activityEventToEntry(
+  event: OrganizationActivityEvent,
+  ticket: Ticket | undefined,
+  todayISO: string,
+  yesterdayISO: string
+): ActivityEntry {
+  const localDate = toLocalDateISO(event.createdAtISO);
+  const group: ActivityEntry["group"] =
+    localDate === todayISO ? "today" : localDate === yesterdayISO ? "yesterday" : "earlier";
 
-const PRIORITY_GROUPS: DropdownGroup[] = [{
-  options: [
-    { value: "high",   label: "High" },
-    { value: "normal", label: "Normal" },
-    { value: "low",    label: "Low" },
-  ],
-}];
+  const base = { id: event.id, name: event.actorName ?? "Someone", avatar: event.actorAvatar, time: event.time, group, ticket };
 
-const PROJECT_GROUPS: DropdownGroup[] = [{
-  options: [
-    { value: "mobile-banking",  label: "Mobile Banking App" },
-    { value: "design-system",   label: "Design System" },
-    { value: "api-gateway",     label: "API Gateway" },
-  ],
-}];
-
-const LABEL_GROUPS: DropdownGroup[] = [{
-  options: [
-    { value: "Security",      label: "Security" },
-    { value: "Bug",           label: "Bug" },
-    { value: "Performance",   label: "Performance" },
-    { value: "Design",        label: "Design" },
-    { value: "API",           label: "API" },
-    { value: "Compliance",    label: "Compliance" },
-    { value: "Notifications", label: "Notifications" },
-  ],
-}];
+  if (event.type === "blocked") {
+    return { ...base, action: <>marked <span className="text-red-600 dark:text-red-400 font-medium">Blocked</span></> };
+  }
+  if (event.type === "completed") {
+    return { ...base, action: <>moved to <span className="text-emerald-600 dark:text-emerald-400 font-medium">Done</span></> };
+  }
+  if (event.type === "hours") {
+    return { ...base, action: <>changed Hours — <span className="font-medium">{event.oldHours}h → {event.newHours}h</span></> };
+  }
+  if (event.type === "assigned") {
+    return { ...base, action: <>reassigned to <span className="font-medium">{event.newAssigneeName}</span></> };
+  }
+  return {
+    ...base,
+    action: (
+      <>
+        {event.priorityRaised ? "raised" : "lowered"} priority to{" "}
+        <span className="font-medium">{event.newPriorityLabel}</span>
+      </>
+    ),
+  };
+}
 
 // ── List groups (blocked first — most urgent) ─────────────────────────────────
 
@@ -350,55 +118,73 @@ const LIST_GROUPS: { id: string; label: string; statuses: TicketStatus[] }[] = [
 ];
 
 // ── Date helpers ──────────────────────────────────────────────────────────────
+// Real local-calendar date logic throughout (never a fixed/mock date) — same
+// conventions already established elsewhere in this app (Member Dashboard,
+// tickets-screen.tsx).
 
-function parseDueDate(str: string | undefined): Date | null {
-  if (!str) return null;
-  const d = new Date(`${str}, 2026`);
-  return isNaN(d.getTime()) ? null : d;
+function round1(n: number): number {
+  return Math.round(n * 10) / 10;
 }
 
-const TODAY      = new Date(2026, 5, 30); // Jun 30
-const WEEK_CUTOFF = new Date(2026, 6, 7); // Jul 7
-
-function isDueSoon(ticket: Ticket): boolean {
-  if (ticket.status === "done") return false;
-  const d = parseDueDate(ticket.dueDate);
-  return d !== null && d <= WEEK_CUTOFF;
+// Local calendar date behind a full timestamp — same reasoning/shape as
+// tickets-screen.tsx's own toLocalDateISO (kept local here too, page-local
+// glue over a shared real timestamp, not a duplicated business rule).
+function toLocalDateISO(iso: string): string {
+  const d = new Date(iso);
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${d.getFullYear()}-${month}-${day}`;
 }
 
-// ── Precomputed KPIs ──────────────────────────────────────────────────────────
+// Monday–Sunday containing todayISO — same "This Week" convention already
+// used by Member Dashboard/Reports, duplicated here as page-local glue.
+function getWeekRangeISO(todayISO: string): { start: string; end: string } {
+  const today = new Date(`${todayISO}T00:00:00`);
+  const day = today.getDay();
+  const monday = new Date(today);
+  monday.setDate(today.getDate() + (day === 0 ? -6 : 1 - day));
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+  const toISO = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return { start: toISO(monday), end: toISO(sunday) };
+}
 
-const TOTAL_HOURS    = MY_TICKETS.reduce((s, t) => s + (t.hours ?? 0), 0);
-const BLOCKED_TICKETS = MY_TICKETS.filter((t) => t.status === "blocked");
-const DUE_SOON_TICKETS = MY_TICKETS.filter(isDueSoon).sort((a, b) => {
-  const da = parseDueDate(a.dueDate)?.getTime() ?? Infinity;
-  const db = parseDueDate(b.dueDate)?.getTime() ?? Infinity;
-  return da - db;
-});
+// Same "urgent window" convention Member Dashboard's own isUrgentDue uses —
+// today plus the two days right after it.
+const URGENT_WINDOW_DAYS = 2;
 
-const HOURS_BY_STATUS = {
-  assigned:   TOTAL_HOURS,
-  blocked:    MY_TICKETS.filter(t => t.status === "blocked").reduce((s, t) => s + (t.hours ?? 0), 0),
-  inProgress: MY_TICKETS.filter(t => t.status === "in-progress").reduce((s, t) => s + (t.hours ?? 0), 0),
-  review:     MY_TICKETS.filter(t => t.status === "review").reduce((s, t) => s + (t.hours ?? 0), 0),
-  done:       MY_TICKETS.filter(t => t.status === "done").reduce((s, t) => s + (t.hours ?? 0), 0),
-};
+function isUrgentDue(dueISO: string, todayISO: string): boolean {
+  if (dueISO > todayISO) {
+    const diffDays = Math.round(
+      (new Date(`${dueISO}T00:00:00`).getTime() - new Date(`${todayISO}T00:00:00`).getTime()) / 86_400_000
+    );
+    return diffDays <= URGENT_WINDOW_DAYS;
+  }
+  return false;
+}
 
-const REMAINING_ESTIMATED_HOURS = TOTAL_HOURS - HOURS_BY_STATUS.done;
+function isDueThisWeek(t: Ticket, weekStart: string, weekEnd: string): boolean {
+  if (t.status === "done" || !t.dueDate) return false;
+  const iso = parseDisplayDate(t.dueDate);
+  return Boolean(iso) && iso >= weekStart && iso <= weekEnd;
+}
 
-// ── My Time (Member role only) ──────────────────────────────────────────────
-// Time tracking isn't a separate module for Members — it's a compact summary
-// of what "Log Time" on their own tickets has already produced, plus a
-// read-only view of those entries. Sized to sum to the Member persona's
-// hoursWeek in mock-time-tracking.ts so the summary row and the timesheet
-// panel agree with each other and with what Admin/Project Lead see for this
-// same person in Time Tracking.
-const MY_TIME_ENTRIES: PersonalTimesheetEntry[] = [
-  { id: "mte-1", ticket: MY_TICKETS.find((t) => t.id === "mw-pci")!,        hours: 7, date: "Yesterday", comment: "Reviewed encryption requirements with security" },
-  { id: "mte-2", ticket: MY_TICKETS.find((t) => t.id === "mw-kyc")!,        hours: 6, date: "Jun 28",     comment: "Investigated vendor timeout errors" },
-  { id: "mte-3", ticket: MY_TICKETS.find((t) => t.id === "mw-a11y")!,       hours: 5, date: "Jun 27",     comment: "VoiceOver pass on settings screens" },
-  { id: "mte-4", ticket: MY_TICKETS.find((t) => t.id === "mw-pagination")!, hours: 4, date: "Jun 26",     comment: "Pagination edge cases for large accounts" },
-];
+// Matches the header's original "Tuesday, June 30" style — real local date,
+// same helper shape as Member/Project Lead Dashboards' own formatFullDate.
+function formatFullDate(todayISO: string): string {
+  return new Date(`${todayISO}T00:00:00`).toLocaleDateString("en-US", {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+  });
+}
+
+function formatEntryDateLabel(workDateISO: string, todayISO: string, yesterdayISO: string): string {
+  if (workDateISO === todayISO) return "Today";
+  if (workDateISO === yesterdayISO) return "Yesterday";
+  return formatISODate(workDateISO);
+}
 
 // ── Focus mode config ─────────────────────────────────────────────────────────
 
@@ -479,10 +265,10 @@ function KpiCard({
 
 // ── Focus ticket row (compact, scannable) ─────────────────────────────────────
 
-function FocusTicketRow({ ticket, onOpen }: { ticket: Ticket; onOpen: (t: Ticket) => void }) {
-  const dueDate   = parseDueDate(ticket.dueDate);
-  const isOverdue = dueDate !== null && dueDate < TODAY && ticket.status !== "done";
-  const isUrgent  = !isOverdue && dueDate !== null && dueDate <= new Date(2026, 6, 3);
+function FocusTicketRow({ ticket, todayISO, onOpen }: { ticket: Ticket; todayISO: string; onOpen: (t: Ticket) => void }) {
+  const dueISO    = ticket.dueDate ? parseDisplayDate(ticket.dueDate) : "";
+  const isOverdue = Boolean(dueISO) && dueISO < todayISO && ticket.status !== "done";
+  const isUrgent  = !isOverdue && Boolean(dueISO) && isUrgentDue(dueISO, todayISO);
 
   return (
     <button
@@ -579,7 +365,20 @@ const VIEW_ICONS: Record<WorkView, ReactNode> = {
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function MyWorkScreen() {
-  const { user } = useCurrentUser();
+  const { user, userId, organization, isDevFallback } = useCurrentUser();
+
+  const [loadState, setLoadState] = useState<"loading" | "ready" | "error">(isDevFallback ? "ready" : "loading");
+  const [loadErrorMessage, setLoadErrorMessage] = useState<string | null>(null);
+  const [tickets, setTickets] = useState<Ticket[]>([]);
+  const [projects, setProjects] = useState<{ slug: string; name: string }[]>([]);
+  const [activityEvents, setActivityEvents] = useState<OrganizationActivityEvent[]>([]);
+  const [todayMinutes, setTodayMinutes] = useState(0);
+  const [weekMinutes, setWeekMinutes] = useState(0);
+  const [monthMinutes, setMonthMinutes] = useState(0);
+  const [weeklyCapacity, setWeeklyCapacity] = useState(user.weeklyCapacity);
+  const [timesheetRecords, setTimesheetRecords] = useState<ProfileTimeEntryRecord[]>([]);
+  const [requestId, setRequestId] = useState(0);
+
   const [previewTicket, setPreviewTicket] = useState<Ticket | null>(null);
   const [view, setView]                   = useState<WorkView>("list");
   const [statusFilter, setStatusFilter]   = useState<string[]>([]);
@@ -590,32 +389,243 @@ export function MyWorkScreen() {
   const [focusMode, setFocusMode]         = useState(false);
   const [showTimesheet, setShowTimesheet] = useState(false);
 
+  const runFetch = useCallback(() => setRequestId((id) => id + 1), []);
+
+  useEffect(() => {
+    if (isDevFallback || !organization || !userId) return;
+    let cancelled = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: same "clear before the async fetch below resolves" pattern used elsewhere in this app (e.g. member-profile-modal.tsx)
+    setLoadState("loading");
+
+    (async () => {
+      const ticketsResult = await loadOrganizationTickets(organization.id);
+      if (cancelled) return;
+      if (ticketsResult.status === "error") {
+        setLoadState("error");
+        setLoadErrorMessage(ticketsResult.message);
+        return;
+      }
+
+      const myTicketIds = ticketsResult.tickets.filter((t) => t.assigneeProfileId === userId).map((t) => t.id);
+
+      const todayISO = getTodayISO();
+      const { start: weekStart, end: weekEnd } = getWeekRangeISO(todayISO);
+      const monthStart = `${todayISO.slice(0, 7)}-01`;
+
+      const [activityResult, todayResult, weekResult, monthResult, capacityResult, entriesResult] = await Promise.all([
+        loadOrganizationActivity(myTicketIds, RECENT_ACTIVITY_LIMIT),
+        loadProfileLoggedTimeForDate(userId, todayISO),
+        loadProfileLoggedMinutesForRange(userId, weekStart, weekEnd),
+        loadProfileLoggedMinutesForRange(userId, monthStart, todayISO),
+        loadMemberWeeklyCapacity(userId, user.weeklyCapacity),
+        loadProfileTimeEntries(userId, myTicketIds, TIMESHEET_ENTRY_LIMIT),
+      ]);
+      if (cancelled) return;
+
+      if (activityResult.status === "error") {
+        setLoadState("error");
+        setLoadErrorMessage(activityResult.message);
+        return;
+      }
+      if (todayResult.status === "error") {
+        setLoadState("error");
+        setLoadErrorMessage(todayResult.message);
+        return;
+      }
+      if (weekResult.status === "error") {
+        setLoadState("error");
+        setLoadErrorMessage(weekResult.message);
+        return;
+      }
+      if (monthResult.status === "error") {
+        setLoadState("error");
+        setLoadErrorMessage(monthResult.message);
+        return;
+      }
+      if (capacityResult.status === "error") {
+        setLoadState("error");
+        setLoadErrorMessage(capacityResult.message);
+        return;
+      }
+      if (entriesResult.status === "error") {
+        setLoadState("error");
+        setLoadErrorMessage(entriesResult.message);
+        return;
+      }
+
+      setTickets(ticketsResult.tickets);
+      setProjects(ticketsResult.projects);
+      setActivityEvents(activityResult.events);
+      setTodayMinutes(todayResult.entries.reduce((sum, e) => sum + e.minutes, 0));
+      setWeekMinutes(weekResult.totalMinutes);
+      setMonthMinutes(monthResult.totalMinutes);
+      setWeeklyCapacity(capacityResult.weeklyCapacity);
+      setTimesheetRecords(entriesResult.entries);
+      setLoadState("ready");
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isDevFallback, organization, userId, requestId, user.weeklyCapacity]);
+
   const openPreview = (ticket: Ticket) => setPreviewTicket(ticket);
   const show        = (section: string) => !focusMode || !FOCUS_MODE_HIDDEN.has(section);
 
-  // Only Members get personal time tracking folded into My Work — Admin and
-  // Project Lead keep their dedicated Time Tracking page for this data.
-  const myTimesheetRow = user.role === "MEMBER"
-    ? timesheetRows.find((r) => r.name === user.name)
-    : undefined;
+  const todayISO     = getTodayISO();
+  const yesterdayISO = getTodayISO(-1);
+  const { start: weekStart, end: weekEnd } = getWeekRangeISO(todayISO);
 
-  const activeCount = MY_TICKETS.filter((t) => t.status !== "done").length;
+  const myTickets = useMemo(
+    () => (userId ? tickets.filter((t) => t.assigneeProfileId === userId) : []),
+    [tickets, userId]
+  );
+  const myTicketsById = useMemo(() => new Map(myTickets.map((t) => [t.id, t])), [myTickets]);
+  const projectsBySlug = useMemo(() => new Map(projects.map((p) => [p.slug, p])), [projects]);
+
+  const activeCount = myTickets.filter((t) => t.status !== "done").length;
+  const totalHours = useMemo(() => myTickets.reduce((s, t) => s + (t.hours ?? 0), 0), [myTickets]);
+  const blockedTickets = useMemo(() => myTickets.filter((t) => t.status === "blocked"), [myTickets]);
+  const dueThisWeekTickets = useMemo(
+    () =>
+      myTickets
+        .filter((t) => isDueThisWeek(t, weekStart, weekEnd))
+        .sort((a, b) => parseDisplayDate(a.dueDate as string).localeCompare(parseDisplayDate(b.dueDate as string))),
+    [myTickets, weekStart, weekEnd]
+  );
+
+  const hoursByStatus = useMemo(
+    () => ({
+      assigned:   totalHours,
+      blocked:    myTickets.filter((t) => t.status === "blocked").reduce((s, t) => s + (t.hours ?? 0), 0),
+      inProgress: myTickets.filter((t) => t.status === "in-progress").reduce((s, t) => s + (t.hours ?? 0), 0),
+      review:     myTickets.filter((t) => t.status === "review").reduce((s, t) => s + (t.hours ?? 0), 0),
+      done:       myTickets.filter((t) => t.status === "done").reduce((s, t) => s + (t.hours ?? 0), 0),
+    }),
+    [myTickets, totalHours]
+  );
+  const remainingEstimatedHours = Math.max(0, totalHours - hoursByStatus.done);
+
+  // Filter option lists — restricted to values that actually occur among
+  // this member's own tickets, same "only real, present values" convention
+  // Admin Reports' own filters already use.
+  const statusOptions: DropdownGroup[] = useMemo(() => {
+    const present = new Set(myTickets.map((t) => t.status));
+    return [{ options: (Object.keys(STATUS_LABEL) as TicketStatus[]).filter((s) => present.has(s)).map((s) => ({ value: s, label: STATUS_LABEL[s] })) }];
+  }, [myTickets]);
+
+  const priorityOptions: DropdownGroup[] = useMemo(() => {
+    const present = new Set(myTickets.map((t) => t.priority));
+    return [{ options: PRIORITY_VALUES.filter((p) => present.has(p)).map((p) => ({ value: p, label: PRIORITY_LABEL[p] })) }];
+  }, [myTickets]);
+
+  const projectOptions: DropdownGroup[] = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const t of myTickets) {
+      if (!seen.has(t.projectSlug)) seen.set(t.projectSlug, projectsBySlug.get(t.projectSlug)?.name ?? t.projectSlug);
+    }
+    return [{ options: Array.from(seen.entries()).map(([value, label]) => ({ value, label })).sort((a, b) => a.label.localeCompare(b.label)) }];
+  }, [myTickets, projectsBySlug]);
+
+  const labelOptions: DropdownGroup[] = useMemo(() => {
+    const set = new Set<string>();
+    for (const t of myTickets) for (const l of t.labels) set.add(l);
+    return [{ options: Array.from(set).sort().map((l) => ({ value: l, label: l })) }];
+  }, [myTickets]);
+
+  // Status/Priority/Project/Labels ANDed together, same multi-select-OR/
+  // cross-filter-AND convention tickets-screen.tsx already uses.
+  const filteredMyTickets = useMemo(
+    () =>
+      myTickets.filter((t) => {
+        if (statusFilter.length > 0 && !statusFilter.includes(t.status)) return false;
+        if (priorityFilter.length > 0 && !priorityFilter.includes(t.priority)) return false;
+        if (projectFilter.length > 0 && !projectFilter.includes(t.projectSlug)) return false;
+        if (labelFilter.length > 0 && !labelFilter.some((l) => t.labels.includes(l))) return false;
+        return true;
+      }),
+    [myTickets, statusFilter, priorityFilter, projectFilter, labelFilter]
+  );
 
   // KPI cards toggle their own filter; clicking the active one clears it
   function handleKpiClick(mode: KpiMode) {
     setKpiMode((prev) => (prev === mode ? null : mode));
   }
 
-  // Displayed tickets: apply kpiMode filter/sort
-  const displayedTickets = (() => {
-    if (kpiMode === "blocked")   return MY_TICKETS.filter((t) => t.status === "blocked");
-    if (kpiMode === "due-soon")  return DUE_SOON_TICKETS;
-    if (kpiMode === "hours")     return [...MY_TICKETS].sort((a, b) => (b.hours ?? 0) - (a.hours ?? 0));
-    return MY_TICKETS;
-  })();
+  // Displayed tickets: the 4 dropdown filters above, further narrowed by
+  // whichever KPI quick-filter is active — so group/board counts always
+  // match what's actually visible, never the unfiltered totals the KPI
+  // cards themselves show.
+  const displayedTickets = useMemo(() => {
+    if (kpiMode === "blocked")   return filteredMyTickets.filter((t) => t.status === "blocked");
+    if (kpiMode === "due-soon") {
+      return filteredMyTickets
+        .filter((t) => isDueThisWeek(t, weekStart, weekEnd))
+        .sort((a, b) => parseDisplayDate(a.dueDate as string).localeCompare(parseDisplayDate(b.dueDate as string)));
+    }
+    if (kpiMode === "hours")     return [...filteredMyTickets].sort((a, b) => (b.hours ?? 0) - (a.hours ?? 0));
+    return filteredMyTickets;
+  }, [filteredMyTickets, kpiMode, weekStart, weekEnd]);
 
   // Flat list when kpiMode imposes its own order; grouped otherwise
   const useFlatList = kpiMode === "due-soon" || kpiMode === "hours";
+
+  const myRecentActivity: ActivityEntry[] = useMemo(
+    () => activityEvents.map((event) => activityEventToEntry(event, myTicketsById.get(event.ticketId), todayISO, yesterdayISO)),
+    [activityEvents, myTicketsById, todayISO, yesterdayISO]
+  );
+
+  const myTimeEntries: PersonalTimesheetEntry[] = useMemo(
+    () =>
+      timesheetRecords
+        .map((r) => {
+          const ticket = myTicketsById.get(r.ticketId);
+          if (!ticket) return null;
+          return {
+            id: r.id,
+            ticket,
+            hours: round1(r.minutes / 60),
+            date: formatEntryDateLabel(r.workDate, todayISO, yesterdayISO),
+            comment: r.comment,
+          };
+        })
+        .filter((e): e is PersonalTimesheetEntry => e !== null),
+    [timesheetRecords, myTicketsById, todayISO, yesterdayISO]
+  );
+
+  const weekHours = round1(weekMinutes / 60);
+  const capacityPct = weeklyCapacity > 0 ? Math.min(100, Math.round((weekHours / weeklyCapacity) * 100)) : 0;
+  const showMyTime = user.role === "MEMBER";
+
+  if (loadState === "loading") {
+    return (
+      <div className="max-w-5xl mx-auto px-6 py-6 pb-16">
+        <div className="h-full flex items-center justify-center text-sm text-slate-400 dark:text-zinc-500 py-20">
+          Loading your work…
+        </div>
+      </div>
+    );
+  }
+
+  if (loadState === "error") {
+    return (
+      <div className="max-w-5xl mx-auto px-6 py-6 pb-16">
+        <div className="flex flex-col items-center justify-center text-center px-4 py-20">
+          <h3 className="text-sm font-semibold text-slate-700 dark:text-zinc-200">Couldn&apos;t load your work</h3>
+          <p className="text-sm text-slate-400 mt-1 max-w-xs dark:text-zinc-500">
+            {loadErrorMessage ?? "Something went wrong."}
+          </p>
+          <button
+            type="button"
+            onClick={runFetch}
+            className="mt-5 text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3.5 py-2 shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-500 dark:hover:bg-brand-600 dark:shadow-brand-500/20"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-5xl mx-auto px-6 py-6 pb-16">
@@ -629,10 +639,10 @@ export function MyWorkScreen() {
             </h1>
             <span className="text-slate-300 dark:text-zinc-600">·</span>
             <span className="text-sm font-medium text-slate-600 dark:text-zinc-400">
-              Good morning, Marcus 👋
+              Good morning, {user.name.split(" ")[0]} 👋
             </span>
           </div>
-          <p className="text-xs text-slate-400 dark:text-zinc-500">Tuesday, June 30</p>
+          <p className="text-xs text-slate-400 dark:text-zinc-500">{formatFullDate(todayISO)}</p>
         </div>
 
         {/* Focus Mode toggle */}
@@ -659,14 +669,14 @@ export function MyWorkScreen() {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <KpiCard
             label="Assigned Tickets"
-            value={MY_TICKETS.length}
+            value={myTickets.length}
             sub={`${activeCount} active`}
             active={kpiMode === "all"}
             onClick={() => handleKpiClick("all")}
           />
           <KpiCard
             label="Estimated Hours"
-            value={<>{TOTAL_HOURS}<span className="text-base font-medium ml-0.5">h</span></>}
+            value={<>{totalHours}<span className="text-base font-medium ml-0.5">h</span></>}
             sub="assigned"
             accent
             active={kpiMode === "hours"}
@@ -674,16 +684,16 @@ export function MyWorkScreen() {
           />
           <KpiCard
             label="Blocked"
-            value={BLOCKED_TICKETS.length}
-            sub={BLOCKED_TICKETS.length > 0 ? "needs attention" : "you're clear"}
-            danger={BLOCKED_TICKETS.length > 0}
+            value={blockedTickets.length}
+            sub={blockedTickets.length > 0 ? "needs attention" : "you're clear"}
+            danger={blockedTickets.length > 0}
             active={kpiMode === "blocked"}
             onClick={() => handleKpiClick("blocked")}
           />
           <KpiCard
             label="Due This Week"
-            value={DUE_SOON_TICKETS.length}
-            sub="by Jul 7"
+            value={dueThisWeekTickets.length}
+            sub={`by ${formatISODate(weekEnd)}`}
             active={kpiMode === "due-soon"}
             onClick={() => handleKpiClick("due-soon")}
           />
@@ -698,11 +708,11 @@ export function MyWorkScreen() {
           </p>
           <div className="flex items-center gap-6 flex-1 min-w-0">
             {([
-              { label: "Assigned",    value: HOURS_BY_STATUS.assigned,   cls: "text-slate-900 dark:text-zinc-50" },
-              { label: "Blocked",     value: HOURS_BY_STATUS.blocked,    cls: "text-red-600 dark:text-red-400" },
-              { label: "In Progress", value: HOURS_BY_STATUS.inProgress, cls: "text-amber-600 dark:text-amber-400" },
-              { label: "In Review",   value: HOURS_BY_STATUS.review,     cls: "text-violet-600 dark:text-violet-400" },
-              { label: "Done",        value: HOURS_BY_STATUS.done,       cls: "text-emerald-600 dark:text-emerald-400" },
+              { label: "Assigned",    value: hoursByStatus.assigned,   cls: "text-slate-900 dark:text-zinc-50" },
+              { label: "Blocked",     value: hoursByStatus.blocked,    cls: "text-red-600 dark:text-red-400" },
+              { label: "In Progress", value: hoursByStatus.inProgress, cls: "text-amber-600 dark:text-amber-400" },
+              { label: "In Review",   value: hoursByStatus.review,     cls: "text-violet-600 dark:text-violet-400" },
+              { label: "Done",        value: hoursByStatus.done,       cls: "text-emerald-600 dark:text-emerald-400" },
             ] as const).map(({ label, value, cls }) => (
               <div key={label} className="flex-shrink-0">
                 <p className="text-[10px] text-slate-400 dark:text-zinc-600">{label}</p>
@@ -717,7 +727,7 @@ export function MyWorkScreen() {
       {/* Time tracking isn't a separate module for a Member — it's folded in
           here as a compact summary, with the ticket's own Log Time button
           remaining the only way to actually log time. */}
-      {myTimesheetRow && show("my-time") && (
+      {showMyTime && show("my-time") && (
         <div className="mt-3 flex items-center gap-5 rounded-xl border border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900 px-5 py-3.5 shadow-sm shadow-slate-200/40 dark:shadow-black/20 overflow-x-auto">
           <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600 flex-shrink-0">
             My Time
@@ -725,19 +735,19 @@ export function MyWorkScreen() {
           <div className="flex items-center gap-6 flex-1 min-w-0">
             <div className="flex-shrink-0">
               <p className="text-[10px] text-slate-400 dark:text-zinc-600">Logged Today</p>
-              <p className="text-sm font-bold text-slate-900 dark:text-zinc-50 tabular-nums">{formatHours(myTimesheetRow.hoursToday)}</p>
+              <p className="text-sm font-bold text-slate-900 dark:text-zinc-50 tabular-nums">{formatHours(todayMinutes / 60)}</p>
             </div>
             <div className="flex-shrink-0">
               <p className="text-[10px] text-slate-400 dark:text-zinc-600">Logged This Week</p>
-              <p className="text-sm font-bold text-slate-900 dark:text-zinc-50 tabular-nums">{formatHours(myTimesheetRow.hoursWeek)}</p>
+              <p className="text-sm font-bold text-slate-900 dark:text-zinc-50 tabular-nums">{formatHours(weekHours)}</p>
             </div>
             <div className="flex-shrink-0">
               <p className="text-[10px] text-slate-400 dark:text-zinc-600">Remaining Estimated</p>
-              <p className="text-sm font-bold text-slate-900 dark:text-zinc-50 tabular-nums">{REMAINING_ESTIMATED_HOURS}h</p>
+              <p className="text-sm font-bold text-slate-900 dark:text-zinc-50 tabular-nums">{remainingEstimatedHours}h</p>
             </div>
             <div className="flex-shrink-0">
               <p className="text-[10px] text-slate-400 dark:text-zinc-600 mb-0.5">Personal Capacity</p>
-              <CapacityCell pct={weeklyCapacityPct(myTimesheetRow)} />
+              <CapacityCell pct={capacityPct} />
             </div>
           </div>
           <button
@@ -762,7 +772,7 @@ export function MyWorkScreen() {
               {displayedTickets.length}
             </span>
             <span className="hidden sm:block text-xs text-slate-300 dark:text-zinc-700">
-              · {TOTAL_HOURS}h estimated
+              · {totalHours}h estimated
             </span>
 
             {/* Active KPI filter chip */}
@@ -781,10 +791,10 @@ export function MyWorkScreen() {
           </div>
 
           <div className="flex items-center gap-1.5 flex-wrap">
-            <FilterDropdown label="Status"   mode="multi"  groups={STATUS_GROUPS}   selected={statusFilter}   onChange={setStatusFilter} />
-            <FilterDropdown label="Priority" mode="multi"  groups={PRIORITY_GROUPS} selected={priorityFilter} onChange={setPriorityFilter} />
-            <FilterDropdown label="Project"  mode="single" groups={PROJECT_GROUPS}  selected={projectFilter}  onChange={setProjectFilter} />
-            <FilterDropdown label="Labels"   mode="multi"  groups={LABEL_GROUPS}    selected={labelFilter}    onChange={setLabelFilter} />
+            <FilterDropdown label="Status"   mode="multi"  groups={statusOptions}   selected={statusFilter}   onChange={setStatusFilter} />
+            <FilterDropdown label="Priority" mode="multi"  groups={priorityOptions} selected={priorityFilter} onChange={setPriorityFilter} />
+            <FilterDropdown label="Project"  mode="single" groups={projectOptions}  selected={projectFilter}  onChange={setProjectFilter} />
+            <FilterDropdown label="Labels"   mode="multi"  groups={labelOptions}    selected={labelFilter}    onChange={setLabelFilter} />
 
             <div className="w-px h-4 bg-slate-200 dark:bg-zinc-700 mx-1" />
 
@@ -829,6 +839,9 @@ export function MyWorkScreen() {
         ) : (
           /* Grouped list */
           <div>
+            {displayedTickets.length === 0 && (
+              <p className="text-sm text-slate-400 dark:text-zinc-500 py-2">No tickets match this filter.</p>
+            )}
             {LIST_GROUPS.map((group) => {
               const groupTickets = displayedTickets.filter((t) =>
                 (group.statuses as string[]).includes(t.status)
@@ -863,14 +876,14 @@ export function MyWorkScreen() {
           {show("blocked") && (
             <Section
               title="Blocked"
-              count={BLOCKED_TICKETS.length}
+              count={blockedTickets.length}
               icon={
                 <svg className="w-3.5 h-3.5 text-red-500 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
                   <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
                 </svg>
               }
             >
-              {BLOCKED_TICKETS.length === 0 ? (
+              {blockedTickets.length === 0 ? (
                 <div className="flex items-center gap-2 py-2 text-sm text-slate-400 dark:text-zinc-500">
                   <svg className="w-4 h-4 text-emerald-500 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
                     <path d="M5 12l5 5L20 7" />
@@ -879,8 +892,8 @@ export function MyWorkScreen() {
                 </div>
               ) : (
                 <div className="space-y-0.5">
-                  {BLOCKED_TICKETS.map((t) => (
-                    <FocusTicketRow key={t.id} ticket={t} onOpen={openPreview} />
+                  {blockedTickets.map((t) => (
+                    <FocusTicketRow key={t.id} ticket={t} todayISO={todayISO} onOpen={openPreview} />
                   ))}
                 </div>
               )}
@@ -891,19 +904,19 @@ export function MyWorkScreen() {
           {show("due-soon") && (
             <Section
               title="Due Soon"
-              count={DUE_SOON_TICKETS.length}
+              count={dueThisWeekTickets.length}
               icon={
                 <svg className="w-3.5 h-3.5 text-amber-500 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
                   <circle cx="12" cy="12" r="10" /><path d="M12 6v6l4 2" />
                 </svg>
               }
             >
-              {DUE_SOON_TICKETS.length === 0 ? (
+              {dueThisWeekTickets.length === 0 ? (
                 <p className="text-sm text-slate-400 dark:text-zinc-500 py-2">Nothing due this week.</p>
               ) : (
                 <div className="space-y-0.5">
-                  {DUE_SOON_TICKETS.map((t) => (
-                    <FocusTicketRow key={t.id} ticket={t} onOpen={openPreview} />
+                  {dueThisWeekTickets.map((t) => (
+                    <FocusTicketRow key={t.id} ticket={t} todayISO={todayISO} onOpen={openPreview} />
                   ))}
                 </div>
               )}
@@ -916,59 +929,63 @@ export function MyWorkScreen() {
       {show("activity") && (
         <div className="mt-5">
           <Section title="Recently Updated">
-            <div className="space-y-5">
-              {ACTIVITY_GROUPS.map((ag) => {
-                const entries = RECENT_ACTIVITY.filter((e) => e.group === ag.key);
-                if (entries.length === 0) return null;
-                return (
-                  <div key={ag.id}>
-                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-300 dark:text-zinc-700 mb-2.5">
-                      {ag.label}
-                    </p>
-                    <ul className="space-y-3.5">
-                      {entries.map((entry) => (
-                        <li key={entry.id} className="flex items-start gap-3">
-                          <MemberTrigger name={entry.name} avatar={entry.avatar} className="flex-shrink-0 mt-0.5 rounded-full">
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img
-                              src={entry.avatar}
-                              alt={entry.name}
-                              className="w-6 h-6 rounded-full"
-                            />
-                          </MemberTrigger>
-                          <div className="text-sm leading-snug min-w-0 flex-1">
-                            <p className="text-slate-700 dark:text-zinc-300">
-                              <MemberTrigger name={entry.name} avatar={entry.avatar} className="font-medium text-slate-900 dark:text-zinc-100 hover:underline">
-                                {entry.name}
-                              </MemberTrigger>{" "}
-                              {entry.action}
-                            </p>
-                            {entry.ticket && (
-                              <button
-                                type="button"
-                                onClick={() => openPreview(entry.ticket!)}
-                                className="group/ref mt-1 flex items-baseline gap-1.5 min-w-0 max-w-full text-left"
-                              >
-                                <TicketTypeIcon type={entry.ticket.type} />
-                                <span className="text-[11px] font-mono font-semibold text-slate-500 dark:text-zinc-400 group-hover/ref:text-brand-600 dark:group-hover/ref:text-brand-400 flex-shrink-0">
-                                  {getTicketDisplayKey(entry.ticket)}
-                                </span>
-                                <span className="text-sm font-medium text-slate-700 dark:text-zinc-300 group-hover/ref:text-brand-600 dark:group-hover/ref:text-brand-400 group-hover/ref:underline truncate">
-                                  {entry.ticket.title}
-                                </span>
-                              </button>
-                            )}
-                            <p className="text-xs text-slate-400 dark:text-zinc-500 mt-0.5">
-                              {entry.time}
-                            </p>
-                          </div>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                );
-              })}
-            </div>
+            {myRecentActivity.length === 0 ? (
+              <p className="text-sm text-slate-400 dark:text-zinc-500 py-2">No recent activity on your tickets yet.</p>
+            ) : (
+              <div className="space-y-5">
+                {ACTIVITY_GROUPS.map((ag) => {
+                  const entries = myRecentActivity.filter((e) => e.group === ag.key);
+                  if (entries.length === 0) return null;
+                  return (
+                    <div key={ag.id}>
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-slate-300 dark:text-zinc-700 mb-2.5">
+                        {ag.label}
+                      </p>
+                      <ul className="space-y-3.5">
+                        {entries.map((entry) => (
+                          <li key={entry.id} className="flex items-start gap-3">
+                            <MemberTrigger name={entry.name} avatar={entry.avatar} className="flex-shrink-0 mt-0.5 rounded-full">
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img
+                                src={entry.avatar}
+                                alt={entry.name}
+                                className="w-6 h-6 rounded-full"
+                              />
+                            </MemberTrigger>
+                            <div className="text-sm leading-snug min-w-0 flex-1">
+                              <p className="text-slate-700 dark:text-zinc-300">
+                                <MemberTrigger name={entry.name} avatar={entry.avatar} className="font-medium text-slate-900 dark:text-zinc-100 hover:underline">
+                                  {entry.name}
+                                </MemberTrigger>{" "}
+                                {entry.action}
+                              </p>
+                              {entry.ticket && (
+                                <button
+                                  type="button"
+                                  onClick={() => openPreview(entry.ticket!)}
+                                  className="group/ref mt-1 flex items-baseline gap-1.5 min-w-0 max-w-full text-left"
+                                >
+                                  <TicketTypeIcon type={entry.ticket.type} />
+                                  <span className="text-[11px] font-mono font-semibold text-slate-500 dark:text-zinc-400 group-hover/ref:text-brand-600 dark:group-hover/ref:text-brand-400 flex-shrink-0">
+                                    {getTicketDisplayKey(entry.ticket)}
+                                  </span>
+                                  <span className="text-sm font-medium text-slate-700 dark:text-zinc-300 group-hover/ref:text-brand-600 dark:group-hover/ref:text-brand-400 group-hover/ref:underline truncate">
+                                    {entry.ticket.title}
+                                  </span>
+                                </button>
+                              )}
+                              <p className="text-xs text-slate-400 dark:text-zinc-500 mt-0.5">
+                                {entry.time}
+                              </p>
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </Section>
         </div>
       )}
@@ -983,12 +1000,12 @@ export function MyWorkScreen() {
       )}
 
       {/* ── My Timesheet panel ──────────────────────────────────────────────── */}
-      {showTimesheet && myTimesheetRow && (
+      {showTimesheet && showMyTime && (
         <PersonalTimesheetPanel
-          today={myTimesheetRow.hoursToday}
-          week={myTimesheetRow.hoursWeek}
-          month={myTimesheetRow.hoursMonth}
-          entries={MY_TIME_ENTRIES}
+          today={todayMinutes / 60}
+          week={weekHours}
+          month={round1(monthMinutes / 60)}
+          entries={myTimeEntries}
           onOpenTicket={(ticket) => {
             setShowTimesheet(false);
             openPreview(ticket);

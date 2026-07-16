@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { tickets as MOCK_TICKETS, getTicketDisplayKey } from "@/lib/mock-tickets";
 import type { Ticket } from "@/lib/mock-tickets";
 import { loadProjectTickets, loadOrganizationLabels, createOrganizationLabel } from "@/lib/tickets";
-import { loadOrganizationMembers, type OrgMember } from "@/lib/projects";
+import { loadOrganizationMembers, loadProjectTeam, type OrgMember } from "@/lib/projects";
 import { buildLabelCatalog, parseDisplayDate, getTodayISO } from "@/components/tickets/ticket-ui";
 import { NewTicketModal } from "@/components/tickets/new-ticket-modal";
 import { ViewSwitcher, type ViewMode } from "@/components/tickets/view-switcher";
@@ -127,6 +127,12 @@ export function TicketsScreen({ slug, projectName }: { slug: string; projectName
   // filter itself stays unwired (see FilterBar), this just replaces the
   // mock names it used to show. Dev fallback shows none, never mock names.
   const [members, setMembers] = useState<OrgMember[]>([]);
+  // Real, project-scoped roster for the actual Assignee-picking UI (New
+  // Ticket, Quick Ticket Preview) — deliberately separate from `members`
+  // above: only an active member of *this* project can be assigned a
+  // ticket in it, but the Assigned filter is intentionally left showing
+  // every org member, unchanged (out of scope for this restriction).
+  const [assignableMembers, setAssignableMembers] = useState<OrgMember[]>([]);
   // Real per-org label catalog, only needed for the preview panel's Labels
   // editor (see editable prop below) — same catalog/merge Ticket Detail uses.
   const [orgLabels, setOrgLabels] = useState<string[]>([]);
@@ -187,6 +193,13 @@ export function TicketsScreen({ slug, projectName }: { slug: string; projectName
       if (result.status === "ready") setMembers(result.members);
     });
   }, [isDevFallback, organization]);
+
+  useEffect(() => {
+    if (isDevFallback || !organization) return;
+    loadProjectTeam(organization.id, slug).then((result) => {
+      if (result.status === "ready") setAssignableMembers(result.members);
+    });
+  }, [isDevFallback, organization, slug]);
 
   useEffect(() => {
     if (isDevFallback || !organization) return;
@@ -566,7 +579,7 @@ export function TicketsScreen({ slug, projectName }: { slug: string; projectName
           onBeforeNavigate={handleBeforeExpand}
           editable
           isDevFallback={isDevFallback}
-          members={members}
+          members={assignableMembers}
           allLabels={allLabelOptions}
           onCreateLabel={createLabel}
           onTicketUpdated={handleTicketUpdated}
@@ -577,7 +590,7 @@ export function TicketsScreen({ slug, projectName }: { slug: string; projectName
         <NewTicketModal
           slug={slug}
           tickets={ticketList}
-          members={members}
+          members={assignableMembers}
           onClose={() => setShowNewTicket(false)}
           onCreated={handleTicketCreated}
           onPreviewDuplicate={handlePreviewDuplicate}

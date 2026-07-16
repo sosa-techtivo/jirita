@@ -352,6 +352,29 @@ export async function createTicket(
   }
   if (!project) return { status: "error", message: "Project not found." };
 
+  // Reject an assignee who isn't a real, active member of this project —
+  // same "row exists in project_memberships" definition loadProjectTeam/
+  // is_project_member already use, enforced here too since neither RLS nor
+  // a DB constraint checks this (project_memberships/tickets' own FKs only
+  // ever validate assignee_profile_id against profiles, not against this
+  // specific project). Never auto-adds the assignee to the project — that
+  // stays exclusively a Team action.
+  if (input.assigneeProfileId) {
+    const { data: membershipRow, error: membershipError } = await supabase
+      .from("project_memberships")
+      .select("id")
+      .eq("project_id", project.id)
+      .eq("profile_id", input.assigneeProfileId)
+      .maybeSingle<{ id: string }>();
+    if (membershipError) {
+      logDev("assignee project membership check failed", membershipError);
+      return { status: "error", message: membershipError.message };
+    }
+    if (!membershipRow) {
+      return { status: "error", message: "This person isn't a member of this project and can't be assigned." };
+    }
+  }
+
   const { data: lastTicket, error: lastTicketError } = await supabase
     .from("tickets")
     .select("ticket_number")
@@ -447,6 +470,38 @@ export async function updateTicket(
   input: UpdateTicketInput
 ): Promise<UpdateTicketResult> {
   const supabase = getSupabaseBrowserClient();
+
+  // Same real-membership validation createTicket applies — reject setting
+  // (not clearing) an assignee who isn't an active member of this ticket's
+  // project. Looked up by ticketId directly since updateTicket isn't given
+  // an organizationId to resolve the project from slug the way createTicket
+  // does. Never auto-adds the assignee to the project.
+  if (input.assigneeProfileId) {
+    const { data: ticketRow, error: ticketLookupError } = await supabase
+      .from("tickets")
+      .select("project_id")
+      .eq("id", ticketId)
+      .maybeSingle<{ project_id: string }>();
+    if (ticketLookupError) {
+      logDev("ticket project lookup for assignee validation failed", ticketLookupError);
+      return { status: "error", message: ticketLookupError.message };
+    }
+    if (!ticketRow) return { status: "error", message: "Ticket not found." };
+
+    const { data: membershipRow, error: membershipError } = await supabase
+      .from("project_memberships")
+      .select("id")
+      .eq("project_id", ticketRow.project_id)
+      .eq("profile_id", input.assigneeProfileId)
+      .maybeSingle<{ id: string }>();
+    if (membershipError) {
+      logDev("assignee project membership check failed", membershipError);
+      return { status: "error", message: membershipError.message };
+    }
+    if (!membershipRow) {
+      return { status: "error", message: "This person isn't a member of this project and can't be assigned." };
+    }
+  }
 
   const patch: Record<string, unknown> = {};
   if (input.title !== undefined) patch.title = input.title;
@@ -1764,6 +1819,62 @@ export async function loadTicketTimeEntries(ticketId: string): Promise<TicketTim
   return { status: "ready", entries };
 }
 
+export interface ProfileTimeEntryRecord extends TimeEntryRecord {
+  ticketId: string;
+}
+
+export type ProfileTimeEntriesResult =
+  | { status: "ready"; entries: ProfileTimeEntryRecord[] }
+  | { status: "error"; message: string };
+
+// Real cross-ticket time entries for one profile, scoped to a given set of
+// ticket ids (e.g. every ticket they're assigned to) — same row shape and
+// rowToTimeEntryRecord mapping as loadTicketTimeEntries above, reused as-is,
+// just filtered by logged_by + a ticket_id set instead of a single ticket.
+// Backs My Work's own Personal Timesheet panel, the one place in the app
+// that needs "all of one person's own logged entries across many tickets."
+export async function loadProfileTimeEntries(
+  profileId: string,
+  ticketIds: string[],
+  limit = 20
+): Promise<ProfileTimeEntriesResult> {
+  if (ticketIds.length === 0) return { status: "ready", entries: [] };
+
+  const supabase = getSupabaseBrowserClient();
+
+  const { data: rows, error } = await supabase
+    .from("ticket_time_entries")
+    .select("id, minutes, comment, work_date, logged_by, created_at, ticket_id")
+    .eq("logged_by", profileId)
+    .in("ticket_id", ticketIds)
+    .order("created_at", { ascending: false })
+    .limit(limit)
+    .returns<(TimeEntryRow & { ticket_id: string })[]>();
+
+  if (error) {
+    logDev("profile time entries query failed", error);
+    return { status: "error", message: error.message };
+  }
+
+  // logged_by is always this same profile (filtered above), so the logger's
+  // own profile row only needs to be resolved once, not per-row.
+  const { data: profileRow, error: profileError } = await supabase
+    .from("profiles")
+    .select("id, first_name, last_name, avatar_url, updated_at")
+    .eq("id", profileId)
+    .maybeSingle<AssigneeProfileRow>();
+  if (profileError) {
+    logDev("profile lookup for time entries failed", profileError);
+  }
+
+  const entries: ProfileTimeEntryRecord[] = (rows ?? []).map((row) => ({
+    ...rowToTimeEntryRecord(row, profileRow ?? undefined),
+    ticketId: row.ticket_id,
+  }));
+
+  return { status: "ready", entries };
+}
+
 export interface LogTimeInput {
   /** Must be > 0 — normalized from the modal's separate hours/minutes fields. */
   minutes: number;
@@ -1907,6 +2018,11 @@ export interface OrganizationActivityEvent {
   actorAvatar: string;
   ticketId: string;
   time: string;
+  /** Raw event timestamp — `time` above is already relative-formatted for
+   *  direct display; this is only for callers that need to bucket events by
+   *  real calendar day (e.g. My Work's "Recently Updated" Today/Yesterday/
+   *  Earlier groups) without re-deriving it from the display string. */
+  createdAtISO: string;
   oldHours?: string;
   newHours?: string;
   newAssigneeName?: string;
@@ -1946,18 +2062,28 @@ function isRelevantOrgActivityRow(row: OrgActivityRawRow): boolean {
   }
 }
 
+// `actorProfileId`, when passed, narrows this to only the events that
+// specific profile performed — reused as-is by the Member Project Overview's
+// own "My Activity" (real activity on this project, scoped to the signed-in
+// member as actor) instead of a second/parallel activity query. Every
+// existing caller (Admin/Project Lead Dashboards, Admin Project Overview)
+// omits it and keeps its prior, unfiltered behavior unchanged.
 export async function loadOrganizationActivity(
   ticketIds: string[],
-  limit = 10
+  limit = 10,
+  actorProfileId?: string
 ): Promise<OrganizationActivityResult> {
   if (ticketIds.length === 0) return { status: "ready", events: [] };
 
   const supabase = getSupabaseBrowserClient();
 
-  const { data: rows, error } = await supabase
+  let query = supabase
     .from("ticket_activity")
     .select("id, ticket_id, actor_profile_id, event_type, old_value, new_value, created_at")
-    .in("ticket_id", ticketIds)
+    .in("ticket_id", ticketIds);
+  if (actorProfileId) query = query.eq("actor_profile_id", actorProfileId);
+
+  const { data: rows, error } = await query
     .order("created_at", { ascending: false })
     .limit(ORG_ACTIVITY_RAW_FETCH_LIMIT)
     .returns<OrgActivityRawRow[]>();
@@ -1984,6 +2110,7 @@ export async function loadOrganizationActivity(
       actorAvatar: (actor ? resolveAvatarUrl(actor.avatar_url, actor.updated_at) : null) ?? FALLBACK_AVATAR,
       ticketId: row.ticket_id,
       time: formatRelativeTime(row.created_at),
+      createdAtISO: row.created_at,
     };
 
     if (row.event_type === "status_changed") {

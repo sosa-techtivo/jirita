@@ -56,7 +56,7 @@ import {
   type RelatedTicket,
   type TicketRelationKind,
 } from "@/lib/tickets";
-import { loadOrganizationMembers, type OrgMember } from "@/lib/projects";
+import { loadProjectTeam, type OrgMember } from "@/lib/projects";
 import { FALLBACK_AVATAR } from "@/lib/current-user";
 import { MemberTrigger } from "@/components/member-profile";
 import { useCurrentUser } from "@/components/current-user-provider";
@@ -2527,10 +2527,12 @@ export function TicketDetailScreen({
 
   useEffect(() => {
     if (isDevFallback || !organization) return; // dev fallback: no mock members either
-    loadOrganizationMembers(organization.id).then((result) => {
+    // Project-scoped roster (not loadOrganizationMembers) — only an active
+    // member of this ticket's own project can be assigned to it.
+    loadProjectTeam(organization.id, slug).then((result) => {
       if (result.status === "ready") setMembers(result.members);
     });
-  }, [isDevFallback, organization]);
+  }, [isDevFallback, organization, slug]);
 
   useEffect(() => {
     if (isDevFallback || !organization) return;

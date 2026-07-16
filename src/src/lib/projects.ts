@@ -612,6 +612,56 @@ export async function loadLeadProjects(organizationId: string, profileId: string
   return { status: "ready", projects };
 }
 
+export interface MemberProject {
+  slug: string;
+  name: string;
+}
+
+export type MemberProjectsResult =
+  | { status: "ready"; projects: MemberProject[] }
+  | { status: "error"; message: string };
+
+// Active projects this profile currently has any real Team membership on —
+// same shape/query as loadLeadProjects just above, minus its
+// project_role = 'lead' filter, since here any real project_memberships row
+// (Lead or Member) counts. Backs the Member Dashboard's own project
+// selector only. RLS (project_memberships_select / projects_select, both
+// via can_view_project) already limits results to what this profile can
+// actually see, same as loadLeadProjects.
+export async function loadMemberProjects(organizationId: string, profileId: string): Promise<MemberProjectsResult> {
+  const supabase = getSupabaseBrowserClient();
+
+  const { data: membershipRows, error: membershipError } = await supabase
+    .from("project_memberships")
+    .select("project_id")
+    .eq("profile_id", profileId)
+    .returns<{ project_id: string }[]>();
+
+  if (membershipError) {
+    logDev("member project memberships query failed", membershipError);
+    return { status: "error", message: membershipError.message };
+  }
+  if (!membershipRows || membershipRows.length === 0) return { status: "ready", projects: [] };
+
+  const projectIds = membershipRows.map((row) => row.project_id);
+
+  const { data: rows, error } = await supabase
+    .from("projects")
+    .select("slug, name")
+    .eq("organization_id", organizationId)
+    .eq("status", "active")
+    .in("id", projectIds)
+    .order("name", { ascending: true })
+    .returns<{ slug: string; name: string }[]>();
+
+  if (error) {
+    logDev("member projects query failed", error);
+    return { status: "error", message: error.message };
+  }
+
+  return { status: "ready", projects: (rows ?? []).map((row) => ({ slug: row.slug, name: row.name })) };
+}
+
 export interface ProjectSettingsUpdate {
   name?: string;
   description?: string;

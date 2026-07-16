@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useCurrentUser } from "@/components/current-user-provider";
 import { getTeamByProjectSlug } from "@/lib/mock-team";
 import type { TeamMember } from "@/lib/mock-team";
@@ -246,6 +247,8 @@ export function ProjectLeadDashboard() {
   const { user, userId, organization, isDevFallback } = useCurrentUser();
   const { openMemberProfile } = useMemberProfile();
   const [preview, setPreview] = useState<Ticket | null>(null);
+  const router = useRouter();
+  const searchParams = useSearchParams();
 
   // ── Current Project: real projects this profile leads (projects.owner_profile_id) ──
   const [projectsLoadState, setProjectsLoadState] = useState<"loading" | "ready" | "error">(
@@ -253,7 +256,6 @@ export function ProjectLeadDashboard() {
   );
   const [projectsErrorMessage, setProjectsErrorMessage] = useState<string | null>(null);
   const [leadProjects, setLeadProjects] = useState<LeadProject[]>([]);
-  const [activeSlug, setActiveSlug] = useState("");
 
   useEffect(() => {
     if (isDevFallback || !organization || !userId) return;
@@ -267,7 +269,6 @@ export function ProjectLeadDashboard() {
         return;
       }
       setLeadProjects(result.projects);
-      setActiveSlug((prev) => (result.projects.some((p) => p.slug === prev) ? prev : result.projects[0]?.slug ?? ""));
       setProjectsLoadState("ready");
     });
 
@@ -275,6 +276,48 @@ export function ProjectLeadDashboard() {
       cancelled = true;
     };
   }, [isDevFallback, organization, userId]);
+
+  // ── Project scope selector — only shown when this Project Lead leads more
+  // than one active project (see the header JSX below); with 0 or 1 led
+  // projects there's nothing to pick, so the Dashboard just auto-scopes to
+  // that single project the same way it always has. `?project=<slug>` is the
+  // single source of truth (same real-URL-state precedent as the Admin
+  // Dashboard's own scope selector), so refresh/back/forward all just work.
+  // A requested slug that isn't one of this lead's own active projects
+  // (stale link, no-longer-led project, another org) — or any leftover
+  // `?project=` once only one project remains — falls back to the first led
+  // project rather than trusted as-is.
+  const requestedProjectSlug = searchParams.get("project");
+  const activeSlug = useMemo(() => {
+    if (leadProjects.length === 0) return "";
+    if (leadProjects.length === 1) return leadProjects[0].slug;
+    if (requestedProjectSlug && leadProjects.some((p) => p.slug === requestedProjectSlug)) return requestedProjectSlug;
+    return leadProjects[0].slug;
+  }, [leadProjects, requestedProjectSlug]);
+
+  // Keeps the URL itself honest with the resolved selection above — clears
+  // `?project=` once it's down to a single led project, and corrects a
+  // stale/inaccessible slug back to the real fallback — via `router.replace`
+  // (a correction, not a user-driven navigation, so it doesn't add a
+  // spurious back-button entry the way an actual selector change does below).
+  useEffect(() => {
+    if (projectsLoadState !== "ready" || !requestedProjectSlug) return;
+    const isValidMultiProjectSelection =
+      leadProjects.length > 1 && leadProjects.some((p) => p.slug === requestedProjectSlug);
+    if (isValidMultiProjectSelection) return;
+
+    const params = new URLSearchParams(searchParams.toString());
+    if (leadProjects.length > 1) params.set("project", activeSlug);
+    else params.delete("project");
+    const qs = params.toString();
+    router.replace(`/dashboard${qs ? `?${qs}` : ""}`);
+  }, [projectsLoadState, leadProjects, requestedProjectSlug, activeSlug, router, searchParams]);
+
+  function handleScopeChange(slug: string) {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("project", slug);
+    router.push(`/dashboard?${params.toString()}`);
+  }
 
   // ── Current Delivery + Attention Required: real data for the selected project ──
   const [deliveryLoadState, setDeliveryLoadState] = useState<"loading" | "ready" | "error">(
@@ -291,6 +334,14 @@ export function ProjectLeadDashboard() {
   useEffect(() => {
     if (isDevFallback || !organization || !activeSlug) return;
     let cancelled = false;
+    // Back to "loading" on every project switch too, not just the first
+    // mount — the full-screen "Loading dashboard…" state below already
+    // exists and already gates every section on `deliveryLoadState`, so
+    // reusing it here is what keeps the previous project's tickets/team/
+    // hours/activity from ever staying on screen while the new project's
+    // real data is still in flight.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: same "clear before the async fetch below resolves" pattern used elsewhere in this app (e.g. member-profile-modal.tsx)
+    setDeliveryLoadState("loading");
 
     (async () => {
       const ticketsResult = await loadProjectTickets(organization.id, activeSlug);
@@ -616,34 +667,34 @@ export function ProjectLeadDashboard() {
       {/* ── Header ─────────────────────────────────────────────────────────── */}
       <div className="flex items-start justify-between gap-6 mb-6">
         <div>
-          <h1 className="text-[22px] font-bold text-slate-900 dark:text-zinc-50 tracking-tight leading-none mb-2">
+          <h1 className="text-[22px] font-bold text-slate-900 dark:text-zinc-50 tracking-tight leading-none mb-1">
             Good morning, {user.name.split(" ")[0]} 👋
           </h1>
-
-          {/* Project Context selector */}
-          <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600 mb-0.5">
-            Current Project
-          </p>
-          <div className="relative inline-flex items-center">
-            <select
-              value={activeSlug}
-              onChange={(event) => setActiveSlug(event.target.value)}
-              aria-label="Current project"
-              className="appearance-none bg-transparent border-none p-0 pr-5 text-sm font-semibold text-slate-700 dark:text-zinc-200 outline-none cursor-pointer hover:text-brand-600 dark:hover:text-brand-400 focus:ring-2 focus:ring-brand-500/30 rounded"
-            >
-              {leadProjects.map((p) => (
-                <option key={p.slug} value={p.slug}>{p.name}</option>
-              ))}
-            </select>
-            <svg className="pointer-events-none absolute right-0 w-3 h-3 text-slate-400 dark:text-zinc-500" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24" aria-hidden="true">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 9l6 6 6-6" />
-            </svg>
-          </div>
-          <p className="text-xs text-slate-400 dark:text-zinc-500 mt-1">{formatISODate(todayISO)}</p>
+          <p className="text-sm text-slate-400 dark:text-zinc-500">{formatISODate(todayISO)}</p>
         </div>
 
-        {/* Quick Actions */}
+        {/* Top actions: project scope selector (only when leading more than
+            one active project — see leadProjects.length above) + Quick
+            Actions, same placement/component pattern as the Admin
+            Dashboard's own scope selector. */}
         <div className="flex items-center gap-2 flex-shrink-0">
+          {leadProjects.length > 1 && (
+            <div className="relative inline-flex items-center">
+              <select
+                value={activeSlug}
+                onChange={(event) => handleScopeChange(event.target.value)}
+                aria-label="Current project"
+                className="appearance-none text-[13px] font-medium pl-3 pr-7 py-1.5 rounded-lg border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-slate-700 dark:text-zinc-300 hover:bg-slate-50 dark:hover:bg-zinc-800 transition-colors cursor-pointer outline-none focus:ring-2 focus:ring-brand-500/30"
+              >
+                {leadProjects.map((p) => (
+                  <option key={p.slug} value={p.slug}>{p.name}</option>
+                ))}
+              </select>
+              <svg className="pointer-events-none absolute right-2 w-3 h-3 text-slate-400 dark:text-zinc-500" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24" aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 9l6 6 6-6" />
+              </svg>
+            </div>
+          )}
           <button
             type="button"
             onClick={() => setShowAddMember(true)}
@@ -910,7 +961,7 @@ export function ProjectLeadDashboard() {
         <NewTicketModal
           slug={activeSlug}
           tickets={tickets}
-          members={orgMembers}
+          members={team}
           onClose={() => setShowNewTicket(false)}
           onCreated={handleTicketCreated}
           onPreviewDuplicate={handleTicketPreviewDuplicate}

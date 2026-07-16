@@ -1,41 +1,40 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import type { ProjectCategory, ProjectSummary } from "@/lib/mock-projects";
+import type { ProjectCategory } from "@/lib/mock-projects";
 import { ProjectCategoryBadge } from "@/components/status-badge";
-import { MEMBER_WORK } from "@/components/member-dashboard";
-import type { WorkItem } from "@/components/member-dashboard";
 import { useOrganizationProjects } from "@/components/organization-projects-provider";
+import { useCurrentUser } from "@/components/current-user-provider";
+import { loadProjectTeam } from "@/lib/projects";
+import { loadProjectTickets } from "@/lib/tickets";
+import { getTodayISO, parseDisplayDate } from "@/components/tickets/ticket-ui";
+import { FALLBACK_AVATAR } from "@/lib/current-user";
 
 // A Member doesn't manage projects — they work inside them. So this page
 // never shows org-wide status/priority/health or ticket-volume metrics; it
 // only answers what a Member actually needs: which projects am I on, who
 // leads each one, and what's mine to do there. See MemberDashboard for the
 // same "no project-picking, work-first" philosophy applied to the homepage.
+//
+// The project list itself comes from useOrganizationProjects() — already
+// real and already RLS-scoped (a Member only ever sees projects they have
+// an active project_membership row on, same as everywhere else in this
+// app), so no separate membership check is needed here. Lead and per-
+// project ticket counts are fetched per project below.
 
-const TODAY = new Date("Jun 30, 2026").getTime();
-const DAY_MS = 1000 * 60 * 60 * 24;
-
-// "Due this week" — due today or within the next 7 days (including anything
-// already overdue this week, since that's still pending work).
-function isDueThisWeek(dueDate?: string): boolean {
-  if (!dueDate) return false;
-  const days = (new Date(`${dueDate}, 2026`).getTime() - TODAY) / DAY_MS;
-  return days <= 7;
-}
-
-// Relative-time labels here ("Updated 3h ago", "Updated yesterday", "Updated
-// 6 days ago") are free text, not timestamps — this just ranks them well
-// enough to sort projects by recent activity.
-function hoursAgo(label: string): number {
-  const hours = /(\d+)\s*h\b/i.exec(label);
-  if (hours) return Number(hours[1]);
-  const days = /(\d+)\s*day/i.exec(label);
-  if (days) return Number(days[1]) * 24;
-  if (/yesterday/i.test(label)) return 24;
-  if (/just now/i.test(label)) return 0;
-  return Infinity;
+// Monday–Sunday containing todayISO — same "This Week" convention already
+// used by My Work/Member Dashboard, duplicated here as page-local glue.
+function getWeekRangeISO(todayISO: string): { start: string; end: string } {
+  const today = new Date(`${todayISO}T00:00:00`);
+  const day = today.getDay();
+  const monday = new Date(today);
+  monday.setDate(today.getDate() + (day === 0 ? -6 : 1 - day));
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+  const toISO = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return { start: toISO(monday), end: toISO(sunday) };
 }
 
 interface MemberProjectCard {
@@ -47,39 +46,116 @@ interface MemberProjectCard {
   leadAvatar: string;
   assignedCount: number;
   dueThisWeekCount: number;
-  recencyHours: number;
-}
-
-function buildMemberProjectCards(work: WorkItem[], projectsBySlug: Map<string, ProjectSummary>): MemberProjectCard[] {
-  const bySlug = new Map<string, WorkItem[]>();
-  for (const item of work) {
-    const list = bySlug.get(item.project.slug) ?? [];
-    list.push(item);
-    bySlug.set(item.project.slug, list);
-  }
-
-  return Array.from(bySlug.entries())
-    .map(([slug, items]) => {
-      const project = projectsBySlug.get(slug);
-      return {
-        slug,
-        name: items[0].project.name,
-        description: project?.description ?? "",
-        category: project?.category ?? "internal",
-        leadName: project?.owner.name ?? "Unassigned",
-        leadAvatar: project?.owner.avatar ?? "",
-        assignedCount: items.length,
-        dueThisWeekCount: items.filter((i) => isDueThisWeek(i.ticket.dueDate)).length,
-        recencyHours: Math.min(...items.map((i) => hoursAgo(i.ticket.updatedAt))),
-      };
-    })
-    .sort((a, b) => a.recencyHours - b.recencyHours);
 }
 
 export function MemberProjectsScreen() {
+  const { organization, userId, isDevFallback } = useCurrentUser();
   const { projects } = useOrganizationProjects();
-  const projectsBySlug = useMemo(() => new Map(projects.map((project) => [project.slug, project])), [projects]);
-  const cards = buildMemberProjectCards(MEMBER_WORK, projectsBySlug);
+
+  const [loadState, setLoadState] = useState<"loading" | "ready" | "error">(isDevFallback ? "ready" : "loading");
+  const [loadErrorMessage, setLoadErrorMessage] = useState<string | null>(null);
+  const [cards, setCards] = useState<MemberProjectCard[]>([]);
+  const [requestId, setRequestId] = useState(0);
+
+  const runFetch = () => setRequestId((id) => id + 1);
+
+  useEffect(() => {
+    if (isDevFallback || !organization || !userId) return;
+    let cancelled = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: same "clear before the async fetch below resolves" pattern used elsewhere in this app (e.g. member-profile-modal.tsx)
+    setLoadState("loading");
+
+    (async () => {
+      const todayISO = getTodayISO();
+      const { start: weekStart, end: weekEnd } = getWeekRangeISO(todayISO);
+
+      const results = await Promise.all(
+        projects.map(async (project) => {
+          const [teamResult, ticketsResult] = await Promise.all([
+            loadProjectTeam(organization.id, project.slug),
+            loadProjectTickets(organization.id, project.slug),
+          ]);
+          return { project, teamResult, ticketsResult };
+        })
+      );
+      if (cancelled) return;
+
+      const errorResult = results.find(
+        (r) => r.teamResult.status === "error" || r.ticketsResult.status === "error"
+      );
+      if (errorResult) {
+        const message =
+          errorResult.teamResult.status === "error"
+            ? errorResult.teamResult.message
+            : errorResult.ticketsResult.status === "error"
+            ? errorResult.ticketsResult.message
+            : "Something went wrong.";
+        setLoadState("error");
+        setLoadErrorMessage(message);
+        return;
+      }
+
+      const nextCards: MemberProjectCard[] = results.map(({ project, teamResult, ticketsResult }) => {
+        const lead =
+          teamResult.status === "ready" ? teamResult.members.find((m) => m.projectRole === "lead") : undefined;
+        const myTickets =
+          ticketsResult.status === "ready" ? ticketsResult.tickets.filter((t) => t.assigneeProfileId === userId) : [];
+        const dueThisWeekCount = myTickets.filter((t) => {
+          if (t.status === "done" || !t.dueDate) return false;
+          const iso = parseDisplayDate(t.dueDate);
+          return Boolean(iso) && iso >= weekStart && iso <= weekEnd;
+        }).length;
+
+        return {
+          slug: project.slug,
+          name: project.name,
+          description: project.description,
+          category: project.category,
+          leadName: lead?.name ?? "Unassigned",
+          leadAvatar: lead?.avatar ?? FALLBACK_AVATAR,
+          assignedCount: myTickets.length,
+          dueThisWeekCount,
+        };
+      });
+
+      setCards(nextCards);
+      setLoadState("ready");
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isDevFallback, organization, userId, projects, requestId]);
+
+  if (loadState === "loading") {
+    return (
+      <div className="max-w-3xl mx-auto px-4 sm:px-8 py-10">
+        <div className="h-full flex items-center justify-center text-sm text-slate-400 dark:text-zinc-500 py-20">
+          Loading your projects…
+        </div>
+      </div>
+    );
+  }
+
+  if (loadState === "error") {
+    return (
+      <div className="max-w-3xl mx-auto px-4 sm:px-8 py-10">
+        <div className="flex flex-col items-center justify-center text-center px-4 py-20">
+          <h3 className="text-sm font-semibold text-slate-700 dark:text-zinc-200">Couldn&apos;t load your projects</h3>
+          <p className="text-sm text-slate-400 mt-1 max-w-xs dark:text-zinc-500">
+            {loadErrorMessage ?? "Something went wrong."}
+          </p>
+          <button
+            type="button"
+            onClick={runFetch}
+            className="mt-5 text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3.5 py-2 shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-500 dark:hover:bg-brand-600 dark:shadow-brand-500/20"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-3xl mx-auto px-4 sm:px-8 py-10">
@@ -145,8 +221,10 @@ function MemberProjectCardRow({ card }: { card: MemberProjectCard }) {
 
       <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-2">
         <div className="flex items-center gap-2">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={card.leadAvatar} alt={card.leadName} className="w-6 h-6 rounded-full flex-shrink-0" />
+          {card.leadAvatar && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={card.leadAvatar} alt={card.leadName} className="w-6 h-6 rounded-full flex-shrink-0" />
+          )}
           <span className="text-sm text-slate-600 dark:text-zinc-300">
             <span className="text-slate-400 dark:text-zinc-500">Lead:</span> {card.leadName}
           </span>

@@ -1,37 +1,40 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
-import type { ReactNode } from "react";
-import { tickets as ALL_MOCK_TICKETS, getTicketById, getTicketDisplayKey } from "@/lib/mock-tickets";
+import { useCallback, useEffect, useState } from "react";
+import { getTicketDisplayKey } from "@/lib/mock-tickets";
 import type { Ticket, TicketStatus } from "@/lib/mock-tickets";
-import { TicketTypeIcon } from "@/components/tickets/ticket-ui";
+import { TicketTypeIcon, getTodayISO, parseDisplayDate } from "@/components/tickets/ticket-ui";
 import { TicketListRow } from "@/components/tickets/ticket-card";
 import { BoardView } from "@/components/tickets/board-view";
 import { MemberTrigger } from "@/components/member-profile";
-import { getTeamByProjectSlug } from "@/lib/mock-team";
 import { useCurrentUser } from "@/components/current-user-provider";
 import { useOrganizationProjects } from "@/components/organization-projects-provider";
-import { ProjectCategoryBadge } from "@/components/status-badge";
+import { ProjectCategoryBadge, StatusBadge } from "@/components/status-badge";
 import { TicketPreviewPanel } from "@/components/tickets/ticket-preview-panel";
 import { presetTicketsFilter } from "@/components/tickets-screen";
 import { AdminProjectOverview } from "@/components/admin-project-overview";
 import { ProjectLeadProjectOverview } from "@/components/project-lead-project-overview";
+import { loadProjectDetail, loadProjectTeam } from "@/lib/projects";
+import type { ProjectDetail, ProjectTeamMember } from "@/lib/projects";
+import { loadProjectTickets, loadOrganizationActivity } from "@/lib/tickets";
+import type { OrganizationActivityEvent } from "@/lib/tickets";
+import {
+  PROJECT_ACTIVITY_PREVIEW_LIMIT,
+  ExpandableDescription,
+  activityEventToEntry,
+} from "@/components/admin-project-overview";
+import type { ActivityEntry, TeamMember } from "@/components/admin-project-overview";
 
 // The Member Project Overview is a personal workspace inside the project —
 // "what do I need to work on here today?" — not a scaled-down Project Lead
 // dashboard. It never shows project-wide health, capacity, or org metrics;
 // everything on this page is scoped to the current member's own tickets and
 // actions within this one project. (Cross-project "my work" already exists
-// as MemberDashboard — this is the single-project counterpart.)
-
-const TODAY = new Date(2026, 5, 30); // Jun 30, 2026 — same "today" the rest of the app uses
-
-function parseDue(dateStr?: string): Date | null {
-  if (!dateStr) return null;
-  const d = new Date(`${dateStr}, 2026`);
-  return isNaN(d.getTime()) ? null : d;
-}
+// as MemberDashboard — this is the single-project counterpart.) Header,
+// project loading, Team, and the activity-formatting helper are all reused
+// directly from admin-project-overview.tsx — never a second/parallel
+// implementation of the same real data.
 
 // ── My Project Work: same List/Board interaction pattern as My Work
 //    (my-work-screen.tsx), scoped to this project and shown as a capped
@@ -63,24 +66,28 @@ function readStoredProjectWorkView(slug: string): ProjectWorkView {
 // Same urgency ordering vocabulary used by "Needs My Attention" below
 // (blocked → overdue → due today → high priority → in progress → review →
 // to-do), but as a total order so the preview can be capped to the N most
-// relevant tickets regardless of which view is showing them.
-function projectWorkRank(t: Ticket): number {
+// relevant tickets regardless of which view is showing them. Takes the real
+// current local date (todayISO) rather than a fixed mock date.
+function projectWorkRank(t: Ticket, todayISO: string): number {
   if (t.status === "blocked") return 0;
-  const due = parseDue(t.dueDate);
-  if (due !== null && due.getTime() < TODAY.getTime()) return 1;
-  if (due !== null && due.getTime() === TODAY.getTime()) return 2;
-  if (t.priority === "high") return 3;
+  const due = t.dueDate ? parseDisplayDate(t.dueDate) : null;
+  if (due !== null && due < todayISO) return 1;
+  if (due !== null && due === todayISO) return 2;
+  if (t.priority === "high" || t.priority === "highest") return 3;
   if (t.status === "in-progress") return 4;
   if (t.status === "review") return 5;
   return 6;
 }
 
-function sortByProjectWorkRank(a: Ticket, b: Ticket): number {
-  const diff = projectWorkRank(a) - projectWorkRank(b);
+function sortByProjectWorkRank(a: Ticket, b: Ticket, todayISO: string): number {
+  const diff = projectWorkRank(a, todayISO) - projectWorkRank(b, todayISO);
   if (diff !== 0) return diff;
-  const da = parseDue(a.dueDate)?.getTime() ?? Infinity;
-  const db = parseDue(b.dueDate)?.getTime() ?? Infinity;
-  return da - db;
+  const da = a.dueDate ? parseDisplayDate(a.dueDate) : null;
+  const db = b.dueDate ? parseDisplayDate(b.dueDate) : null;
+  if (da && db) return da.localeCompare(db);
+  if (da) return -1;
+  if (db) return 1;
+  return 0;
 }
 
 // ── My Work: grouped by status ───────────────────────────────────────────────
@@ -117,34 +124,34 @@ function WorkGroup({
   );
 }
 
-// ── Needs My Attention: ticket-driven (blocked/overdue/due today) plus a
-//    couple of hand-authored review/mention notifications — this prototype
-//    has no comment-mention or review-request data model yet, so those two
-//    always point at real tickets in this project via getTicketById rather
-//    than inventing fake ones. ──────────────────────────────────────────────
+// ── Needs My Attention: real, ticket-driven only (blocked/overdue/due
+//    today) — this MVP has no real comment-mention or review-request data
+//    model, so the mock's hand-authored review/mention notifications are
+//    removed outright rather than replaced with fabricated ones; when none
+//    of the three real conditions apply to any of the member's own tickets,
+//    this section (and its banner clauses) simply don't render, same as the
+//    interface's own existing empty behavior. ─────────────────────────────
 
-type AttentionKind = "blocked" | "overdue" | "due-today" | "review" | "mention";
+type AttentionKind = "blocked" | "overdue" | "due-today";
 
 const ATTENTION_TONE: Record<AttentionKind, string> = {
   blocked:     "text-red-500 dark:text-red-400",
   overdue:     "text-red-500 dark:text-red-400",
   "due-today": "text-amber-500 dark:text-amber-400",
-  review:      "text-sky-500 dark:text-sky-400",
-  mention:     "text-violet-500 dark:text-violet-400",
 };
 
 interface AttentionItem {
   id: string;
   kind: AttentionKind;
-  reason: ReactNode;
+  reason: string;
   ticket: Ticket;
   rank: number;
 }
 
-function buildTicketAttention(t: Ticket): AttentionItem | null {
-  const due = parseDue(t.dueDate);
-  const isOverdue = due !== null && due.getTime() < TODAY.getTime();
-  const isDueToday = due !== null && due.getTime() === TODAY.getTime();
+function buildTicketAttention(t: Ticket, todayISO: string): AttentionItem | null {
+  const due = t.dueDate ? parseDisplayDate(t.dueDate) : null;
+  const isOverdue = due !== null && due < todayISO;
+  const isDueToday = due !== null && due === todayISO;
 
   if (t.status === "blocked") {
     return { id: `blocked-${t.id}`, kind: "blocked", ticket: t, reason: "Blocked — needs unblocking", rank: 0 };
@@ -157,23 +164,6 @@ function buildTicketAttention(t: Ticket): AttentionItem | null {
   }
   return null;
 }
-
-const PERSONAL_NOTIFICATIONS: { id: string; kind: AttentionKind; ticketId: string; reason: ReactNode; rank: number }[] = [
-  {
-    id: "review-1",
-    kind: "review",
-    ticketId: "push-notification-setup",
-    reason: <><span className="font-medium">Sarah Chen</span> requested your review</>,
-    rank: 3,
-  },
-  {
-    id: "mention-1",
-    kind: "mention",
-    ticketId: "api-rate-limiting",
-    reason: <><span className="font-medium">Marcus Lee</span> mentioned you in a comment</>,
-    rank: 4,
-  },
-];
 
 function AttentionRow({ item, slug, onOpen }: { item: AttentionItem; slug: string; onOpen: (t: Ticket) => void }) {
   return (
@@ -210,123 +200,6 @@ function AttentionRow({ item, slug, onOpen }: { item: AttentionItem; slug: strin
   );
 }
 
-// ── My Activity: only events where the current member actually participates
-//    — either they performed the action ("You ..."), or the action was
-//    directed at them (assigned to them, commented on their ticket,
-//    mentioned them). Never general project activity. This prototype has no
-//    real comment/mention/time-log data model yet, so entries are hand-
-//    authored like the attention notifications above, but every one of them
-//    always points at a real ticket via getTicketById. ────────────────────
-
-const activityAvatar = (id: number) => `https://i.pravatar.cc/64?img=${id}`;
-
-interface MyActivityTemplate {
-  id: string;
-  /** True when the current member performed the action — renders as "You". */
-  isMe: boolean;
-  actorName: string;
-  actorAvatar: string;
-  /** The action fragment only — the ticket title never appears here; it
-   *  renders on its own clickable line via getTicketDisplayKey instead. */
-  message: ReactNode;
-  detail?: ReactNode;
-  ticketId: string;
-  time: string;
-}
-
-const MY_ACTIVITY: MyActivityTemplate[] = [
-  {
-    id: "my-activity-1", isMe: true, actorName: "", actorAvatar: "",
-    message: <>marked <span className="text-red-600 dark:text-red-400 font-medium">Blocked</span></>,
-    ticketId: "kyc-vendor-outage", time: "2h ago",
-  },
-  {
-    id: "my-activity-2", isMe: false, actorName: "Sarah Chen", actorAvatar: activityAvatar(47),
-    message: "commented on",
-    ticketId: "kyc-vendor-outage", time: "3h ago",
-  },
-  {
-    id: "my-activity-3", isMe: true, actorName: "", actorAvatar: "",
-    message: <>logged <span className="font-medium">2h</span> on</>,
-    ticketId: "kyc-vendor-outage", time: "5h ago",
-  },
-  {
-    id: "my-activity-4", isMe: false, actorName: "Sarah Chen", actorAvatar: activityAvatar(47),
-    message: "assigned",
-    detail: <>to <span className="font-medium">you</span></>,
-    ticketId: "mfa-onboarding", time: "Yesterday",
-  },
-  {
-    id: "my-activity-5", isMe: true, actorName: "", actorAvatar: "",
-    message: "completed",
-    ticketId: "mfa-onboarding", time: "Yesterday",
-  },
-  {
-    id: "my-activity-6", isMe: false, actorName: "Marcus Lee", actorAvatar: activityAvatar(12),
-    message: "mentioned you in a comment on",
-    ticketId: "api-rate-limiting", time: "2 days ago",
-  },
-];
-
-function MyActivityRow({
-  entry,
-  slug,
-  currentUser,
-  onOpen,
-}: {
-  entry: MyActivityTemplate;
-  slug: string;
-  currentUser: { name: string; avatar: string };
-  onOpen: (t: Ticket) => void;
-}) {
-  const ticket = getTicketById(entry.ticketId);
-  if (!ticket) return null;
-
-  const name = entry.isMe ? "You" : entry.actorName;
-  const actorAvatar = entry.isMe ? currentUser.avatar : entry.actorAvatar;
-
-  return (
-    <li className="flex items-start gap-3">
-      <MemberTrigger
-        name={entry.isMe ? currentUser.name : entry.actorName}
-        avatar={actorAvatar}
-        projectSlug={slug}
-        className="flex-shrink-0 mt-0.5 rounded-full"
-      >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={actorAvatar} alt={name} className="w-6 h-6 rounded-full" />
-      </MemberTrigger>
-      <div className="text-sm leading-snug min-w-0 flex-1">
-        <p className="text-slate-700 dark:text-zinc-300">
-          <span className="font-medium text-slate-900 dark:text-zinc-100">{name}</span> {entry.message}
-        </p>
-        <button
-          type="button"
-          onClick={() => onOpen(ticket)}
-          className="group/ref mt-1 flex items-baseline gap-1.5 min-w-0 max-w-full text-left"
-        >
-          <TicketTypeIcon type={ticket.type} />
-          <span className="text-[11px] font-mono font-semibold text-slate-500 dark:text-zinc-400 group-hover/ref:text-brand-600 dark:group-hover/ref:text-brand-400 flex-shrink-0">
-            {getTicketDisplayKey(ticket)}
-          </span>
-          <span className="text-sm font-medium text-slate-700 dark:text-zinc-300 group-hover/ref:text-brand-600 dark:group-hover/ref:text-brand-400 group-hover/ref:underline truncate">
-            {ticket.title}
-          </span>
-        </button>
-        <p className="flex items-center gap-1.5 flex-wrap text-xs text-slate-400 mt-0.5 dark:text-zinc-500">
-          {entry.detail && (
-            <>
-              {entry.detail}
-              <span className="text-slate-300 dark:text-zinc-700" aria-hidden="true">·</span>
-            </>
-          )}
-          {entry.time}
-        </p>
-      </div>
-    </li>
-  );
-}
-
 // The /projects/[slug] page itself is a server component (so it can't call
 // useCurrentUser/useOrganizationProjects directly), so its breadcrumb is a
 // small client component instead — same "server page, client breadcrumb"
@@ -350,11 +223,89 @@ export function ProjectOverviewBreadcrumb({ slug }: { slug: string }) {
 }
 
 export function ProjectOverview({ slug = "mobile-banking-app" }: { slug?: string }) {
-  const { user } = useCurrentUser();
+  const { user, userId, organization, isDevFallback } = useCurrentUser();
   // Declared before the role branches below so hook order stays identical
   // across renders even if the role switches at runtime without unmounting.
   const [preview, setPreview] = useState<Ticket | null>(null);
   const [workView, setWorkView] = useState<ProjectWorkView>(() => readStoredProjectWorkView(slug));
+
+  const [loadState, setLoadState] = useState<"loading" | "ready" | "error">(isDevFallback ? "ready" : "loading");
+  const [loadErrorMessage, setLoadErrorMessage] = useState<string | null>(null);
+  const [project, setProject] = useState<ProjectDetail | null>(null);
+  const [tickets, setTickets] = useState<Ticket[]>([]);
+  const [teamMembers, setTeamMembers] = useState<ProjectTeamMember[]>([]);
+  const [myActivityEvents, setMyActivityEvents] = useState<OrganizationActivityEvent[]>([]);
+  const [requestId, setRequestId] = useState(0);
+
+  const runFetch = useCallback(() => setRequestId((id) => id + 1), []);
+
+  // Same data-loading shape as AdminProjectOverview's/ProjectLeadProjectOverview's
+  // own effect (same loaders, same real sources), plus one real, actor-scoped
+  // activity read for "My Activity" (loadOrganizationActivity's own optional
+  // actorProfileId filter — see lib/tickets.ts — never a second/parallel
+  // activity query).
+  useEffect(() => {
+    // ADMIN/PROJECT_LEAD render AdminProjectOverview/ProjectLeadProjectOverview
+    // instead (see the role branches below) — each of those already does its
+    // own real fetch, so this effect stays a no-op for those roles rather
+    // than duplicating the same network calls for a view that's never shown.
+    if (isDevFallback || !organization || !userId || user.role !== "MEMBER") return;
+    let cancelled = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: same "clear before the async fetch below resolves" pattern used elsewhere in this app (e.g. member-profile-modal.tsx)
+    setLoadState("loading");
+
+    (async () => {
+      const projectResult = await loadProjectDetail(organization.id, slug);
+      if (cancelled) return;
+      if (projectResult.status === "error") {
+        setLoadState("error");
+        setLoadErrorMessage(projectResult.message);
+        return;
+      }
+      if (projectResult.status === "not-found") {
+        setLoadState("error");
+        setLoadErrorMessage("Project not found.");
+        return;
+      }
+
+      const ticketsResult = await loadProjectTickets(organization.id, slug);
+      if (cancelled) return;
+      if (ticketsResult.status === "error") {
+        setLoadState("error");
+        setLoadErrorMessage(ticketsResult.message);
+        return;
+      }
+      const projectTickets = ticketsResult.status === "ready" ? ticketsResult.tickets : [];
+      const ticketIds = projectTickets.map((t) => t.id);
+
+      const [teamResult, activityResult] = await Promise.all([
+        loadProjectTeam(organization.id, slug),
+        loadOrganizationActivity(ticketIds, PROJECT_ACTIVITY_PREVIEW_LIMIT, userId),
+      ]);
+      if (cancelled) return;
+
+      if (teamResult.status === "error") {
+        setLoadState("error");
+        setLoadErrorMessage(teamResult.message);
+        return;
+      }
+      if (activityResult.status === "error") {
+        setLoadState("error");
+        setLoadErrorMessage(activityResult.message);
+        return;
+      }
+
+      setProject(projectResult.project);
+      setTickets(projectTickets);
+      setTeamMembers(teamResult.members);
+      setMyActivityEvents(activityResult.events);
+      setLoadState("ready");
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isDevFallback, organization, userId, user.role, slug, requestId]);
 
   function changeWorkView(next: ProjectWorkView) {
     setWorkView(next);
@@ -374,57 +325,104 @@ export function ProjectOverview({ slug = "mobile-banking-app" }: { slug?: string
     return <ProjectLeadProjectOverview slug={slug} />;
   }
 
-  const team = getTeamByProjectSlug(slug);
+  if (loadState === "loading") {
+    return (
+      <div className="max-w-4xl mx-auto px-8 py-10">
+        <div className="h-full flex items-center justify-center text-sm text-slate-400 dark:text-zinc-500 py-20">
+          Loading project…
+        </div>
+      </div>
+    );
+  }
+
+  if (loadState === "error" || !project) {
+    return (
+      <div className="max-w-4xl mx-auto px-8 py-10">
+        <div className="flex flex-col items-center justify-center text-center px-4 py-20">
+          <h3 className="text-sm font-semibold text-slate-700 dark:text-zinc-200">Couldn&apos;t load project</h3>
+          <p className="text-sm text-slate-400 mt-1 max-w-xs dark:text-zinc-500">
+            {loadErrorMessage ?? "Something went wrong."}
+          </p>
+          <button
+            type="button"
+            onClick={runFetch}
+            className="mt-5 text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3.5 py-2 shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-500 dark:hover:bg-brand-600 dark:shadow-brand-500/20"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const todayISO = getTodayISO();
+  const monthPrefix = todayISO.slice(0, 7);
+
+  const team: TeamMember[] = teamMembers.map((m) => ({ id: m.id, name: m.name, role: m.title, avatar: m.avatar }));
+  const ticketsById = new Map(tickets.map((t) => [t.id, t]));
 
   // ── Scope everything to this member's own tickets in this project ────────
-  const myTickets = ALL_MOCK_TICKETS.filter((t) => t.projectSlug === slug && t.assignee.name === user.name);
+  const myTickets = tickets.filter((t) => t.assigneeProfileId === userId);
   const myOpenTickets = myTickets.filter((t) => t.status !== "done");
   const myBlockedTickets = myOpenTickets.filter((t) => t.status === "blocked");
-  // No close-date field exists on Ticket in this MVP, so "this month" is
-  // approximated as every ticket of mine currently marked Done — same
-  // approximation the Admin/Project Lead overviews use for the whole project.
-  const myCompletedThisMonth = myTickets.filter((t) => t.status === "done").length;
+  // Same real "done this calendar month" signal Admin/Project Lead Project
+  // Overview already use (a done ticket's own updated_at falling in the
+  // current month) — not the mock's looser "every ticket of mine ever
+  // marked Done" approximation.
+  const myCompletedThisMonth = myTickets.filter(
+    (t) => t.status === "done" && t.updatedAtISO?.slice(0, 7) === monthPrefix
+  ).length;
 
-  const myOpenTicketsRanked = [...myOpenTickets].sort(sortByProjectWorkRank);
+  const myOpenTicketsRanked = [...myOpenTickets].sort((a, b) => sortByProjectWorkRank(a, b, todayISO));
   const myProjectWorkPreview = myOpenTicketsRanked.slice(0, PROJECT_WORK_PREVIEW_LIMIT);
   const hasMoreProjectWork = myOpenTickets.length > PROJECT_WORK_PREVIEW_LIMIT;
 
-  const weekEnd = new Date(TODAY);
+  const weekEnd = new Date(`${todayISO}T00:00:00`);
   weekEnd.setDate(weekEnd.getDate() + 6);
+  const weekEndISO = weekEnd.toISOString().slice(0, 10);
   const dueThisWeekCount = myOpenTickets.filter((t) => {
-    const due = parseDue(t.dueDate);
-    return due !== null && due.getTime() >= TODAY.getTime() && due.getTime() <= weekEnd.getTime();
+    const due = t.dueDate ? parseDisplayDate(t.dueDate) : null;
+    return due !== null && due >= todayISO && due <= weekEndISO;
   }).length;
-  const dueTodayCount = myOpenTickets.filter((t) => {
-    const due = parseDue(t.dueDate);
-    return due !== null && due.getTime() === TODAY.getTime();
-  }).length;
+  const dueTodayCount = myOpenTickets.filter((t) => t.dueDate && parseDisplayDate(t.dueDate) === todayISO).length;
 
-  const personalNotifications: AttentionItem[] = PERSONAL_NOTIFICATIONS
-    .map((n) => {
-      const ticket = getTicketById(n.ticketId);
-      return ticket ? { id: n.id, kind: n.kind, ticket, reason: n.reason, rank: n.rank } : null;
-    })
-    .filter((x): x is AttentionItem => x !== null);
+  const attentionItems: AttentionItem[] = myOpenTickets
+    .map((t) => buildTicketAttention(t, todayISO))
+    .filter((x): x is AttentionItem => x !== null)
+    .sort((a, b) => a.rank - b.rank);
 
-  const attentionItems: AttentionItem[] = [
-    ...myOpenTickets.map(buildTicketAttention).filter((x): x is AttentionItem => x !== null),
-    ...personalNotifications,
-  ].sort((a, b) => a.rank - b.rank);
-
-  const reviewNotification = personalNotifications.find((n) => n.kind === "review");
-  const mentionNotification = personalNotifications.find((n) => n.kind === "mention");
-
-  const bannerClauses: ReactNode[] = [];
+  const bannerClauses: string[] = [];
   if (dueTodayCount > 0) bannerClauses.push(`${dueTodayCount} ticket${dueTodayCount === 1 ? "" : "s"} due today`);
-  if (reviewNotification) bannerClauses.push(reviewNotification.reason);
-  if (mentionNotification) bannerClauses.push(mentionNotification.reason);
   if (myBlockedTickets.length > 0) {
     bannerClauses.push(
       `${myBlockedTickets.length} blocked ticket${myBlockedTickets.length === 1 ? "" : "s"} need${myBlockedTickets.length === 1 ? "s" : ""} attention`
     );
   }
 
+  // Review action target — same real "1 ticket → straight to it, 2+ → the
+  // Tickets page with the alert type applied as a real, visible URL filter"
+  // pattern Admin/Project Lead Project Overview already implement (see
+  // alertActionHref there and its own `?alerts=` handoff, read by
+  // tickets-screen.tsx), reused as-is rather than a second implementation —
+  // just scoped to this member's own blocked tickets instead of the whole
+  // project's. "Mine" still goes through the existing presetTicketsFilter
+  // mechanism (unchanged) so the Tickets page stays scoped to this member's
+  // own tickets, exactly as the banner itself already promises.
+  let blockedActionHref: string | null = null;
+  if (myBlockedTickets.length === 1) {
+    blockedActionHref = `/projects/${slug}/tickets/${getTicketDisplayKey(myBlockedTickets[0])}`;
+  } else if (myBlockedTickets.length > 1) {
+    blockedActionHref = `/projects/${slug}/tickets?alerts=blocked`;
+  }
+
+  // ── My Activity: real ticket_activity events on this project where the
+  // signed-in member is the actor (loadOrganizationActivity's actorProfileId
+  // filter above) — the same real event categories/labels Admin/Project
+  // Lead Project Overview already use for their own activity feeds, via the
+  // same activityEventToEntry, never a second formatting function.
+  const myActivity: ActivityEntry[] = myActivityEvents.map((event) =>
+    activityEventToEntry(event, ticketsById.get(event.ticketId))
+  );
 
   return (
     <div className="max-w-4xl mx-auto px-8 py-10">
@@ -432,26 +430,17 @@ export function ProjectOverview({ slug = "mobile-banking-app" }: { slug?: string
       <div className="flex items-start justify-between">
         <div className="flex items-start gap-4">
           <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 flex items-center justify-center text-white font-bold text-base flex-shrink-0">
-            MB
+            {project.shortName}
           </div>
           <div>
             <div className="flex items-center gap-2.5">
-              <h1 className="text-xl font-bold text-slate-900 tracking-tight dark:text-zinc-50">Mobile Banking App</h1>
-              <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700 dark:text-emerald-400">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> Active
-              </span>
-              <ProjectCategoryBadge category="client" />
+              <h1 className="text-xl font-bold text-slate-900 tracking-tight dark:text-zinc-50">{project.name}</h1>
+              <StatusBadge status={project.status} />
+              <ProjectCategoryBadge category={project.category} />
             </div>
-            <p className="text-sm text-slate-500 mt-1 max-w-xl dark:text-zinc-400">
-              iOS and Android banking experience for Meridian Bank — redesign of onboarding, transfers, and
-              biometric authentication.
-            </p>
+            <ExpandableDescription text={project.description} />
             <div className="flex items-center gap-2 mt-2 text-xs text-slate-400 dark:text-zinc-500">
-              <span>
-                Owned by <span className="text-slate-600 font-medium dark:text-zinc-300">Sarah Chen</span>
-              </span>
-              <span className="text-slate-300 dark:text-zinc-700">·</span>
-              <span>Started Mar 3, 2026</span>
+              <span>Started {project.createdAt}</span>
             </div>
           </div>
         </div>
@@ -460,8 +449,17 @@ export function ProjectOverview({ slug = "mobile-banking-app" }: { slug?: string
       {/* ===== Slim alert banner — member-specific only ===== */}
       {bannerClauses.length > 0 && (
         <Link
-          href={`/projects/${slug}/tickets`}
-          onClick={() => presetTicketsFilter(slug, myBlockedTickets.length > 0 ? ["Mine", "Blocked"] : ["Mine"])}
+          href={blockedActionHref ?? `/projects/${slug}/tickets`}
+          onClick={() => {
+            // The direct-to-ticket case (exactly 1 blocked ticket) doesn't
+            // navigate to the Tickets list at all, so there's no filter to
+            // preset; every other case still scopes that list to this
+            // member's own tickets via the existing presetTicketsFilter
+            // mechanism, unchanged — "Blocked" itself now comes from the
+            // real `?alerts=blocked` URL filter baked into blockedActionHref
+            // above instead of this sessionStorage preset.
+            if (myBlockedTickets.length !== 1) presetTicketsFilter(slug, ["Mine"]);
+          }}
           className="mt-5 flex items-center gap-2.5 text-sm text-amber-800 bg-amber-50/70 hover:bg-amber-100/70 rounded-md px-3 py-2 dark:text-amber-300 dark:bg-amber-500/10 dark:hover:bg-amber-500/15 transition-colors"
         >
           <span className="w-1.5 h-1.5 rounded-full bg-amber-500 flex-shrink-0" />
@@ -566,12 +564,38 @@ export function ProjectOverview({ slug = "mobile-banking-app" }: { slug?: string
 
           <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/40 dark:border-zinc-700/70 dark:bg-zinc-900 dark:shadow-black/20">
             <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-3 dark:text-zinc-400">My Activity</h2>
-            {MY_ACTIVITY.length === 0 ? (
+            {myActivity.length === 0 ? (
               <p className="text-sm text-slate-400 dark:text-zinc-500 py-2">No recent activity involving you on this project yet.</p>
             ) : (
               <ul className="space-y-4">
-                {MY_ACTIVITY.map((entry) => (
-                  <MyActivityRow key={entry.id} entry={entry} slug={slug} currentUser={user} onOpen={setPreview} />
+                {myActivity.map((entry) => (
+                  <li key={entry.id} className="flex items-start gap-3">
+                    <MemberTrigger name={entry.name} avatar={entry.avatar} projectSlug={slug} className="flex-shrink-0 mt-0.5 rounded-full">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={entry.avatar} alt={entry.name} className="w-6 h-6 rounded-full" />
+                    </MemberTrigger>
+                    <div className="text-sm leading-snug min-w-0 flex-1">
+                      <p className="text-slate-700 dark:text-zinc-300">
+                        <span className="font-medium text-slate-900 dark:text-zinc-100">{entry.name}</span> {entry.message}
+                      </p>
+                      {entry.ticket && (
+                        <button
+                          type="button"
+                          onClick={() => setPreview(entry.ticket!)}
+                          className="group/ref mt-1 flex items-baseline gap-1.5 min-w-0 max-w-full text-left"
+                        >
+                          <TicketTypeIcon type={entry.ticket.type} />
+                          <span className="text-[11px] font-mono font-semibold text-slate-500 dark:text-zinc-400 group-hover/ref:text-brand-600 dark:group-hover/ref:text-brand-400 flex-shrink-0">
+                            {getTicketDisplayKey(entry.ticket)}
+                          </span>
+                          <span className="text-sm font-medium text-slate-700 dark:text-zinc-300 group-hover/ref:text-brand-600 dark:group-hover/ref:text-brand-400 group-hover/ref:underline truncate">
+                            {entry.ticket.title}
+                          </span>
+                        </button>
+                      )}
+                      <p className="text-xs text-slate-400 mt-0.5 dark:text-zinc-500">{entry.time}</p>
+                    </div>
+                  </li>
                 ))}
               </ul>
             )}
@@ -596,26 +620,30 @@ export function ProjectOverview({ slug = "mobile-banking-app" }: { slug?: string
               <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-zinc-400">Team</h2>
               <p className="text-xs text-slate-400 dark:text-zinc-500">{team.length} members</p>
             </div>
-            <ul className="space-y-3">
-              {team.map((member) => (
-                <li key={member.id}>
-                  <MemberTrigger
-                    name={member.name}
-                    avatar={member.avatar}
-                    role={member.role}
-                    projectSlug={slug}
-                    className="flex items-center gap-2.5 w-full text-left"
-                  >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={member.avatar} alt={member.name} className="w-7 h-7 rounded-full" />
-                    <div className="text-sm leading-tight flex-1">
-                      <p className="font-medium text-slate-800 dark:text-zinc-200">{member.name}</p>
-                      <p className="text-xs text-slate-400 dark:text-zinc-500">{member.role}</p>
-                    </div>
-                  </MemberTrigger>
-                </li>
-              ))}
-            </ul>
+            {team.length === 0 ? (
+              <p className="text-sm text-slate-400 dark:text-zinc-500 py-2">No team members on this project yet.</p>
+            ) : (
+              <ul className="space-y-3">
+                {team.map((member) => (
+                  <li key={member.id}>
+                    <MemberTrigger
+                      name={member.name}
+                      avatar={member.avatar}
+                      role={member.role}
+                      projectSlug={slug}
+                      className="flex items-center gap-2.5 w-full text-left"
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={member.avatar} alt={member.name} className="w-7 h-7 rounded-full" />
+                      <div className="text-sm leading-tight flex-1">
+                        <p className="font-medium text-slate-800 dark:text-zinc-200">{member.name}</p>
+                        <p className="text-xs text-slate-400 dark:text-zinc-500">{member.role}</p>
+                      </div>
+                    </MemberTrigger>
+                  </li>
+                ))}
+              </ul>
+            )}
           </section>
 
           <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/40 dark:border-zinc-700/70 dark:bg-zinc-900 dark:shadow-black/20">

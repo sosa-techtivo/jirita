@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo } from "react";
 import type { ReactNode } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useCurrentUser } from "@/components/current-user-provider";
 import { TicketListRow } from "@/components/tickets/ticket-card";
 import { TicketPreviewPanel } from "@/components/tickets/ticket-preview-panel";
@@ -11,13 +12,14 @@ import type { Ticket } from "@/lib/mock-tickets";
 import { getTicketDisplayKey } from "@/lib/mock-tickets";
 import type { ProjectStatus } from "@/lib/mock-projects";
 import {
-  loadOrganizationTickets,
+  loadProjectTickets,
   loadProfileLoggedTimeForDate,
-  loadProfileLoggedMinutesForRange,
+  loadOrganizationLoggedTimeForRange,
   loadMemberAttentionEvents,
 } from "@/lib/tickets";
 import type { ProfileTimeEntry, MemberAttentionEvent } from "@/lib/tickets";
-import { loadMemberWeeklyCapacity } from "@/lib/projects";
+import { loadMemberProjects, loadProjectTeam } from "@/lib/projects";
+import type { MemberProject } from "@/lib/projects";
 import {
   Card,
   ActiveTicketRow,
@@ -28,10 +30,14 @@ import {
 
 // A Member (Engineer / QA / Designer) may be staffed on several projects at
 // once, but they don't think in terms of projects — their context is their
-// work. So this dashboard never asks them to pick a project; every project
-// a ticket belongs to shows up only as a small badge above the ticket
-// title, the same way "Resolve login crash / Mobile Banking App" would
-// read in a personal work queue.
+// work, so every project a ticket belongs to still shows only as a small
+// badge above the ticket title, the same way "Resolve login crash / Mobile
+// Banking App" would read in a personal work queue. When a member is
+// staffed on more than one active project, though, the whole dashboard is
+// still scoped to exactly one project at a time via the selector in the
+// header (see MemberDashboard() below) — with only one project (or zero),
+// there's nothing to pick, so it's scoped automatically/left as the
+// existing empty state, same as before.
 
 export interface Project {
   slug: string;
@@ -371,6 +377,79 @@ function AttentionRow({
 export function MemberDashboard() {
   const { user, userId, organization, isDevFallback } = useCurrentUser();
   const [preview, setPreview] = useState<Ticket | null>(null);
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
+  // Shared by both load effects below (project list + per-project delivery
+  // data) so a single Retry click on either error state re-runs whichever
+  // one actually failed.
+  const [requestId, setRequestId] = useState(0);
+  const runFetch = () => setRequestId((id) => id + 1);
+
+  // ── Project scope: active projects this member has a real Team
+  // membership on (see loadMemberProjects, mirrors loadLeadProjects' own
+  // shape). Same `?project=<slug>` URL-as-source-of-truth pattern as the
+  // Admin and Project Lead Dashboards' own scope selectors — 0 memberships
+  // resolves to no project (every section below just falls back to its
+  // existing empty state), exactly 1 auto-scopes with no selector shown,
+  // 2+ reads the URL (falling back to the first membership when the URL
+  // names a project this member can no longer see). ──
+  const [projectsLoadState, setProjectsLoadState] = useState<"loading" | "ready" | "error">(
+    isDevFallback ? "ready" : "loading"
+  );
+  const [projectsErrorMessage, setProjectsErrorMessage] = useState<string | null>(null);
+  const [memberProjects, setMemberProjects] = useState<MemberProject[]>([]);
+
+  useEffect(() => {
+    if (isDevFallback || !organization || !userId) return;
+    let cancelled = false;
+
+    loadMemberProjects(organization.id, userId).then((result) => {
+      if (cancelled) return;
+      if (result.status === "error") {
+        setProjectsLoadState("error");
+        setProjectsErrorMessage(result.message);
+        return;
+      }
+      setMemberProjects(result.projects);
+      setProjectsLoadState("ready");
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isDevFallback, organization, userId, requestId]);
+
+  const requestedProjectSlug = searchParams.get("project");
+  const resolvedProjectSlug = useMemo(() => {
+    if (memberProjects.length === 0) return null;
+    if (memberProjects.length === 1) return memberProjects[0].slug;
+    if (requestedProjectSlug && memberProjects.some((p) => p.slug === requestedProjectSlug)) return requestedProjectSlug;
+    return memberProjects[0].slug;
+  }, [memberProjects, requestedProjectSlug]);
+
+  // Keeps the URL honest with the resolved selection above — clears
+  // `?project=` once it's down to a single (or zero) team project, and
+  // corrects a stale/inaccessible slug back to the real fallback — via
+  // `router.replace` (a correction, not a user-driven navigation).
+  useEffect(() => {
+    if (projectsLoadState !== "ready" || !requestedProjectSlug) return;
+    const isValidMultiProjectSelection =
+      memberProjects.length > 1 && memberProjects.some((p) => p.slug === requestedProjectSlug);
+    if (isValidMultiProjectSelection) return;
+
+    const params = new URLSearchParams(searchParams.toString());
+    if (memberProjects.length > 1 && resolvedProjectSlug) params.set("project", resolvedProjectSlug);
+    else params.delete("project");
+    const qs = params.toString();
+    router.replace(`/dashboard${qs ? `?${qs}` : ""}`);
+  }, [projectsLoadState, memberProjects, requestedProjectSlug, resolvedProjectSlug, router, searchParams]);
+
+  function handleScopeChange(slug: string) {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("project", slug);
+    router.push(`/dashboard?${params.toString()}`);
+  }
 
   const [loadState, setLoadState] = useState<"loading" | "ready" | "error">(isDevFallback ? "ready" : "loading");
   const [loadErrorMessage, setLoadErrorMessage] = useState<string | null>(null);
@@ -378,36 +457,43 @@ export function MemberDashboard() {
   const [projects, setProjects] = useState<{ slug: string; name: string; status: ProjectStatus }[]>([]);
   const [todayEntries, setTodayEntries] = useState<ProfileTimeEntry[]>([]);
   const [attentionEvents, setAttentionEvents] = useState<MemberAttentionEvent[]>([]);
-  const [weeklyCapacity, setWeeklyCapacity] = useState(0);
+  const [weeklyCapacity, setWeeklyCapacity] = useState(user.weeklyCapacity);
   const [weekLoggedMinutes, setWeekLoggedMinutes] = useState(0);
-  const [requestId, setRequestId] = useState(0);
 
-  const runFetch = () => setRequestId((id) => id + 1);
   const todayISO = getTodayISO();
 
   useEffect(() => {
-    if (isDevFallback || !organization || !userId) return;
+    if (isDevFallback || !organization || !userId || !resolvedProjectSlug) return;
     let cancelled = false;
+    // Back to "loading" on every project switch too, not just the first
+    // mount — reuses the existing full-screen "Loading dashboard…" state
+    // below (gated on `loadState`) so the previous project's tickets/hours/
+    // activity are never left on screen while the new project's real data
+    // is still in flight.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: same "clear before the async fetch below resolves" pattern used elsewhere in this app (e.g. member-profile-modal.tsx)
+    setLoadState("loading");
 
     (async () => {
-      const ticketsResult = await loadOrganizationTickets(organization.id);
+      const ticketsResult = await loadProjectTickets(organization.id, resolvedProjectSlug);
       if (cancelled) return;
       if (ticketsResult.status === "error") {
         setLoadState("error");
         setLoadErrorMessage(ticketsResult.message);
         return;
       }
+      const myProjectTickets = ticketsResult.status === "ready" ? ticketsResult.tickets : [];
 
-      const myActiveTicketIds = ticketsResult.tickets
+      const myActiveTicketIds = myProjectTickets
         .filter((t) => t.assigneeProfileId === userId && t.status !== "done")
         .map((t) => t.id);
+      const allProjectTicketIds = myProjectTickets.map((t) => t.id);
 
       const { start: weekStart, end: weekEnd } = getWeekRangeISO(getTodayISO());
-      const [timeResult, attentionResult, capacityResult, weekMinutesResult] = await Promise.all([
+      const [timeResult, attentionResult, teamResult, weekEntriesResult] = await Promise.all([
         loadProfileLoggedTimeForDate(userId, getTodayISO()),
         loadMemberAttentionEvents(myActiveTicketIds, userId),
-        loadMemberWeeklyCapacity(userId, user.weeklyCapacity),
-        loadProfileLoggedMinutesForRange(userId, weekStart, weekEnd),
+        loadProjectTeam(organization.id, resolvedProjectSlug),
+        loadOrganizationLoggedTimeForRange(allProjectTicketIds, weekStart, weekEnd),
       ]);
       if (cancelled) return;
 
@@ -421,30 +507,54 @@ export function MemberDashboard() {
         setLoadErrorMessage(attentionResult.message);
         return;
       }
-      if (capacityResult.status === "error") {
+      if (teamResult.status === "error") {
         setLoadState("error");
-        setLoadErrorMessage(capacityResult.message);
+        setLoadErrorMessage(teamResult.message);
         return;
       }
-      if (weekMinutesResult.status === "error") {
+      if (weekEntriesResult.status === "error") {
         setLoadState("error");
-        setLoadErrorMessage(weekMinutesResult.message);
+        setLoadErrorMessage(weekEntriesResult.message);
         return;
       }
 
-      setTickets(ticketsResult.tickets);
-      setProjects(ticketsResult.projects);
-      setTodayEntries(timeResult.entries);
+      // Today's entries are still fetched profile-wide (loadProfileLoggedTimeForDate
+      // has no project filter of its own), so they're narrowed here to just
+      // this project's own tickets — same client-side scoping the Admin
+      // Dashboard's own scoped-tickets memo uses. The week total, by
+      // contrast, comes from loadOrganizationLoggedTimeForRange scoped to
+      // this project's ticket ids directly (the same function Reports/
+      // Project Overview already use for exactly this "who logged what, on
+      // which ticket, in this range" need), then narrowed to this member's
+      // own entries — reused as-is, not reimplemented.
+      const myProjectTicketIds = new Set(allProjectTicketIds);
+      const scopedTodayEntries = timeResult.entries.filter((e) => myProjectTicketIds.has(e.ticketId));
+      const myWeekMinutes = weekEntriesResult.entries
+        .filter((e) => e.loggedBy === userId)
+        .reduce((sum, e) => sum + e.minutes, 0);
+
+      // Same org-capacity fallback loadProjectTeam already resolves per
+      // member — falls back to the real org-level weekly capacity only if
+      // this profile's own row is somehow missing from the roster (e.g. a
+      // membership removed between the project list load and this fetch).
+      const myTeamRow = teamResult.members.find((m) => m.id === userId);
+      const resolvedWeeklyCapacity = myTeamRow?.weeklyCapacity ?? user.weeklyCapacity;
+
+      const projectMeta = memberProjects.find((p) => p.slug === resolvedProjectSlug);
+
+      setTickets(myProjectTickets);
+      setProjects(projectMeta ? [{ slug: projectMeta.slug, name: projectMeta.name, status: "active" }] : []);
+      setTodayEntries(scopedTodayEntries);
       setAttentionEvents(attentionResult.events);
-      setWeeklyCapacity(capacityResult.weeklyCapacity);
-      setWeekLoggedMinutes(weekMinutesResult.totalMinutes);
+      setWeeklyCapacity(resolvedWeeklyCapacity);
+      setWeekLoggedMinutes(myWeekMinutes);
       setLoadState("ready");
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [isDevFallback, organization, userId, requestId, user.weeklyCapacity]);
+  }, [isDevFallback, organization, userId, resolvedProjectSlug, memberProjects, requestId, user.weeklyCapacity]);
 
   const ticketsById = useMemo(() => new Map(tickets.map((t) => [t.id, t])), [tickets]);
   const projectsBySlug = useMemo(() => new Map(projects.map((p) => [p.slug, p])), [projects]);
@@ -503,7 +613,10 @@ export function MemberDashboard() {
     if (ticket) setPreview(ticket);
   }
 
-  if (loadState === "loading") {
+  const loading = projectsLoadState === "loading" || (memberProjects.length > 0 && loadState === "loading");
+  const loadError = projectsLoadState === "error" ? projectsErrorMessage : loadState === "error" ? loadErrorMessage : null;
+
+  if (loading) {
     return (
       <div className="max-w-5xl mx-auto px-6 py-8 pb-16">
         <div className="h-full flex items-center justify-center text-sm text-slate-400 dark:text-zinc-500 py-20">
@@ -513,13 +626,13 @@ export function MemberDashboard() {
     );
   }
 
-  if (loadState === "error") {
+  if (loadError) {
     return (
       <div className="max-w-5xl mx-auto px-6 py-8 pb-16">
         <div className="flex flex-col items-center justify-center text-center px-4 py-20">
           <h3 className="text-sm font-semibold text-slate-700 dark:text-zinc-200">Couldn&apos;t load dashboard</h3>
           <p className="text-sm text-slate-400 mt-1 max-w-xs dark:text-zinc-500">
-            {loadErrorMessage ?? "Something went wrong."}
+            {loadError}
           </p>
           <button
             type="button"
@@ -538,12 +651,35 @@ export function MemberDashboard() {
 
       {/* ── Section 1: Today ─────────────────────────────────────────────────── */}
       <section className="rounded-2xl border border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900 p-5 shadow-sm shadow-slate-200/40 dark:shadow-black/20 mb-5">
-        <div className="flex items-baseline gap-2 mb-4">
-          <h1 className="text-[15px] font-semibold text-slate-800 dark:text-zinc-100 tracking-tight leading-none">
-            Good morning, {user.name.split(" ")[0]} 👋
-          </h1>
-          <span className="text-slate-300 dark:text-zinc-700" aria-hidden="true">·</span>
-          <p className="text-xs text-slate-400 dark:text-zinc-500">{formatFullDate(todayISO)}</p>
+        <div className="flex items-center justify-between gap-2 mb-4">
+          <div className="flex items-baseline gap-2">
+            <h1 className="text-[15px] font-semibold text-slate-800 dark:text-zinc-100 tracking-tight leading-none">
+              Good morning, {user.name.split(" ")[0]} 👋
+            </h1>
+            <span className="text-slate-300 dark:text-zinc-700" aria-hidden="true">·</span>
+            <p className="text-xs text-slate-400 dark:text-zinc-500">{formatFullDate(todayISO)}</p>
+          </div>
+
+          {/* Project scope selector — same component/placement pattern as
+              the Admin and Project Lead Dashboards' own selectors, shown
+              only when staffed on more than one active project. */}
+          {memberProjects.length > 1 && (
+            <div className="relative inline-flex items-center flex-shrink-0">
+              <select
+                value={resolvedProjectSlug ?? ""}
+                onChange={(event) => handleScopeChange(event.target.value)}
+                aria-label="Current project"
+                className="appearance-none text-[13px] font-medium pl-3 pr-7 py-1.5 rounded-lg border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-slate-700 dark:text-zinc-300 hover:bg-slate-50 dark:hover:bg-zinc-800 transition-colors cursor-pointer outline-none focus:ring-2 focus:ring-brand-500/30"
+              >
+                {memberProjects.map((p) => (
+                  <option key={p.slug} value={p.slug}>{p.name}</option>
+                ))}
+              </select>
+              <svg className="pointer-events-none absolute right-2 w-3 h-3 text-slate-400 dark:text-zinc-500" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24" aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 9l6 6 6-6" />
+              </svg>
+            </div>
+          )}
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
@@ -618,8 +754,8 @@ export function MemberDashboard() {
         {/* Left: My Active Work + Notifications */}
         <div className="space-y-5 min-w-0">
 
-          {/* Section 3: My Active Work — the main section, spanning every
-              project the member is staffed on. */}
+          {/* Section 3: My Active Work — scoped to the current project
+              (see the selector above). */}
           <section>
             <div className="flex items-center gap-2 mb-2">
               <h2 className="text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:text-zinc-400">
@@ -712,7 +848,7 @@ export function MemberDashboard() {
             </div>
           </Card>
 
-          {/* Section 6: Upcoming Work — every project, sorted by due date only. */}
+          {/* Section 6: Upcoming Work — scoped to the current project, sorted by due date only. */}
           <Card title="Upcoming Work">
             {upcoming.length === 0 ? (
               <p className="text-sm text-slate-400 dark:text-zinc-500 py-2">Nothing else on the horizon.</p>

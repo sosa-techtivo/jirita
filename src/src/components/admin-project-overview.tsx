@@ -32,8 +32,11 @@ import type { PersonRow, ProjectRow as DeliveryProjectRow } from "@/components/r
 // Project Activity card is capped at this many items (never paginated in
 // place) — "View all activity →" links to the dedicated, fully paginated
 // /projects/[slug]/activity page (project-activity-history-screen.tsx) for
-// the complete real history.
-const PROJECT_ACTIVITY_PREVIEW_LIMIT = 10;
+// the complete real history. Exported (along with the other building blocks
+// below) so project-lead-project-overview.tsx can reuse the exact same
+// components/calculations instead of maintaining a parallel implementation
+// — this file's own rendered behavior is unchanged by any of these exports.
+export const PROJECT_ACTIVITY_PREVIEW_LIMIT = 10;
 
 // The Admin Project Overview is an executive read of one project — health,
 // risk, and overall progress — not a personal work queue. It intentionally
@@ -45,7 +48,7 @@ const PROJECT_ACTIVITY_PREVIEW_LIMIT = 10;
 // duplicated) so this page can never disagree with Reports about what
 // counts as "at risk."
 
-interface ActivityEntry {
+export interface ActivityEntry {
   id: string;
   avatar: string;
   name: string;
@@ -56,7 +59,7 @@ interface ActivityEntry {
   ticket?: Ticket;
 }
 
-interface TeamMember {
+export interface TeamMember {
   id: string;
   name: string;
   role: string;
@@ -68,9 +71,9 @@ interface TeamMember {
 // StatusBadge/HealthBadge in status-badge.tsx) rather than inventing a new
 // one — "On Track" / "Needs Attention" / "At Risk" instead of a numeric score.
 
-type HealthStatus = "on-track" | "needs-attention" | "at-risk";
+export type HealthStatus = "on-track" | "needs-attention" | "at-risk";
 
-const HEALTH_STATUS_META: Record<HealthStatus, { dot: string; text: string; label: string }> = {
+export const HEALTH_STATUS_META: Record<HealthStatus, { dot: string; text: string; label: string }> = {
   "on-track": {
     dot: "bg-emerald-500",
     text: "text-emerald-600 dark:text-emerald-400",
@@ -88,17 +91,17 @@ const HEALTH_STATUS_META: Record<HealthStatus, { dot: string; text: string; labe
   },
 };
 
-interface HealthRow {
+export interface HealthRow {
   id: string;
   label: string;
   status: HealthStatus;
   note: string;
 }
 
-const HEALTH_ROW_CLASS =
+export const HEALTH_ROW_CLASS =
   "block w-full text-left py-2.5 -mx-2 px-2 rounded-lg border-b border-slate-100 dark:border-zinc-800/70 last:border-0 cursor-pointer transition-colors hover:bg-slate-50 dark:hover:bg-zinc-800/50";
 
-function HealthRowContent({ row }: { row: HealthRow }) {
+export function HealthRowContent({ row }: { row: HealthRow }) {
   const meta = HEALTH_STATUS_META[row.status];
   return (
     <>
@@ -119,7 +122,7 @@ function HealthRowContent({ row }: { row: HealthRow }) {
 // person" affordance already uses. Scope has no real signal anywhere in
 // this schema (no scope-change tracking exists), so it stays a plain,
 // non-fabricated navigation rather than a fake "no changes" claim.
-function ProjectHealthRow({
+export function ProjectHealthRow({
   row,
   slug,
   onOpenMember,
@@ -162,7 +165,7 @@ function ProjectHealthRow({
 
 // ── Active Work: grouped by status ───────────────────────────────────────────
 
-function TicketRow({
+export function TicketRow({
   ticket,
   projectCode,
   slug,
@@ -204,7 +207,7 @@ function TicketRow({
   );
 }
 
-function TicketGroup({
+export function TicketGroup({
   label,
   labelClass,
   tickets,
@@ -239,7 +242,7 @@ function TicketGroup({
 // (blocked/completed/hours/assigned/priority) ever appear here — comments,
 // attachments, and time entries are genuinely real too, just not one of
 // this widget's existing categories, same precedent as the dashboards.
-function activityEventToEntry(event: OrganizationActivityEvent, ticket: Ticket | undefined): ActivityEntry {
+export function activityEventToEntry(event: OrganizationActivityEvent, ticket: Ticket | undefined): ActivityEntry {
   const base = {
     id: event.id,
     avatar: event.actorAvatar,
@@ -279,7 +282,7 @@ function activityEventToEntry(event: OrganizationActivityEvent, ticket: Ticket |
 // (measured via scrollHeight vs. clientHeight, not a character count, so it
 // stays correct across font sizes/widths). Re-measured on resize since the
 // same text can wrap to more or fewer lines at different viewport widths.
-function ExpandableDescription({ text }: { text: string }) {
+export function ExpandableDescription({ text }: { text: string }) {
   const [expanded, setExpanded] = useState(false);
   const [isTruncated, setIsTruncated] = useState(false);
   const ref = useRef<HTMLParagraphElement>(null);

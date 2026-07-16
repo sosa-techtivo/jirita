@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo, Fragment } from "react";
 import type { ReactNode } from "react";
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { TicketPreviewPanel } from "@/components/tickets/ticket-preview-panel";
 import type { Ticket } from "@/lib/mock-tickets";
 import { getTicketDisplayKey } from "@/lib/mock-tickets";
@@ -229,6 +230,8 @@ export function DashboardScreen() {
 function AdminDashboard() {
   const { user, userId, organization, isDevFallback } = useCurrentUser();
   const [preview, setPreview] = useState<Ticket | null>(null);
+  const router = useRouter();
+  const searchParams = useSearchParams();
 
   const [loadState, setLoadState] = useState<"loading" | "ready" | "error">(isDevFallback ? "ready" : "loading");
   const [loadErrorMessage, setLoadErrorMessage] = useState<string | null>(null);
@@ -244,6 +247,79 @@ function AdminDashboard() {
 
   const canManageOrg = canManage(user.role);
   const runFetch = () => setRequestId((id) => id + 1);
+
+  // ── Project scope selector — the `?project=<slug>` query param is the
+  // single source of truth (same real-URL-state precedent as Tickets'
+  // `?alerts=` and Time Tracking's own filters), so refresh/back/forward all
+  // just work with no extra state to keep in sync. A requested slug that
+  // isn't a real, active, org-scoped project (stale link, another org, an
+  // archived project) is silently ignored — falls back to "All Projects" —
+  // rather than trusted as-is, respecting the same access boundary
+  // `activeOrgProjects` itself is built from (RLS-scoped loadOrganizationTickets).
+  const activeOrgProjects = useMemo(() => orgProjects.filter((p) => p.status === "active"), [orgProjects]);
+  const requestedProjectSlug = searchParams.get("project");
+  const selectedProjectSlug = useMemo(
+    () => (requestedProjectSlug && activeOrgProjects.some((p) => p.slug === requestedProjectSlug) ? requestedProjectSlug : null),
+    [requestedProjectSlug, activeOrgProjects]
+  );
+
+  function handleScopeChange(slug: string) {
+    const params = new URLSearchParams(searchParams.toString());
+    if (slug) params.set("project", slug);
+    else params.delete("project");
+    const qs = params.toString();
+    router.push(`/dashboard${qs ? `?${qs}` : ""}`);
+  }
+
+  // Every section below reads from this instead of `tickets` directly —
+  // "All Projects" is a no-op filter (same reference-shaped result), a
+  // selected project narrows every KPI/list/insight to just that project's
+  // own tickets, reusing the exact same downstream calculations.
+  const scopedTickets = useMemo(
+    () => (selectedProjectSlug ? tickets.filter((t) => t.projectSlug === selectedProjectSlug) : tickets),
+    [tickets, selectedProjectSlug]
+  );
+  const scopedActiveProjects = useMemo(
+    () => (selectedProjectSlug ? activeOrgProjects.filter((p) => p.slug === selectedProjectSlug) : activeOrgProjects),
+    [activeOrgProjects, selectedProjectSlug]
+  );
+
+  // Logged minutes and the curated Recent Activity feed are each backed by
+  // their own real query scoped by a ticket-id list (loadOrganizationLoggedMinutes/
+  // loadOrganizationActivity, same functions the org-wide load above already
+  // uses) — the org-wide top-11 activity probe can't just be filtered
+  // client-side to one project, since that project's own most recent events
+  // may not be within the org's global top 11. Reset to the zero state the
+  // instant the scope changes (before the fetch resolves) so a fast switch
+  // can never render the previous project's numbers even for a moment.
+  const [scopedLoggedMinutes, setScopedLoggedMinutes] = useState(0);
+  const [scopedActivityEvents, setScopedActivityEvents] = useState<OrganizationActivityEvent[]>([]);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: clears the previous project's numbers the moment the scope changes, before the async fetch below resolves
+    setScopedLoggedMinutes(0);
+    setScopedActivityEvents([]);
+    if (!selectedProjectSlug || loadState !== "ready") return;
+    let cancelled = false;
+
+    const projectTicketIds = tickets.filter((t) => t.projectSlug === selectedProjectSlug).map((t) => t.id);
+    (async () => {
+      const [minutesResult, activityResult] = await Promise.all([
+        loadOrganizationLoggedMinutes(projectTicketIds),
+        loadOrganizationActivity(projectTicketIds, RECENT_ACTIVITY_LIMIT + 1),
+      ]);
+      if (cancelled) return;
+      if (minutesResult.status === "ready") setScopedLoggedMinutes(minutesResult.totalMinutes);
+      if (activityResult.status === "ready") setScopedActivityEvents(activityResult.events);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedProjectSlug, tickets, loadState]);
+
+  const effectiveLoggedMinutes = selectedProjectSlug ? scopedLoggedMinutes : loggedMinutes;
+  const effectiveActivityEvents = selectedProjectSlug ? scopedActivityEvents : activityEvents;
 
   useEffect(() => {
     if (isDevFallback || !organization) return;
@@ -304,24 +380,24 @@ function AdminDashboard() {
 
   const ticketsById = useMemo(() => new Map(tickets.map((t) => [t.id, t])), [tickets]);
 
-  const openTicketsCount = useMemo(() => tickets.filter((t) => t.status !== "done").length, [tickets]);
+  const openTicketsCount = useMemo(() => scopedTickets.filter((t) => t.status !== "done").length, [scopedTickets]);
   const activeTicketsCount = useMemo(
-    () => tickets.filter((t) => t.status === "in-progress" || t.status === "review").length,
-    [tickets]
+    () => scopedTickets.filter((t) => t.status === "in-progress" || t.status === "review").length,
+    [scopedTickets]
   );
-  const blockedTicketsCount = useMemo(() => tickets.filter((t) => t.status === "blocked").length, [tickets]);
+  const blockedTicketsCount = useMemo(() => scopedTickets.filter((t) => t.status === "blocked").length, [scopedTickets]);
   const dueTodayCount = useMemo(
-    () => tickets.filter((t) => t.dueDate && parseDisplayDate(t.dueDate) === todayISO).length,
-    [tickets, todayISO]
+    () => scopedTickets.filter((t) => t.dueDate && parseDisplayDate(t.dueDate) === todayISO).length,
+    [scopedTickets, todayISO]
   );
 
-  const estimatedHoursTotal = useMemo(() => tickets.reduce((sum, t) => sum + (t.hours ?? 0), 0), [tickets]);
-  const loggedHoursTotal = loggedMinutes / 60;
+  const estimatedHoursTotal = useMemo(() => scopedTickets.reduce((sum, t) => sum + (t.hours ?? 0), 0), [scopedTickets]);
+  const loggedHoursTotal = effectiveLoggedMinutes / 60;
   const hoursBurnPct = estimatedHoursTotal > 0 ? Math.round((loggedHoursTotal / estimatedHoursTotal) * 100) : 0;
 
   const myActiveWork = useMemo(
-    () => (userId ? tickets.filter((t) => t.assigneeProfileId === userId && t.status !== "done") : []),
-    [tickets, userId]
+    () => (userId ? scopedTickets.filter((t) => t.assigneeProfileId === userId && t.status !== "done") : []),
+    [scopedTickets, userId]
   );
 
   const deadlines = useMemo(
@@ -341,7 +417,7 @@ function AdminDashboard() {
   const workload = useMemo(() => {
     return workloadMembers
       .map((member) => {
-        const assignedHours = tickets
+        const assignedHours = scopedTickets
           .filter((t) => t.assigneeProfileId === member.id && t.status !== "done")
           .reduce((sum, t) => sum + (t.hours ?? 0), 0);
         const pct = utilizationOf({
@@ -360,7 +436,7 @@ function AdminDashboard() {
       })
       .sort((a, b) => b.pct - a.pct)
       .slice(0, 5);
-  }, [workloadMembers, tickets]);
+  }, [workloadMembers, scopedTickets]);
 
   // Projects at Risk — BLOCKED (>=1 active ticket in status "blocked") takes
   // priority over AT RISK (no blocked tickets, but >=1 active ticket whose
@@ -372,7 +448,7 @@ function AdminDashboard() {
   // deleted in this schema, so no separate "not deleted" filter is needed.
   const projectsAtRisk = useMemo(() => {
     type RiskEntry = { slug: string; name: string; risk: "blocked" | "at-risk"; affected: number; progressPct: number };
-    const activeProjects = orgProjects.filter((p) => p.status === "active");
+    const activeProjects = scopedActiveProjects;
 
     const entries: RiskEntry[] = [];
     for (const project of activeProjects) {
@@ -404,7 +480,7 @@ function AdminDashboard() {
     });
 
     return entries.slice(0, 3);
-  }, [orgProjects, tickets, todayISO]);
+  }, [scopedActiveProjects, tickets, todayISO]);
 
   // Organization Health (the insights band) — each indicator below reuses
   // the same real definitions as the widget it's named after, but computed
@@ -416,21 +492,21 @@ function AdminDashboard() {
   // Same "active project + >=1 blocked ticket" criterion as Projects at
   // Risk above, uncapped and blocked-only (no AT RISK projects here).
   const blockedProjects = useMemo(() => {
-    const activeProjects = orgProjects.filter((p) => p.status === "active");
+    const activeProjects = scopedActiveProjects;
     const result: { name: string; count: number }[] = [];
     for (const project of activeProjects) {
       const blockedCount = tickets.filter((t) => t.projectSlug === project.slug && t.status === "blocked").length;
       if (blockedCount > 0) result.push({ name: project.name, count: blockedCount });
     }
     return result;
-  }, [orgProjects, tickets]);
+  }, [scopedActiveProjects, tickets]);
 
   // Same assignedHours + utilizationOf calculation Team Workload uses
   // above, uncapped and filtered to >100%, most over-capacity first.
   const membersOverCapacity = useMemo(() => {
     return workloadMembers
       .map((member) => {
-        const assignedHours = tickets
+        const assignedHours = scopedTickets
           .filter((t) => t.assigneeProfileId === member.id && t.status !== "done")
           .reduce((sum, t) => sum + (t.hours ?? 0), 0);
         const pct = utilizationOf({
@@ -449,7 +525,7 @@ function AdminDashboard() {
       })
       .filter((m) => m.pct > 100)
       .sort((a, b) => b.pct - a.pct);
-  }, [workloadMembers, tickets]);
+  }, [workloadMembers, scopedTickets]);
 
   // No dedicated "completed_at" column exists — updated_at on a ticket
   // that's currently "done" is the real, closest available signal for when
@@ -458,8 +534,8 @@ function AdminDashboard() {
   // "this month", but there's no fabricated data involved).
   const completedThisMonthCount = useMemo(() => {
     const monthPrefix = todayISO.slice(0, 7); // "YYYY-MM"
-    return tickets.filter((t) => t.status === "done" && t.updatedAtISO?.slice(0, 7) === monthPrefix).length;
-  }, [tickets, todayISO]);
+    return scopedTickets.filter((t) => t.status === "done" && t.updatedAtISO?.slice(0, 7) === monthPrefix).length;
+  }, [scopedTickets, todayISO]);
 
   // Same estimatedHoursTotal/loggedHoursTotal/hoursBurnPct the Hours Burn
   // KPI card above already computes — omitted entirely (not just 0%) when
@@ -513,11 +589,11 @@ function AdminDashboard() {
   // Only ever an 11th probe event past RECENT_ACTIVITY_LIMIT — never
   // rendered, just used to decide whether "View all activity →" appears
   // (same pattern as Project Overview's hasMoreActivity).
-  const hasMoreActivity = activityEvents.length > RECENT_ACTIVITY_LIMIT;
+  const hasMoreActivity = effectiveActivityEvents.length > RECENT_ACTIVITY_LIMIT;
 
   const recentActivityEntries = useMemo<DashboardActivityEntry[]>(
     () =>
-      activityEvents.slice(0, RECENT_ACTIVITY_LIMIT).map((event) => {
+      effectiveActivityEvents.slice(0, RECENT_ACTIVITY_LIMIT).map((event) => {
         const ticket = ticketsById.get(event.ticketId);
         const project = ticket ? projectNameBySlug.get(ticket.projectSlug) ?? ticket.projectSlug : "";
         const base = {
@@ -554,7 +630,7 @@ function AdminDashboard() {
           detail: <span className="font-medium">{event.oldPriorityLabel} → {event.newPriorityLabel}</span>,
         };
       }),
-    [activityEvents, ticketsById, projectNameBySlug]
+    [effectiveActivityEvents, ticketsById, projectNameBySlug]
   );
 
   if (loadState === "loading") {
@@ -599,9 +675,27 @@ function AdminDashboard() {
           <p className="text-sm text-slate-400 dark:text-zinc-500">Tuesday, June 30</p>
         </div>
 
-        {/* Quick Actions */}
-        {canManageOrg && (
-          <div className="flex items-center gap-2 flex-shrink-0">
+        {/* Top actions: project scope selector + Quick Actions */}
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <div className="relative inline-flex items-center">
+            <select
+              value={selectedProjectSlug ?? ""}
+              onChange={(e) => handleScopeChange(e.target.value)}
+              aria-label="Dashboard project scope"
+              className="appearance-none text-[13px] font-medium pl-3 pr-7 py-1.5 rounded-lg border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-slate-700 dark:text-zinc-300 hover:bg-slate-50 dark:hover:bg-zinc-800 transition-colors cursor-pointer outline-none focus:ring-2 focus:ring-brand-500/30"
+            >
+              <option value="">All Projects</option>
+              {activeOrgProjects.map((p) => (
+                <option key={p.slug} value={p.slug}>{p.name}</option>
+              ))}
+            </select>
+            <svg className="pointer-events-none absolute right-2 w-3 h-3 text-slate-400 dark:text-zinc-500" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24" aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 9l6 6 6-6" />
+            </svg>
+          </div>
+
+          {canManageOrg && (
+            <>
             <button
               type="button"
               onClick={() => setShowCreateProject(true)}
@@ -626,8 +720,9 @@ function AdminDashboard() {
               </svg>
               Add Member
             </button>
-          </div>
-        )}
+            </>
+          )}
+        </div>
       </div>
 
       {/* ── KPI Cards ──────────────────────────────────────────────────────── */}

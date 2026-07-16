@@ -1,245 +1,47 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { NewTicketModal } from "@/components/tickets/new-ticket-modal";
-import { tickets as ALL_MOCK_TICKETS, getTicketById } from "@/lib/mock-tickets";
+import { getTicketDisplayKey } from "@/lib/mock-tickets";
 import type { Ticket } from "@/lib/mock-tickets";
-import { TicketTypeIcon } from "@/components/tickets/ticket-ui";
-import { getProjectBySlug } from "@/lib/mock-projects";
+import { TicketTypeIcon, getTodayISO, parseDisplayDate } from "@/components/tickets/ticket-ui";
 import { useCurrentUser } from "@/components/current-user-provider";
 import { canManage } from "@/lib/current-user";
-import { ProjectCategoryBadge } from "@/components/status-badge";
+import { ProjectCategoryBadge, StatusBadge } from "@/components/status-badge";
 import { TicketPreviewPanel } from "@/components/tickets/ticket-preview-panel";
-import { presetTicketsFilter } from "@/components/tickets-screen";
 import { MemberTrigger, useMemberProfile } from "@/components/member-profile";
+import { loadProjectDetail, loadProjectTeam } from "@/lib/projects";
+import type { ProjectDetail, ProjectTeamMember } from "@/lib/projects";
+import { loadProjectTickets, loadOrganizationLoggedTimeForRange } from "@/lib/tickets";
+import type { OrganizationTimeEntry } from "@/lib/tickets";
+import {
+  buildHoursByPersonRows,
+  buildProjectHealthRows,
+  buildDeliveryKpiSummary,
+  buildDeliveryStatusItems,
+} from "@/components/reports-screen";
+import type { PersonRow, ProjectRow as DeliveryProjectRow } from "@/components/reports-screen";
+import { ExpandableDescription, TicketGroup, ProjectHealthRow } from "@/components/admin-project-overview";
+import type { TeamMember, HealthRow, HealthStatus } from "@/components/admin-project-overview";
 
-// The Project Lead Project Overview answers one question — "what needs my
-// attention in this project today?" — so unlike the Admin executive view it
-// skips history (Recent Activity) and generic health labels in favor of
-// concrete reasons and a prioritized action list. No financial or
-// org-wide figures here (that's Admin/Reports territory).
-
-interface TeamMember {
-  id: string;
-  name: string;
-  role: string;
-  avatar: string;
-  available: boolean;
-}
-
-const avatar = (id: number) => `https://i.pravatar.cc/64?img=${id}`;
-
-const team: TeamMember[] = [
-  { id: "team-sarah", name: "Sarah Chen", role: "Project Lead", avatar: avatar(47), available: true },
-  { id: "team-marcus", name: "Marcus Lee", role: "Engineer", avatar: avatar(12), available: true },
-  { id: "team-priya", name: "Alejo Cadavid", role: "Admin", avatar: avatar(33), available: true },
-  { id: "team-david", name: "David Kim", role: "QA Engineer", avatar: avatar(22), available: true },
-  { id: "team-elena", name: "Elena Rossi", role: "Designer", avatar: avatar(5), available: true },
-];
-
-// ── Active Work: grouped by status (identical to Admin's — unchanged) ───────
-
-function TicketRow({
-  ticket,
-  projectCode,
-  slug,
-  onOpen,
-}: {
-  ticket: Ticket;
-  projectCode: string;
-  slug: string;
-  onOpen: (t: Ticket) => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={() => onOpen(ticket)}
-      className="w-full py-2.5 flex items-center justify-between gap-2 text-left hover:bg-slate-50 dark:hover:bg-zinc-800/50 -mx-2 px-2 rounded-lg transition-colors"
-    >
-      <span className="min-w-0 flex items-baseline gap-1.5">
-        <TicketTypeIcon type={ticket.type} />
-        <span className="text-[11px] font-mono font-medium text-slate-400 dark:text-zinc-500 flex-shrink-0">
-          {projectCode}-{ticket.ticketNumber}
-        </span>
-        <span className="text-sm text-slate-800 dark:text-zinc-200 truncate">{ticket.title}</span>
-      </span>
-      <MemberTrigger
-        name={ticket.assignee.name}
-        avatar={ticket.assignee.avatar}
-        projectSlug={slug}
-        nested
-        className="flex-shrink-0 rounded-full"
-      >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={ticket.assignee.avatar}
-          alt={ticket.assignee.name}
-          className="w-6 h-6 rounded-full flex-shrink-0"
-        />
-      </MemberTrigger>
-    </button>
-  );
-}
-
-function TicketGroup({
-  label,
-  labelClass,
-  tickets,
-  projectCode,
-  slug,
-  onOpen,
-}: {
-  label: string;
-  labelClass: string;
-  tickets: Ticket[];
-  projectCode: string;
-  slug: string;
-  onOpen: (t: Ticket) => void;
-}) {
-  if (tickets.length === 0) return null;
-  return (
-    <div className="mt-4 first:mt-0">
-      <p className={`text-xs font-medium mb-1.5 ${labelClass}`}>{label} ({tickets.length})</p>
-      <div className="divide-y divide-slate-100 dark:divide-zinc-800">
-        {tickets.map((ticket) => (
-          <TicketRow key={ticket.id} ticket={ticket} projectCode={projectCode} slug={slug} onOpen={onOpen} />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// ── Project Health: reasons, not labels ──────────────────────────────────────
-
-interface HealthRow {
-  id: string;
-  label: string;
-  note: string;
-}
-
-const PROJECT_HEALTH: HealthRow[] = [
-  { id: "schedule", label: "Schedule", note: "2 blocked tickets older than 4 days" },
-  { id: "capacity", label: "Capacity", note: "Elena Rossi is over capacity" },
-  { id: "scope",    label: "Scope",    note: "No scope changes this month" },
-  { id: "risks",    label: "Risks",    note: "Vendor API outage affecting Security Audit" },
-];
-
-const HEALTH_ROW_CLASS =
-  "block w-full text-left py-2.5 -mx-2 px-2 rounded-lg border-b border-slate-100 dark:border-zinc-800/70 last:border-0 cursor-pointer transition-colors hover:bg-slate-50 dark:hover:bg-zinc-800/50";
-
-function HealthRowContent({ row }: { row: HealthRow }) {
-  return (
-    <>
-      <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600">{row.label}</p>
-      <p className="text-sm text-slate-700 dark:text-zinc-300 mt-1">{row.note}</p>
-    </>
-  );
-}
-
-// Same drill-down mapping as the Admin overview: Schedule/Scope are real
-// navigations to the Tickets page (Link, matching the attention banner
-// above), Capacity/Risks open in place via the shared member-profile/
-// ticket-preview mechanisms every other "click a person/ticket" affordance
-// already uses in this app.
-function ProjectHealthRow({
-  row,
-  slug,
-  onOpenTicket,
-  onOpenMember,
-}: {
-  row: HealthRow;
-  slug: string;
-  onOpenTicket: (ticket: Ticket) => void;
-  onOpenMember: () => void;
-}) {
-  if (row.id === "schedule") {
-    return (
-      <Link
-        href={`/projects/${slug}/tickets`}
-        onClick={() => presetTicketsFilter(slug, ["Blocked"])}
-        className={HEALTH_ROW_CLASS}
-      >
-        <HealthRowContent row={row} />
-      </Link>
-    );
-  }
-
-  if (row.id === "capacity") {
-    return (
-      <button type="button" onClick={onOpenMember} className={HEALTH_ROW_CLASS}>
-        <HealthRowContent row={row} />
-      </button>
-    );
-  }
-
-  if (row.id === "risks") {
-    return (
-      <button
-        type="button"
-        onClick={() => {
-          const ticket = getTicketById("kyc-vendor-outage");
-          if (ticket) onOpenTicket(ticket);
-        }}
-        className={HEALTH_ROW_CLASS}
-      >
-        <HealthRowContent row={row} />
-      </button>
-    );
-  }
-
-  // Scope: no scope-change events exist yet, so fall back to the project's
-  // Tickets page rather than inventing a dedicated Activity view.
-  return (
-    <Link href={`/projects/${slug}/tickets`} className={HEALTH_ROW_CLASS}>
-      <HealthRowContent row={row} />
-    </Link>
-  );
-}
-
-// ── Needs Your Attention: prioritized, actionable, derived from real tickets ─
-
-const TODAY = new Date(2026, 5, 30); // Jun 30, 2026 — same "today" ticket-detail-screen.tsx uses
-
-function parseDue(dateStr?: string): Date | null {
-  if (!dateStr) return null;
-  const d = new Date(`${dateStr}, 2026`);
-  return isNaN(d.getTime()) ? null : d;
-}
+// The Project Lead Project Overview is the same real project-health read as
+// the Admin's (same data loading, KPI/alert/health calculations, and
+// components — all reused directly from admin-project-overview.tsx and
+// reports-screen.tsx, never a second implementation), with two deliberate,
+// role-specific differences: a "Needs Your Attention" ticket list in place
+// of Admin's Recent Activity history (built from the exact same real
+// blocked/due-today/awaiting-review signals the Project Lead Dashboard's own
+// Attention Required widget already uses, deduped, no invented priority
+// scheme), and no Scope row in Project Health (this MVP has no real
+// scope-tracking source of truth for either role, but only this view drops
+// the row outright instead of keeping Admin's honest "not tracked" note).
+// Recent Activity itself isn't loaded here at all (unlike Admin) since this
+// role's view never renders it — no dead data fetch for an unused widget.
 
 interface AttentionEntry {
   ticket: Ticket;
   reason: string;
-  rank: number;
-}
-
-// Lower rank = more urgent. Blocked tickets always come first, then overdue
-// review, then any other overdue, then review/due-today, then due-today.
-function buildAttentionEntry(t: Ticket): AttentionEntry | null {
-  if (t.status === "done") return null;
-  const due = parseDue(t.dueDate);
-  const isOverdue = due !== null && due < TODAY;
-  const isDueToday = due !== null && due.getTime() === TODAY.getTime();
-
-  if (t.status === "blocked") {
-    return { ticket: t, reason: "Blocked — needs unblocking", rank: 0 };
-  }
-  if (t.status === "review" && isOverdue) {
-    return { ticket: t, reason: "Waiting for review — overdue", rank: 1 };
-  }
-  if (isOverdue) {
-    return { ticket: t, reason: "Overdue", rank: 2 };
-  }
-  if (t.status === "review" && isDueToday) {
-    return { ticket: t, reason: "Waiting for review — due today", rank: 3 };
-  }
-  if (isDueToday) {
-    return { ticket: t, reason: "Due today", rank: 4 };
-  }
-  if (t.status === "review") {
-    return { ticket: t, reason: "Waiting for review", rank: 5 };
-  }
-  return null;
 }
 
 function AttentionRow({
@@ -289,49 +91,238 @@ function AttentionRow({
 }
 
 export function ProjectLeadProjectOverview({ slug = "mobile-banking-app" }: { slug?: string }) {
-  const { user } = useCurrentUser();
+  const { user, organization, isDevFallback } = useCurrentUser();
   const canManageProject = canManage(user.role);
   const { openMemberProfile } = useMemberProfile();
-  const project = getProjectBySlug(slug);
-  const projectCode = project?.projectCode ?? "TKT";
+
+  const [loadState, setLoadState] = useState<"loading" | "ready" | "error">(isDevFallback ? "ready" : "loading");
+  const [loadErrorMessage, setLoadErrorMessage] = useState<string | null>(null);
+  const [project, setProject] = useState<ProjectDetail | null>(null);
+  const [tickets, setTickets] = useState<Ticket[]>([]);
+  const [teamMembers, setTeamMembers] = useState<ProjectTeamMember[]>([]);
+  const [timeEntries, setTimeEntries] = useState<OrganizationTimeEntry[]>([]);
+  const [requestId, setRequestId] = useState(0);
 
   const [showNewTicket, setShowNewTicket] = useState(false);
-  const [tickets, setTickets] = useState<Ticket[]>(() =>
-    ALL_MOCK_TICKETS.filter((t) => t.projectSlug === slug)
-  );
   const [preview, setPreview] = useState<Ticket | null>(null);
 
-  const openTickets = tickets.filter((t) => t.status !== "done");
-  const blocked = tickets.filter((t) => t.status === "blocked");
-  const inProgress = tickets.filter((t) => t.status === "in-progress");
-  const inReview = tickets.filter((t) => t.status === "review");
-  // No close-date field exists on Ticket in this MVP, so "this month" is
-  // approximated as every ticket currently marked Done in this project.
-  const closedThisMonth = tickets.filter((t) => t.status === "done").length;
-  const progressPct = project?.progress ?? 0;
+  const runFetch = useCallback(() => setRequestId((id) => id + 1), []);
 
-  const dueTodayCount = tickets.filter((t) => {
-    if (t.status === "done") return false;
-    const due = parseDue(t.dueDate);
-    return due !== null && due.getTime() === TODAY.getTime();
-  }).length;
+  // Same data-loading shape as AdminProjectOverview's own effect (same
+  // loaders, same real sources) — kept as this page's own wiring rather than
+  // a shared hook, matching how every other project-scoped screen in this
+  // app (Reports, Team, Notes, Tickets) already loads its own project data
+  // locally on top of shared lib/ functions.
+  useEffect(() => {
+    if (isDevFallback || !organization) return;
+    let cancelled = false;
+    // Back to "loading" on every slug change too, not just the first mount
+    // — without this, navigating from one project straight to another (the
+    // component stays mounted, only the `slug` prop changes) would keep
+    // rendering the previous project's real data until the new fetch
+    // resolves, since `loadState` would otherwise still read "ready".
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: same "clear before the async fetch below resolves" pattern used elsewhere in this app (e.g. member-profile-modal.tsx)
+    setLoadState("loading");
 
-  const attentionItems = tickets
-    .map(buildAttentionEntry)
-    .filter((e): e is AttentionEntry => e !== null)
-    .sort((a, b) => a.rank - b.rank)
-    .slice(0, 6);
+    (async () => {
+      const projectResult = await loadProjectDetail(organization.id, slug);
+      if (cancelled) return;
+      if (projectResult.status === "error") {
+        setLoadState("error");
+        setLoadErrorMessage(projectResult.message);
+        return;
+      }
+      if (projectResult.status === "not-found") {
+        setLoadState("error");
+        setLoadErrorMessage("Project not found.");
+        return;
+      }
 
-  const unavailableCount = team.filter((m) => !m.available).length;
+      const ticketsResult = await loadProjectTickets(organization.id, slug);
+      if (cancelled) return;
+      if (ticketsResult.status === "error") {
+        setLoadState("error");
+        setLoadErrorMessage(ticketsResult.message);
+        return;
+      }
+      const projectTickets = ticketsResult.status === "ready" ? ticketsResult.tickets : [];
+      const ticketIds = projectTickets.map((t) => t.id);
 
-  function handleTicketCreated(ticket: Ticket) {
+      const [teamResult, timeResult] = await Promise.all([
+        loadProjectTeam(organization.id, slug),
+        loadOrganizationLoggedTimeForRange(ticketIds, projectResult.project.createdAtISO.slice(0, 10), getTodayISO()),
+      ]);
+      if (cancelled) return;
+
+      if (teamResult.status === "error") {
+        setLoadState("error");
+        setLoadErrorMessage(teamResult.message);
+        return;
+      }
+      if (timeResult.status === "error") {
+        setLoadState("error");
+        setLoadErrorMessage(timeResult.message);
+        return;
+      }
+
+      setProject(projectResult.project);
+      setTickets(projectTickets);
+      setTeamMembers(teamResult.members);
+      setTimeEntries(timeResult.entries);
+      setLoadState("ready");
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [organization, isDevFallback, slug, requestId]);
+
+  function handleTicketCreated() {
     setShowNewTicket(false);
-    setTickets((prev) => [ticket, ...prev]);
+    runFetch();
   }
 
   function handlePreviewDuplicate(_ticket: Ticket) {
     setShowNewTicket(false);
   }
+
+  if (loadState === "loading") {
+    return (
+      <div className="max-w-4xl mx-auto px-8 py-10">
+        <div className="h-full flex items-center justify-center text-sm text-slate-400 dark:text-zinc-500 py-20">
+          Loading project…
+        </div>
+      </div>
+    );
+  }
+
+  if (loadState === "error" || !project) {
+    return (
+      <div className="max-w-4xl mx-auto px-8 py-10">
+        <div className="flex flex-col items-center justify-center text-center px-4 py-20">
+          <h3 className="text-sm font-semibold text-slate-700 dark:text-zinc-200">Couldn&apos;t load project</h3>
+          <p className="text-sm text-slate-400 mt-1 max-w-xs dark:text-zinc-500">
+            {loadErrorMessage ?? "Something went wrong."}
+          </p>
+          <button
+            type="button"
+            onClick={runFetch}
+            className="mt-5 text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3.5 py-2 shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-500 dark:hover:bg-brand-600 dark:shadow-brand-500/20"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const projectCode = project.projectCode;
+  const todayISO = getTodayISO();
+  const monthPrefix = todayISO.slice(0, 7);
+
+  // ── KPIs — identical definitions to AdminProjectOverview ──────────────────
+  const openTickets = tickets.filter((t) => t.status !== "done");
+  const blocked = tickets.filter((t) => t.status === "blocked");
+  const inProgress = tickets.filter((t) => t.status === "in-progress");
+  const inReview = tickets.filter((t) => t.status === "review");
+  const doneTickets = tickets.filter((t) => t.status === "done");
+  const closedThisMonth = doneTickets.filter((t) => t.updatedAtISO?.slice(0, 7) === monthPrefix).length;
+  const progressPct = tickets.length > 0 ? Math.round((doneTickets.length / tickets.length) * 100) : 0;
+
+  const overdueTickets = tickets.filter(
+    (t) => t.status !== "done" && t.dueDate && parseDisplayDate(t.dueDate) < todayISO
+  );
+  const overdueOpenCount = overdueTickets.length;
+
+  const team: TeamMember[] = teamMembers.map((m) => ({ id: m.id, name: m.name, role: m.title, avatar: m.avatar }));
+
+  // ── Alert Banner + Project Health: reuse Delivery Reports' own real
+  //    functions, scoped to this one project — identical to Admin, never a
+  //    second/parallel health calculation.
+  const capacities = teamMembers.map((m) => ({ profileId: m.id, weeklyCapacity: m.weeklyCapacity }));
+  const membersForRows = teamMembers.map((m) => ({ id: m.id, name: m.name, avatar: m.avatar }));
+  const personRows: PersonRow[] = buildHoursByPersonRows(tickets, membersForRows, capacities, timeEntries);
+  const kpiSummary = buildDeliveryKpiSummary(tickets, [{ status: project.status }], timeEntries, todayISO);
+  const statusItems = buildDeliveryStatusItems(personRows, kpiSummary);
+  const alertItems = statusItems.filter((item) => item.level !== "ok");
+
+  const actionableAlertTypes = alertItems
+    .map((item) => item.id)
+    .filter((id): id is "overdue" | "blocked" => id === "overdue" || id === "blocked");
+  const ticketsByAlertType: Record<"overdue" | "blocked", Ticket[]> = { overdue: overdueTickets, blocked };
+
+  const actionableTicketsById = new Map<string, Ticket>();
+  for (const type of actionableAlertTypes) {
+    for (const t of ticketsByAlertType[type]) actionableTicketsById.set(t.id, t);
+  }
+  const actionableTickets = Array.from(actionableTicketsById.values());
+
+  let alertActionHref: string | null = null;
+  if (actionableAlertTypes.length === 1 && actionableTickets.length === 1) {
+    alertActionHref = `/projects/${slug}/tickets/${getTicketDisplayKey(actionableTickets[0])}`;
+  } else if (actionableTickets.length > 0) {
+    alertActionHref = `/projects/${slug}/tickets?alerts=${actionableAlertTypes.join(",")}`;
+  }
+
+  const healthRows: DeliveryProjectRow[] = buildProjectHealthRows(
+    [{ slug: project.slug, name: project.name, projectCode: project.projectCode }],
+    tickets,
+    timeEntries,
+    todayISO
+  );
+  const healthRow = healthRows[0];
+
+  const overCapacityMember = [...personRows].sort((a, b) => b.capacity - a.capacity).find((p) => p.capacity > 100);
+  const overCapacityTeamMember = overCapacityMember
+    ? teamMembers.find((m) => m.id === overCapacityMember.id)
+    : undefined;
+
+  const scheduleStatus: HealthStatus =
+    healthRow?.risk === "blocked" ? "at-risk" : healthRow?.risk === "at-risk" ? "needs-attention" : "on-track";
+  const scheduleNote =
+    blocked.length > 0
+      ? `${blocked.length} ticket${blocked.length === 1 ? "" : "s"} blocked`
+      : overdueOpenCount > 0
+      ? `${overdueOpenCount} ticket${overdueOpenCount === 1 ? "" : "s"} overdue`
+      : "No blocked or overdue tickets";
+
+  // Same Schedule/Capacity/Risks rows as Admin — Scope is omitted outright
+  // for this role, not just relabeled, since the MVP has no real
+  // scope-tracking source of truth (per this task's own explicit scope).
+  const projectHealth: HealthRow[] = [
+    { id: "schedule", label: "Schedule", status: scheduleStatus, note: scheduleNote },
+    {
+      id: "capacity",
+      label: "Capacity",
+      status: overCapacityTeamMember ? "needs-attention" : "on-track",
+      note: overCapacityTeamMember ? `${overCapacityTeamMember.name} is over capacity` : "No capacity issues",
+    },
+    {
+      id: "risks",
+      label: "Risks",
+      status: overdueOpenCount > 0 ? "at-risk" : "on-track",
+      note: overdueOpenCount > 0 ? `${overdueOpenCount} overdue ticket${overdueOpenCount === 1 ? "" : "s"}` : "No overdue tickets",
+    },
+  ];
+
+  // ── Needs Your Attention — the same real, project-scoped signals the
+  // Project Lead Dashboard's own Attention Required widget already uses
+  // (Blocked/Due Today/Awaiting Review — all three already computed above as
+  // `blocked`/`inReview`, plus `dueToday` below), rendered as a ticket list
+  // instead of that widget's KPI cards to match this section's existing
+  // layout. "Over Capacity" has no single ticket to point at, so it isn't
+  // representable in this per-ticket list and is left out, same as it would
+  // be from any other ticket-shaped view. Deduped (a ticket can be both
+  // blocked and due today) and ordered by the same real severity Attention
+  // Required already implies (Blocked, then Due Today, then Awaiting
+  // Review) — no invented ranking scheme, no fabricated reason text.
+  const dueToday = openTickets.filter((t) => t.dueDate && parseDisplayDate(t.dueDate) === todayISO);
+
+  const attentionEntriesById = new Map<string, AttentionEntry>();
+  for (const t of blocked) attentionEntriesById.set(t.id, { ticket: t, reason: "Blocked — needs unblocking" });
+  for (const t of dueToday) if (!attentionEntriesById.has(t.id)) attentionEntriesById.set(t.id, { ticket: t, reason: "Due today" });
+  for (const t of inReview) if (!attentionEntriesById.has(t.id)) attentionEntriesById.set(t.id, { ticket: t, reason: "Waiting for review" });
+  const attentionItems = Array.from(attentionEntriesById.values());
 
   return (
     <div className="max-w-4xl mx-auto px-8 py-10">
@@ -339,26 +330,17 @@ export function ProjectLeadProjectOverview({ slug = "mobile-banking-app" }: { sl
       <div className="flex items-start justify-between">
         <div className="flex items-start gap-4">
           <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 flex items-center justify-center text-white font-bold text-base flex-shrink-0">
-            MB
+            {project.shortName}
           </div>
           <div>
             <div className="flex items-center gap-2.5">
-              <h1 className="text-xl font-bold text-slate-900 tracking-tight dark:text-zinc-50">Mobile Banking App</h1>
-              <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700 dark:text-emerald-400">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> Active
-              </span>
-              <ProjectCategoryBadge category="client" />
+              <h1 className="text-xl font-bold text-slate-900 tracking-tight dark:text-zinc-50">{project.name}</h1>
+              <StatusBadge status={project.status} />
+              <ProjectCategoryBadge category={project.category} />
             </div>
-            <p className="text-sm text-slate-500 mt-1 max-w-xl dark:text-zinc-400">
-              iOS and Android banking experience for Meridian Bank — redesign of onboarding, transfers, and
-              biometric authentication.
-            </p>
+            <ExpandableDescription text={project.description} />
             <div className="flex items-center gap-2 mt-2 text-xs text-slate-400 dark:text-zinc-500">
-              <span>
-                Owned by <span className="text-slate-600 font-medium dark:text-zinc-300">Sarah Chen</span>
-              </span>
-              <span className="text-slate-300 dark:text-zinc-700">·</span>
-              <span>Started Mar 3, 2026</span>
+              <span>Started {project.createdAt}</span>
             </div>
           </div>
         </div>
@@ -374,24 +356,40 @@ export function ProjectLeadProjectOverview({ slug = "mobile-banking-app" }: { sl
         )}
       </div>
 
-      {/* ===== Attention banner — the most important alerts, not just Blocked ===== */}
-      <Link
-        href={`/projects/${slug}/tickets`}
-        onClick={() => presetTicketsFilter(slug, ["Blocked"])}
-        className="mt-5 flex items-center gap-2.5 text-sm text-amber-800 bg-amber-50/70 hover:bg-amber-100/70 rounded-md px-3 py-2 dark:text-amber-300 dark:bg-amber-500/10 dark:hover:bg-amber-500/15 transition-colors"
-      >
-        <span className="w-1.5 h-1.5 rounded-full bg-amber-500 flex-shrink-0" />
-        <p className="flex-1">
-          {blocked.length} tickets blocked 4+ days
-          <span className="mx-1.5 text-amber-400 dark:text-amber-600">·</span>
-          {dueTodayCount} tickets due today
-          <span className="mx-1.5 text-amber-400 dark:text-amber-600">·</span>
-          {inReview.length} tickets waiting for review
-        </p>
-        <span className="text-xs font-medium text-amber-700 flex-shrink-0 dark:text-amber-400">
-          Review →
-        </span>
-      </Link>
+      {/* ===== Attention banner — real Health Alerts, same source of truth
+          as Delivery Reports/Admin Project Overview; hidden when there's
+          nothing real to flag ===== */}
+      {alertItems.length > 0 && (alertActionHref ? (
+        <Link
+          href={alertActionHref}
+          className="mt-5 flex items-center gap-2.5 text-sm text-amber-800 bg-amber-50/70 hover:bg-amber-100/70 rounded-md px-3 py-2 dark:text-amber-300 dark:bg-amber-500/10 dark:hover:bg-amber-500/15 transition-colors"
+        >
+          <span className="w-1.5 h-1.5 rounded-full bg-amber-500 flex-shrink-0" />
+          <p className="flex-1">
+            {alertItems.map((item, i) => (
+              <span key={item.id}>
+                {i > 0 && <span className="mx-1.5 text-amber-400 dark:text-amber-600" aria-hidden="true">·</span>}
+                {item.text}
+              </span>
+            ))}
+          </p>
+          <span className="text-xs font-medium text-amber-700 flex-shrink-0 dark:text-amber-400">
+            Review →
+          </span>
+        </Link>
+      ) : (
+        <div className="mt-5 flex items-center gap-2.5 text-sm text-amber-800 bg-amber-50/70 rounded-md px-3 py-2 dark:text-amber-300 dark:bg-amber-500/10">
+          <span className="w-1.5 h-1.5 rounded-full bg-amber-500 flex-shrink-0" />
+          <p className="flex-1">
+            {alertItems.map((item, i) => (
+              <span key={item.id}>
+                {i > 0 && <span className="mx-1.5 text-amber-400 dark:text-amber-600" aria-hidden="true">·</span>}
+                {item.text}
+              </span>
+            ))}
+          </p>
+        </div>
+      ))}
 
       {/* ===== KPI strip ===== */}
       <div className="mt-6 flex items-stretch divide-x divide-slate-100 dark:divide-zinc-800 rounded-xl border border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900 shadow-sm shadow-slate-200/40 dark:shadow-black/20 overflow-hidden">
@@ -489,10 +487,7 @@ export function ProjectLeadProjectOverview({ slug = "mobile-banking-app" }: { sl
             <div className="flex items-start justify-between mb-3">
               <div>
                 <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-zinc-400">Team</h2>
-                <p className="text-xs text-slate-400 dark:text-zinc-500 mt-0.5">
-                  {team.length} active members
-                  {unavailableCount > 0 && <> · {unavailableCount} unavailable</>}
-                </p>
+                <p className="text-xs text-slate-400 dark:text-zinc-500 mt-0.5">{team.length} active members</p>
               </div>
               {canManageProject && (
                 <Link
@@ -503,39 +498,49 @@ export function ProjectLeadProjectOverview({ slug = "mobile-banking-app" }: { sl
                 </Link>
               )}
             </div>
-            <ul className="space-y-3">
-              {team.map((member) => (
-                <li key={member.id}>
-                  <MemberTrigger
-                    name={member.name}
-                    avatar={member.avatar}
-                    role={member.role}
-                    projectSlug={slug}
-                    className="flex items-center gap-2.5 w-full text-left"
-                  >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={member.avatar} alt={member.name} className="w-7 h-7 rounded-full" />
-                    <div className="text-sm leading-tight flex-1">
-                      <p className="font-medium text-slate-800 dark:text-zinc-200">{member.name}</p>
-                      <p className="text-xs text-slate-400 dark:text-zinc-500">{member.role}</p>
-                    </div>
-                  </MemberTrigger>
-                </li>
-              ))}
-            </ul>
+            {team.length === 0 ? (
+              <p className="text-sm text-slate-400 dark:text-zinc-500 py-2">No team members on this project yet.</p>
+            ) : (
+              <ul className="space-y-3">
+                {team.map((member) => (
+                  <li key={member.id}>
+                    <MemberTrigger
+                      name={member.name}
+                      avatar={member.avatar}
+                      role={member.role}
+                      projectSlug={slug}
+                      className="flex items-center gap-2.5 w-full text-left"
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={member.avatar} alt={member.name} className="w-7 h-7 rounded-full" />
+                      <div className="text-sm leading-tight flex-1">
+                        <p className="font-medium text-slate-800 dark:text-zinc-200">{member.name}</p>
+                        <p className="text-xs text-slate-400 dark:text-zinc-500">{member.role}</p>
+                      </div>
+                    </MemberTrigger>
+                  </li>
+                ))}
+              </ul>
+            )}
           </section>
 
           <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/40 dark:border-zinc-700/70 dark:bg-zinc-900 dark:shadow-black/20">
             <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-1 dark:text-zinc-400">Project Health</h2>
             <div>
-              {PROJECT_HEALTH.map((row) => (
+              {projectHealth.map((row) => (
                 <ProjectHealthRow
                   key={row.id}
                   row={row}
                   slug={slug}
-                  onOpenTicket={setPreview}
+                  canOpenMember={Boolean(overCapacityTeamMember)}
                   onOpenMember={() =>
-                    openMemberProfile({ name: "Elena Rossi", avatar: avatar(5), role: "Designer", projectSlug: slug })
+                    overCapacityTeamMember &&
+                    openMemberProfile({
+                      name: overCapacityTeamMember.name,
+                      avatar: overCapacityTeamMember.avatar,
+                      role: overCapacityTeamMember.title,
+                      projectSlug: slug,
+                    })
                   }
                 />
               ))}

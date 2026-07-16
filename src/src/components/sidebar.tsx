@@ -1,14 +1,18 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { statusMeta } from "@/components/status-badge";
 import { useCurrentUser } from "@/components/current-user-provider";
 import { useOrganizationProjects } from "@/components/organization-projects-provider";
 import { mainNavForRole, projectNavForRole } from "@/lib/nav-config";
 import type { MainNavKey } from "@/lib/nav-config";
 import { CreateProjectModal } from "@/components/create-project-modal";
+import { useMemberProfile } from "@/components/member-profile";
+import { searchGlobal } from "@/lib/search";
+import type { GlobalSearchProject, GlobalSearchResults, GlobalSearchTicket, GlobalSearchUser } from "@/lib/search";
 
 // Main nav link content, keyed so `mainNavForRole`'s order (per role) drives
 // what renders where — the sidebar no longer hardcodes link order itself.
@@ -97,6 +101,57 @@ function isNavActive(key: MainNavKey, activePage?: string): boolean {
   return activePage === key;
 }
 
+// ── Global Search popover ────────────────────────────────────────────────
+// Data-layer-only for now (see lib/search.ts) — this is just the results
+// popover under the existing Search field. No navigation on select, no
+// Enter/arrow-key handling, and no ⌘K shortcut yet (the badge stays purely
+// decorative, same as before).
+
+const SEARCH_DEBOUNCE_MS = 300;
+const EMPTY_SEARCH_RESULTS: GlobalSearchResults = { projects: [], tickets: [], users: [] };
+
+function SearchResultGroup({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="px-1 py-1.5">
+      <p className="px-2 pb-1 text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600">
+        {label}
+      </p>
+      <div className="space-y-0.5">{children}</div>
+    </div>
+  );
+}
+
+// One flattened, ordered result — Projects, then Tickets, then Users,
+// matching the popover's own rendering order — so ArrowUp/ArrowDown/Enter
+// can walk "all visible results" as a single sequence without caring which
+// group a given index falls in.
+type FlatSearchResult =
+  | { type: "project"; value: GlobalSearchProject }
+  | { type: "ticket"; value: GlobalSearchTicket }
+  | { type: "user"; value: GlobalSearchUser };
+
+function flattenSearchResults(results: GlobalSearchResults): FlatSearchResult[] {
+  return [
+    ...results.projects.map((value): FlatSearchResult => ({ type: "project", value })),
+    ...results.tickets.map((value): FlatSearchResult => ({ type: "ticket", value })),
+    ...results.users.map((value): FlatSearchResult => ({ type: "user", value })),
+  ];
+}
+
+function isEditableElement(el: Element | null): boolean {
+  if (!el) return false;
+  const tag = el.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
+  return (el as HTMLElement).isContentEditable;
+}
+
+// Same background the rows already use on hover — the keyboard-selected row
+// reuses it rather than introducing a new color, per "discreet, compatible
+// with existing styles."
+const SEARCH_RESULT_ROW_CLASS =
+  "w-full text-left px-2 py-1.5 rounded-md hover:bg-slate-50 dark:hover:bg-zinc-800/50 transition-colors";
+const SEARCH_RESULT_ROW_SELECTED_CLASS = "bg-slate-50 dark:bg-zinc-800/50";
+
 export function Sidebar({
   activeSlug,
   activeSection = "overview",
@@ -106,12 +161,183 @@ export function Sidebar({
   activeSection?: "overview" | "tickets" | "notes" | "team" | "reports" | "settings";
   activePage?: string;
 }) {
-  const { user } = useCurrentUser();
+  const { user, organization, userId, isDevFallback } = useCurrentUser();
   const { projects } = useOrganizationProjects();
+  const { openMemberProfile } = useMemberProfile();
+  const router = useRouter();
   const mainNav     = mainNavForRole(user.role);
   const projectNav  = projectNavForRole(user.role);
   const pinnedProjects = projects.filter((project) => project.status !== "archived").slice(0, 3);
   const [showCreateModal, setShowCreateModal] = useState(false);
+
+  // ── Global Search ─────────────────────────────────────────────────────────
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchLoadState, setSearchLoadState] = useState<"idle" | "loading" | "ready" | "error">("idle");
+  const [searchErrorMessage, setSearchErrorMessage] = useState<string | null>(null);
+  const [searchResults, setSearchResults] = useState<GlobalSearchResults>(EMPTY_SEARCH_RESULTS);
+  // Index into flattenSearchResults(searchResults) — null means "nothing
+  // keyboard-selected yet" (Enter then defaults to the first result).
+  const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
+  const searchRootRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // Debounced real search — never queries for an empty (post-trim) term,
+  // and clears results the instant the term goes empty rather than leaving
+  // the previous term's results on screen. The keyboard selection resets
+  // here too, on every term change, safely before any debounced query even
+  // starts (the arrow/Enter handler below is itself guarded to only act
+  // once a fresh result set is actually "ready", so a stale selection can
+  // never be activated mid-debounce).
+  useEffect(() => {
+    const term = searchQuery.trim();
+    if (!term || isDevFallback || !organization || !userId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: clears stale results/loading state the instant the query goes empty, before any debounce
+      setSearchLoadState("idle");
+      setSearchResults(EMPTY_SEARCH_RESULTS);
+      setSelectedIndex(null);
+      return;
+    }
+
+    setSearchLoadState("loading");
+    setSelectedIndex(null);
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      searchGlobal(organization.id, user.role, userId, term).then((result) => {
+        if (cancelled) return;
+        if (result.status === "error") {
+          setSearchLoadState("error");
+          setSearchErrorMessage(result.message);
+          return;
+        }
+        setSearchResults(result.results);
+        setSearchLoadState("ready");
+      });
+    }, SEARCH_DEBOUNCE_MS);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [searchQuery, isDevFallback, organization, userId, user.role]);
+
+  // Close on outside click — same pattern already used by
+  // tickets/filter-dropdown.tsx's own popover.
+  useEffect(() => {
+    if (!searchOpen) return;
+    function onMouseDown(e: MouseEvent) {
+      if (searchRootRef.current && !searchRootRef.current.contains(e.target as Node)) {
+        setSearchOpen(false);
+        setSelectedIndex(null);
+      }
+    }
+    document.addEventListener("mousedown", onMouseDown);
+    return () => document.removeEventListener("mousedown", onMouseDown);
+  }, [searchOpen]);
+
+  // Global ⌘K / Ctrl+K — focuses Search and opens the popover from
+  // anywhere in the app. Registered once for the component's lifetime (no
+  // reactive dependencies: setSearchOpen and the refs are stable), removed
+  // on unmount, so there's never more than one listener alive at a time.
+  // Ignored while the user is typing in some other real input/textarea/
+  // contenteditable — except when focus is already in Search itself, where
+  // it should keep working normally.
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      const isShortcut = (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k";
+      if (!isShortcut) return;
+
+      const active = document.activeElement;
+      if (active !== searchInputRef.current && isEditableElement(active)) return;
+
+      e.preventDefault();
+      setSearchOpen(true);
+      searchInputRef.current?.focus();
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  // The popover only actually renders once there's a real term to show
+  // results for — focusing the field alone marks it "open" (so typing
+  // immediately reveals results) without floating an empty box over the nav.
+  const showSearchPopover = searchOpen && searchQuery.trim() !== "";
+  const hasSearchResults =
+    searchResults.projects.length > 0 || searchResults.tickets.length > 0 || searchResults.users.length > 0;
+  const flatSearchResults = flattenSearchResults(searchResults);
+
+  // ArrowUp/ArrowDown/Enter — only act once a real, up-to-date result set is
+  // actually showing (never mid-debounce/"loading", so a stale index from
+  // the previous term can never be activated). No wrap-around: the first
+  // press in either direction lands on the first result.
+  function handleSearchInputKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (!showSearchPopover || searchLoadState !== "ready") return;
+
+    if (e.key === "ArrowDown") {
+      if (flatSearchResults.length === 0) return;
+      e.preventDefault();
+      setSelectedIndex((prev) => (prev === null ? 0 : Math.min(prev + 1, flatSearchResults.length - 1)));
+    } else if (e.key === "ArrowUp") {
+      if (flatSearchResults.length === 0) return;
+      e.preventDefault();
+      setSelectedIndex((prev) => (prev === null ? 0 : Math.max(prev - 1, 0)));
+    } else if (e.key === "Enter") {
+      const target = selectedIndex !== null ? flatSearchResults[selectedIndex] : flatSearchResults[0];
+      if (!target) return;
+      e.preventDefault();
+      selectFlatSearchResult(target);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      setSearchOpen(false);
+      setSelectedIndex(null);
+    }
+  }
+
+  // Same reset after every kind of result selection — close the popover,
+  // drop the typed term, drop the results, and drop the keyboard selection,
+  // so reopening Search always starts clean rather than showing the
+  // previous query's matches.
+  function closeSearch() {
+    setSearchOpen(false);
+    setSearchQuery("");
+    setSearchResults(EMPTY_SEARCH_RESULTS);
+    setSearchLoadState("idle");
+    setSelectedIndex(null);
+  }
+
+  function selectSearchProject(project: GlobalSearchProject) {
+    closeSearch();
+    router.push(`/projects/${project.slug}`);
+  }
+
+  function selectSearchTicket(ticket: GlobalSearchTicket) {
+    closeSearch();
+    router.push(`/projects/${ticket.projectSlug}/tickets/${ticket.key}`);
+  }
+
+  // Same real profile mechanism every other "click a person" affordance in
+  // this app already uses (MemberTrigger/openMemberProfile) — passing the
+  // real profileId makes resolveTeamMember use it authoritatively instead
+  // of guessing by name match, and it's already role-agnostic (no branching
+  // needed for Admin/Project Lead/Member here).
+  function selectSearchUser(result: GlobalSearchUser) {
+    closeSearch();
+    openMemberProfile({
+      name: result.fullName,
+      avatar: result.avatarUrl,
+      role: result.role,
+      profileId: result.id,
+    });
+  }
+
+  // Enter reuses these exact same three functions, whichever type the
+  // selected (or, absent a selection, first) flattened result happens to
+  // be — never a second/parallel navigation path from what click already uses.
+  function selectFlatSearchResult(result: FlatSearchResult) {
+    if (result.type === "project") selectSearchProject(result.value);
+    else if (result.type === "ticket") selectSearchTicket(result.value);
+    else selectSearchUser(result.value);
+  }
 
   return (
     <>
@@ -130,17 +356,135 @@ export function Sidebar({
         </p>
       </div>
 
-      <div className="px-3 pt-3">
-        <button className="w-full flex items-center gap-2 text-sm text-slate-400 bg-slate-100 hover:bg-slate-200/70 rounded-md px-2.5 py-1.5 transition-colors dark:text-zinc-500 dark:bg-zinc-900 dark:hover:bg-zinc-800">
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+      <div className="px-3 pt-3 relative" ref={searchRootRef}>
+        <div className="w-full flex items-center gap-2 text-sm text-slate-400 bg-slate-100 rounded-md px-2.5 py-1.5 transition-colors dark:text-zinc-500 dark:bg-zinc-900 focus-within:bg-slate-200/70 dark:focus-within:bg-zinc-800 hover:bg-slate-200/70 dark:hover:bg-zinc-800">
+          <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
             <circle cx="11" cy="11" r="7" />
             <path d="M21 21l-4.3-4.3" />
           </svg>
-          <span>Search</span>
-          <span className="ml-auto text-[10px] font-medium text-slate-400 bg-white border border-slate-200 rounded px-1 py-0.5 dark:text-zinc-500 dark:bg-zinc-800 dark:border-zinc-700">
+          <input
+            ref={searchInputRef}
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            onFocus={() => setSearchOpen(true)}
+            onKeyDown={handleSearchInputKeyDown}
+            placeholder="Search"
+            className="flex-1 min-w-0 bg-transparent outline-none text-slate-700 placeholder:text-slate-400 dark:text-zinc-200 dark:placeholder:text-zinc-500"
+          />
+          <span className="ml-auto flex-shrink-0 text-[10px] font-medium text-slate-400 bg-white border border-slate-200 rounded px-1 py-0.5 dark:text-zinc-500 dark:bg-zinc-800 dark:border-zinc-700">
             ⌘K
           </span>
-        </button>
+        </div>
+
+        {showSearchPopover && (
+          <div
+            role="dialog"
+            aria-label="Search results"
+            className="absolute left-3 right-3 top-full mt-1.5 z-50 rounded-xl border border-slate-200 dark:border-zinc-700/60 bg-white dark:bg-zinc-900 shadow-lg shadow-black/10 dark:shadow-black/40 max-h-[70vh] overflow-y-auto"
+          >
+            {searchLoadState === "loading" && (
+              <p className="px-3 py-4 text-xs text-slate-400 dark:text-zinc-500 text-center">Searching…</p>
+            )}
+
+            {searchLoadState === "error" && (
+              <p className="px-3 py-4 text-xs text-red-500 dark:text-red-400 text-center">
+                {searchErrorMessage ?? "Something went wrong."}
+              </p>
+            )}
+
+            {searchLoadState === "ready" && !hasSearchResults && (
+              <p className="px-3 py-4 text-xs text-slate-400 dark:text-zinc-500 text-center">No results found.</p>
+            )}
+
+            {searchLoadState === "ready" && hasSearchResults && (
+              <div className="py-1 divide-y divide-slate-100 dark:divide-zinc-800">
+                {searchResults.projects.length > 0 && (
+                  <SearchResultGroup label="Projects">
+                    {searchResults.projects.map((project, i) => (
+                      <button
+                        key={project.id}
+                        type="button"
+                        onClick={() => selectSearchProject(project)}
+                        className={[
+                          SEARCH_RESULT_ROW_CLASS,
+                          i === selectedIndex ? SEARCH_RESULT_ROW_SELECTED_CLASS : "",
+                        ].join(" ")}
+                      >
+                        <p className="text-[13px] text-slate-700 dark:text-zinc-200 truncate">{project.name}</p>
+                        {(project.key || project.category || project.status) && (
+                          <p className="text-xs text-slate-400 dark:text-zinc-500 truncate">
+                            {project.key ?? project.category ?? project.status}
+                          </p>
+                        )}
+                      </button>
+                    ))}
+                  </SearchResultGroup>
+                )}
+
+                {searchResults.tickets.length > 0 && (
+                  <SearchResultGroup label="Tickets">
+                    {searchResults.tickets.map((ticket, i) => {
+                      const index = searchResults.projects.length + i;
+                      return (
+                        <button
+                          key={ticket.id}
+                          type="button"
+                          onClick={() => selectSearchTicket(ticket)}
+                          className={[
+                            SEARCH_RESULT_ROW_CLASS,
+                            index === selectedIndex ? SEARCH_RESULT_ROW_SELECTED_CLASS : "",
+                          ].join(" ")}
+                        >
+                          <p className="flex items-baseline gap-1.5 min-w-0">
+                            <span className="text-[11px] font-mono font-medium text-slate-400 dark:text-zinc-500 flex-shrink-0">
+                              {ticket.key}
+                            </span>
+                            <span className="text-[13px] text-slate-700 dark:text-zinc-200 truncate">{ticket.title}</span>
+                          </p>
+                          <p className="text-xs text-slate-400 dark:text-zinc-500 truncate">{ticket.projectName}</p>
+                        </button>
+                      );
+                    })}
+                  </SearchResultGroup>
+                )}
+
+                {searchResults.users.length > 0 && (
+                  <SearchResultGroup label="Users">
+                    {searchResults.users.map((result, i) => {
+                      const index = searchResults.projects.length + searchResults.tickets.length + i;
+                      return (
+                        <button
+                          key={result.id}
+                          type="button"
+                          onClick={() => selectSearchUser(result)}
+                          className={[
+                            SEARCH_RESULT_ROW_CLASS,
+                            "flex items-center gap-2",
+                            index === selectedIndex ? SEARCH_RESULT_ROW_SELECTED_CLASS : "",
+                          ].join(" ")}
+                        >
+                          {result.avatarUrl && (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={result.avatarUrl} alt={result.fullName} className="w-6 h-6 rounded-full flex-shrink-0" />
+                          )}
+                          <div className="min-w-0">
+                            <p className="text-[13px] text-slate-700 dark:text-zinc-200 truncate">{result.fullName}</p>
+                            {(result.email || result.role) && (
+                              <p className="text-xs text-slate-400 dark:text-zinc-500 truncate">
+                                {result.email || result.role}
+                              </p>
+                            )}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </SearchResultGroup>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       <nav className="px-2 pt-4 space-y-0.5 text-sm">
