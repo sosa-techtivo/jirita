@@ -5,7 +5,7 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { TicketPreviewPanel } from "@/components/tickets/ticket-preview-panel";
-import type { Ticket } from "@/lib/mock-tickets";
+import type { Ticket, TicketStatus } from "@/lib/mock-tickets";
 import { getTicketDisplayKey } from "@/lib/mock-tickets";
 import { TicketTypeIcon, parseDisplayDate, getTodayISO, formatISODate } from "@/components/tickets/ticket-ui";
 import { MemberTrigger } from "@/components/member-profile";
@@ -40,12 +40,137 @@ import type { DashboardActivityEntry } from "@/components/dashboard-shared";
 // component's own state/props from.
 const RECENT_ACTIVITY_LIMIT = 10;
 
+// Every non-"done" status — the "Assigned Tickets" KPI's own definition
+// (see assignedTickets below). Used to build its `?alerts=` link so the
+// Tickets page's own OR-filter (tickets-screen.tsx) reproduces exactly
+// that same set, whether it lands on one project's Tickets page or the
+// org-wide one (app/tickets/page.tsx).
+const ASSIGNED_TICKET_STATUSES: TicketStatus[] = ["backlog", "to-do", "in-progress", "review", "blocked"];
+
+// Precondition: `tickets` is non-empty (only called when assignedTicketsCount
+// > 0) — always returns a real, navigable href, so a >0 KPI never ends up
+// without a place to land, regardless of how many different projects those
+// tickets span.
+function buildAssignedTicketsHref(tickets: Ticket[], selectedProjectSlug: string | null): string {
+  if (tickets.length === 1) {
+    const only = tickets[0];
+    return `/projects/${only.projectSlug}/tickets/${getTicketDisplayKey(only)}`;
+  }
+  // Dashboard scoped to one project — that project's own Tickets page shows
+  // exactly this set (scopedTickets, and therefore this list, is already
+  // narrowed to it).
+  if (selectedProjectSlug) {
+    return `/projects/${selectedProjectSlug}/tickets?alerts=${ASSIGNED_TICKET_STATUSES.join(",")}`;
+  }
+  // "All Projects" — the org-wide Tickets view (app/tickets/page.tsx) shows
+  // every accessible project's tickets, so the same `?alerts=` filter there
+  // reproduces this exact set even when it spans multiple projects.
+  return `/tickets?alerts=${ASSIGNED_TICKET_STATUSES.join(",")}`;
+}
+
+// Hours Burn sums logged time with no date restriction at all
+// (loadOrganizationLoggedMinutes has no from/to bound) — unlike every one
+// of Time Tracking's own periods (Today/This Week/This Month/Custom
+// Range), which are all real date windows. Time Tracking has no "All Time"
+// period of its own; rather than add one (a new, visible period option),
+// this reuses its existing Custom Range params (`?period=custom&from=&to=`)
+// with a deliberately early lower bound, so the resulting Billable +
+// Non-Billable Hours there sum to the exact same all-time total Hours
+// Burn itself reads from the same ticket_time_entries rows.
+const ALL_TIME_FROM_DATE = "2000-01-01";
+
+function buildHoursBurnHref(selectedProjectSlug: string | null, todayISO: string): string {
+  const params = new URLSearchParams();
+  params.set("period", "custom");
+  params.set("from", ALL_TIME_FROM_DATE);
+  params.set("to", todayISO);
+  // Dashboard scoped to one project — Time Tracking's own Project filter
+  // narrows to the exact same ticket scope Hours Burn itself is reading
+  // from (scopedTickets). Left unset for "All Projects," same as every
+  // other Time Tracking filter Hours Burn doesn't itself apply (Member/
+  // Client/Billing all stay "All").
+  if (selectedProjectSlug) params.set("projects", selectedProjectSlug);
+  return `/time-tracking?${params.toString()}`;
+}
+
+// "Blocked" KPI navigation — same single-ticket / project-scoped-vs-org-wide
+// `?alerts=` pattern Assigned Tickets already established
+// (buildAssignedTicketsHref above), kept as its own small function rather
+// than sharing one with that card's helper, so neither card's navigation
+// can be affected by a change meant for the other. Applies to just the one
+// "blocked" status this card itself counts.
+function buildBlockedTicketsHref(tickets: Ticket[], selectedProjectSlug: string | null): string {
+  if (tickets.length === 1) {
+    const only = tickets[0];
+    return `/projects/${only.projectSlug}/tickets/${getTicketDisplayKey(only)}`;
+  }
+  if (selectedProjectSlug) {
+    return `/projects/${selectedProjectSlug}/tickets?alerts=blocked`;
+  }
+  return `/tickets?alerts=blocked`;
+}
+
+// "Due Today" KPI navigation — same single-ticket / project-scoped-vs-
+// org-wide `?alerts=` pattern as Assigned Tickets/Blocked above, kept as
+// its own small function for the same reason (so no other card's
+// navigation can be affected by a change meant for this one). "due-today"
+// is a new pseudo-type in tickets-screen.tsx's own `?alerts=` OR-filter —
+// same real precedent as its existing "overdue" pseudo-type, matched there
+// with the exact same `getTodayISO()`/`parseDisplayDate()` definition of
+// "today" this card's own dueTodayTickets below already uses, never a
+// second/different one.
+function buildDueTodayHref(tickets: Ticket[], selectedProjectSlug: string | null): string {
+  if (tickets.length === 1) {
+    const only = tickets[0];
+    return `/projects/${only.projectSlug}/tickets/${getTicketDisplayKey(only)}`;
+  }
+  if (selectedProjectSlug) {
+    return `/projects/${selectedProjectSlug}/tickets?alerts=due-today`;
+  }
+  return `/tickets?alerts=due-today`;
+}
+
+// "Projects currently blocked" health-insight navigation — a project's own
+// `blockedTickets` field isn't populated for real data (derived-from-tickets
+// columns that nothing re-aggregates yet), so this can't reuse the Projects
+// list's own Status/Health/Priority filters; the real, already-computed
+// slugs (from blockedProjects below, the same list the insight's own text
+// is built from) are carried in the URL instead — same query-state handoff
+// precedent as Tickets' `?alerts=`, applied to the one place (Projects)
+// that doesn't already have an equivalent filter.
+function buildBlockedProjectsHref(projects: { slug: string }[]): string {
+  if (projects.length === 1) return `/projects/${projects[0].slug}`;
+  return `/projects?blocked=${projects.map((p) => p.slug).join(",")}`;
+}
+
+// "Tickets completed this month" health-insight navigation — same
+// single-ticket / project-scoped-vs-org-wide `?alerts=` pattern as the KPI
+// cards above. "completed-this-month" is a new pseudo-type in
+// tickets-screen.tsx's own `?alerts=` OR-filter, matched there with the
+// exact same status-done + current-month-updatedAtISO definition this
+// insight's own completedThisMonthTickets below already uses.
+function buildCompletedThisMonthHref(tickets: Ticket[], selectedProjectSlug: string | null): string {
+  if (tickets.length === 1) {
+    const only = tickets[0];
+    return `/projects/${only.projectSlug}/tickets/${getTicketDisplayKey(only)}`;
+  }
+  if (selectedProjectSlug) {
+    return `/projects/${selectedProjectSlug}/tickets?alerts=completed-this-month`;
+  }
+  return `/tickets?alerts=completed-this-month`;
+}
+
 // ── Sub-components ────────────────────────────────────────────────────────────
 
 export interface OrgHealthInsight {
   id: string;
   level: "ok" | "warning" | "critical";
   text: string;
+  // Optional — only the "blocked"/"completed"/"hours" insights pass this
+  // (see orgHealthInsights below). When present, just that one item becomes
+  // its own independent link; the "·" separators between items are never
+  // clickable, and the band itself is never one single link.
+  href?: string;
 }
 
 function InsightIcon({ level }: { level: OrgHealthInsight["level"] }) {
@@ -73,19 +198,33 @@ function InsightIcon({ level }: { level: OrgHealthInsight["level"] }) {
 function InsightsBand({ items }: { items: OrgHealthInsight[] }) {
   return (
     <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-xl border border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900 px-4 py-3 shadow-sm shadow-slate-200/40 dark:shadow-black/20">
-      {items.map((item, i) => (
-        <Fragment key={item.id}>
-          <span className="flex items-center gap-2">
+      {items.map((item, i) => {
+        const content = (
+          <>
             <InsightIcon level={item.level} />
             <span className={`text-[12px] ${item.level === "critical" ? "font-medium text-slate-800 dark:text-zinc-100" : "text-slate-600 dark:text-zinc-400"}`}>
               {item.text}
             </span>
-          </span>
-          {i < items.length - 1 && (
-            <span className="hidden sm:block text-slate-200 dark:text-zinc-800 select-none" aria-hidden="true">·</span>
-          )}
-        </Fragment>
-      ))}
+          </>
+        );
+        return (
+          <Fragment key={item.id}>
+            {/* Each item is its own independent click target when it has a
+                real href — never the whole band, and never nesting the "·"
+                separator below inside it. */}
+            {item.href ? (
+              <Link href={item.href} className="flex items-center gap-2 cursor-pointer">
+                {content}
+              </Link>
+            ) : (
+              <span className="flex items-center gap-2">{content}</span>
+            )}
+            {i < items.length - 1 && (
+              <span className="hidden sm:block text-slate-200 dark:text-zinc-800 select-none" aria-hidden="true">·</span>
+            )}
+          </Fragment>
+        );
+      })}
     </div>
   );
 }
@@ -97,6 +236,7 @@ function DashKpiCard({
   accent,
   danger,
   progress,
+  href,
 }: {
   label:     string;
   value:     ReactNode;
@@ -104,23 +244,29 @@ function DashKpiCard({
   accent?:   boolean;
   danger?:   boolean;
   progress?: number;
+  // Optional — only "Assigned Tickets" passes this today. When present, the
+  // whole card becomes a real link (same markup/classes either way, plus a
+  // cursor-pointer affordance) to that exact ticket set; `sub` stays plain
+  // text, never a separate/nested link of its own.
+  href?: string;
 }) {
-  return (
-    <div
-      className={[
-        "h-full flex flex-col rounded-xl border shadow-sm shadow-slate-200/40 dark:shadow-black/20 px-5 pt-4 pb-4",
-        // Every KPI card shares the same dark card background/border — an
-        // Admin overview shouldn't let one metric visually outweigh the
-        // others. Accent cards keep their light-mode tint but, in dark
-        // mode, only add a faint violet ring as emphasis instead of a
-        // brighter background (brand-300/400/900/950 aren't defined in the
-        // theme, so the old `dark:bg-brand-950/15` etc. silently fell back
-        // to the *light* class, which is why this card looked washed out).
-        accent
-          ? "border-brand-100 bg-brand-50/40 dark:border-zinc-700/70 dark:bg-zinc-900 dark:ring-1 dark:ring-inset dark:ring-violet-500/15"
-          : "border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900",
-      ].join(" ")}
-    >
+  const className = [
+    "h-full flex flex-col rounded-xl border shadow-sm shadow-slate-200/40 dark:shadow-black/20 px-5 pt-4 pb-4",
+    // Every KPI card shares the same dark card background/border — an
+    // Admin overview shouldn't let one metric visually outweigh the
+    // others. Accent cards keep their light-mode tint but, in dark
+    // mode, only add a faint violet ring as emphasis instead of a
+    // brighter background (brand-300/400/900/950 aren't defined in the
+    // theme, so the old `dark:bg-brand-950/15` etc. silently fell back
+    // to the *light* class, which is why this card looked washed out).
+    accent
+      ? "border-brand-100 bg-brand-50/40 dark:border-zinc-700/70 dark:bg-zinc-900 dark:ring-1 dark:ring-inset dark:ring-violet-500/15"
+      : "border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900",
+    href ? "cursor-pointer" : "",
+  ].join(" ");
+
+  const content = (
+    <>
       <p className={`text-[10px] font-bold uppercase tracking-widest mb-1 ${accent ? HERO_LABEL_CLASS : "text-slate-400 dark:text-zinc-600"}`}>
         {label}
       </p>
@@ -138,8 +284,18 @@ function DashKpiCard({
           </div>
         )}
       </div>
-    </div>
+    </>
   );
+
+  if (href) {
+    return (
+      <Link href={href} className={className}>
+        {content}
+      </Link>
+    );
+  }
+
+  return <div className={className}>{content}</div>;
 }
 
 function RiskBadge({ risk }: { risk: "on-track" | "at-risk" | "blocked" }) {
@@ -161,11 +317,26 @@ function WorkloadRow({
   avatar,
   hours,
   capacity,
+  profileId,
+  projectSlug,
 }: {
   name:     string;
   avatar:   string;
   hours:    number;
   capacity: number;
+  // This member's real profiles.id — the Member Profile Modal now fetches
+  // its own real Assigned Hours/Active Tickets/Utilization/Current Workload
+  // straight from Supabase given just this id (+ projectSlug below), so
+  // this row no longer needs to precompute/pass that data itself. Without
+  // a real id, resolveTeamMember (no profileId, no match in the mock
+  // roster) used to synthesize an `unknown-<name>` id, which is what made
+  // "View Work History" build an invalid route.
+  profileId: string;
+  // The Admin Dashboard's own current project scope — real slug when one
+  // project is selected, omitted entirely under "All Projects" (never a
+  // guessed/first/arbitrary project), so the modal aggregates org-wide
+  // (matching this row's own "All Projects" hours) instead of guessing one.
+  projectSlug?: string;
 }) {
   // capacity can be real 0 (no weekly capacity set) — guarded here exactly
   // like utilizationOf (member-profile-modal.tsx, Team's own definition):
@@ -180,7 +351,13 @@ function WorkloadRow({
 
   return (
     <div className="flex items-center gap-2.5 py-1.5">
-      <MemberTrigger name={name} avatar={avatar} className="flex items-center gap-2.5 min-w-0">
+      <MemberTrigger
+        name={name}
+        avatar={avatar}
+        profileId={profileId}
+        projectSlug={projectSlug}
+        className="flex items-center gap-2.5 min-w-0"
+      >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={avatar} alt={name} className="w-5 h-5 rounded-full flex-shrink-0" />
         <span className="text-[12px] text-slate-600 dark:text-zinc-400 w-14 flex-shrink-0 truncate text-left">
@@ -380,20 +557,67 @@ function AdminDashboard() {
 
   const ticketsById = useMemo(() => new Map(tickets.map((t) => [t.id, t])), [tickets]);
 
-  const openTicketsCount = useMemo(() => scopedTickets.filter((t) => t.status !== "done").length, [scopedTickets]);
+  // "Assigned Tickets" KPI — the org's/project's own open (non-"done")
+  // tickets in the current Dashboard scope. This is the single source of
+  // truth for the card: the number shown, the ticket a single-ticket click
+  // resolves to, and the `?alerts=` filter applied on the destination
+  // Tickets page all derive from this same list — never a second,
+  // independently-filtered copy of it.
+  const assignedTickets = useMemo(() => scopedTickets.filter((t) => t.status !== "done"), [scopedTickets]);
+  const assignedTicketsCount = assignedTickets.length;
+
+  // "Assigned Tickets" card navigation — same single-ticket `?alerts=`
+  // query-state pattern Health Alerts already established
+  // (admin-project-overview.tsx's alertActionHref): exactly one ticket links
+  // straight to its own detail page. Two or more hand off to a Tickets page
+  // with every open (non-done) status carried in the URL, so the total shown
+  // there matches this KPI exactly — that page is the current project's own
+  // `/projects/<slug>/tickets` when the Dashboard is scoped to one project,
+  // or the org-wide `/tickets` (app/tickets/page.tsx) under "All Projects,"
+  // which is always resolvable regardless of how many different projects
+  // those tickets actually belong to. The card is interactive precisely when
+  // `assignedTicketsCount > 0` — this never leaves a >0 count without a real
+  // href to land on.
+  const assignedTicketsHref =
+    assignedTicketsCount === 0 ? undefined : buildAssignedTicketsHref(assignedTickets, selectedProjectSlug);
   const activeTicketsCount = useMemo(
     () => scopedTickets.filter((t) => t.status === "in-progress" || t.status === "review").length,
     [scopedTickets]
   );
-  const blockedTicketsCount = useMemo(() => scopedTickets.filter((t) => t.status === "blocked").length, [scopedTickets]);
-  const dueTodayCount = useMemo(
-    () => scopedTickets.filter((t) => t.dueDate && parseDisplayDate(t.dueDate) === todayISO).length,
+  // "Blocked" KPI — single source of truth for the card: the number shown,
+  // the ticket a single-ticket click resolves to, and the `?alerts=blocked`
+  // filter applied on the destination Tickets page all derive from this
+  // same list.
+  const blockedTickets = useMemo(() => scopedTickets.filter((t) => t.status === "blocked"), [scopedTickets]);
+  const blockedTicketsCount = blockedTickets.length;
+  // Card is interactive precisely when blockedTicketsCount > 0 — a single
+  // blocked ticket goes straight to its own detail; two or more hand off to
+  // the current project's own Tickets page (or the org-wide one under "All
+  // Projects") with `?alerts=blocked` already applied and visible.
+  const blockedTicketsHref =
+    blockedTicketsCount === 0 ? undefined : buildBlockedTicketsHref(blockedTickets, selectedProjectSlug);
+  // "Due Today" KPI — single source of truth for the card: the number
+  // shown, the ticket a single-ticket click resolves to, and the
+  // `?alerts=due-today` filter applied on the destination Tickets page all
+  // derive from this same list. Same real `todayISO`/`parseDisplayDate`
+  // "today" — no status exclusion, exactly matching the KPI's own existing
+  // definition, never a second/different one.
+  const dueTodayTickets = useMemo(
+    () => scopedTickets.filter((t) => t.dueDate && parseDisplayDate(t.dueDate) === todayISO),
     [scopedTickets, todayISO]
   );
+  const dueTodayCount = dueTodayTickets.length;
+  const dueTodayHref =
+    dueTodayCount === 0 ? undefined : buildDueTodayHref(dueTodayTickets, selectedProjectSlug);
 
   const estimatedHoursTotal = useMemo(() => scopedTickets.reduce((sum, t) => sum + (t.hours ?? 0), 0), [scopedTickets]);
   const loggedHoursTotal = effectiveLoggedMinutes / 60;
   const hoursBurnPct = estimatedHoursTotal > 0 ? Math.round((loggedHoursTotal / estimatedHoursTotal) * 100) : 0;
+
+  // "Hours Burn" card navigation — real logged minutes, not the rounded
+  // display value, decide whether there's anything to land on (a sub-hour
+  // total that still rounds to "0h" on the card is still real logged time).
+  const hoursBurnHref = effectiveLoggedMinutes > 0 ? buildHoursBurnHref(selectedProjectSlug, todayISO) : undefined;
 
   const myActiveWork = useMemo(
     () => (userId ? scopedTickets.filter((t) => t.assigneeProfileId === userId && t.status !== "done") : []),
@@ -417,6 +641,11 @@ function AdminDashboard() {
   const workload = useMemo(() => {
     return workloadMembers
       .map((member) => {
+        // This widget's own `hours` figure — the Member Profile Modal now
+        // computes the exact same real number itself (real assigneeProfileId
+        // match, org-wide since this widget passes no projectSlug for "All
+        // Projects") when this row is opened, from the same real tickets,
+        // never a second/different calculation.
         const assignedHours = scopedTickets
           .filter((t) => t.assigneeProfileId === member.id && t.status !== "done")
           .reduce((sum, t) => sum + (t.hours ?? 0), 0);
@@ -432,7 +661,14 @@ function AdminDashboard() {
           assignedHours,
           activeTicketIds: [],
         });
-        return { id: member.id, name: member.name, avatar: member.avatar, hours: assignedHours, capacity: member.weeklyCapacity, pct };
+        return {
+          id: member.id,
+          name: member.name,
+          avatar: member.avatar,
+          hours: assignedHours,
+          capacity: member.weeklyCapacity,
+          pct,
+        };
       })
       .sort((a, b) => b.pct - a.pct)
       .slice(0, 5);
@@ -493,13 +729,17 @@ function AdminDashboard() {
   // Risk above, uncapped and blocked-only (no AT RISK projects here).
   const blockedProjects = useMemo(() => {
     const activeProjects = scopedActiveProjects;
-    const result: { name: string; count: number }[] = [];
+    const result: { slug: string; name: string; count: number }[] = [];
     for (const project of activeProjects) {
       const blockedCount = tickets.filter((t) => t.projectSlug === project.slug && t.status === "blocked").length;
-      if (blockedCount > 0) result.push({ name: project.name, count: blockedCount });
+      if (blockedCount > 0) result.push({ slug: project.slug, name: project.name, count: blockedCount });
     }
     return result;
   }, [scopedActiveProjects, tickets]);
+  // "0 proyectos" naturally means no "blocked" insight item ever gets
+  // pushed below, so there's nothing to gate here beyond having a real
+  // href whenever the item does exist.
+  const blockedProjectsHref = blockedProjects.length === 0 ? undefined : buildBlockedProjectsHref(blockedProjects);
 
   // Same assignedHours + utilizationOf calculation Team Workload uses
   // above, uncapped and filtered to >100%, most over-capacity first.
@@ -532,10 +772,13 @@ function AdminDashboard() {
   // it was completed (same approximation this schema uses elsewhere; a
   // later unrelated edit could in principle nudge a ticket into/out of
   // "this month", but there's no fabricated data involved).
-  const completedThisMonthCount = useMemo(() => {
+  const completedThisMonthTickets = useMemo(() => {
     const monthPrefix = todayISO.slice(0, 7); // "YYYY-MM"
-    return scopedTickets.filter((t) => t.status === "done" && t.updatedAtISO?.slice(0, 7) === monthPrefix).length;
+    return scopedTickets.filter((t) => t.status === "done" && t.updatedAtISO?.slice(0, 7) === monthPrefix);
   }, [scopedTickets, todayISO]);
+  const completedThisMonthCount = completedThisMonthTickets.length;
+  const completedThisMonthHref =
+    completedThisMonthCount === 0 ? undefined : buildCompletedThisMonthHref(completedThisMonthTickets, selectedProjectSlug);
 
   // Same estimatedHoursTotal/loggedHoursTotal/hoursBurnPct the Hours Burn
   // KPI card above already computes — omitted entirely (not just 0%) when
@@ -556,9 +799,15 @@ function AdminDashboard() {
         id: "blocked",
         level: "critical",
         text: `${b.name} blocked — ${b.count} ticket${b.count !== 1 ? "s" : ""}`,
+        href: blockedProjectsHref,
       });
     } else if (blockedProjects.length > 1) {
-      items.push({ id: "blocked", level: "critical", text: `${blockedProjects.length} projects currently blocked` });
+      items.push({
+        id: "blocked",
+        level: "critical",
+        text: `${blockedProjects.length} projects currently blocked`,
+        href: blockedProjectsHref,
+      });
     }
 
     if (membersOverCapacity.length === 1) {
@@ -573,18 +822,30 @@ function AdminDashboard() {
       items.push({ id: "capacity", level: "warning", text: `${membersOverCapacity.length} members above capacity` });
     }
 
-    items.push({ id: "completed", level: "ok", text: `${completedThisMonthCount} tickets completed this month` });
+    items.push({
+      id: "completed",
+      level: "ok",
+      text: `${completedThisMonthCount} tickets completed this month`,
+      href: completedThisMonthHref,
+    });
 
     if (hoursBurnInsight) {
       items.push({
         id: "hours",
         level: "warning",
         text: `Hours burn at ${hoursBurnInsight.pct}% · ${hoursBurnInsight.remaining}h remaining`,
+        // Reuses the exact same href the Hours Burn KPI card itself
+        // computes (effectiveLoggedMinutes > 0 gate included) — never a
+        // second/duplicated navigation decision for the same data.
+        href: hoursBurnHref,
       });
     }
 
     return items.length > 0 ? items : [{ id: "none", level: "ok", text: "No health alerts right now." }];
-  }, [blockedProjects, membersOverCapacity, completedThisMonthCount, hoursBurnInsight]);
+  }, [
+    blockedProjects, blockedProjectsHref, membersOverCapacity, completedThisMonthCount, completedThisMonthHref,
+    hoursBurnInsight, hoursBurnHref,
+  ]);
 
   // Only ever an 11th probe event past RECENT_ACTIVITY_LIMIT — never
   // rendered, just used to decide whether "View all activity →" appears
@@ -600,6 +861,11 @@ function AdminDashboard() {
           id: event.id,
           avatar: event.actorAvatar,
           name: event.actorName ?? "Someone",
+          actorProfileId: event.actorProfileId,
+          // Same scope this whole widget is already reading from
+          // (effectiveActivityEvents) — a selected project, or org-wide
+          // aggregation under "All Projects."
+          projectSlug: selectedProjectSlug ?? undefined,
           ticket,
           project,
           time: event.time,
@@ -630,7 +896,7 @@ function AdminDashboard() {
           detail: <span className="font-medium">{event.oldPriorityLabel} → {event.newPriorityLabel}</span>,
         };
       }),
-    [effectiveActivityEvents, ticketsById, projectNameBySlug]
+    [effectiveActivityEvents, ticketsById, projectNameBySlug, selectedProjectSlug]
   );
 
   if (loadState === "loading") {
@@ -732,8 +998,9 @@ function AdminDashboard() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
         <DashKpiCard
           label="Assigned Tickets"
-          value={openTicketsCount}
+          value={assignedTicketsCount}
           sub={`${activeTicketsCount} active`}
+          href={assignedTicketsHref}
         />
         <DashKpiCard
           label="Hours Burn"
@@ -746,17 +1013,20 @@ function AdminDashboard() {
           sub={`${hoursBurnPct}% complete`}
           accent
           progress={hoursBurnPct}
+          href={hoursBurnHref}
         />
         <DashKpiCard
           label="Blocked"
           value={blockedTicketsCount}
           sub="across all projects"
           danger
+          href={blockedTicketsHref}
         />
         <DashKpiCard
           label="Due Today"
           value={dueTodayCount}
           sub={formatISODate(todayISO)}
+          href={dueTodayHref}
         />
       </div>
 
@@ -825,7 +1095,13 @@ function AdminDashboard() {
             ) : (
               <div className="space-y-4">
                 {projectsAtRisk.map((p) => (
-                  <div key={p.slug}>
+                  // The whole row is one click target (real slug, straight to
+                  // that project's Overview) — every element inside (name,
+                  // badge, progress bar, percentage, info text) stays exactly
+                  // as it was, just now inside a single <Link> instead of a
+                  // plain <div>, with `block` so it keeps the same stacked
+                  // layout an <a> wouldn't have by default.
+                  <Link key={p.slug} href={`/projects/${p.slug}`} className="block cursor-pointer">
                     <div className="flex items-center justify-between gap-2 mb-1.5">
                       <span className="text-[13px] font-medium text-slate-800 dark:text-zinc-200 truncate">
                         {p.name}
@@ -848,7 +1124,7 @@ function AdminDashboard() {
                         ? `${p.affected} blocked ticket${p.affected !== 1 ? "s" : ""}`
                         : `${p.affected} overdue ticket${p.affected !== 1 ? "s" : ""}`}
                     </p>
-                  </div>
+                  </Link>
                 ))}
               </div>
             )}
@@ -867,7 +1143,15 @@ function AdminDashboard() {
             ) : (
               <div>
                 {workload.map((w) => (
-                  <WorkloadRow key={w.id} name={w.name} avatar={w.avatar} hours={w.hours} capacity={w.capacity} />
+                  <WorkloadRow
+                    key={w.id}
+                    name={w.name}
+                    avatar={w.avatar}
+                    hours={w.hours}
+                    capacity={w.capacity}
+                    profileId={w.id}
+                    projectSlug={selectedProjectSlug ?? undefined}
+                  />
                 ))}
               </div>
             )}

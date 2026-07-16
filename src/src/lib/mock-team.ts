@@ -161,12 +161,15 @@ export interface MemberIdentity {
   avatar: string;
   role?: string;
   projectSlug?: string;
-  /** Real profiles.id, only ever set by team-screen.tsx (whose roster is
-   *  real project_memberships rows, so it already knows it) — lets
-   *  resolveTeamMember skip the name-matching heuristic below entirely for
-   *  member actions that need the real id (e.g. Remove from Project's
-   *  history check in member-profile-modal.tsx). Every other existing
-   *  caller never sets this and is unaffected. */
+  /** Real profiles.id — the single key MemberProfileModal now uses to fetch
+   *  its own real Assigned Hours/Active Tickets/Utilization/Current
+   *  Workload (see that file's own doc), and that lets resolveTeamMember
+   *  skip the name-matching heuristic below entirely for member actions
+   *  that need the real id (View Work History, Remove from Project, Make
+   *  Project Lead). Every real "click a person" trigger app-wide sets this
+   *  now; only the still-mock Project Lead Reports/Time Tracking screens
+   *  omit it, for which the modal falls back to resolveTeamMember's
+   *  existing mock-driven data unchanged. */
   profileId?: string;
   /** project_memberships.project_role for this profileId, same "only
    *  team-screen.tsx knows this" reasoning as profileId above — lets

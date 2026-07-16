@@ -39,6 +39,12 @@ export function MemberProfileProvider({ children }: { children: ReactNode }) {
         <MemberProfileModal
           member={member}
           slug={member.projectSlug}
+          // The real profileId this identity was opened with, if any (see
+          // MemberIdentity's own doc) — the single key the modal uses to
+          // fetch its own real Assigned Hours/Active Tickets/Utilization/
+          // Current Workload. undefined for the few remaining callers that
+          // still only have mock data, unaffected.
+          realProfileId={identity?.profileId}
           onClose={() => setIdentity(null)}
         />
       )}
@@ -64,6 +70,7 @@ export function MemberTrigger({
   avatar,
   role,
   projectSlug,
+  profileId,
   children,
   className,
   nested = false,
@@ -71,7 +78,18 @@ export function MemberTrigger({
   name: string;
   avatar: string;
   role?: string;
+  /** Real project slug, when this trigger has one in scope (a project-
+   *  scoped screen, or a ticket's own project) — lets the modal fetch this
+   *  member's real per-project metrics instead of aggregating org-wide. */
   projectSlug?: string;
+  /** Real profiles.id — see MemberIdentity's own doc (mock-team.ts). The
+   *  single key MemberProfileModal uses to fetch its own real Assigned
+   *  Hours/Active Tickets/Utilization/Current Workload, and lets
+   *  resolveTeamMember skip the name-matching heuristic entirely for menu
+   *  actions (View Work History, etc.) that need the real id. Every real
+   *  "click a person" trigger app-wide should set this; only truly
+   *  mock-only contexts omit it. */
+  profileId?: string;
   children: ReactNode;
   className?: string;
   /** True when this sits inside another clickable element (a ticket row,
@@ -81,7 +99,7 @@ export function MemberTrigger({
   nested?: boolean;
 }) {
   const { openMemberProfile } = useMemberProfile();
-  const identity: MemberIdentity = { name, avatar, role, projectSlug };
+  const identity: MemberIdentity = { name, avatar, role, projectSlug, profileId };
 
   // "Unassigned" is the app-wide sentinel for "no assignee" (see
   // EditableSidebarAssignee / PreviewAssigneeControl's onChange({ name:

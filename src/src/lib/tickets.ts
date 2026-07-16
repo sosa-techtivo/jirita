@@ -2016,6 +2016,12 @@ export interface OrganizationActivityEvent {
   type: OrganizationActivityEventType;
   actorName: string | null;
   actorAvatar: string;
+  /** Real profiles.id of the actor, when known — lets any "click this
+   *  person" trigger (Recent Activity, My Work's Recently Updated, etc.)
+   *  open the Member Profile Modal against their real identity instead of
+   *  a name-based guess. Null when the event has no real actor (same cases
+   *  actorName is already null for). */
+  actorProfileId: string | null;
   ticketId: string;
   time: string;
   /** Raw event timestamp — `time` above is already relative-formatted for
@@ -2108,6 +2114,7 @@ export async function loadOrganizationActivity(
       id: row.id,
       actorName: resolveProfileName(actor),
       actorAvatar: (actor ? resolveAvatarUrl(actor.avatar_url, actor.updated_at) : null) ?? FALLBACK_AVATAR,
+      actorProfileId: row.actor_profile_id,
       ticketId: row.ticket_id,
       time: formatRelativeTime(row.created_at),
       createdAtISO: row.created_at,

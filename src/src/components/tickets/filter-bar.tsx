@@ -19,6 +19,27 @@ const ASSIGNED_BASE_GROUP: DropdownGroup = {
   ],
 };
 
+// Same "__anyone__" sentinel FilterDropdown's own `mode="single"` already
+// special-cases to mean "show as selected when nothing else is" (see
+// ASSIGNED_BASE_GROUP above) — reused here so "All Projects" behaves
+// exactly the same way, with no change to filter-dropdown.tsx itself.
+const PROJECT_BASE_GROUP: DropdownGroup = {
+  options: [{ value: "__anyone__", label: "All Projects" }],
+};
+
+// Real, already permission-scoped projects only (see tickets-screen.tsx's
+// availableProjects) — org-wide "all projects" Tickets view only.
+function buildProjectGroups(projects: { slug: string; name: string }[]): DropdownGroup[] {
+  if (projects.length === 0) return [PROJECT_BASE_GROUP];
+  return [
+    PROJECT_BASE_GROUP,
+    {
+      divider: true,
+      options: projects.map((p) => ({ value: p.slug, label: p.name })),
+    },
+  ];
+}
+
 // Real org members only — no mock names. If there are none yet (dev
 // fallback, or an org with no other members), the dropdown just shows the
 // base group above.
@@ -74,11 +95,17 @@ const QUICK_FILTERS = ["Mine", "Blocked", "High Priority", "Due Soon", "Recently
 
 // Labels for real URL-applied filters handed off from Project Overview's
 // Health Alert action and Project Reports' Delivery Progress cards
-// (?alerts=overdue,blocked,done,in-progress, etc. — see tickets-screen.tsx).
-// "overdue" isn't a real ticket status, so it keeps its own label; every
-// other type is a canonical TicketStatus and reuses the app's existing
-// STATUS_LABEL mapping instead of a parallel/duplicate label.
-const NON_STATUS_ALERT_LABEL: Record<string, string> = { overdue: "Overdue" };
+// (?alerts=overdue,blocked,done,in-progress, etc. — see tickets-screen.tsx),
+// plus the Admin Dashboard's own "Due Today" KPI card and "tickets
+// completed this month" health insight. "overdue"/"due-today"/
+// "completed-this-month" aren't real ticket statuses, so they keep their
+// own label; every other type is a canonical TicketStatus and reuses the
+// app's existing STATUS_LABEL mapping instead of a parallel/duplicate label.
+const NON_STATUS_ALERT_LABEL: Record<string, string> = {
+  overdue: "Overdue",
+  "due-today": "Due Today",
+  "completed-this-month": "Completed This Month",
+};
 
 function alertChipLabel(type: string): string {
   return STATUS_LABEL[type as TicketStatus] ?? NON_STATUS_ALERT_LABEL[type] ?? type;
@@ -96,6 +123,10 @@ export function FilterBar({
   onToggleChip,
   searchQuery,
   onSearchChange,
+  showProjectFilter,
+  projects,
+  project,
+  onProjectChange,
   members,
   assigned,
   onAssignedChange,
@@ -123,6 +154,14 @@ export function FilterBar({
   onToggleChip: (label: string) => void;
   searchQuery: string;
   onSearchChange: (query: string) => void;
+  /** Only the org-wide Tickets view (`/tickets`) renders the Project
+   *  filter — per-project Tickets (`/projects/[slug]/tickets`) never shows
+   *  it, since the project is already fixed by the route. */
+  showProjectFilter: boolean;
+  /** Real, already permission-scoped projects (empty when showProjectFilter is false). */
+  projects: { slug: string; name: string }[];
+  project: string[];
+  onProjectChange: (values: string[]) => void;
   members: OrgMember[];
   /** Controlled by the caller (not local state) so it can be combined with
    *  the quick-filter chips and applied once to the shared ticket list —
@@ -208,6 +247,16 @@ export function FilterBar({
         <span className="w-px h-4 bg-slate-200 dark:bg-zinc-700 mx-1 hidden sm:block" />
 
         {/* Dropdown filters */}
+        {showProjectFilter && (
+          <FilterDropdown
+            label="Project"
+            mode="single"
+            groups={buildProjectGroups(projects)}
+            selected={project}
+            onChange={onProjectChange}
+            searchable
+          />
+        )}
         <FilterDropdown
           label="Assigned"
           mode="single"

@@ -100,6 +100,16 @@ export interface DashboardActivityEntry {
   type: ActivityType;
   avatar: string;
   name: string;
+  /** Real profiles.id of the actor, when known (see OrganizationActivityEvent's
+   *  own doc) — lets clicking this entry's avatar/name open the Member
+   *  Profile Modal against their real identity instead of a name-based guess. */
+  actorProfileId?: string | null;
+  /** Real project slug for this entry's own scope — set by the caller from
+   *  its own current context (e.g. the Admin Dashboard's project scope
+   *  selector, or the Project Lead Dashboard's always-one-project scope).
+   *  Omitted for an org-wide context, in which case the modal aggregates
+   *  this member's metrics across every accessible project. */
+  projectSlug?: string;
   /** The action fragment only — e.g. "marked", "completed". Never embeds the
    *  ticket title; when `ticketId`/`ticket` is set, the title renders on its
    *  own clickable line via getTicketDisplayKey instead. */
@@ -266,7 +276,13 @@ export function RecentActivityList({
         const ticket = entry.ticket ?? (entry.ticketId ? getTicketById(entry.ticketId) : undefined);
         return (
           <li key={entry.id} className="flex items-start gap-3">
-            <MemberTrigger name={entry.name} avatar={entry.avatar} className="flex-shrink-0 mt-0.5 rounded-full">
+            <MemberTrigger
+              name={entry.name}
+              avatar={entry.avatar}
+              profileId={entry.actorProfileId ?? undefined}
+              projectSlug={entry.projectSlug}
+              className="flex-shrink-0 mt-0.5 rounded-full"
+            >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={entry.avatar}
@@ -276,7 +292,13 @@ export function RecentActivityList({
             </MemberTrigger>
             <div className="text-[13px] leading-snug min-w-0 flex-1">
               <p className="text-slate-700 dark:text-zinc-300">
-                <MemberTrigger name={entry.name} avatar={entry.avatar} className="font-medium text-slate-900 dark:text-zinc-100 hover:underline">
+                <MemberTrigger
+                  name={entry.name}
+                  avatar={entry.avatar}
+                  profileId={entry.actorProfileId ?? undefined}
+                  projectSlug={entry.projectSlug}
+                  className="font-medium text-slate-900 dark:text-zinc-100 hover:underline"
+                >
                   {entry.name}
                 </MemberTrigger>{" "}
                 {entry.verb}

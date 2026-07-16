@@ -2,11 +2,12 @@
 
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import type { ProjectHealth, ProjectPriority, ProjectStatus, ProjectSummary } from "@/lib/mock-projects";
 import { StatusBadge, PriorityBadge, HealthBadge, ProjectCategoryBadge, statusMeta, priorityMeta, healthMeta } from "@/components/status-badge";
 import { FilterDropdown } from "@/components/tickets/filter-dropdown";
 import type { DropdownGroup } from "@/components/tickets/filter-dropdown";
+import { FilterChip } from "@/components/tickets/filter-chip";
 import { useCurrentUser } from "@/components/current-user-provider";
 import { useOrganizationProjects } from "@/components/organization-projects-provider";
 import { canManage } from "@/lib/current-user";
@@ -97,6 +98,8 @@ function ProjectsErrorState({ message, onRetry }: { message: string | null; onRe
 function ManagedProjectsScreen() {
   const { user } = useCurrentUser();
   const { projects: allProjects, restoreProject } = useOrganizationProjects();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const isProjectLead = user.role === "PROJECT_LEAD";
   const canCreateProject = canManage(user.role);
   const [search, setSearch] = useState("");
@@ -109,6 +112,25 @@ function ManagedProjectsScreen() {
   const [editingProject, setEditingProject] = useState<ProjectSummary | null>(null);
   const [archivingProject, setArchivingProject] = useState<ProjectSummary | null>(null);
   const searchId = useId();
+
+  // Real URL query-state handoff from the Admin Dashboard's "projects
+  // currently blocked" health insight — carries the exact real project
+  // slugs it already counted (blockedTickets on `projects` rows isn't
+  // populated for real data, so this can't be recomputed client-side from
+  // that field; the Dashboard hands off the precise set it computed from
+  // real tickets instead). Same `?param=` URL-as-source-of-truth precedent
+  // as Tickets' own `?alerts=`.
+  const blockedParam = searchParams.get("blocked");
+  const blockedSlugs = useMemo(
+    () => (blockedParam ? new Set(blockedParam.split(",").filter(Boolean)) : null),
+    [blockedParam]
+  );
+  const clearBlockedFilter = () => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("blocked");
+    const qs = params.toString();
+    router.replace(`/projects${qs ? `?${qs}` : ""}`);
+  };
 
   // RLS on `projects` already scopes rows per role (Admin sees the whole
   // workspace; Project Lead/Member only see projects they're staffed on),
@@ -221,7 +243,8 @@ function ManagedProjectsScreen() {
         project.projectCode.toLowerCase().includes(query) ||
         (project.client ?? "").toLowerCase().includes(query) ||
         project.owner.name.toLowerCase().includes(query);
-      return matchesStatus && matchesHealth && matchesLead && matchesPriority && matchesSearch;
+      const matchesBlocked = !blockedSlugs || blockedSlugs.has(project.slug);
+      return matchesStatus && matchesHealth && matchesLead && matchesPriority && matchesSearch && matchesBlocked;
     })
     .sort((a, b) => {
       switch (sortBy[0]) {
@@ -293,6 +316,16 @@ function ManagedProjectsScreen() {
           <FilterDropdown label="Sort By" mode="single" groups={SORT_GROUPS} selected={sortBy} onChange={setSortBy} />
         </div>
       </div>
+
+      {/* Real URL-applied filter handed off from the Admin Dashboard's
+          "projects currently blocked" health insight — same FilterChip
+          style/remove interaction Tickets' own `?alerts=` chips already
+          use, never a second chip design. */}
+      {blockedSlugs && (
+        <div className="mt-3 flex items-center gap-1.5">
+          <FilterChip label="Blocked" active onToggle={clearBlockedFilter} />
+        </div>
+      )}
 
       {isProjectLead && (
         <p className="mt-6 text-xs font-medium text-slate-500 dark:text-zinc-400">{leadSummaryLine}</p>

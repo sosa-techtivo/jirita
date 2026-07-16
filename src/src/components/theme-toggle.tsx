@@ -13,12 +13,11 @@ function useMounted() {
   );
 }
 
-type ThemeOption = "light" | "dark" | "system";
+type ThemeOption = "light" | "dark";
 
 const options: { value: ThemeOption; label: string }[] = [
   { value: "light", label: "Light" },
   { value: "dark", label: "Dark" },
-  { value: "system", label: "System" },
 ];
 
 function SunIcon() {
@@ -38,26 +37,16 @@ function MoonIcon() {
   );
 }
 
-function MonitorIcon() {
-  return (
-    <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-      <rect x="3" y="4" width="18" height="13" rx="1.5" />
-      <path d="M8 21h8M12 17v4" />
-    </svg>
-  );
-}
-
 const icons: Record<ThemeOption, () => ReactElement> = {
   light: SunIcon,
   dark: MoonIcon,
-  system: MonitorIcon,
 };
 
 export function ThemeToggle() {
   const { theme, setTheme } = useTheme();
   const mounted = useMounted();
 
-  const active = mounted ? (theme as ThemeOption | undefined) ?? "system" : "system";
+  const active = mounted ? (theme as ThemeOption | undefined) ?? "light" : "light";
 
   return (
     <div

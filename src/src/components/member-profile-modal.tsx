@@ -16,10 +16,16 @@ import { fullName } from "@/lib/mock-users";
 import type { Role } from "@/lib/current-user";
 import { ROLE_LABELS } from "@/lib/current-user";
 import { getProjectBySlug } from "@/lib/mock-projects";
-import { loadProjectTickets, loadUserActivity } from "@/lib/tickets";
+import { loadProjectTickets, loadOrganizationTickets, loadUserActivity } from "@/lib/tickets";
 import type { UserActivityEvent } from "@/lib/tickets";
 import { generatePasswordResetLink } from "@/lib/users";
-import { hasProjectMemberHistory, removeProjectMember, setProjectLead } from "@/lib/projects";
+import {
+  hasProjectMemberHistory,
+  removeProjectMember,
+  setProjectLead,
+  loadProjectTeam,
+  loadOrganizationMemberWeeklyCapacities,
+} from "@/lib/projects";
 import { useCurrentUser } from "@/components/current-user-provider";
 import { ResetPasswordLinkModal } from "@/components/reset-password-link-modal";
 
@@ -136,13 +142,26 @@ const PROFILE_TABS: { key: ProfileTab; label: string }[] = [
 export function MemberProfileModal({
   member,
   slug,
+  realProfileId,
   user,
   initialTab = "profile",
   onClose,
 }: {
   member?: TeamMember;
-  /** Required when `member` is set (existing per-project mode); unused in user mode. */
+  /** Real project slug when the caller has one (a project-scoped context —
+   *  Team, Project Overview, a ticket's own project, etc.). Omitted for an
+   *  org-wide context (Recent Activity, Team Workload, Reports) — metrics
+   *  then aggregate across every project this viewer can access, same
+   *  "All Projects" convention the Dashboards already use. */
   slug?: string;
+  /** The real profiles.id this member was opened with (see MemberIdentity's
+   *  own doc in mock-team.ts) — the single, authoritative key this modal
+   *  uses to fetch its own real data below. Every real "click a person"
+   *  trigger app-wide now supplies this; only truly mock-only contexts
+   *  (the still-mock Project Lead Reports/Time Tracking screens) omit it,
+   *  in which case this modal falls back to resolveTeamMember's existing
+   *  mock-driven numbers exactly as before, never a crash. */
+  realProfileId?: string;
   /** Org-wide account — when set, renders the tab bar instead of the plain single view. */
   user?: User;
   /** Which tab opens first in user mode — e.g. the Users table's "Projects"
@@ -156,52 +175,87 @@ export function MemberProfileModal({
   const [activeTab, setActiveTab] = useState<ProfileTab>(initialTab);
   const { organization, isDevFallback } = useCurrentUser();
 
-  // Real tickets for this project, refetched every time a different member's
-  // card is opened — resolveTeamMember (member-profile.tsx) only ever
-  // produces a real name/avatar (or a synthesized stub with assignedHours: 0
-  // and activeTicketIds: [] for anyone not in the old mock-team.ts roster),
-  // so Active Tickets/Assigned Hours/Utilization/Workload below are derived
-  // from this real data instead of that stub whenever it's available. Dev
-  // fallback (or no project context) keeps the previous mock-driven numbers.
-  const [realProjectTickets, setRealProjectTickets] = useState<Ticket[] | null>(null);
+  // The single real-data fetch every "click a person" trigger app-wide now
+  // funnels through — driven purely by (realProfileId, slug), never by
+  // name/avatar matching or a per-caller pre-computed number. Project-scoped
+  // (slug set) reads that one project's own tickets/team; org-wide (no
+  // slug) aggregates across every project this viewer can access — the
+  // exact same real loaders (loadProjectTickets/loadProjectTeam,
+  // loadOrganizationTickets/loadOrganizationMemberWeeklyCapacities) every
+  // other real screen in this app already uses for the same numbers, so
+  // Team Workload/Reports/Team/Project Overview/Recent Activity/etc. can
+  // never disagree about what "this member's real workload" means.
+  const [realMemberData, setRealMemberData] = useState<{ activeTickets: Ticket[]; weeklyCapacity: number } | null>(
+    null
+  );
 
   useEffect(() => {
     // Reset the instant a different member's card opens (or this one closes)
     // so stale numbers from the previous member never flash for the new one
     // while the real fetch below is in flight.
     // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: clears stale data the moment the identity changes, before the async fetch below resolves
-    setRealProjectTickets(null);
-    if (!member || !slug || isDevFallback || !organization) return;
+    setRealMemberData(null);
+    if (!realProfileId || isDevFallback || !organization) return;
     let cancelled = false;
-    loadProjectTickets(organization.id, slug).then((result) => {
-      if (cancelled) return;
-      if (result.status === "ready") setRealProjectTickets(result.tickets);
-    });
+
+    (async () => {
+      if (slug) {
+        const [ticketsResult, teamResult] = await Promise.all([
+          loadProjectTickets(organization.id, slug),
+          loadProjectTeam(organization.id, slug),
+        ]);
+        if (cancelled || ticketsResult.status !== "ready") return;
+        const activeTickets = ticketsResult.tickets.filter(
+          (t) => t.assigneeProfileId === realProfileId && t.status !== "done"
+        );
+        const weeklyCapacity =
+          teamResult.status === "ready"
+            ? teamResult.members.find((m) => m.id === realProfileId)?.weeklyCapacity ?? 0
+            : 0;
+        setRealMemberData({ activeTickets, weeklyCapacity });
+      } else {
+        const [ticketsResult, capacitiesResult] = await Promise.all([
+          loadOrganizationTickets(organization.id),
+          loadOrganizationMemberWeeklyCapacities(organization.id),
+        ]);
+        if (cancelled || ticketsResult.status !== "ready") return;
+        const activeTickets = ticketsResult.tickets.filter(
+          (t) => t.assigneeProfileId === realProfileId && t.status !== "done"
+        );
+        const weeklyCapacity =
+          capacitiesResult.status === "ready"
+            ? capacitiesResult.capacities.find((c) => c.profileId === realProfileId)?.weeklyCapacity ?? 0
+            : 0;
+        setRealMemberData({ activeTickets, weeklyCapacity });
+      }
+    })();
+
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [member?.name, slug, isDevFallback, organization]);
+  }, [realProfileId, slug, isDevFallback, organization]);
 
-  // Active = not the one final/closed status ("done") — the same definition
-  // already used for "open"/"active" tickets everywhere else in the app
-  // (e.g. project-overview.tsx's openTickets, my-work-screen.tsx's
-  // activeCount). loadProjectTickets is already scoped to this one project,
-  // so no other-project tickets can appear here.
+  // Active = not the one final/closed status ("done") — the same real
+  // definition already used for "open"/"active" tickets everywhere else in
+  // the app (e.g. Team's own assignedHours, project-overview.tsx's
+  // openTickets), applied here via the real assigneeProfileId match above,
+  // never a name-string guess. Falls back to resolveTeamMember's existing
+  // mock-driven data only when this member truly has no real profileId
+  // (see its own doc above) — never a crash, never a mismatched number.
   const memberTickets = member
-    ? realProjectTickets
-      ? realProjectTickets.filter((t) => t.assignee.name === member.name && t.status !== "done")
+    ? realMemberData
+      ? realMemberData.activeTickets
       : member.activeTicketIds.map((id) => getTicketById(id)).filter((t): t is Ticket => t !== undefined)
     : [];
 
-  // weeklyCapacity intentionally stays whatever resolveTeamMember already
-  // resolved (the mock roster's value, or the 40h fallback) — no real
-  // per-member capacity source exists yet (see membership.ts's
-  // updateOwnWeeklyCapacity, which only ever reads/writes the signed-in
-  // user's own row), so this doesn't invent new persistence for it.
+  // weeklyCapacity/assignedHours stay whatever resolveTeamMember resolved
+  // (the mock roster's value, or its 0h/40h stub) only when no real fetch
+  // above ever ran — real data is always authoritative once it exists,
+  // never silently overwritten back to a stub 0.
   const effectiveMember = member && {
     ...member,
-    assignedHours: realProjectTickets
+    weeklyCapacity: realMemberData ? realMemberData.weeklyCapacity : member.weeklyCapacity,
+    assignedHours: realMemberData
       ? memberTickets.reduce((sum, t) => sum + (t.hours ?? 0), 0)
       : member.assignedHours,
   };
@@ -326,7 +380,7 @@ export function MemberProfileModal({
                 <div className="mt-6 flex items-stretch divide-x divide-slate-100 dark:divide-zinc-800 rounded-xl border border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900 shadow-sm shadow-slate-200/40 dark:shadow-black/20 overflow-hidden">
                   <div className="flex-1 px-4 py-3">
                     <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600">Weekly Capacity</p>
-                    <p className="text-lg font-bold text-slate-900 dark:text-zinc-50 mt-0.5 leading-none">{member!.weeklyCapacity}h</p>
+                    <p className="text-lg font-bold text-slate-900 dark:text-zinc-50 mt-0.5 leading-none">{effectiveMember!.weeklyCapacity}h</p>
                   </div>
                   <div className="flex-1 px-4 py-3">
                     <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600">Assigned Hours</p>
@@ -387,10 +441,14 @@ export function MemberProfileModal({
         </div>
       </div>
 
-      {selectedTicket && slug && (
+      {selectedTicket && (
         <TicketPreviewPanel
           ticket={selectedTicket}
-          slug={slug}
+          // The ticket's own real project — always correct (identical to
+          // the outer `slug` in the existing single-project mode), and
+          // required when realActiveTickets spans more than one project
+          // (Team Workload), where there's no single outer `slug` at all.
+          slug={selectedTicket.projectSlug}
           onClose={() => setSelectedTicket(null)}
         />
       )}
@@ -419,6 +477,11 @@ function CloseButton({ onClick }: { onClick: () => void }) {
 // (/projects/[slug]/team/[userId]/work-history — see work-history-screen.tsx)
 // instead of opening a second modal, so a history that grows into the
 // hundreds/thousands of tickets is never loaded whole into a small dialog.
+// That route requires a real project slug — for a member opened without one
+// (the Admin Dashboard's Team Workload widget under "All Projects" scope,
+// where no single project applies), "View Work History" is omitted from
+// `items` below rather than built into an invalid `/projects//team/...`
+// path; no global/cross-project equivalent page exists yet to fall back to.
 // "Remove from Project" is real (removeProjectMember) and only ever offered
 // when hasProjectMemberHistory confirms this member has no real
 // participation in the project yet — never rendered disabled, simply
@@ -519,10 +582,19 @@ function MemberMenu({
     (member.role === "Admin" || member.role === "Project Lead");
 
   const items: { label: string; danger?: boolean; onClick: () => void }[] = [
-    { label: "View Work History", onClick: handleViewWorkHistory },
+    // Requires a real project slug to build a valid route — omitted
+    // outright (not shown disabled) when there isn't one, same "simply
+    // omitted" convention Remove from Project already uses below.
+    ...(slug ? [{ label: "View Work History", onClick: handleViewWorkHistory }] : []),
     ...(canMakeLead ? [{ label: "Make Project Lead", onClick: handleMakeLead }] : []),
     ...(canRemove ? [{ label: "Remove from Project", danger: true, onClick: handleRemove }] : []),
   ];
+
+  // No valid action at all (e.g. Team Workload under "All Projects," where
+  // View Work History is the only action this context could ever offer) —
+  // the "⋯" trigger itself is omitted rather than opening onto an empty
+  // popover.
+  if (items.length === 0) return null;
 
   return (
     <div ref={ref} className="relative">

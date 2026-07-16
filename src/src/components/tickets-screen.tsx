@@ -4,8 +4,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { tickets as MOCK_TICKETS, getTicketDisplayKey } from "@/lib/mock-tickets";
 import type { Ticket } from "@/lib/mock-tickets";
-import { loadProjectTickets, loadOrganizationLabels, createOrganizationLabel } from "@/lib/tickets";
-import { loadOrganizationMembers, loadProjectTeam, type OrgMember } from "@/lib/projects";
+import { loadProjectTickets, loadOrganizationTickets, loadOrganizationLabels, createOrganizationLabel } from "@/lib/tickets";
+import {
+  loadOrganizationMembers,
+  loadProjectTeam,
+  loadOrganizationProjects,
+  loadLeadProjects,
+  loadMemberProjects,
+  type OrgMember,
+} from "@/lib/projects";
 import { buildLabelCatalog, parseDisplayDate, getTodayISO } from "@/components/tickets/ticket-ui";
 import { NewTicketModal } from "@/components/tickets/new-ticket-modal";
 import { ViewSwitcher, type ViewMode } from "@/components/tickets/view-switcher";
@@ -69,9 +76,17 @@ export function presetTicketsFilter(slug: string, chips: string[]) {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export function TicketsScreen({ slug, projectName }: { slug: string; projectName: string }) {
+// `slug` is omitted for the org-wide "all projects" mode (the Admin
+// Dashboard's global ticket list, reached at `/tickets` — see
+// app/tickets/page.tsx) — every other caller keeps passing a real slug and
+// is completely unaffected. `projectName` was already unused in this
+// component before this change; left as-is.
+export function TicketsScreen({ slug, projectName }: { slug?: string; projectName?: string }) {
   const { user, userId, organization, isDevFallback } = useCurrentUser();
-  const canCreateTicket = canManage(user.role);
+  const canCreateTicket = canManage(user.role) && Boolean(slug);
+  // Stable storage/session key for the "all projects" mode, kept distinct
+  // from any real project slug so it can never collide with one.
+  const scopeKey = slug ?? "__all__";
   // Real query-state handoff from Project Overview's Health Alert action
   // (admin-project-overview.tsx) and Project Reports' Delivery Progress
   // cards (project-reports-screen.tsx) — carried in the URL itself, unlike
@@ -80,6 +95,11 @@ export function TicketsScreen({ slug, projectName }: { slug: string; projectName
   // `?page=` query param already does.
   const router = useRouter();
   const searchParams = useSearchParams();
+  // Project filter — org-wide "all projects" mode only (see
+  // availableProjects/selectedProjectSlug below); `?project=` is never read
+  // in single-project mode, where the route's own `slug` already fixes it
+  // and this filter isn't rendered at all.
+  const projectParam = slug ? null : searchParams.get("project");
   const alertsParam = searchParams.get("alerts");
   // De-duplicated (a malformed `?alerts=blocked,blocked` must never apply
   // or display a filter twice) — the single source both the OR-filter below
@@ -101,7 +121,8 @@ export function TicketsScreen({ slug, projectName }: { slug: string; projectName
       if (remaining.length > 0) params.set("alerts", remaining.join(","));
       else params.delete("alerts");
       const qs = params.toString();
-      router.push(`/projects/${slug}/tickets${qs ? `?${qs}` : ""}`);
+      const basePath = slug ? `/projects/${slug}/tickets` : "/tickets";
+      router.push(`${basePath}${qs ? `?${qs}` : ""}`);
     },
     [alertTypes, searchParams, router, slug]
   );
@@ -109,14 +130,16 @@ export function TicketsScreen({ slug, projectName }: { slug: string; projectName
   // Read saved state once per mount (useMemo with [] deps).
   // We keep it in sessionStorage until useEffect clears it, so strict-mode
   // double-invocation doesn't lose it on the "real" render.
-  const saved = useMemo(() => readSaved(slug), []); // eslint-disable-line react-hooks/exhaustive-deps
+  const saved = useMemo(() => readSaved(scopeKey), []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Dev-only fallback: no real organization membership — same mock array
   // used before this feature existed, just scoped to the current project
-  // (real data is always scoped this way; see loadProjectTickets). Never
-  // reached once a real organization exists.
+  // when there is one (real data is always scoped this way; see
+  // loadProjectTickets), or every mock ticket in the org-wide "all
+  // projects" mode (mirrors loadOrganizationTickets below). Never reached
+  // once a real organization exists.
   const initialDevTickets = useMemo(
-    () => (isDevFallback ? MOCK_TICKETS.filter((t) => t.projectSlug === slug) : []),
+    () => (isDevFallback ? (slug ? MOCK_TICKETS.filter((t) => t.projectSlug === slug) : MOCK_TICKETS) : []),
     [isDevFallback, slug]
   );
 
@@ -133,6 +156,10 @@ export function TicketsScreen({ slug, projectName }: { slug: string; projectName
   // ticket in it, but the Assigned filter is intentionally left showing
   // every org member, unchanged (out of scope for this restriction).
   const [assignableMembers, setAssignableMembers] = useState<OrgMember[]>([]);
+  // The Project filter's own dropdown options — org-wide "all projects"
+  // mode only (see the effect below); stays empty in single-project mode,
+  // where the filter itself is never rendered at all.
+  const [availableProjects, setAvailableProjects] = useState<{ slug: string; name: string }[]>([]);
   // Real per-org label catalog, only needed for the preview panel's Labels
   // editor (see editable prop below) — same catalog/merge Ticket Detail uses.
   const [orgLabels, setOrgLabels] = useState<string[]>([]);
@@ -167,7 +194,11 @@ export function TicketsScreen({ slug, projectName }: { slug: string; projectName
   const runFetch = useCallback(() => {
     if (!organization) return;
     const requestId = ++requestIdRef.current;
-    loadProjectTickets(organization.id, slug).then((result) => {
+    // Org-wide "all projects" mode (no slug) loads every project's tickets
+    // via the same real, RLS-scoped org-wide loader the Dashboards/Reports
+    // already use — never a second/parallel query.
+    const result$ = slug ? loadProjectTickets(organization.id, slug) : loadOrganizationTickets(organization.id);
+    result$.then((result) => {
       if (requestIdRef.current !== requestId) return;
       if (result.status === "ready") {
         setTicketList(result.tickets);
@@ -195,7 +226,11 @@ export function TicketsScreen({ slug, projectName }: { slug: string; projectName
   }, [isDevFallback, organization]);
 
   useEffect(() => {
-    if (isDevFallback || !organization) return;
+    // No single project to staff an Assignee picker from in "all projects"
+    // mode — New Ticket is hidden there and the preview panel renders
+    // read-only (see `editable` below), so `assignableMembers` simply stays
+    // empty rather than loading a roster nothing will use.
+    if (isDevFallback || !organization || !slug) return;
     loadProjectTeam(organization.id, slug).then((result) => {
       if (result.status === "ready") setAssignableMembers(result.members);
     });
@@ -208,11 +243,66 @@ export function TicketsScreen({ slug, projectName }: { slug: string; projectName
     });
   }, [isDevFallback, organization]);
 
+  // Project filter options — org-wide "all projects" mode only (the
+  // per-project Tickets page never renders this filter, so there's nothing
+  // to load there). Scoped per the same real permission rule each role's
+  // own "current project" picker elsewhere in this app already uses:
+  // Admin sees every active org project (loadOrganizationProjects, RLS
+  // already returns everything for an admin); Project Lead only projects
+  // where they hold `project_memberships.project_role = 'lead'`
+  // (loadLeadProjects — the exact same query the Project Lead Dashboard's
+  // own Current Project selector uses); Member only projects with any real
+  // active membership (loadMemberProjects — same as the Member Dashboard's
+  // own project scope selector).
+  useEffect(() => {
+    if (isDevFallback || !organization || slug) return;
+    if (user.role === "PROJECT_LEAD") {
+      if (!userId) return;
+      loadLeadProjects(organization.id, userId).then((result) => {
+        if (result.status === "ready") setAvailableProjects(result.projects.map((p) => ({ slug: p.slug, name: p.name })));
+      });
+    } else if (user.role === "MEMBER") {
+      if (!userId) return;
+      loadMemberProjects(organization.id, userId).then((result) => {
+        if (result.status === "ready") setAvailableProjects(result.projects.map((p) => ({ slug: p.slug, name: p.name })));
+      });
+    } else {
+      loadOrganizationProjects(organization.id).then((result) => {
+        if (result.status === "ready") {
+          setAvailableProjects(
+            result.projects.filter((p) => p.status === "active").map((p) => ({ slug: p.slug, name: p.name }))
+          );
+        }
+      });
+    }
+  }, [isDevFallback, organization, slug, user.role, userId]);
+
+  // Validated against the real, permission-scoped options list — same
+  // "ignore a stale/inaccessible slug, fall back to unset" precedent the
+  // Admin/Project Lead/Member Dashboards' own `?project=` scope selectors
+  // already use (dashboard-screen.tsx's selectedProjectSlug), rather than
+  // trusting the URL param as-is.
+  const selectedProjectSlug = useMemo(
+    () => (projectParam && availableProjects.some((p) => p.slug === projectParam) ? projectParam : null),
+    [projectParam, availableProjects]
+  );
+  const projectFilter = useMemo(() => (selectedProjectSlug ? [selectedProjectSlug] : []), [selectedProjectSlug]);
+  const onProjectChange = useCallback(
+    (values: string[]) => {
+      const params = new URLSearchParams(searchParams.toString());
+      if (values.length > 0) params.set("project", values[0]);
+      else params.delete("project");
+      const qs = params.toString();
+      router.push(`/tickets${qs ? `?${qs}` : ""}`);
+    },
+    [searchParams, router]
+  );
+
   // Clear sessionStorage and restore scroll after first render
   useEffect(() => {
-    const raw = sessionStorage.getItem(sessionKey(slug));
+    const raw = sessionStorage.getItem(sessionKey(scopeKey));
     if (raw) {
-      sessionStorage.removeItem(sessionKey(slug));
+      sessionStorage.removeItem(sessionKey(scopeKey));
       try {
         const state = JSON.parse(raw) as SavedState;
         if (state.scrollTop) {
@@ -221,7 +311,7 @@ export function TicketsScreen({ slug, projectName }: { slug: string; projectName
         }
       } catch {}
     }
-  }, [slug]);
+  }, [scopeKey]);
 
   function toggleChip(label: string) {
     setActiveChips((prev) => {
@@ -318,6 +408,22 @@ export function TicketsScreen({ slug, projectName }: { slug: string; projectName
     // already use (status !== done, a real due date, in the past).
     const isOverdue = (t: Ticket) => t.status !== "done" && Boolean(t.dueDate) && parseDisplayDate(t.dueDate!) < todayISO;
 
+    // Due Today — the exact same real definition the Admin Dashboard's own
+    // "Due Today" KPI already uses (a real due date equal to today, no
+    // status exclusion — unlike the "Due Soon" quick filter above, which
+    // excludes done tickets and covers a 7-day window instead of one day).
+    // Same todayISO/parseDisplayDate, never a second/different "today".
+    const isDueToday = (t: Ticket) => Boolean(t.dueDate) && parseDisplayDate(t.dueDate!) === todayISO;
+
+    // Completed This Month — the exact same real definition the Admin
+    // Dashboard's own "tickets completed this month" health insight already
+    // uses (status done, real updatedAtISO in the current calendar month —
+    // the closest available signal for "when it was completed," since no
+    // dedicated completed_at column exists). Same todayISO, never a
+    // second/different "this month".
+    const monthPrefix = todayISO.slice(0, 7);
+    const isCompletedThisMonth = (t: Ticket) => t.status === "done" && t.updatedAtISO?.slice(0, 7) === monthPrefix;
+
     // Local calendar date (not UTC — same reasoning as getTodayISO) behind a
     // full timestamp, so Created/Updated Date ranges compare day-to-day like
     // the date-only inputs that set them, not exact instants.
@@ -343,6 +449,10 @@ export function TicketsScreen({ slug, projectName }: { slug: string; projectName
           t.title.toLowerCase().includes(query) || getTicketDisplayKey(t).toLowerCase().includes(query);
         if (!matchesText) return false;
       }
+
+      // Project — org-wide "all projects" mode only; selectedProjectSlug is
+      // always null in single-project mode, so this is a no-op there.
+      if (selectedProjectSlug && t.projectSlug !== selectedProjectSlug) return false;
 
       if (assigned.length > 0) {
         const value = assigned[0];
@@ -389,7 +499,10 @@ export function TicketsScreen({ slug, projectName }: { slug: string; projectName
       // used everywhere else in this app, never a parallel value.
       if (alertTypes.length > 0) {
         const matchesAlert = alertTypes.some((type) =>
-          type === "overdue" ? isOverdue(t) : t.status === type
+          type === "overdue" ? isOverdue(t) :
+          type === "due-today" ? isDueToday(t) :
+          type === "completed-this-month" ? isCompletedThisMonth(t) :
+          t.status === type
         );
         if (!matchesAlert) return false;
       }
@@ -399,6 +512,7 @@ export function TicketsScreen({ slug, projectName }: { slug: string; projectName
   }, [
     ticketList, searchQuery, assigned, priority, status, activeChips, isDevFallback, user.name, userId,
     labelsFilter, reporterFilter, dueDateFilter, createdDateFilter, updatedDateFilter, alertTypes,
+    selectedProjectSlug,
   ]);
 
   function openPreview(ticket: Ticket) {
@@ -413,7 +527,7 @@ export function TicketsScreen({ slug, projectName }: { slug: string; projectName
   // to sessionStorage so the tickets page can restore it on return.
   function handleBeforeExpand() {
     const main = document.querySelector("main");
-    saveState(slug, {
+    saveState(scopeKey, {
       view,
       previewTicketId: previewTicket?.id ?? null,
       activeChips: [...activeChips],
@@ -492,7 +606,7 @@ export function TicketsScreen({ slug, projectName }: { slug: string; projectName
               Tickets
             </h1>
             <p className="text-sm text-slate-500 dark:text-zinc-400 mt-1">
-              Track and manage all work items for this project.
+              {slug ? "Track and manage all work items for this project." : "Track and manage all work items across every project."}
             </p>
           </div>
 
@@ -515,6 +629,10 @@ export function TicketsScreen({ slug, projectName }: { slug: string; projectName
           onToggleChip={toggleChip}
           searchQuery={searchQuery}
           onSearchChange={setSearchQuery}
+          showProjectFilter={!slug}
+          projects={availableProjects}
+          project={projectFilter}
+          onProjectChange={onProjectChange}
           members={members}
           assigned={assigned}
           onAssignedChange={setAssigned}
@@ -574,10 +692,19 @@ export function TicketsScreen({ slug, projectName }: { slug: string; projectName
       {previewTicket !== null && (
         <TicketPreviewPanel
           ticket={previewTicket}
-          slug={slug}
+          // Each ticket's own real projectSlug — always correct in
+          // single-project mode (identical to the page's own `slug`) and
+          // required in "all projects" mode, where tickets can belong to
+          // different projects.
+          slug={previewTicket.projectSlug}
           onClose={closePreview}
           onBeforeNavigate={handleBeforeExpand}
-          editable
+          // Inline editing needs one definite project to scope the
+          // Assignee picker to (see assignableMembers above) — only
+          // available in single-project mode; "all projects" falls back to
+          // the same read-only panel every other non-Tickets-board caller
+          // already uses.
+          editable={Boolean(slug)}
           isDevFallback={isDevFallback}
           members={assignableMembers}
           allLabels={allLabelOptions}
@@ -586,7 +713,10 @@ export function TicketsScreen({ slug, projectName }: { slug: string; projectName
         />
       )}
 
-      {showNewTicket && (
+      {/* No single project to create into in "all projects" mode — the
+          button above is already hidden there (canCreateTicket requires
+          slug), this guard just keeps the type honest. */}
+      {showNewTicket && slug && (
         <NewTicketModal
           slug={slug}
           tickets={ticketList}
