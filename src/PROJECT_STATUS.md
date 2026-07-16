@@ -140,7 +140,7 @@ Rebuilt as a personal workspace inside the project — "what do I need to work o
 - **Team card** — real per-project roster via `getTeamByProjectSlug`, every avatar/name opens the Member Profile Modal
 - **Quick Links** — Notes & Documentation
 
-All data is correctly scoped to the active `slug` (tickets, team, activity) — only the header's title/description text is still fixed to "Mobile Banking App" regardless of slug, matching the Admin and Project Lead variants.
+All data is correctly scoped to the active `slug` (tickets, team, activity) — **resolved**: the header's title/description now also come from the real project record instead of a fixed "Mobile Banking App" string, matching the Admin and Project Lead variants (see Architecture Status → Project Overview).
 
 A cross-project "My Work" equivalent already exists (`my-work-screen.tsx`); this Member Project Overview is its single-project counterpart and deliberately does not offer a Focus view — scope is already limited to one project, and Needs My Attention already covers prioritization. Focus remains exclusive to My Work.
 
@@ -369,7 +369,7 @@ A personal cross-project work-queue rather than a project-management view. **Now
 - Upcoming Work — real
 - Real empty states throughout ("You're all clear," "Nothing needs your attention right now," "No time logged yet today," "Nothing else on the horizon")
 - `TicketListRow` / `ActiveTicketRow` gained an optional `projectBadge` slot so multi-project rows can show which project a ticket belongs to
-- `MEMBER_WORK`/`WorkItem` (the old mock array) stay defined/exported in this same file only because `member-projects-screen.tsx` ("My Projects") still reads them directly — out of scope for this pass, see Technical Debt
+- `MEMBER_WORK`/`WorkItem` (the old mock array) stay defined/exported in this same file, but are now fully unused anywhere in the app — **resolved**: `member-projects-screen.tsx` ("My Projects") was later made real and no longer reads them (see Architecture Status → Projects)
 
 Along the way, fixed a dark-mode bug where the Project Lead's and Member's hero cards (and the Admin "Hours Burn" KPI card) referenced `brand-300/400/900/950` shades that don't exist in the theme, silently falling back to the light gradient in dark mode.
 
@@ -554,10 +554,10 @@ After that, continue the Supabase backend work already underway, following the s
 
 The natural next mock-to-real seams:
 
-- The Project Lead's and Member's own Project Overview (`project-lead-project-overview.tsx`/`project-overview.tsx`) — still import `src/lib/mock-projects.ts`/`mock-team.ts` directly and still create/view tickets against local mock state, even though the **Admin** variant is now real
+- **Resolved**: the Project Lead's and Member's own Project Overview (`project-lead-project-overview.tsx`/`project-overview.tsx`) are now real too, reusing the **Admin** variant's own data loading/building blocks (see Architecture Status → Project Overview)
 - The Project Lead's own scoped Reports view (`project-lead-reports-screen.tsx`) — a separate component from the now-real company-wide Reports and per-project Reports, still fully mock
 - The Project Lead's own scoped Time Tracking view (`project-lead-time-tracking-screen.tsx`) — a separate component from the now-real Admin/Member `time-tracking-screen.tsx`, still fully mock
-- `member-projects-screen.tsx` ("My Projects") — still reads `MEMBER_WORK` mock data directly, unaffected by the Member Dashboard becoming real; also still surfaces a project's lead via `ProjectSummary.owner` (`projects.owner_profile_id`), not Team's real `project_memberships.project_role`
+- **Resolved**: `member-projects-screen.tsx` ("My Projects") is now real — no longer reads `MEMBER_WORK`, and now surfaces a project's lead via Team's real `project_memberships.project_role` (via `loadProjectTeam`), not `ProjectSummary.owner`/`owner_profile_id` (see Architecture Status → Projects)
 - The rest of Settings (`/settings/*`) — still visual-only, no state persists
 
 See Architecture Status.
@@ -597,7 +597,7 @@ Milestones, Versions, and Components were evaluated and explicitly decided again
 
 # Architecture Status
 
-Current architecture follows a frontend-first approach, with Auth/Profile, Projects, Tickets, Team, Project Notes, the Admin/Project Lead/Member Dashboards, company-wide Reports (Admin role), the **Admin** Project Overview, per-project Reports, Time Tracking (Admin/Member), and Users as real exceptions — see below. Auth/Profile through company-wide Reports are confirmed live; the Admin Project Overview, per-project Reports, Time Tracking (Admin/Member), the Dashboard's new org-wide Activity History page, and Users are all implemented against the same schema but not yet confirmed live (see the two backend-integration lists below).
+Current architecture follows a frontend-first approach. Nearly every screen is now real — Auth/Profile, Projects (Sidebar/`/projects`/Settings/Member's "My Projects"), Tickets, Team, Project Notes, the Admin/Project Lead/Member Dashboards (including their project scope selectors), company-wide Reports (Admin role), Project Overview (all three roles), per-project Reports, Time Tracking (Admin/Member), My Work (Member), ticket-assignment restriction, Users, and global Search. Only the Project Lead's own scoped Reports view, the Project Lead's own scoped Time Tracking view, and the rest of Settings (`/settings/*`) remain mock. Auth/Profile through company-wide Reports (Admin) are confirmed live; everything from the Admin Project Overview onward in the list above is implemented and type/build-clean but not yet clicked through in a live browser — see the detailed breakdown below.
 
 Current stack:
 
@@ -605,7 +605,7 @@ Current stack:
 - React 19
 - TypeScript
 - TailwindCSS v4
-- `@supabase/supabase-js` — used by `src/lib/auth.ts`, `src/lib/membership.ts`, `src/lib/avatar-upload.ts`, `src/lib/projects.ts`, `src/lib/tickets.ts`, `src/lib/notes.ts`, and `src/lib/users.ts`, plus the service-role admin client each file under `src/lib/server/*.ts` builds for its own Server Action
+- `@supabase/supabase-js` — used by `src/lib/auth.ts`, `src/lib/membership.ts`, `src/lib/avatar-upload.ts`, `src/lib/projects.ts`, `src/lib/tickets.ts`, `src/lib/notes.ts`, `src/lib/users.ts`, and `src/lib/search.ts`, plus the service-role admin client each file under `src/lib/server/*.ts` builds for its own Server Action
 
 Not installed:
 
@@ -613,9 +613,11 @@ Not installed:
 
 Current data source:
 
-- **Real Supabase, confirmed live**: authentication/session, `profiles`, `organization_memberships` (read path, plus the Dashboards' and Reports' org-wide reads), `organizations`, the `avatars` Storage bucket, `projects`, `clients`, `tickets`, `ticket_comments`, `ticket_activity`, `labels`, `ticket_attachments` (+ the `ticket-attachments` Storage bucket), `ticket_time_entries`, `ticket_relations`, `project_memberships` (roster reads, `project_role`, Add/Remove Member, the auto-membership trigger, the history guard, and the Work History RPCs — backing `/projects/[slug]/team` and the Project Lead Dashboard's Team Capacity), `project_notes`, and `project_note_activity` (written by triggers, not yet read by any UI). Real coverage of `projects` is scoped to the Sidebar, the `/projects` list, `/projects/[slug]/settings` (whose General section no longer has a "Project Lead" field/picker — see Current Sprint → Completed → Projects → Project Settings), the **Admin** Project Overview, and per-project Reports — the Project Lead's and Member's own Project Overview still read `mock-projects.ts` directly. Real coverage of `tickets` is scoped to the five list views (with real filtering, plus a real URL-persisted status/alert filter), New Ticket creation, the full Ticket Detail page, Related Tickets, the editable Quick Ticket Preview, all three Dashboards (org-wide/per-project/per-member scoped), company-wide Reports (org-wide, Admin role), the Admin Project Overview (including its new paginated Project Activity history page), per-project Reports, and Time Tracking for the Admin/Member roles — the Project Lead's own Project Overview still creates/views tickets against local mock state instead, and the Project Lead's own scoped Reports view and own scoped Time Tracking view are still mock.
-- **Real Supabase, implemented but not yet confirmed live**: the write side of `organization_memberships` (Disable/Enable/Edit/invite acceptance, all via Server Actions using the service-role key) backing `/users`; the read-side queries backing the **Admin** Project Overview and per-project Reports; Time Tracking for the Admin/Member roles (`time-tracking-screen.tsx` — real KPIs/filters/Timesheets/Billing by Client, reusing Reports → Finance's own billing functions); and the Dashboard's new org-wide Activity History page (`/activity`) behind Recent Activity's "View all activity →" action (all of these reuse already-confirmed-live tables/functions, but haven't themselves been clicked through in a browser). See the second backend-integration list below.
-- **Mock data** (everything else): `src/lib/mock-projects.ts` (still the source for the Project Lead's/Member's own Project Overview), `src/lib/mock-tickets.ts` (still supplies the `Ticket` type/`getTicketDisplayKey` helper the real Tickets/Dashboard/Reports/Project-Overview/Project-Reports/Time-Tracking code builds on, and remains the actual data source for the Project Lead's Project Overview's local ticket state), `src/lib/mock-team.ts` (still the source everywhere *except* `/projects/[slug]/team`, the Project Lead Dashboard's Team Capacity, and per-project Reports — see above), `src/lib/mock-notes.ts` (kept as a type-only module now, no data source role left), `src/lib/mock-time-tracking.ts` (kept only for the still-mock Project Lead Time Tracking view — see Current Sprint → Completed → Hours & Time Tracking), `member-dashboard.tsx`'s own `MEMBER_WORK` array (kept only because `member-projects-screen.tsx` still reads it directly), and the other `src/lib/mock-*.ts` files; module-level constants in screen components.
+- **Real Supabase, confirmed live**: authentication/session, `profiles`, `organization_memberships`, `organizations`, the `avatars` Storage bucket, `projects`, `clients`, `tickets`, `ticket_comments`, `ticket_activity`, `labels`, `ticket_attachments` (+ Storage bucket), `ticket_time_entries`, `ticket_relations`, `project_memberships` (roster, `project_role`, Add/Remove Member, auto-membership trigger, history guard, Work History RPCs), `project_notes`, `project_note_activity` (written by triggers, not yet read by any UI). Covers the Sidebar, `/projects` (all roles), `/projects/[slug]/settings`, `/projects/[slug]/team` + Work History, `/projects/[slug]/notes`, all five Ticket list views + New Ticket + Ticket Detail + Related Tickets + editable Quick Ticket Preview, all three Dashboards, and company-wide Reports (Admin role).
+- **Real Supabase, implemented but not yet confirmed live** (should work, not yet clicked through in a browser): Users (the write side of `organization_memberships` via Server Actions), the **Admin** Project Overview and its paginated Activity history page, per-project Reports (all roles), Time Tracking (Admin/Member), the Dashboard's org-wide Activity History page, the Project Lead's and Member's own Project Overview, all three Dashboards' `?project=` scope selectors, My Work (Member), ticket-assignment restriction to a project's own active members, Member's own `/projects` ("My Projects"), and global Search.
+- **Mock data** (everything else): `src/lib/mock-time-tracking.ts` (Project Lead's own Time Tracking view only), `project-lead-reports-screen.tsx`'s own mock arrays (Project Lead's own Reports view only), the rest of `/settings/*`, and a handful of module-level constants kept alive solely for those two screens (`MEMBER_GROUPS`/`PROJECT_GROUPS`/`CLIENT_GROUPS`, `MY_ACTIVE`/`RECENT_ACTIVITY`, `LEAD_PROJECT_SLUGS`/`PROJECT_TICKETS`/`aggregateTeam`, `MEMBER_WORK`). `mock-tickets.ts`/`mock-team.ts`/`mock-notes.ts`/`mock-projects.ts` are kept only as type-only modules or a dev-only fallback (no real organization/membership), never a data source in production.
+
+The detailed, per-feature breakdown of what's connected and how — every Server Action, migration, and real bug fixed along the way — lives below, organized the same way this section's summary is: confirmed-live features first, then implemented-but-unverified ones, then what's still mock.
 
 Backend integration, connected and confirmed working:
 
@@ -665,7 +667,835 @@ Backend integration, implemented and type-checked, **not yet confirmed against a
 - `src/components/organization-activity-history-screen.tsx` + `src/app/activity/page.tsx` — the new, org-wide sibling of `project-activity-history-screen.tsx`, backed by a new `loadOrganizationActivityPage` in `lib/tickets.ts` that mirrors `loadProjectActivityPage`'s query/pagination shape verbatim (same `buildActivityLabel`, same real `?page=`/20-per-page pagination), resolved across every project in the organization instead of one, with each entry additionally carrying its own project name/slug. Backs the Admin Dashboard's new "View all activity →" action (shown only when `loadOrganizationActivity`'s own 11-event probe detects a real 11th event past the 10 displayed). Not added to the Sidebar's main nav — reached only via that Dashboard link, same "link-only" precedent as Work History.
 - No new migrations for any of this — pure application-layer query/rendering work on top of already-real tables
 
-Everything except Auth/Profile/Avatar, Projects (Sidebar/`/projects`/Project Settings), Tickets (five list views/New Ticket/Ticket Detail/Related Tickets/editable Preview/the real status filter), Team, Project Notes, the Admin/Project Lead/Member Dashboards, company-wide Reports (Admin role), the **Admin** Project Overview, per-project Reports, Time Tracking (Admin/Member), and Users still runs entirely on mock data — the Project Lead's and Member's own Project Overview, the Project Lead's own scoped Reports view, the Project Lead's own scoped Time Tracking view, `member-projects-screen.tsx` ("My Projects"), and the rest of Settings are not connected. Users, the Admin Project Overview, per-project Reports, Time Tracking (Admin/Member), and the Dashboard's new Activity History page are all implemented against the real schema but not yet confirmed against a live project — see the list above. Note also that Projects' own real rows still don't populate `openTickets`/`blockedTickets`/`overdueTickets`/`awaitingReviewTickets`/`dueThisWeekTickets`/`activeMilestones` — those are derived from `tickets` by design and default to 0 on the Projects list/Project Settings screens even though Tickets itself is now real, since nothing yet re-aggregates those derived fields back onto the `projects` rows (see `docs/SUPABASE_MVP_SCHEMA.md`); the Admin Project Overview and per-project Reports both work around this by computing Progress/KPIs directly from real tickets at read time instead of relying on those stored-but-unpopulated fields. Also note that Project Settings' removed "Project Lead" field leaves `projects.owner_profile_id` with no remaining writer anywhere in the app — `ProjectSummary.owner` (still `owner_profile_id`-backed) is what the `/projects` list's own Lead column/filter and Member's "My Projects" display, and neither was migrated to Team's real `project_memberships.project_role` as part of this change — see Technical Debt.
+## Confirmed working (login/logout, profile, avatar, change password)
+
+- `src/lib/auth.ts` — real login/logout/session (`login`, `logout`,
+  `onAuthStateChange`, `requestPasswordReset`, `confirmPasswordReset`) and
+  real Change Password (`changePassword`): verifies the current password by
+  re-authenticating with `signInWithPassword` (never a manual string
+  comparison), then calls `supabase.auth.updateUser()`. `mock-auth.ts` no
+  longer has any login/session/change-password logic — it only holds
+  `AuthError` and the shared password-strength helpers.
+- `src/lib/membership.ts` — loads the signed-in user's `profiles` row +
+  active `organization_memberships` row + `organizations` row
+  (`loadMembership`), and writes real updates: `updateProfileNames`
+  (first/last name), `updateOwnWeeklyCapacity` (via a security-definer RPC,
+  since org role/status stay admin-managed), `updateProfileAvatarPath`
+  (stores a Storage *path*, never a URL — `resolveAvatarUrl` turns it back
+  into a public URL for display, with `updated_at` as a cache-busting
+  query param).
+- `src/lib/avatar-upload.ts` — validates (JPG/PNG/WEBP, ≤8MB), center-crops
+  and resizes to a 320×320 JPEG via Canvas (no new dependency), uploads to
+  the `avatars` Supabase Storage bucket at `<uid>/avatar.jpg` (upsert).
+- `src/components/current-user-provider.tsx` — `CurrentUser` (role,
+  name, avatar, weekly capacity, etc.) now comes from the real membership
+  when one exists, refetched after every save so Sidebar/Header/Profile
+  stay in sync. The old dev-only mock fallback is gone entirely — a
+  real signed-in session with no active membership (or a lookup error)
+  never renders a fake role/name/avatar in any environment, including
+  local dev (`isDevFallback` is now hard-coded `false`; the "Dev fallback"
+  badge and `RoleSwitcher` in the header are unreachable dead code, kept
+  as-is rather than deleted). Two real-time behaviors on top of the
+  original load: (1) if the signed-in user's membership ever resolves to
+  "no-membership" — most notably an admin disabling this exact user while
+  their tab is still open — the provider signs them out immediately
+  (`logout()`), which flips `status` to `"unauthenticated"` and lets
+  `AuthGuard`'s existing redirect-to-`/login` effect take over; a first-
+  ever "no-membership" (never invited) still renders `MembershipErrorScreen`
+  the same way, just no longer ever masked by mock data. (2) the still-open
+  session's membership is silently revalidated (reusing `runFetch`, no new
+  fetching mechanism) on window focus and on every route change, so a
+  membership change made from another tab/session is picked up without a
+  manual reload — no polling, no timers. `organization-projects-provider.tsx`
+  had the equivalent mock-array fallback removed the same way; see its own
+  bullet below.
+- `src/lib/auth.ts` — `acceptInvitation` (sets the new password, then calls
+  the `accept_own_invitation` RPC to flip the invited user's own
+  `organization_memberships` row to `active`) backs both invite delivery
+  methods below. `src/components/accept-invite-screen.tsx` and
+  `src/components/reset-password-screen.tsx` both establish their session
+  two ways: the email flow's Supabase-hosted link lands with the session
+  already in the URL fragment (`detectSessionInUrl`, unchanged); a link
+  generated via `generateLink` (Invite/Reset Password) instead carries
+  `?token_hash=...&type=...` in the query string, which these two screens
+  now detect and resolve via `supabase.auth.verifyOtp()` before continuing
+  through the exact same "set your password" form either way.
+- Applied migrations (all confirmed against the live project):
+  `20260708000000_mvp_schema.sql` (base schema — organizations, profiles,
+  organization_memberships, projects, project_memberships, tickets, ticket
+  comments, ticket activity, RLS policies),
+  `20260708010000_grant_authenticated_membership_read.sql` (SELECT grants —
+  RLS alone isn't enough, Postgres checks table privileges first),
+  `20260709000000_profile_self_service_updates.sql` (column-scoped UPDATE
+  grant for first/last name + the weekly-capacity RPC),
+  `20260710000000_avatars_storage.sql` + `20260711000000_fix_avatars_storage_policies.sql`
+  (the `avatars` Storage bucket and its RLS policies — the first pass had a
+  bug that blocked uploads, fixed in the second file),
+  `20260805000000_accept_own_invitation_rpc.sql` (the security-definer RPC
+  `acceptInvitation` calls above — `organization_memberships_update` is
+  admin-only by design, so an invited user can't flip their own row any
+  other way),
+  `20260806000000_grant_service_role_public_schema.sql` (a missing
+  service-role grant that broke the Invite User Server Action's own writes;
+  see Users below). See `docs/SUPABASE_SETUP.md` for how to apply
+  migrations to a new project.
+
+## Confirmed working (Projects — Sidebar, `/projects` list, Project Settings)
+
+Scoped narrowly: only the Sidebar's pinned project list, the `/projects`
+page (both the Admin/Project Lead list and, see its own bullet below, the
+Member's own "My Projects" view at that same URL), and
+`/projects/[slug]/settings` read/write real data. Notes and per-project
+Reports are unaffected — see "Still mock" for what's left. (Team is also
+real now, but is unrelated to this one.)
+
+- `src/lib/projects.ts` — all real Projects reads/writes:
+  `loadOrganizationProjects` (org-scoped list; RLS alone decides who sees
+  what — Admin sees every org project, Project Lead/Member only see
+  projects they're staffed on via `project_memberships` — so there's no
+  client-side role filtering), `createProject` (name + description only;
+  slug/project_code auto-derived from the name), `updateProject` (the
+  Projects list's Edit modal: name + description only), `archiveProject` /
+  `restoreProject` (status only — nothing is ever deleted), plus, for
+  Project Settings specifically: `loadProjectDetail` + `updateProjectSettings`
+  (name, description, project code, status, category, client, billing
+  rate — `updateProjectSettings`'s status field is typed to exclude
+  `"archived"`, so that transition is structurally only reachable through
+  `archiveProject`/`restoreProject`, never a parallel path) and
+  `loadOrganizationClients` / `createOrganizationClient` (Billing → Client,
+  backed by the `clients` table below). `updateProjectSettings`'s optional
+  `ownerProfileId` field and the `projects.owner_profile_id` column it
+  writes both still exist (no schema change), but nothing calls it with
+  that key anymore — see the Project Lead removal note below.
+- `src/components/organization-projects-provider.tsx` —
+  `OrganizationProjectsProvider`, mounted in `layout.tsx` next to
+  `CurrentUserProvider`, holds the org's project list once so Sidebar and
+  `/projects` always show the exact same data; every write refetches
+  through it afterward, which is also how edits made in Project Settings
+  propagate to Sidebar, `/projects`, and the settings page's own
+  breadcrumb without any extra wiring. The old dev-only mock-array fallback
+  (no real organization → the old mock `projects` array) is gone, same as
+  `CurrentUserProvider`'s — `isDevFallback` is always `false` now, so this
+  provider (and everything gated on it) only ever renders real data or
+  nothing.
+- `src/components/create-project-modal.tsx` — Create *and* Edit Project (an
+  `editingProject` prop switches modes, mirroring `invite-user-modal.tsx`'s
+  `editingUser` pattern).
+- `src/components/archive-project-modal.tsx` — the Archive confirmation
+  modal, reused as-is by both the Projects list row menu and Project
+  Settings' Danger Zone (never duplicated). Restore has no confirmation
+  step — the menu item / Danger Zone button call `restoreProject` directly.
+- `src/components/project-settings-screen.tsx` — real General (Project
+  Name, Description, Project Code, Status) and Billing (Project Category,
+  Client, Billing Rate) editing, plus a real "Save Changes" button (none
+  existed before this). Also exports `ProjectSettingsBreadcrumb`, a client
+  component reading from the shared provider so the breadcrumb never shows
+  a stale server-rendered name. **The General section's "Project Lead"
+  row was removed outright** (not hidden, not disabled) — it was the only
+  UI that read/wrote `projects.owner_profile_id`, and the real,
+  authoritative "who leads this project" signal is
+  `project_memberships.project_role` (see Team below), set exclusively via
+  Team's own "Make Project Lead" action. The `loadOrganizationMembers`
+  fetch that only existed to populate this picker's roster was removed
+  along with it. Note this is a targeted removal, not a full migration off
+  `owner_profile_id`: `ProjectSummary.owner` (still `owner_profile_id`-
+  backed, per `loadOrganizationProjects` above) is what the `/projects`
+  list's own Lead column/filter still displays — that was untouched and
+  out of scope for this change, so `owner_profile_id` still has this one
+  remaining reader in the app, while Team's real `project_role` has its
+  own separate writer and is what Project Overview/Team/the Dashboards/
+  Member's "My Projects" already show as the lead (see the Member "My
+  Projects" bullet below — that screen was updated to read `project_role`
+  directly instead of `owner_profile_id`). Reconciling the `/projects`
+  list's own Lead column/filter onto `project_role` is the one remaining
+  piece of this — see Technical Debt.
+- `src/components/settings-ui.tsx` — `SelectField`/`TextField`/
+  `NumberField` gained an optional `onChange` (`SelectField` also gained
+  `options`) to become real controlled inputs; every existing call site
+  that doesn't pass them (the org-wide `/settings/*` pages) keeps its
+  original display-only rendering, unchanged.
+- `src/components/add-client-modal.tsx` — the minimal "+ Add new client"
+  flow from Project Settings' Client selector: name only, created
+  immediately in Supabase and selected in the form, persisted to the
+  project's `client_name` on the next Save like every other field on that
+  screen (no separate/hidden write path).
+- **`src/components/member-projects-screen.tsx` ("My Projects," Member
+  role, real replacement for its entire mock implementation)** — also
+  fixes a real bug on the way: the old `<img src={card.leadAvatar}>` could
+  render with `src=""` whenever a project had no owner; `leadAvatar` now
+  always resolves to a real URL (`FALLBACK_AVATAR` when there's no lead),
+  with a defensive `{leadAvatar && <img .../>}` guard on top. The card list
+  itself now comes from `useOrganizationProjects()` (already real, already
+  RLS-scoped to this Member's own active `project_memberships` — no
+  separate membership query needed), one card per project regardless of
+  whether the member currently has any tickets there (previously a project
+  only appeared if it had at least one mock `WorkItem`). Project Lead comes
+  from `loadProjectTeam`'s real `projectRole === "lead"` member (never the
+  older `ProjectSummary.owner`), falling back to the existing "Lead:
+  Unassigned" text when none exists. Assigned/Due-This-Week ticket counts
+  come from `loadProjectTickets`, filtered to `assigneeProfileId === userId`
+  per project. No more free-text "Updated Xh ago" recency parsing — cards
+  keep `useOrganizationProjects()`'s own real order (already sorted by
+  `updated_at` server-side). No longer reads `member-dashboard.tsx`'s
+  `MEMBER_WORK` mock array at all.
+- Migrations (in addition to the ones above, all confirmed against the
+  live project): `20260712000000_grant_authenticated_projects_read.sql`,
+  `20260713000000_grant_authenticated_projects_insert.sql`,
+  `20260714000000_fix_projects_select_rls_self_reference.sql` (real bug
+  fix: `projects_select`'s helper function re-queried `projects` from
+  within its own policy, which silently broke `INSERT`/`UPDATE ...
+  RETURNING` — even for a genuine org admin — because Postgres evaluates
+  the RETURNING-time SELECT check against the row being written in the
+  same command, and that self-reference doesn't reliably see it yet;
+  rewritten to check the row's own columns directly instead),
+  `20260715000000_grant_authenticated_projects_update.sql`,
+  `20260716000000_add_clients_table.sql` (new `clients` table —
+  deliberately not a foreign key on `projects`; `client_name` stays free
+  text, this table only supplies a real per-org roster and basic
+  duplicate-by-name prevention).
+
+## Confirmed working (Tickets — list views, New Ticket, and Ticket Detail)
+
+Scoped narrowly, like Projects above: only the ticket data itself and the
+screens listed here are real as of this original pass — Project Overview,
+Notes, and per-project Reports were still mock at the time and are now
+real too, each covered by its own section above/below.
+
+- `src/lib/tickets.ts` — the single module for every real Tickets read/write:
+  `loadProjectTickets` (all five list views — List/Board/Calendar/Timeline/
+  Insights — scoped to one project via `project_id`, RLS decides
+  visibility same as Projects), `loadTicketByCode` (Ticket Detail's real
+  data source, resolved by the visible ticket code — e.g. `JIR-1` — never
+  the internal uuid, which stays a database-only identifier and is never
+  exposed in a URL), `createTicket` (New Ticket modal: title, description,
+  acceptance criteria, estimated hours, and assignee are persisted;
+  Type/Status/Priority/Labels/Due Date in "More Options" are still
+  unwired and always write fixed defaults — `backlog`/`medium`/`task`/none —
+  matching that sprint's explicit scope), `updateTicket` (every Ticket
+  Detail *and* Quick Ticket Preview inline edit: Title, Description,
+  Status, Type, Priority, Assignee, Estimated Hours, Due Date, Labels, and
+  each Acceptance Criterion's checked state), `loadTicketComments` /
+  `createTicketComment` (real comment thread, newest first),
+  `loadTicketActivity` (see Activity Log below), `loadOrganizationLabels` /
+  `createOrganizationLabel` (the Labels selector's real, per-org,
+  case-insensitive-deduped catalog, merged with the static seed categories
+  already in `ALL_LABELS`), `loadTicketAttachments` / `uploadTicketAttachment`
+  / `downloadTicketAttachment` / `getTicketAttachmentPreviewUrl` (image/PDF
+  Preview via a short-lived signed URL — the bucket is private) /
+  `renameTicketAttachment` / `deleteTicketAttachment` (all real — Storage +
+  metadata row; "Replace File" was removed from the UI entirely rather than
+  wired up), `loadTicketTimeEntries` / `logTicketTime` (real time entries,
+  minutes as the canonical stored unit to avoid float drift, Date defaults
+  to the user's real local today), and `loadTicketRelations` /
+  `createTicketRelation` / `deleteTicketRelation` (Related Tickets — see its
+  own bullet below). Ticket priority is a 4-value scale —
+  `highest`/`high`/`medium`/`low` — `normal` was fully migrated to `medium`
+  and removed from the database enum, not just phased out client-side.
+- `src/components/tickets-screen.tsx` — the five list views' orchestrator;
+  loads real tickets for the currently-open project only, and now actually
+  filters them: free-text search (title/key), the Assigned/Priority/Status
+  dropdowns, the 5 quick-filter chips (Mine/Blocked/High Priority/Due
+  Soon/Recently Updated), and the "Add Filter" menu (Labels, Due Date,
+  Reporter, Created Date, Updated Date) all combine with AND into one
+  `filteredTickets` that every view and the header counters read from — none
+  of this filtering is duplicated per view. "Mine"/Reporter match the
+  signed-in user's real `profiles.id` (exposed as `userId` on
+  `useCurrentUser()`), never the display name.
+- `src/components/tickets/ticket-preview-panel.tsx` — the Quick Ticket
+  Preview drawer is now editable (Title, Status, Priority, Assignee,
+  Estimated, Due Date, Labels) when opened with `editable` — currently only
+  `tickets-screen.tsx` (the Tickets board) passes that; the other ~9 call
+  sites (Dashboard, Reports, Project Overview, etc.) render it read-only
+  exactly as before. Persists through the same `updateTicket()` Ticket
+  Detail itself uses, so both stay in sync.
+- `src/components/member-profile-modal.tsx` — the per-project Member card's
+  Active Tickets, Assigned Hours, Utilization, and Current Workload are now
+  computed from real tickets in that project (via `loadProjectTickets`),
+  replacing the old `mock-team.ts` roster numbers that showed 0 for any real
+  user not in that mock array. Weekly Capacity is intentionally left as-is
+  (no real per-member capacity source exists yet).
+- `src/components/tickets/new-ticket-modal.tsx` — Possible Duplicates
+  checks only the current project's own real tickets (never another
+  project's, never the old mock array).
+- `src/app/projects/[slug]/tickets/[ticketCode]/page.tsx` (renamed from
+  `[ticketId]`) + `src/components/tickets/ticket-detail-screen.tsx` — real
+  bug fixed here: the route used to navigate on the internal uuid and 404
+  when a stale dev-server route table lagged the rename; now the ticket
+  code is the only thing that ever appears in a ticket URL.
+  `TicketDetailBreadcrumb` mirrors `ProjectSettingsBreadcrumb`'s pattern
+  (client component reading the shared project list + the real ticket).
+  Attachments/Time Tracking/Comments keep their existing collapsible-
+  section UI untouched — only their data sources changed. Milestone and
+  Story Points fields are dead code (defined, never rendered) and were
+  left alone.
+- **Related Tickets is real** — the "+ Link" control, relation-kind
+  selector, and search all work: search is scoped to the current project's
+  own real tickets (reuses `loadProjectTickets`, no separate search
+  endpoint), excludes the current ticket and anything already linked. Only
+  3 canonical kinds are ever stored (`related_to`/`blocks`/`duplicates`) in
+  a single `ticket_relations` row per relation; the 5 kinds the UI shows
+  (adding "Is blocked by"/"Is duplicated by") are derived per-perspective
+  from that one row depending on which ticket is looking at it — this is
+  what keeps the inverse relation correct and duplicate-relation prevention
+  a plain unique constraint instead of app-level bookkeeping. Opening the
+  related ticket, removing a link, and both tickets' Activity Logs all work.
+- **Activity Log is real and comprehensive**, built almost entirely with
+  database triggers rather than client code, so "only after the real write
+  succeeds, with the real authenticated actor" comes for free and no
+  existing write path had to change: ticket creation, every field change
+  on `tickets` (one row per column that actually changed — labels and
+  acceptance-criteria-done are diffed element by element, so each
+  added/removed label or each toggled criterion gets its own readable
+  entry), attachment uploads/renames/deletes, time entries, and related-
+  ticket add/remove (logged on *both* tickets involved, each with the
+  correct label for its own side) are all logged by triggers; comment
+  creation was already logged by an earlier trigger. `loadTicketActivity`
+  turns `event_type`/`field_name`/`old_value`/`new_value` into the existing
+  Activity UI's plain `{label, timeAgo}` shape (e.g. "Alex Sosa changed
+  Status from To Do to In Progress"), and synthesizes a single "created
+  this ticket" entry for tickets that predate this feature.
+- **Error handling is real across every Ticket write path** (create/edit/
+  move, comments, time entries, attachments, related tickets): a shared
+  `ErrorToast` (`ticket-ui.tsx`) surfaces failures that previously only hit
+  `console.warn` with nothing shown to the user; inline field edits
+  (`persist()` in `ticket-detail-screen.tsx`) roll back to the pre-edit
+  value on failure instead of leaving an unpersisted change on screen;
+  attachment rename now waits for the real result before closing its input;
+  New Ticket/Comment/Log Time all guard against a stuck spinner on a
+  rejected request; Ticket Detail's own load failure now has a Retry
+  button, matching the ticket list's.
+- **Description is now inline-editable on Ticket Detail** — click-to-edit,
+  a textarea prefilled with the current value, explicit Save/Cancel
+  actions, and a placeholder when empty. Persists through the same
+  `updateTicket()` every other inline edit already uses.
+- **New tickets default to Backlog, not To Do** — the real `createTicket()`
+  insert and the New Ticket modal's own "More Options" Status field both
+  changed; the `tickets.status` database column's own default was already
+  `'backlog'`, no migration needed.
+- **Real URL-applied ticket filters** (`?alerts=<type,type,...>`, e.g.
+  `overdue`, `blocked`, or any canonical `TicketStatus`) — the query-state
+  handoff Project Overview's Health Alert action and Project Reports'
+  Delivery Progress cards both use. `tickets-screen.tsx` reads it via
+  `useSearchParams()` and ORs matching tickets into the existing filter
+  pipeline; `filter-bar.tsx` renders each active type as a real, removable
+  chip. Removing a chip rewrites the URL via `router.push`, so this filter
+  is real URL/browser-history state and survives a refresh or back/forward
+  navigation. `app/projects/[slug]/tickets/page.tsx` is wrapped in
+  `<Suspense>` for this reason.
+- Migrations (all confirmed against the live project, in order):
+  `20260717000000_grant_authenticated_tickets_read.sql`,
+  `20260718000000_grant_authenticated_tickets_insert.sql`,
+  `20260719000000_fix_tickets_insert_rls_admin_lead.sql` (real bug: the
+  base schema's insert policies only allowed a real `project_memberships`
+  row, but that table was still empty — no staffing UI existed yet — so
+  every insert was blocked for everyone; fixed by also allowing an org
+  admin/lead, the same fix reused by every ticket-related insert policy
+  added afterward), `20260720000000_grant_authenticated_ticket_comments_activity_read.sql`,
+  `20260721000000_grant_authenticated_tickets_update.sql`,
+  `20260722000000_add_labels_table.sql`,
+  `20260723000000_add_tickets_acceptance_criteria_done.sql` (parallel
+  `boolean[]` aligned by index with `acceptance_criteria`),
+  `20260724000000_add_ticket_attachments.sql` (private `ticket-attachments`
+  Storage bucket, path `<ticket_id>/<uuid>-<filename>`),
+  `20260725000000_fix_ticket_attachments_storage_insert_policy.sql` (real
+  bug: the insert policy joined `projects` to check org admin/lead, and
+  since `projects` also has a `name` column, the unqualified
+  `storage.foldername(name)` reference silently resolved to the *project's*
+  name instead of the uploaded object's own path — every real upload
+  failed RLS until this was qualified as `objects.name`),
+  `20260726000000_add_ticket_time_entries.sql`,
+  `20260727000000_enable_real_ticket_comments.sql` (fixes the same
+  `is_project_member`-only bug for comments, adds `default auth.uid()` to
+  `author_profile_id`, and adds the first Activity-logging trigger),
+  `20260728000000_real_ticket_activity_log.sql` (`tickets.created_by`, new
+  `field_name`/`old_value`/`new_value` columns on `ticket_activity`, and the
+  creation/field-change/attachment/time-entry triggers),
+  `20260729000000_add_ticket_attachments_rename.sql` (RLS UPDATE policy +
+  column-scoped `grant update (filename)`),
+  `20260730000000_add_ticket_attachments_delete.sql` (RLS DELETE policy on
+  both the metadata table and the `ticket-attachments` Storage bucket),
+  `20260731000000_log_attachment_rename_delete_activity.sql` (the
+  `attachment_renamed`/`attachment_deleted` Activity triggers),
+  `20260801000000_unify_ticket_priority_scale.sql` (swaps the
+  `ticket_priority` enum from `high`/`normal`/`low` to
+  `highest`/`high`/`medium`/`low`, migrating existing `normal` rows to
+  `medium` in the same step and dropping the old enum type),
+  `20260802000000_add_ticket_relations.sql` (the `ticket_relations` table,
+  its RLS policies, and the `relation_added`/`relation_removed` Activity
+  triggers).
+
+## Confirmed working (Ticket assignment — restricted to active project members)
+
+A ticket's Assignee can now only ever be a real, active member of that
+ticket's own project — enforced both in every Assignee-picking UI and,
+independently, at the write layer. No schema change; "active project
+member" is the same real, pre-existing definition used everywhere else —
+a row exists in `project_memberships` for `(project_id, profile_id)`.
+
+- **UI**: the three real Assignee `<select>` implementations — New Ticket,
+  Ticket Detail (`EditableSidebarAssignee`), and the Quick Ticket Preview
+  panel (`PreviewAssigneeControl`) — now all list `loadProjectTeam`'s real,
+  project-scoped roster instead of `loadOrganizationMembers`'s org-wide
+  one. `tickets-screen.tsx` keeps a second, still org-wide `members` state
+  exclusively for the Assigned *filter* dropdown and a new, separate
+  `assignableMembers` state (via `loadProjectTeam`) feeding only the two
+  real assignment UIs it renders. `project-lead-dashboard.tsx`'s own New
+  Ticket modal now passes its already-loaded project `team` roster instead
+  of its org-wide `orgMembers` (which stays, feeding only Add Member's
+  candidate list).
+- **Write layer** (`lib/tickets.ts`) — `createTicket` and `updateTicket`
+  both reject (real error, no ticket write) an incoming
+  `assigneeProfileId` that isn't a real member of the ticket's project,
+  checked via a direct `project_memberships` existence query. Clearing an
+  assignee (`null`) is never blocked — only setting one is validated.
+  Neither function ever auto-adds the new assignee to
+  `project_memberships` — membership continues to be managed exclusively
+  from Team.
+- **No DB-level enforcement existed before this** — `tickets.assignee_profile_id`'s
+  own FK only ever validated against `profiles`, never against the
+  ticket's own project's membership; this was a pure application-layer gap
+  until now.
+- **Historical data audited, not modified** — a one-time, read-only check
+  against the live project found zero existing tickets assigned to a
+  non-member; nothing needed correcting.
+- No new migrations — pure application-layer query/validation work on top
+  of the already-real `tickets`/`project_memberships` tables.
+
+## Confirmed working (Project Notes — list, search, New Note, Edit, Duplicate, Delete)
+
+Real replacement for `src/lib/mock-notes.ts`'s hardcoded array on
+`/projects/[slug]/notes`. Only the Tag field stays local-only — see below.
+
+- `src/lib/notes.ts` — the single module for every real Notes read/write:
+  `loadProjectNotes` (real list for one project, newest-`updated_at`-first;
+  RLS via `can_view_project` scopes visibility), `createNote`, `updateNote`,
+  `duplicateNote` (copies title/content into a new row in the same
+  project, appending `(Copy)`/`(Copy 2)`/... checked against every title
+  that currently exists in the project via a fresh query; `updated_by` is
+  set explicitly to the real authenticated user), and `deleteNote`.
+  Activity logging (create/update/delete) is handled entirely by database
+  triggers into `project_note_activity` — nothing in the UI reads that
+  table yet (logged for a future Notes Activity view).
+- `src/components/notes-screen.tsx` — real list + search (title/body), "+
+  New Note" (`NewNoteModal`, exported so `project-lead-dashboard.tsx`'s
+  Quick Actions can reuse it directly), and the card menu's Edit/Duplicate/
+  Delete, all real.
+- `src/components/note-detail-modal.tsx` — the detail view's Edit (saves
+  via `updateNote`, only leaves edit mode on real success), Duplicate, and
+  Delete are all wired to the real functions above.
+- `src/lib/mock-notes.ts` — kept as a type-only module (`ProjectNote`); the
+  mock array and `getNotesByProjectSlug` are gone.
+- **Tag stays local-only, deliberately unwired** — the Tag picker keeps
+  working as UI state, but no `project_notes` column exists for it and
+  it's never sent to or read from Supabase.
+- Migration: `20260811000000_add_project_notes.sql` (`project_notes` +
+  `project_note_activity` tables, RLS select/insert/update/delete policies
+  and grants, and the three logging triggers).
+
+## Confirmed working (Users — list, Invite, Disable/Enable, Edit, Reset Password link, Activity, Security)
+
+**Implemented and build/type-checked, not yet confirmed against a live
+Supabase project or in a browser.** Scoped to `/users` (Admin only) and the
+shared Member Profile Modal's user-mode tabs it opens into. Every
+privileged write below goes through a Server Action using
+`SUPABASE_SERVICE_ROLE_KEY` — never a direct client write — because
+`organization_memberships` has no `UPDATE`/`INSERT` grant for the
+`authenticated` role at all, and because each write needs to independently
+re-verify the caller server-side (active org admin, same organization)
+rather than trust anything the browser claims.
+
+- `src/lib/users.ts` — the real data source, replacing `mock-users.ts`
+  entirely for this screen: `loadOrganizationUsers` (role/status/weekly
+  capacity/joined date + a real `lastLogin`), `disableOrganizationMember`
+  / `enableOrganizationMember` (one shared Server Action,
+  `setMembershipStatusAction`), `editOrganizationMember` (first/last name +
+  role + weekly capacity, atomically as much as two separate writes
+  without a real DB transaction can be — an honest partial-failure message
+  if the second write fails after the first succeeds), `inviteOrganizationUser`
+  (email invite) / `generateOrganizationInviteLink` (single-use link
+  instead), and `generatePasswordResetLink`. `updateOrganizationMember`
+  (direct client write, pre-existing) is now used **only** by the Users
+  list's inline Weekly Capacity cell (`CapacityCell`) — intentionally left
+  as-is/still broken, it has no Server Action yet.
+- `src/lib/server/invite-user-action.ts` — `inviteUserAction` (real email
+  via `inviteUserByEmail`) and `generateInviteLinkAction` /
+  `generatePasswordResetLinkAction` (both use `generateLink`, which mints a
+  single-use token but never sends mail) share one `prepareInvite` +
+  `finalizeInviteRecords` pair. The link handed back to the admin is
+  always built from `NEXT_PUBLIC_APP_URL` + the token — never
+  `GenerateLinkProperties.action_link`, which points at the Supabase
+  project's own domain.
+- `src/lib/server/disable-user-action.ts` — `disableUserAction` /
+  `enableUserAction`; only ever touches `organization_memberships.status`,
+  never `profiles` or `auth.users`.
+- `src/lib/server/edit-user-action.ts` — `editUserAction`, the
+  authorization pattern (caller-authenticated client for identity + admin
+  check, service-role client only after that passes) mirrored by every
+  other Server Action in this family.
+- `src/lib/server/last-sign-in-action.ts` — `loadLastSignInTimesAction`
+  resolves real `last_sign_in_at` per org member via the Auth Admin API
+  (`listUsers`, paged).
+- `src/components/invite-user-modal.tsx` — a pill toggle between "Send by
+  email" and "Generate invite link"; the latter replaces the form with a
+  success view (read-only link field, Copy Link, Done). Edit mode now
+  genuinely awaits `editOrganizationMember` and only closes on real
+  success.
+- `src/components/reset-password-link-modal.tsx` — the shared "link
+  generated" success modal, used both by the Users row menu's "Reset
+  Password" and by the Member Profile Modal's Security tab "Generate Reset
+  Link".
+- `src/components/users-screen.tsx` — Disable/Enable/Edit/Reset Password
+  link are all real now. The shared `Toast` gained a real `variant`
+  ("success" | "error"). Resend Invitation stays intentionally mock.
+- `src/components/member-profile-modal.tsx` (user-mode tabs) — the
+  Activity tab is real and **summarized**: reuses `ticket_activity` (via
+  `loadUserActivity`), grouping every non-milestone action on the same
+  ticket into one "Working on `JIR-x` · N updates" entry while
+  `ticket_created` and "Joined the workspace" stay as their own entries;
+  capped at the 10 most recent after grouping. The Security tab shows the
+  real `lastLogin` and its "Generate Reset Link" button calls
+  `generatePasswordResetLink`.
+- `src/app/accept-invite/` + `src/components/accept-invite-screen.tsx` —
+  the real "set your password" landing page for both invite methods.
+- `.env.example` — `NEXT_PUBLIC_APP_URL`, the app's own public base URL
+  used to build every generated link above — never a Supabase URL.
+- Migrations: `20260805000000_accept_own_invitation_rpc.sql` and
+  `20260806000000_grant_service_role_public_schema.sql` (both pre-existing,
+  already confirmed live). No new grants/RLS were needed for
+  Disable/Enable/Edit/Reset-Password-link themselves — all four go
+  through the service-role client, which bypasses grants/RLS by design
+  once the Server Action's own authorization check has already passed.
+
+## Confirmed working (Project → Team)
+
+Scoped to `/projects/[slug]/team` and the Work History page it links to,
+plus the project-scoped Lead/Member role and Team Capacity data this
+section's own `loadProjectTeam` also backs on the Project Lead Dashboard.
+Real replacement for `mock-team.ts`'s `getTeamByProjectSlug` on this
+screen only — every other `mock-team.ts` consumer is untouched.
+
+- **Team membership is now (mostly) automatic.** A database trigger
+  (`ensure_project_membership`, security-definer) creates a
+  `project_memberships` row the first time someone creates a ticket, edits
+  one, comments, logs time, uploads an attachment, or links a ticket. A
+  backfill covers contributions that already existed before this trigger.
+- **Project-scoped role (Lead vs. Member) is now a real, explicit column** —
+  `project_memberships.project_role` (`'lead'` | `'member'`, default
+  `'member'`, a partial unique index enforces at most one lead per project)
+  is the authoritative "who leads this project" signal, distinct from
+  `projects.owner_profile_id` and from `organization_memberships.role`.
+  `loadProjectTeam`'s `title` field was also fixed to show each member's
+  real *org* role label rather than `project_memberships.title`.
+- **Make Project Lead** — an Admin-only action in `member-profile-modal.tsx`'s
+  `MemberMenu`, gated to members whose real org role is itself Admin or
+  Project Lead. `setProjectLead` (`lib/projects.ts`) clears any existing
+  lead on the project first, then promotes the new one. A `window`
+  `CustomEvent` lets `team-screen.tsx` reflect the change immediately
+  without a manual reload.
+- **`loadProjectTeam`'s Weekly Capacity now falls back to the member's real
+  organization-level capacity** when the project-level value is unset —
+  a real bug fix. Only a genuinely unset value falls back; an explicit 0
+  is never overridden.
+- `src/lib/projects.ts` — `loadProjectTeam`, `addProjectMember`,
+  `removeProjectMember` (direct client delete; the real guarantee against
+  removing a member with history is a database trigger, not this function
+  or the UI), and `hasProjectMemberHistory` (an RPC check deciding whether
+  "Remove from Project" even appears).
+- **"Remove from Project" can never delete a member with real history, at
+  the database level.** A `BEFORE DELETE` trigger on `project_memberships`
+  calls the same history check and raises an exception if it's true.
+- `src/components/team-screen.tsx` — real roster + real KPIs. "+ Add
+  Member" opens `add-team-member-modal.tsx`, a picker over real org
+  members not already on the team.
+- `src/components/member-profile-modal.tsx` (project-mode `MemberMenu`) —
+  "Send Message" was removed outright; "View Ticket History" was renamed
+  to "View Work History" and now navigates to its own page instead of
+  opening a second modal.
+- `src/app/projects/[slug]/team/[userId]/work-history/` +
+  `src/components/work-history-screen.tsx` — real, **server-side**
+  pagination (20/page, `?page=` in the URL) via two RPCs built on one
+  shared inner table function, so the participation rule exists in exactly
+  one place. Clicking a ticket reuses the real Ticket Detail route
+  directly, never `TicketPreviewPanel`.
+- Migrations, in order (all confirmed against the live project):
+  `20260803000000_add_project_creator_membership.sql`,
+  `20260804000000_grant_authenticated_project_memberships_read.sql`,
+  `20260807000000_grant_authenticated_project_memberships_write.sql`,
+  `20260808000000_auto_project_membership_on_contribution.sql`,
+  `20260809000000_project_membership_history_guard.sql`,
+  `20260810000000_project_member_work_history_pagination.sql`,
+  `20260812000000_add_project_membership_project_role.sql`,
+  `20260813000000_restore_project_memberships_after_project_role.sql` and
+  `20260814000000_restore_manually_added_project_membership.sql`
+  (corrective — during this work, a validation script accidentally deleted
+  every real `project_memberships` row in the live database; these two
+  migrations re-derive/restore them from still-intact source data, plus a
+  hardcoded restore for the one row with no derivable source, approved by
+  the user before applying. Fully verified restored afterward. Live-
+  validation scripts against this schema must always scope test-data
+  creation/cleanup to freshly-generated, uniquely-stamped slugs/emails —
+  never broad/unscoped deletes against any real table).
+
+## Confirmed working (Project Overview — Admin, Project Lead, and Member)
+
+Implemented and type/build-clean (`tsc`/`eslint`/`next build` all pass),
+**not yet clicked through in a live browser**. Real for all three roles:
+`admin-project-overview.tsx`, `project-lead-project-overview.tsx`, and
+`project-overview.tsx` (Member). The Project Lead's and Member's own
+Project Overview reuse the Admin file's own building blocks directly
+(`ExpandableDescription`, `activityEventToEntry`, `TicketGroup`,
+`ProjectHealthRow`, `HealthRowContent`, and the `ActivityEntry`/
+`TeamMember`/`HealthRow`/`HealthStatus` types) rather than a second
+implementation.
+
+- **Header** — real project name, description, status, category, and
+  creation date, all from `loadProjectDetail`. Description is
+  expandable/collapsible (measured via `scrollHeight`/`clientHeight`, not a
+  character count). The "Owned by" field was removed outright.
+- **Alert Banner (Health Alerts)** — reuses Delivery Reports' own
+  `buildDeliveryStatusItems`/`buildDeliveryKpiSummary`/
+  `buildHoursByPersonRows`, scoped to one project. Exactly one alert type
+  resolving to exactly one real ticket links straight to it; every other
+  actionable combination hands off to the Tickets page via
+  `?alerts=<type,type,...>`.
+- **KPIs** — Open Tickets, Progress (real done/total percentage), Blocked,
+  and Closed This Month, all from real tickets.
+- **Active Work** — real Blocked/In Progress/In Review ticket groups.
+- **Project Activity (Admin only)** — capped at the 10 most recent real
+  events (`loadOrganizationActivity`), with a "View all activity →" link to
+  a new, dedicated, fully paginated `/projects/[slug]/activity` page.
+  Project Lead's own view replaces this with **Needs Your Attention**
+  (Blocked/Due Today/Awaiting Review, deduped into one ticket list); Member's
+  own view has **My Activity**, scoped to this member's own tickets.
+- **Team** — real roster from `loadProjectTeam`.
+- **Project Health** — reuses Delivery Reports' own `buildProjectHealthRows`
+  for the real risk verdict. Admin shows an honest "No scope tracking
+  available yet" Scope row; Project Lead's own view omits the Scope row
+  outright.
+- No new migrations — pure application-layer query/rendering work on top of
+  already-real `projects`/`tickets`/`ticket_activity`/`ticket_time_entries`/
+  `project_memberships` tables.
+
+## Confirmed working (Dashboard — Admin, Project Lead, and Member)
+
+Real KPIs, lists, and quick actions for all three roles' `/dashboard` — no
+mock data remains on any of the three screens themselves (only
+`Ticket`/`getTicketDisplayKey` are still imported from `mock-tickets.ts`,
+as the shared type/display-key helper every real screen uses the same
+way).
+
+- `src/lib/tickets.ts` — `loadOrganizationTickets`, `loadOrganizationLoggedMinutes`,
+  `loadOrganizationActivity` (filtered to 5 curated event types —
+  `blocked`/`completed`/`hours`/`assigned`/`priority`). `src/lib/projects.ts` —
+  `loadOrganizationWorkloadMembers`, `loadLeadProjects` (Project Lead's
+  Current Project list, by `project_role = 'lead'` — a real bug was fixed
+  here mid-build, it originally filtered by the older, unrelated
+  `owner_profile_id`), `loadMemberProjects`/`loadMemberWeeklyCapacity`.
+- **Admin** (`AdminDashboard()`) — Assigned Tickets, Hours Burn, Blocked,
+  Due Today, My Active Work, Recent Activity, My Upcoming Deadlines, Team
+  Workload, Projects at Risk, and Organization Health are all real. Quick
+  Actions: New Project and Add Member open their modals directly; New
+  Ticket was removed from Quick Actions entirely. Recent Activity has a
+  real "View all activity →" action to a new, dedicated, org-wide
+  `/activity` page (`OrganizationActivityHistoryScreen`, mirroring the
+  per-project Activity page's query/pagination shape verbatim) — not on
+  the Sidebar's main nav, link-only.
+- **Project Lead** (`ProjectLeadDashboard()`) — Current Project selector
+  (`?project=<slug>`, only rendered when leading more than one active
+  project), Current Delivery, Target Date (now the nearest due date among
+  the project's own active tickets, previously read the unrelated
+  `projects.target_date`), Attention Required, Team Capacity, Project Work
+  (renamed from "My Active Work"), Recent Activity, Upcoming Deadlines are
+  all real. Quick Actions: Add Member/New Note/New Ticket all open their
+  real modals directly against the selected project.
+- **Member** (`MemberDashboard()`) — Assigned Tickets, Weekly Capacity
+  (renamed from "Planned Today"), Logged Today, Due Today, Recommended
+  Next, My Active Work, Needs Your Attention, Time Today, and Upcoming Work
+  are all real. `MEMBER_WORK`/`WorkItem` stay defined/exported in this file
+  but are now fully unused anywhere in the app.
+- **Project scope selector on all three** — a `?project=<slug>` selector
+  in the header's top-actions row. Admin defaults to "All Projects"
+  (org-wide); Project Lead's/Member's only render when scoped to more than
+  one project. Every KPI/list re-scopes to that project's own data;
+  fast-switching resets to a zero state first so stale numbers never show.
+  `app/dashboard/page.tsx` is wrapped in `<Suspense>` for this.
+- No new migrations — pure application-layer query/rendering work on top of
+  already-real tables.
+
+## Confirmed working (My Work — Member)
+
+Real replacement for `my-work-screen.tsx`'s entire mock data set for the
+Member role's `/my-work`.
+
+- **Tickets** — `loadOrganizationTickets` filtered to
+  `assigneeProfileId === userId`.
+- **KPIs** — Assigned Tickets, Active, Estimated Hours, Blocked, and Due
+  This Week, computed from the member's full, unfiltered ticket set.
+- **My Tickets — filters are now real and functional**: Status/Priority/
+  Project/Labels all actually filter the ticket list (previously rendered
+  but never applied), composing (AND) with the KPI quick-filters.
+- **Recently Updated** reuses `loadOrganizationActivity` scoped to this
+  member's own ticket ids. `OrganizationActivityEvent` gained one new
+  field, `createdAtISO`, purely additive.
+- **My Time (Member only) + Personal Timesheet panel** — Logged Today
+  (`loadProfileLoggedTimeForDate`) and Personal Capacity
+  (`loadMemberWeeklyCapacity`); Logged This Week/This Month come from
+  `loadOrganizationLoggedTimeForRange`. The Timesheet panel's own entry
+  list is backed by a new, minimal `loadProfileTimeEntries`.
+- No new migrations — pure application-layer query/rendering work on top of
+  already-real tables.
+
+## Confirmed working (Reports — Admin, Delivery and Finance tabs)
+
+Real KPIs, tables, filters, alerts, and Export for both tabs of `/reports`
+(`AdminReportsScreen`). Project Lead gets a separate, still-mock component
+(`ProjectLeadReportsScreen`) instead.
+
+- **Shared filters and period** — Project/Assignee/Client/Date filters
+  plus the Period selector all read from one shared fetch; every KPI/
+  table/chip derives from the same filtered ticket set via `useMemo`
+  chains.
+- **Delivery KPIs, Health Alerts, Project Health, Hours by Person** —
+  `buildDeliveryKpiSummary`, `buildProjectHealthRows`,
+  `buildHoursByPersonRows` compute real rollups from real tickets, logged
+  time, and weekly capacity.
+- **Workload** — `buildWorkloadRows`: real assigned hours/capacity/
+  utilization, plus a real "change this week" delta.
+- **Hours Distribution** — `buildHoursDistribution`: real hours bucketed by
+  ticket status, excluding backlog.
+- **Recent Changes** — `buildRecentChanges` + `loadDeliveryActivityForTickets`:
+  real, deduped, date-grouped activity for the current filtered ticket set.
+- **Delivery Export** — CSV/Excel/PDF build 7 sections from the exact same
+  in-memory state every widget already reads.
+- **Finance KPIs, Billing Overview, Billable Hours by Member** — real
+  Billable/Non-Billable hours, Utilization, and Estimated Revenue from real
+  logged time × each project's real billing rate.
+- **Finance Export** — CSV/Excel (per-section worksheets)/PDF, all
+  preserving on-screen order.
+- No new migrations — pure application-layer query/rendering work on top
+  of already-real tables.
+
+## Confirmed working (Reports — Project, per-project)
+
+Implemented and type/build-clean, **not yet clicked through in a live
+browser**. Real replacement for `/projects/[slug]/reports`'s
+(`project-reports-screen.tsx`) previous org-wide mock ticket list and
+`mock-team.ts` roster, for every role that can open it. Project Lead's own,
+separate Reports view (`project-lead-reports-screen.tsx`) is untouched and
+still mock.
+
+- **Data loading** — `loadProjectDetail`, `loadProjectTickets`,
+  `loadProjectTeam`, and `loadOrganizationLoggedTimeForRange`, all scoped
+  to the route's own `slug`.
+- **Project Health KPI** — now calls Delivery Reports' own
+  `buildProjectHealthRows`, scoped to this one project, rather than a
+  second calculation — a real bug fixed here (this KPI was previously just
+  showing `project.status` mislabeled as "Project Health").
+- **Estimated vs Logged Hours, Team Workload, Delivery Progress** — real
+  sums/counts from real tickets/time entries/roster. Delivery Progress's
+  cards now navigate contextually via the same real `?alerts=<status>`
+  mechanism instead of the old, non-functional `?status=` query param.
+- **Delivery Snapshot** — a new `loadTicketsCompletedInRange` finds tickets
+  with a real `status_changed → done` activity row within the current
+  calendar month, rather than trusting `updated_at`.
+- No new migrations — pure application-layer query/rendering work on top of
+  already-real tables.
+
+## Confirmed working (Time Tracking — Admin/Member)
+
+Real replacement for `/time-tracking`'s previous fully-mock data source, for
+the Admin and Member roles — the Project Lead's own Time Tracking view
+(`project-lead-time-tracking-screen.tsx`) is untouched and still mock. Not
+yet clicked through in a live browser.
+
+- **Data load** — real active org users, org-wide tickets/projects, and
+  real per-member weekly capacity are all fetched once per organization.
+  Real logged time is fetched for four fixed ranges up front (Today/
+  Yesterday/This Week/This Month); Custom Range is fetched separately.
+- **Billing is reused verbatim from Reports → Finance, never recalculated**
+  — `buildFinanceKpiSummary`/`buildBillingOverviewRows`/
+  `buildBillableHoursByMemberRows` were exported from `reports-screen.tsx`
+  for this reuse.
+- **Capacity-based metrics are deliberately independent of the Billing
+  filter** — Hours Missing (relabeled "Members Missing Hours"), Weekly
+  Utilization, and Timesheets' Capacity %/Status always use a member's
+  *total* logged hours; two separate ticket-id scopes are computed
+  (`capacityTicketIds` vs. `billingTicketIds`) so the Billing filter has no
+  code path into capacity math at all.
+- **Filters are real and URL-persisted** — Member/Project/Client/Billing/
+  Date Range all filter real data and round-trip through the URL, same
+  `<Suspense>` requirement as Tickets' `?alerts=`.
+- **Timesheets table** — one real row per active org member, with a real
+  "Review →" action navigating to the existing Work History route.
+- No new migrations — pure application-layer query/rendering work on top
+  of already-real tables.
+
+## Confirmed working (Global Search)
+
+JIRITA's global Search (the Sidebar's own Search field, previously a fully
+inert decorative button) now has a real, permission-scoped Supabase data
+layer and a working results popover with click and full keyboard
+navigation. No new migrations.
+
+- **`src/lib/search.ts` (new) — `searchGlobal(organizationId, role, userId,
+  query)`**, the single reusable data-layer function everything below
+  consumes. Returns up to 5 deduplicated results each for Projects,
+  Tickets, and Users. Permission scoping happens as real query filters,
+  never a client-side trim: **Admin** → every project in the organization;
+  **Project Lead** → only projects where `project_role = 'lead'`;
+  **Member** → any active `project_memberships` row. Search terms are
+  escaped before being used in an `ilike` pattern.
+- **`src/components/sidebar.tsx`** — the Search field is a real controlled
+  `<input>`; a results popover renders below it. Opens on focus, only
+  renders once there's a non-empty typed term; debounced ~300ms; real
+  loading/error/empty states. Results render grouped (Projects/Tickets/
+  Users); clicking navigates to the real detail page/route for each.
+  **Keyboard**: global `⌘K`/`Ctrl+K` focuses the field and opens the
+  popover from anywhere in the app; `ArrowDown`/`ArrowUp` walk the results
+  as one continuous list; `Enter` selects; `Escape` closes.
+
+## Still mock
+
+- The rest of Settings (`/settings/*`) all still reads from
+  `src/lib/mock-*.ts`. Everything else listed above is now fully real.
+- `src/components/project-lead-time-tracking-screen.tsx` — the Project
+  Lead role's own Time Tracking view, a separate component from the now-real
+  Admin/Member `time-tracking-screen.tsx`. Still reads `mock-time-tracking.ts`
+  data untouched by this work.
+- `src/components/project-lead-reports-screen.tsx` — the Project Lead
+  role's own Reports view, a separate component from `AdminReportsScreen`.
+  Still reads `PROJECT_TICKETS`/`RECENT_ACTIVITY`/`MY_PROJECT_NAMES` and
+  other `mock-*.ts` data untouched by this work.
+- Within Tickets/Ticket Detail specifically, still mock/unimplemented on
+  purpose: New Ticket's "More Options" fields (Type/Status/Priority/
+  Labels/Due Date always write fixed defaults); editing or deleting a
+  Comment (local-only); Milestone and Story Points fields on Ticket Detail
+  (dead code); GitHub/Development integration (removed entirely, no real
+  integration exists).
+- Within Users specifically, still mock/unimplemented on purpose: the
+  Users list's inline Weekly Capacity cell (`CapacityCell`, no Server
+  Action yet); Resend Invitation (toast-only); editing a user's email
+  (shown, never persisted); `browser`/`os`/`device` on the Security tab (no
+  real source, simply don't render).
+- Within Project → Team specifically, still mock/unimplemented on purpose:
+  per-person `status` (Available/Busy/Away) — every real member shows a
+  fixed "Available".
+- Within Project Notes specifically, still mock/unimplemented on purpose:
+  the Tag field (interactive, never persisted); `project_note_activity` is
+  written by real triggers but no screen reads it yet.
+- `docs/UNFUDDLE_IMPORT_SPECIFICATION.md` defines how Techtivo's Unfuddle
+  backup maps onto the schema for the eventual data migration. No importer
+  code exists yet.
+
+Note also that Projects' own real rows still don't populate
+`openTickets`/`blockedTickets`/`overdueTickets`/`awaitingReviewTickets`/
+`dueThisWeekTickets`/`activeMilestones` — those are derived from `tickets`
+by design and default to 0 on the Projects list/Project Settings screens,
+since nothing yet re-aggregates those derived fields back onto the
+`projects` rows (see `docs/SUPABASE_MVP_SCHEMA.md`); the Admin Project
+Overview and per-project Reports both work around this by computing
+Progress/KPIs directly from real tickets at read time instead of relying
+on those stored-but-unpopulated fields.
 
 ---
 
@@ -684,7 +1514,7 @@ Current working routes:
 - `/` — Dashboard (role-specific: Admin / Project Lead / Member)
 - `/my-work`
 - `/projects` — role-specific (Admin full table / Project Lead scoped blocks / Member "My Projects")
-- `/projects/[slug]` — Admin variant real end-to-end; Project Lead/Member variants still mock
+- `/projects/[slug]` — real end-to-end for all three roles (Admin/Project Lead/Member)
 - `/projects/[slug]/tickets`
 - `/projects/[slug]/tickets/[ticketCode]`
 - `/projects/[slug]/notes`
@@ -772,12 +1602,12 @@ Favor reusable components over duplicated implementations.
 
 Current known items:
 
-- `ProjectOverview`'s Member-role variant (the original, unmodified page) has hardcoded "Mobile Banking App" data; it does not dynamically load project data based on slug. The Admin and Project Lead rebuilds (`admin-project-overview.tsx`, `project-lead-project-overview.tsx`) correctly key off `slug`.
+- **Resolved**: `ProjectOverview`'s Member-role variant (`project-overview.tsx`) is now real end-to-end and keys off `slug` like the Admin/Project Lead rebuilds — see Architecture Status → Project Overview.
 - **Resolved**: Assigned/Priority/Status filter dropdowns and the 5 quick-filter chips on the Tickets page, plus the "Add Filter" menu (Labels/Due Date/Reporter/Created Date/Updated Date), all now really filter the ticket list, combined with AND — see Current Sprint → Completed → Tickets → Filter Bar.
 - New Ticket's "More Options" fields (Type, Status, Priority, Labels, Due Date) always write fixed defaults (`backlog`/`medium`/`task`/none — Status changed from `to_do` to `backlog`, matching the database column's own default), never the value picked in the form.
 - **Resolved for rename/delete**: Ticket Attachment rename and delete are now real and persisted (Storage + metadata row). "Replace File" was removed from the menu entirely rather than left as a mock stub. Editing or deleting a *Comment* is still local-only — not persisted to Supabase.
 - Milestone and Story Points fields on Ticket Detail's sidebar are dead code — defined in `ticket-detail-screen.tsx` but never rendered.
-- **Resolved for the Admin role**: the Admin Project Overview now creates/views real tickets against the same real Tickets data as everywhere else. The Project Lead's own Project Overview still creates/views tickets via `NewTicketModal`/`TicketDetailScreen` against local mock ticket state.
+- **Resolved for all three roles**: Admin, Project Lead, and Member Project Overview all now create/view real tickets against the same real Tickets data — see Architecture Status → Project Overview.
 - `settings-screen.tsx` (`SettingsScreen` hub component) is retained but no longer rendered — `/settings` redirects directly to `/settings/general`.
 - Org-wide Settings (`/settings/*`) toggles and fields are visual only; no state persists between page loads. (Project Settings — `/projects/[slug]/settings` — is the one exception: it's real and persists, see Current Sprint → Completed → Project Settings.)
 - Role now comes from a real `organization_membership` when one exists; `current-user.ts`'s mock identities are a dev-only fallback (never in production) rather than the only source of truth. **Resolved**: the `RoleSwitcher` is now gated behind `isDevFallback` (only renders, with a visible "Dev fallback" badge, when there's no real membership) instead of always showing. No real server-side permission enforcement is wired into the UI yet for projects/tickets/etc. — the RLS policies in `supabase/migrations/20260708000000_mvp_schema.sql` are applied and enforce tenant isolation at the DB layer, but the UI doesn't call any of those tables yet.
@@ -793,17 +1623,17 @@ Current known items:
 - The Notes Tag field is fully interactive in the UI but never persisted — no `project_notes` column exists for it, same "still mock" precedent as New Ticket's "More Options" fields.
 - `project_note_activity` is written by real database triggers on every note create/update/delete, but no screen reads it yet — there is no Notes Activity view.
 - The Member Dashboard's "Needs Your Attention" mock "mention" event category has no real source in this schema — comments aren't parsed for @mentions — so it stays a defined type but is never populated, the same "kept but unreachable until real data exists" precedent as the Notes Tag field above.
-- `member-projects-screen.tsx` ("My Projects," Member role) still reads `MEMBER_WORK` mock data directly from `member-dashboard.tsx`, unaffected by the Member Dashboard itself becoming real.
+- **Resolved**: `member-projects-screen.tsx` ("My Projects," Member role) is now real (`useOrganizationProjects()` + `loadProjectTeam`/`loadProjectTickets`), no longer reading `MEMBER_WORK` — see Architecture Status → Projects.
 - `project-lead-reports-screen.tsx` (the Project Lead's own scoped Reports view) is a separate component from `reports-screen.tsx` and remains fully mock, unaffected by company-wide Reports becoming real.
 - `project-lead-time-tracking-screen.tsx` (the Project Lead's own scoped Time Tracking view) is a separate component from `time-tracking-screen.tsx` and remains fully mock, unaffected by the Admin/Member screen becoming real — it keeps three exports (`MEMBER_GROUPS`/`PROJECT_GROUPS`/`CLIENT_GROUPS`) alive in the now-real file solely for this one remaining consumer.
-- **New**: Project Settings' "Project Lead" field/picker was removed outright (it read/wrote `projects.owner_profile_id`). This is a targeted removal, not a full migration off that column: `ProjectSummary.owner` (still `owner_profile_id`-backed) is what the `/projects` list's own Lead column/filter and `member-projects-screen.tsx`'s ("My Projects") "who leads this project" display still read — neither was touched, so `owner_profile_id` now has no remaining writer anywhere in the app, while Team's real `project_memberships.project_role` (set via "Make Project Lead") has its own separate writer and is what Project Overview/Team/the Dashboards already show. Reconciling `ProjectSummary.owner` onto the real `project_role` instead of the legacy column is unresolved.
+- Project Settings' "Project Lead" field/picker was removed outright (it read/wrote `projects.owner_profile_id`). This is a targeted removal, not a full migration off that column: `ProjectSummary.owner` (still `owner_profile_id`-backed) is what the `/projects` list's own Lead column/filter still reads — untouched, so `owner_profile_id` still has this one remaining reader, while Team's real `project_memberships.project_role` (set via "Make Project Lead") has its own separate writer and is what Project Overview/Team/the Dashboards/Member's "My Projects" already show (the latter was updated to read `project_role` directly instead — see Architecture Status → Projects). Reconciling the `/projects` list's own Lead column/filter onto the real `project_role` is the one remaining piece of this — unresolved.
 - **New**: the Admin Dashboard's Recent Activity "View all activity →" action and its new org-wide `/activity` page, and Time Tracking's Admin/Member screen becoming real, haven't themselves been clicked through in a live browser yet — same "should work, not yet verified" caveat as Users/the Admin Project Overview/per-project Reports.
 
 Planned future work:
 
-- Live verification of Users, the **Admin** Project Overview (including its new Project Activity history page), per-project Reports, Time Tracking (Admin/Member), and the Dashboard's new Activity History page against a real Supabase project (click through each in a browser) — the immediate next step, ahead of any new backend seam
-- Backend integration for the Project Lead's own Project Overview, the Member's own Project Overview, the Project Lead's own scoped Reports view, the Project Lead's own scoped Time Tracking view, `member-projects-screen.tsx`, and Settings (Auth/Profile/Avatar, Projects' Sidebar/`/projects`/Settings, Tickets, Team, Project Notes, all three Dashboards, company-wide Reports, the Admin Project Overview, per-project Reports, Time Tracking (Admin/Member), and Users are done — see Architecture Status; schema for the rest is designed in `docs/SUPABASE_MVP_SCHEMA.md` and applied via the migrations in `supabase/migrations/`, just not queried by the UI yet)
-- Reconciling `ProjectSummary.owner`/`projects.owner_profile_id` (still read by `/projects` and "My Projects") onto Team's real `project_memberships.project_role`, now that Project Settings no longer writes the former at all
+- Live verification (click through each in a browser against a real Supabase project) of Users, the **Admin** Project Overview (including its new Project Activity history page), per-project Reports, Time Tracking (Admin/Member), the Dashboard's org-wide Activity History page, the Project Lead's and Member's own Project Overview, all three Dashboards' project scope selectors, My Work (Member), ticket-assignment restriction, Member's own `/projects` ("My Projects"), and global Search — the immediate next step, ahead of any new backend seam
+- Backend integration for the Project Lead's own scoped Reports view, the Project Lead's own scoped Time Tracking view, and the rest of Settings (everything else is done — see Architecture Status; schema for the rest is designed in `docs/SUPABASE_MVP_SCHEMA.md` and applied via the migrations in `supabase/migrations/`, just not queried by the UI yet)
+- Reconciling the `/projects` list's own Lead column/filter (still `ProjectSummary.owner`/`projects.owner_profile_id`-backed) onto Team's real `project_memberships.project_role`, now that Project Settings no longer writes the former at all and Member's "My Projects" was already updated to read `project_role` directly
 - API layer
 - Real drag & drop (Kanban)
 - Real-time updates
@@ -830,7 +1660,7 @@ Complete every major screen required for a usable project management platform be
 Remaining priority order:
 
 1. Backlog / Sprint Planning
-2. Live-verification pass for Users, the Admin Project Overview, and per-project Reports
+2. Live-verification pass for Users, the Admin Project Overview, per-project Reports, Time Tracking (Admin/Member), the Project Lead's/Member's own Project Overview, the Dashboard project scope selectors, My Work, ticket-assignment restriction, Member's "My Projects", and global Search
 
 (Authentication and Ticket editing, previously first on this list, are now both complete. Per-project Reports, Notes, and Team pages refinements, previously second on this list, are now also complete.)
 
