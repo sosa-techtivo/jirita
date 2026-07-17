@@ -450,6 +450,17 @@ export function MemberProfileModal({
           // (Team Workload), where there's no single outer `slug` at all.
           slug={selectedTicket.projectSlug}
           onClose={() => setSelectedTicket(null)}
+          // Expand navigates to the full Ticket Detail page underneath this
+          // modal — since MemberProfileProvider is mounted above the
+          // router's own children, this modal survives that navigation
+          // unless explicitly closed here too. Reuses both existing close
+          // mechanisms (this panel's own local `selectedTicket` clear, and
+          // this modal's own animated `handleClose`, which already calls
+          // the real `onClose` prop) rather than a new one.
+          onBeforeNavigate={() => {
+            setSelectedTicket(null);
+            handleClose();
+          }}
         />
       )}
     </>

@@ -12,6 +12,17 @@ import { MemberTrigger } from "@/components/member-profile";
 
 export const av = (id: number) => `https://i.pravatar.cc/64?img=${id}`;
 
+// ── Skeleton loading primitive ───────────────────────────────────────────────
+//
+// A single pulsing placeholder block, sized per call site via `className` —
+// shared by every dashboard's own loading state (each dashboard builds its
+// own skeleton layout out of these, matching its own real structure) so
+// there's exactly one skeleton visual language across Admin/Project
+// Lead/Member, never a second one invented per screen.
+export function SkeletonBlock({ className }: { className: string }) {
+  return <div className={`animate-pulse rounded bg-slate-100 dark:bg-zinc-800 ${className}`} />;
+}
+
 // ── Shared "hero" gradient card treatment ────────────────────────────────────
 //
 // Used by the Project Lead's "Current Delivery" card and the Member's

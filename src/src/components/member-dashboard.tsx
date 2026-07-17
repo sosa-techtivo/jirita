@@ -26,6 +26,7 @@ import {
   av,
   HERO_CARD_CLASS,
   HERO_LABEL_CLASS,
+  SkeletonBlock,
 } from "@/components/dashboard-shared";
 
 // A Member (Engineer / QA / Designer) may be staffed on several projects at
@@ -466,10 +467,10 @@ export function MemberDashboard() {
     if (isDevFallback || !organization || !userId || !resolvedProjectSlug) return;
     let cancelled = false;
     // Back to "loading" on every project switch too, not just the first
-    // mount — reuses the existing full-screen "Loading dashboard…" state
-    // below (gated on `loadState`) so the previous project's tickets/hours/
-    // activity are never left on screen while the new project's real data
-    // is still in flight.
+    // mount — reuses the existing full-screen skeleton state below (gated
+    // on `loadState`) so the previous project's tickets/hours/activity are
+    // never left on screen while the new project's real data is still in
+    // flight.
     // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: same "clear before the async fetch below resolves" pattern used elsewhere in this app (e.g. member-profile-modal.tsx)
     setLoadState("loading");
 
@@ -569,10 +570,11 @@ export function MemberDashboard() {
 
   const recommended = activeWork[0] ?? null;
 
-  const dueTodayCount = useMemo(
-    () => activeWork.filter((t) => t.dueDate && parseDisplayDate(t.dueDate) === todayISO).length,
+  const dueTodayList = useMemo(
+    () => activeWork.filter((t) => t.dueDate && parseDisplayDate(t.dueDate) === todayISO),
     [activeWork, todayISO]
   );
+  const dueTodayCount = dueTodayList.length;
 
   const loggedTodayMinutes = useMemo(() => todayEntries.reduce((sum, e) => sum + e.minutes, 0), [todayEntries]);
   const loggedTodayHours = round1(loggedTodayMinutes / 60);
@@ -613,15 +615,149 @@ export function MemberDashboard() {
     if (ticket) setPreview(ticket);
   }
 
+  // Assigned Tickets KPI: reuses `activeWork`, the exact same real,
+  // per-member ticket list already driving this KPI's count above — no
+  // second query, no duplicated assignee/status criteria. Zero stays
+  // non-interactive; exactly one opens it directly in the existing Ticket
+  // Preview panel; more than one hands off to this project's Tickets page
+  // with the real `?assignee=me` filter applied and visible (Tickets'
+  // existing "Assigned" filter, now readable from the URL the same way
+  // `?alerts=` already is).
+  function handleAssignedTicketsClick() {
+    if (activeWork.length === 0 || !resolvedProjectSlug) return;
+    if (activeWork.length === 1) {
+      setPreview(activeWork[0]);
+      return;
+    }
+    router.push(`/projects/${resolvedProjectSlug}/tickets?assignee=me`);
+  }
+
+  // Due Today KPI: reuses `dueTodayList`, the exact same real per-member
+  // ticket list already driving this KPI's count above — no second query,
+  // no duplicated due-date criteria. Zero stays non-interactive; exactly
+  // one opens it directly in the existing Ticket Preview panel; more than
+  // one hands off to this project's Tickets page with the same real
+  // `?alerts=due-today` filter the Admin/Project Lead Dashboards already
+  // use for "Due Today", combined with `?assignee=me` (this dashboard's own
+  // KPI is personal, unlike Admin's) so the destination shows only the
+  // current user's own tickets due today.
+  function handleDueTodayClick() {
+    if (dueTodayList.length === 0 || !resolvedProjectSlug) return;
+    if (dueTodayList.length === 1) {
+      setPreview(dueTodayList[0]);
+      return;
+    }
+    router.push(`/projects/${resolvedProjectSlug}/tickets?assignee=me&alerts=due-today`);
+  }
+
   const loading = projectsLoadState === "loading" || (memberProjects.length > 0 && loadState === "loading");
   const loadError = projectsLoadState === "error" ? projectsErrorMessage : loadState === "error" ? loadErrorMessage : null;
 
   if (loading) {
     return (
       <div className="max-w-5xl mx-auto px-6 py-8 pb-16">
-        <div className="h-full flex items-center justify-center text-sm text-slate-400 dark:text-zinc-500 py-20">
-          Loading dashboard…
+
+        {/* ── Section 1: Today (skeleton) ─────────────────────────────────── */}
+        <section className="rounded-2xl border border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900 p-5 shadow-sm shadow-slate-200/40 dark:shadow-black/20 mb-5">
+          <div className="flex items-center justify-between gap-2 mb-4">
+            <div className="flex items-baseline gap-2">
+              <SkeletonBlock className="h-[15px] w-40" />
+              <SkeletonBlock className="h-3 w-24" />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            {[0, 1, 2, 3].map((i) => (
+              <div key={i}>
+                <SkeletonBlock className="h-[10px] w-20 mb-1" />
+                <SkeletonBlock className="h-5 w-12" />
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {/* ── Section 2: Recommended Next (skeleton) ──────────────────────── */}
+        <section className={`${HERO_CARD_CLASS} p-6 sm:p-7 mb-5`}>
+          <SkeletonBlock className="h-[11px] w-32 mb-3" />
+          <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-5">
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2.5 mb-2.5">
+                <SkeletonBlock className="h-5 w-16" />
+                <SkeletonBlock className="h-5 w-14" />
+              </div>
+              <SkeletonBlock className="h-4 w-28 mb-1" />
+              <SkeletonBlock className="h-[11px] w-24 mb-1" />
+              <SkeletonBlock className="h-6 w-2/3" />
+              <div className="flex items-center gap-4 mt-3">
+                <SkeletonBlock className="h-4 w-24" />
+                <SkeletonBlock className="h-4 w-24" />
+              </div>
+            </div>
+            <SkeletonBlock className="h-9 w-32 flex-shrink-0" />
+          </div>
+        </section>
+
+        {/* ── Two-column main content (skeleton) ──────────────────────────── */}
+        <div className="grid grid-cols-1 xl:grid-cols-[1fr_320px] gap-5">
+
+          <div className="space-y-5 min-w-0">
+            {/* Section 3: My Active Work */}
+            <section>
+              <div className="flex items-center gap-2 mb-2">
+                <SkeletonBlock className="h-[10px] w-28" />
+              </div>
+              <div className="rounded-xl border border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900 overflow-hidden divide-y divide-slate-100 dark:divide-zinc-800">
+                {[0, 1, 2].map((i) => (
+                  <div key={i} className="flex items-center gap-4 px-4 py-3.5">
+                    <SkeletonBlock className="h-4 flex-1" />
+                    <SkeletonBlock className="h-6 w-6 rounded-full flex-shrink-0" />
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            {/* Section 5: Needs Your Attention */}
+            <section className="rounded-xl border border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900 p-5 shadow-sm shadow-slate-200/40 dark:shadow-black/20">
+              <SkeletonBlock className="h-[10px] w-36 mb-4" />
+              <div className="space-y-3">
+                {[0, 1, 2].map((i) => (
+                  <SkeletonBlock key={i} className="h-4 w-full" />
+                ))}
+              </div>
+            </section>
+          </div>
+
+          <div className="space-y-5">
+            {/* Section 4: Time Today */}
+            <section className="rounded-xl border border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900 p-5 shadow-sm shadow-slate-200/40 dark:shadow-black/20">
+              <SkeletonBlock className="h-[10px] w-24 mb-4" />
+              <div className="flex items-center justify-between mb-3">
+                {[0, 1, 2].map((i) => (
+                  <div key={i}>
+                    <SkeletonBlock className="h-[10px] w-16 mb-1" />
+                    <SkeletonBlock className="h-[18px] w-10" />
+                  </div>
+                ))}
+              </div>
+              <SkeletonBlock className="h-1.5 w-full" />
+              <div className="h-px bg-slate-100 dark:bg-zinc-800 my-3" />
+              <div className="space-y-2">
+                <SkeletonBlock className="h-4 w-full" />
+                <SkeletonBlock className="h-4 w-full" />
+              </div>
+            </section>
+
+            {/* Section 6: Upcoming Work */}
+            <section className="rounded-xl border border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900 p-5 shadow-sm shadow-slate-200/40 dark:shadow-black/20">
+              <SkeletonBlock className="h-[10px] w-28 mb-4" />
+              <div className="space-y-2">
+                {[0, 1, 2].map((i) => (
+                  <SkeletonBlock key={i} className="h-4 w-full" />
+                ))}
+              </div>
+            </section>
+          </div>
         </div>
+
       </div>
     );
   }
@@ -683,10 +819,34 @@ export function MemberDashboard() {
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          <HeroStat label="Assigned Tickets" value={activeWork.length} />
+          {activeWork.length > 0 ? (
+            <button
+              type="button"
+              onClick={handleAssignedTicketsClick}
+              className="w-full text-left p-0 cursor-pointer"
+            >
+              <HeroStat label="Assigned Tickets" value={activeWork.length} />
+            </button>
+          ) : (
+            <HeroStat label="Assigned Tickets" value={activeWork.length} />
+          )}
           <HeroStat label="Weekly Capacity" value={`${weeklyCapacity}h`} />
           <HeroStat label="Logged Today" value={`${loggedTodayHours}h`} />
-          <HeroStat label="Due Today" value={dueTodayCount} danger={dueTodayCount > 0} />
+          {dueTodayCount > 0 ? (
+            <button
+              type="button"
+              onClick={handleDueTodayClick}
+              className="w-full text-left p-0 cursor-pointer"
+            >
+              {dueTodayCount === 1 ? (
+                <HeroStat label={dueTodayList[0].title} value={getTicketDisplayKey(dueTodayList[0])} danger />
+              ) : (
+                <HeroStat label="Due Today" value={dueTodayCount} danger />
+              )}
+            </button>
+          ) : (
+            <HeroStat label="Due Today" value={dueTodayCount} danger={dueTodayCount > 0} />
+          )}
         </div>
       </section>
 

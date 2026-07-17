@@ -194,6 +194,7 @@ export function TicketListRow({
           name={ticket.assignee.name}
           avatar={ticket.assignee.avatar}
           projectSlug={ticket.projectSlug}
+          profileId={ticket.assigneeProfileId ?? undefined}
           nested
           className="rounded-full"
         >

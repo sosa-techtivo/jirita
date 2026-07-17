@@ -30,6 +30,7 @@ import {
   RecentActivityList,
   HERO_LABEL_CLASS,
   HERO_ACCENT_TEXT_CLASS,
+  SkeletonBlock,
 } from "@/components/dashboard-shared";
 import type { DashboardActivityEntry } from "@/components/dashboard-shared";
 
@@ -501,6 +502,15 @@ function AdminDashboard() {
   useEffect(() => {
     if (isDevFallback || !organization) return;
     let cancelled = false;
+    // Back to "loading" on every re-run too, not just the first mount —
+    // same real-data-refresh pattern Member's and Project Lead's own main
+    // effects already use (e.g. project-lead-dashboard.tsx), so this effect
+    // re-running (organization gets a new reference on every
+    // window-focus-regain revalidation in current-user-provider.tsx) shows
+    // the existing skeleton again instead of silently swapping data in the
+    // background with no visible refresh.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: same "clear before the async fetch below resolves" pattern used elsewhere in this app (e.g. member-profile-modal.tsx)
+    setLoadState("loading");
 
     (async () => {
       const ticketsResult = await loadOrganizationTickets(organization.id);
@@ -902,9 +912,101 @@ function AdminDashboard() {
   if (loadState === "loading") {
     return (
       <div className="max-w-6xl mx-auto px-6 py-8 pb-16">
-        <div className="h-full flex items-center justify-center text-sm text-slate-400 dark:text-zinc-500 py-20">
-          Loading dashboard…
+
+        {/* ── Header (skeleton) ────────────────────────────────────────────── */}
+        <div className="flex items-start justify-between gap-6 mb-6">
+          <div>
+            <SkeletonBlock className="h-[22px] w-52 mb-1" />
+            <SkeletonBlock className="h-[14px] w-32" />
+          </div>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <SkeletonBlock className="h-8 w-32" />
+            <SkeletonBlock className="h-8 w-28" />
+            <SkeletonBlock className="h-8 w-28" />
+          </div>
         </div>
+
+        {/* ── KPI Cards (skeleton) ─────────────────────────────────────────── */}
+        <SkeletonBlock className="h-[10px] w-36 mb-2" />
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+          {[0, 1, 2, 3].map((i) => (
+            <div key={i} className="h-full flex flex-col rounded-xl border border-slate-200 dark:border-zinc-700/70 shadow-sm shadow-slate-200/40 dark:shadow-black/20 px-5 pt-4 pb-4">
+              <SkeletonBlock className="h-[10px] w-24 mb-1" />
+              <SkeletonBlock className="h-6 w-16 mb-1" />
+              <SkeletonBlock className="h-3 w-20" />
+            </div>
+          ))}
+        </div>
+
+        {/* ── Insights band (skeleton) ─────────────────────────────────────── */}
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-xl border border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900 px-4 py-3 shadow-sm shadow-slate-200/40 dark:shadow-black/20">
+          {[0, 1, 2].map((i) => (
+            <SkeletonBlock key={i} className="h-3 w-40" />
+          ))}
+        </div>
+
+        {/* ── Two-column main content (skeleton) ───────────────────────────── */}
+        <div className="mt-5 grid grid-cols-1 xl:grid-cols-[1fr_320px] gap-5">
+
+          <div className="space-y-5 min-w-0">
+            <section className="rounded-xl border border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900 p-5 shadow-sm shadow-slate-200/40 dark:shadow-black/20">
+              <SkeletonBlock className="h-[10px] w-28 mb-4" />
+              <div className="space-y-2">
+                {[0, 1, 2].map((i) => (
+                  <SkeletonBlock key={i} className="h-4 w-full" />
+                ))}
+              </div>
+            </section>
+
+            <section className="rounded-xl border border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900 p-5 shadow-sm shadow-slate-200/40 dark:shadow-black/20">
+              <SkeletonBlock className="h-[10px] w-28 mb-4" />
+              <div className="space-y-3">
+                {[0, 1, 2].map((i) => (
+                  <div key={i} className="flex items-center gap-3">
+                    <SkeletonBlock className="h-7 w-7 rounded-full flex-shrink-0" />
+                    <SkeletonBlock className="h-4 flex-1" />
+                  </div>
+                ))}
+              </div>
+            </section>
+          </div>
+
+          <div className="space-y-5">
+            <section className="rounded-xl border border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900 p-5 shadow-sm shadow-slate-200/40 dark:shadow-black/20">
+              <SkeletonBlock className="h-[10px] w-24 mb-4" />
+              <div className="space-y-4">
+                {[0, 1, 2].map((i) => (
+                  <div key={i}>
+                    <SkeletonBlock className="h-4 w-3/4 mb-1.5" />
+                    <SkeletonBlock className="h-1 w-full" />
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            <section className="rounded-xl border border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900 p-5 shadow-sm shadow-slate-200/40 dark:shadow-black/20">
+              <SkeletonBlock className="h-[10px] w-28 mb-4" />
+              <div className="space-y-3">
+                {[0, 1, 2].map((i) => (
+                  <div key={i} className="flex items-center gap-3">
+                    <SkeletonBlock className="h-6 w-6 rounded-full flex-shrink-0" />
+                    <SkeletonBlock className="h-4 flex-1" />
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            <section className="rounded-xl border border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900 p-5 shadow-sm shadow-slate-200/40 dark:shadow-black/20">
+              <SkeletonBlock className="h-[10px] w-32 mb-4" />
+              <div className="space-y-2">
+                {[0, 1, 2].map((i) => (
+                  <SkeletonBlock key={i} className="h-4 w-full" />
+                ))}
+              </div>
+            </section>
+          </div>
+        </div>
+
       </div>
     );
   }

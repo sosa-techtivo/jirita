@@ -21,6 +21,7 @@ import {
   HERO_LABEL_CLASS,
   HERO_ACCENT_TEXT_CLASS,
   HERO_BORDER_CLASS,
+  SkeletonBlock,
 } from "@/components/dashboard-shared";
 import type { DashboardActivityEntry } from "@/components/dashboard-shared";
 import {
@@ -371,11 +372,11 @@ export function ProjectLeadDashboard() {
     if (isDevFallback || !organization || !activeSlug) return;
     let cancelled = false;
     // Back to "loading" on every project switch too, not just the first
-    // mount — the full-screen "Loading dashboard…" state below already
-    // exists and already gates every section on `deliveryLoadState`, so
-    // reusing it here is what keeps the previous project's tickets/team/
-    // hours/activity from ever staying on screen while the new project's
-    // real data is still in flight.
+    // mount — the full-screen skeleton state below already exists and
+    // already gates every section on `deliveryLoadState`, so reusing it
+    // here is what keeps the previous project's tickets/team/hours/activity
+    // from ever staying on screen while the new project's real data is
+    // still in flight.
     // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: same "clear before the async fetch below resolves" pattern used elsewhere in this app (e.g. member-profile-modal.tsx)
     setDeliveryLoadState("loading");
 
@@ -763,9 +764,110 @@ export function ProjectLeadDashboard() {
   if (loading) {
     return (
       <div className="max-w-6xl mx-auto px-6 py-8 pb-16">
-        <div className="h-full flex items-center justify-center text-sm text-slate-400 dark:text-zinc-500 py-20">
-          Loading dashboard…
+
+        {/* ── Header (skeleton) ────────────────────────────────────────────── */}
+        <div className="flex items-start justify-between gap-6 mb-6">
+          <div>
+            <SkeletonBlock className="h-[22px] w-52 mb-1" />
+            <SkeletonBlock className="h-[14px] w-32" />
+          </div>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <SkeletonBlock className="h-8 w-28" />
+            <SkeletonBlock className="h-8 w-24" />
+            <SkeletonBlock className="h-8 w-24" />
+          </div>
         </div>
+
+        {/* ── Section 1: Delivery Health (hero, skeleton) ─────────────────── */}
+        <section className={`${HERO_CARD_CLASS} p-6 sm:p-7 mb-5`}>
+          <div className="flex items-start justify-between gap-4 mb-5">
+            <div>
+              <SkeletonBlock className="h-[11px] w-28 mb-2" />
+              <SkeletonBlock className="h-6 w-40" />
+            </div>
+            <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
+              <SkeletonBlock className="h-[10px] w-16" />
+              <SkeletonBlock className="h-4 w-20" />
+            </div>
+          </div>
+          <div className="flex flex-col lg:flex-row lg:items-center gap-6">
+            <div className="flex-shrink-0">
+              <SkeletonBlock className="h-12 w-24 mb-3" />
+              <SkeletonBlock className={`w-full sm:w-56 h-2 ${HERO_BORDER_CLASS}`} />
+            </div>
+            <div className={`flex-1 grid grid-cols-2 sm:grid-cols-3 gap-4 lg:pl-6 lg:border-l ${HERO_BORDER_CLASS}`}>
+              {[0, 1, 2].map((i) => (
+                <div key={i}>
+                  <SkeletonBlock className="h-[10px] w-24 mb-1" />
+                  <SkeletonBlock className="h-5 w-14" />
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        {/* ── Section 2: Attention Required (skeleton) ────────────────────── */}
+        <SkeletonBlock className="h-[10px] w-32 mb-2" />
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+          {[0, 1, 2, 3].map((i) => (
+            <div key={i} className="rounded-xl border border-slate-200 dark:border-zinc-700/70 p-4">
+              <div className="flex items-center justify-between mb-2">
+                <SkeletonBlock className="h-4 w-4 rounded-full" />
+              </div>
+              <SkeletonBlock className="h-6 w-10 mb-1.5" />
+              <SkeletonBlock className="h-3 w-20" />
+            </div>
+          ))}
+        </div>
+
+        {/* ── Section 3: Team Capacity (skeleton) ─────────────────────────── */}
+        <section className="rounded-xl border border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900 p-5 shadow-sm shadow-slate-200/40 dark:shadow-black/20">
+          <SkeletonBlock className="h-[10px] w-28 mb-4" />
+          <div className="space-y-3">
+            {[0, 1, 2].map((i) => (
+              <div key={i} className="flex items-center gap-3 py-0.5">
+                <SkeletonBlock className="h-8 w-8 rounded-full flex-shrink-0" />
+                <SkeletonBlock className="h-4 flex-1" />
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <div className="mt-5 space-y-5">
+          {/* ── Section 4: Project Work (skeleton) ────────────────────────── */}
+          <section className="rounded-xl border border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900 p-5 shadow-sm shadow-slate-200/40 dark:shadow-black/20">
+            <SkeletonBlock className="h-[10px] w-24 mb-4" />
+            <div className="space-y-2">
+              {[0, 1, 2].map((i) => (
+                <SkeletonBlock key={i} className="h-4 w-full" />
+              ))}
+            </div>
+          </section>
+
+          {/* ── Section 5: Recent Activity (skeleton) ─────────────────────── */}
+          <section className="rounded-xl border border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900 p-5 shadow-sm shadow-slate-200/40 dark:shadow-black/20">
+            <SkeletonBlock className="h-[10px] w-28 mb-4" />
+            <div className="space-y-3">
+              {[0, 1, 2].map((i) => (
+                <div key={i} className="flex items-center gap-3">
+                  <SkeletonBlock className="h-7 w-7 rounded-full flex-shrink-0" />
+                  <SkeletonBlock className="h-4 flex-1" />
+                </div>
+              ))}
+            </div>
+          </section>
+
+          {/* ── Section 6: Upcoming Deadlines (skeleton) ──────────────────── */}
+          <section className="rounded-xl border border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900 p-5 shadow-sm shadow-slate-200/40 dark:shadow-black/20">
+            <SkeletonBlock className="h-[10px] w-32 mb-4" />
+            <div className="space-y-2">
+              {[0, 1, 2].map((i) => (
+                <SkeletonBlock key={i} className="h-4 w-full" />
+              ))}
+            </div>
+          </section>
+        </div>
+
       </div>
     );
   }

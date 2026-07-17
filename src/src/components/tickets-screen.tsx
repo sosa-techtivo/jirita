@@ -175,7 +175,15 @@ export function TicketsScreen({ slug, projectName }: { slug?: string; projectNam
   // Controlled here (not local to FilterBar) so they can be combined with
   // the quick-filter chips below in one shared filteredTickets — see
   // filter-bar.tsx's own comment on why these are now props, not state.
-  const [assigned, setAssigned] = useState<string[]>([]);
+  // Seeded from `?assignee=me` (same real-URL-state handoff `?alerts=`
+  // already uses) so a dashboard KPI can deep-link straight to "my
+  // tickets" with the existing Assigned filter already applied and visible
+  // (the FilterDropdown button itself relabels to "Assigned: Me") — the
+  // only recognized value is the literal sentinel "me" (matches `isMine`
+  // below); any other `?assignee=` value is left unhandled here.
+  const [assigned, setAssigned] = useState<string[]>(
+    () => (searchParams.get("assignee") === "me" ? ["me"] : [])
+  );
   const [priority, setPriority] = useState<string[]>([]);
   const [status,   setStatus]   = useState<string[]>([]);
   // "Add Filter" filters — activeAddFilters tracks which chips are showing
