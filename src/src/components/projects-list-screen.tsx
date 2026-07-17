@@ -305,7 +305,14 @@ function ManagedProjectsScreen() {
   const canCreateProject = canManage(user.role);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string[]>([]);
-  const [healthFilter, setHealthFilter] = useState<string[]>([]);
+  // Real URL query-state handoff from the Project Lead Reports' own
+  // "Project Health" alert (2+ real projects in one Health tier) — seeded
+  // once on mount into this same Health filter dropdown below, same
+  // `?param=` URL-as-source-of-truth precedent as `?blocked=` just below.
+  const [healthFilter, setHealthFilter] = useState<string[]>(() => {
+    const health = searchParams.get("health");
+    return health && HEALTH_ORDER.includes(health as ProjectHealth) ? [health] : [];
+  });
   const [leadFilter, setLeadFilter] = useState<string[]>([]);
   const [sortBy, setSortBy] = useState<string[]>([]);
   const [showCreateModal, setShowCreateModal] = useState(false);

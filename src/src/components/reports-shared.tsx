@@ -11,6 +11,22 @@ export interface StatusItem {
   id: string;
   level: "warning" | "critical" | "ok";
   text: string;
+  /** Real navigation handler for the whole item (e.g. "N team members over
+   *  capacity", "N tickets blocked") — when present, the item's text becomes
+   *  a clickable surface instead of plain text. Ignored when `segments` is
+   *  set. */
+  onClick?: () => void;
+  /** Independent clickable pieces within one item (e.g. Project Health's
+   *  Healthy / Needs Attention / Critical counts) — each piece navigates on
+   *  its own; a piece with no `onClick` (its count is zero) renders as plain
+   *  text. Takes precedence over `text`/`onClick` when present. */
+  segments?: StatusItemSegment[];
+}
+
+export interface StatusItemSegment {
+  key: string;
+  label: string;
+  onClick?: () => void;
 }
 
 const STATUS_ICON: Record<StatusItem["level"], ReactNode> = {
@@ -52,9 +68,34 @@ export function ReportStatusBar({ items }: { items: StatusItem[] }) {
           )}
           <div className="flex items-center gap-1.5">
             {STATUS_ICON[item.level]}
-            <span className={`text-[13px] font-medium whitespace-nowrap ${STATUS_TEXT[item.level]}`}>
-              {item.text}
-            </span>
+            {item.segments ? (
+              <span className={`text-[13px] font-medium whitespace-nowrap ${STATUS_TEXT[item.level]}`}>
+                {item.segments.map((segment, si) => (
+                  <Fragment key={segment.key}>
+                    {si > 0 && <span aria-hidden> · </span>}
+                    {segment.onClick ? (
+                      <button type="button" onClick={segment.onClick} className="bg-transparent border-0 p-0 m-0 font-medium">
+                        {segment.label}
+                      </button>
+                    ) : (
+                      segment.label
+                    )}
+                  </Fragment>
+                ))}
+              </span>
+            ) : item.onClick ? (
+              <button
+                type="button"
+                onClick={item.onClick}
+                className={`text-[13px] font-medium whitespace-nowrap bg-transparent border-0 p-0 m-0 ${STATUS_TEXT[item.level]}`}
+              >
+                {item.text}
+              </button>
+            ) : (
+              <span className={`text-[13px] font-medium whitespace-nowrap ${STATUS_TEXT[item.level]}`}>
+                {item.text}
+              </span>
+            )}
           </div>
         </Fragment>
       ))}

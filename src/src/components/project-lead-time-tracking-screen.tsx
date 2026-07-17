@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { FilterDropdown } from "@/components/tickets/filter-dropdown";
 import type { DropdownGroup } from "@/components/tickets/filter-dropdown";
 import { KpiCard, Section } from "@/components/reports-shared";
+import { SkeletonBlock } from "@/components/dashboard-shared";
 import {
   PeriodSelector,
   StatusPill,
@@ -63,16 +64,22 @@ interface LedTeamMember {
 }
 
 // Merges a member's roster entries across every led project they're staffed
-// on — same "sum weeklyCapacity, concat project ids" convention already
-// established for cross-project merges in this app (see
-// project-lead-dashboard.tsx's own team-merge helper).
+// on. `weeklyCapacity` is a person's real total availability, not a
+// per-project allocation, so it's resolved to a single canonical value via
+// `Math.max` across their own already-resolved (project_memberships.weekly_capacity
+// ?? organization_memberships.weekly_capacity) per-project rows — the exact
+// same fallback/aggregation `loadMemberWeeklyCapacity`/
+// `loadOrganizationMemberWeeklyCapacities` (lib/projects.ts) already use for
+// this — never summed across the projects they're staffed on. `projectSlugs`
+// still concatenates every led project they're on (used for scoping, not
+// capacity).
 function mergeLedTeams(perProject: { slug: string; members: ProjectTeamMember[] }[]): LedTeamMember[] {
   const merged = new Map<string, LedTeamMember>();
   for (const { slug, members } of perProject) {
     for (const m of members) {
       const existing = merged.get(m.id);
       if (existing) {
-        existing.weeklyCapacity += m.weeklyCapacity;
+        existing.weeklyCapacity = Math.max(existing.weeklyCapacity, m.weeklyCapacity);
         existing.projectSlugs.push(slug);
       } else {
         merged.set(m.id, {
@@ -87,6 +94,20 @@ function mergeLedTeams(perProject: { slug: string; members: ProjectTeamMember[] 
     }
   }
   return Array.from(merged.values()).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+// Real page-header date — "Weekday, Month Day, Year", same real
+// getTodayISO()-based convention (and toLocaleDateString pattern) Project
+// Lead Reports' own header already uses, duplicated here as page-local glue
+// rather than importing a non-exported helper from that file. Always
+// today's real date — never the selected Period/Custom Range.
+function formatHeaderDate(todayISO: string): string {
+  return new Date(`${todayISO}T00:00:00`).toLocaleDateString("en-US", {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
 }
 
 interface LedTimesheetViewRow {
@@ -107,6 +128,142 @@ interface ProjectHoursRow {
   projectSlug: string;
   projectName: string;
   hours: number;
+}
+
+// ── Loading skeleton ──────────────────────────────────────────────────────────
+//
+// Mirrors this screen's own real layout (header, period selector, filter
+// bar, KPI strip, Timesheets table, Hours Missing/Hours by Project cards),
+// built from the same shared `SkeletonBlock` primitive the Admin/Project
+// Lead/Member Dashboards, Projects list, My Work, and Project Lead Reports
+// already use for their own loading states — never a second skeleton
+// pattern. Reuses the real `Section` container (with its own real title/
+// icon, same markup as the real render below) for each section, same as
+// Project Lead Reports' own loading state already does, so only the
+// still-loading numbers/rows are placeholders. Shown both on first load and
+// on every re-run of the data-loading effect below (e.g. returning to a
+// backgrounded browser tab), so real content never has to share the screen
+// with stale data mid-refresh.
+function ProjectLeadTimeTrackingLoadingSkeleton() {
+  return (
+    <div className="max-w-5xl mx-auto px-6 py-6 pb-16">
+      {/* Page header + period selector */}
+      <div className="flex items-start justify-between mb-5 gap-4">
+        <div>
+          <SkeletonBlock className="h-[21px] w-40 mb-1.5" />
+          <SkeletonBlock className="h-3 w-44" />
+        </div>
+        <SkeletonBlock className="h-8 w-64 rounded-lg flex-shrink-0" />
+      </div>
+
+      {/* Filters */}
+      <div className="flex items-center gap-1.5 flex-wrap mb-6 rounded-xl border border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900 px-4 py-2.5 shadow-sm shadow-slate-200/40 dark:shadow-black/20">
+        <SkeletonBlock className="h-[10px] w-10 mr-2" />
+        <SkeletonBlock className="h-7 w-20" />
+        <SkeletonBlock className="h-7 w-20" />
+        <SkeletonBlock className="h-7 w-16" />
+      </div>
+
+      {/* Overview KPIs */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-8">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <div
+            key={i}
+            className="rounded-xl border border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900 px-5 pt-4 pb-4 shadow-sm shadow-slate-200/40 dark:shadow-black/20"
+          >
+            <SkeletonBlock className="h-[10px] w-20 mb-2" />
+            <SkeletonBlock className="h-6 w-14 mb-1.5" />
+            <SkeletonBlock className="h-3 w-16" />
+          </div>
+        ))}
+      </div>
+
+      {/* Timesheets */}
+      <Section
+        title="Timesheets"
+        icon={
+          <svg className="w-3.5 h-3.5 text-slate-400 dark:text-zinc-500 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+            <circle cx="12" cy="12" r="9" />
+            <path d="M12 7v5l3 2" />
+          </svg>
+        }
+      >
+        <div className="overflow-x-auto -mx-5 px-5">
+          <table className="w-full text-sm min-w-[820px]">
+            <tbody className="divide-y divide-slate-50 dark:divide-zinc-800/60">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <tr key={i}>
+                  <td className="py-2.5 pr-4">
+                    <div className="flex items-center gap-2.5">
+                      <SkeletonBlock className="h-7 w-7 rounded-full flex-shrink-0" />
+                      <div className="min-w-0">
+                        <SkeletonBlock className="h-4 w-28 mb-1" />
+                        <SkeletonBlock className="h-3 w-16" />
+                      </div>
+                    </div>
+                  </td>
+                  <td className="py-2.5 text-right"><SkeletonBlock className="h-4 w-10 ml-auto" /></td>
+                  <td className="py-2.5 text-right"><SkeletonBlock className="h-4 w-10 ml-auto" /></td>
+                  <td className="py-2.5 text-right"><SkeletonBlock className="h-4 w-10 ml-auto" /></td>
+                  <td className="py-2.5 pl-4 text-right"><SkeletonBlock className="h-4 w-12 ml-auto" /></td>
+                  <td className="py-2.5 pl-4 text-right"><SkeletonBlock className="h-5 w-16 ml-auto rounded-full" /></td>
+                  <td className="py-2.5 pl-4 text-right"><SkeletonBlock className="h-4 w-10 ml-auto" /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Section>
+
+      {/* Action cards */}
+      <div className="grid md:grid-cols-2 gap-5 mt-6">
+        <Section
+          title="Hours Missing"
+          icon={
+            <svg className="w-3.5 h-3.5 text-slate-400 dark:text-zinc-500 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+            </svg>
+          }
+        >
+          <div>
+            {Array.from({ length: 3 }).map((_, i) => (
+              <div key={i} className="flex items-center justify-between gap-2 py-2 border-b border-slate-100 dark:border-zinc-800/70 last:border-0">
+                <div className="flex items-center gap-2 min-w-0">
+                  <SkeletonBlock className="h-6 w-6 rounded-full flex-shrink-0" />
+                  <div className="min-w-0">
+                    <SkeletonBlock className="h-3.5 w-24 mb-1" />
+                    <SkeletonBlock className="h-3 w-16" />
+                  </div>
+                </div>
+                <SkeletonBlock className="h-3 w-14 flex-shrink-0" />
+              </div>
+            ))}
+          </div>
+        </Section>
+
+        <Section
+          title="Hours by Project"
+          icon={
+            <svg className="w-3.5 h-3.5 text-slate-400 dark:text-zinc-500 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
+            </svg>
+          }
+        >
+          <div>
+            {Array.from({ length: 3 }).map((_, i) => (
+              <div key={i} className="flex items-center justify-between gap-2 py-2 border-b border-slate-100 dark:border-zinc-800/70 last:border-0">
+                <SkeletonBlock className="h-3.5 w-32" />
+                <div className="text-right flex-shrink-0">
+                  <SkeletonBlock className="h-3.5 w-10 mb-1 ml-auto" />
+                  <SkeletonBlock className="h-3 w-16 ml-auto" />
+                </div>
+              </div>
+            ))}
+          </div>
+        </Section>
+      </div>
+    </div>
+  );
 }
 
 export function ProjectLeadTimeTrackingScreen() {
@@ -301,6 +458,25 @@ export function ProjectLeadTimeTrackingScreen() {
     return ids;
   }, [rawTickets, projectBySlug, projectFilter, clientFilter]);
 
+  // Real assigned workload per member — the same official "over capacity"
+  // numerator Team/Reports/Dashboards/Projects/Member Profile Modal already
+  // share (active, non-`done` tickets' own real `hours` estimate, summed by
+  // `assigneeProfileId`), reused verbatim here off the exact same `rawTickets`
+  // already loaded — never a second query, never timesheet-logged hours.
+  // Scoped by the same Project/Client `scopedTicketIds` every other widget
+  // on this page already narrows by, so selecting a Project limits this to
+  // that project's own assigned work while each member's own canonical
+  // weekly capacity (see `capacityByMember` below) stays unchanged.
+  const assignedHoursByMember = useMemo(() => {
+    const assigned = new Map<string, number>();
+    for (const t of rawTickets) {
+      if (t.status === "done" || !t.assigneeProfileId) continue;
+      if (!scopedTicketIds.has(t.id)) continue;
+      assigned.set(t.assigneeProfileId, (assigned.get(t.assigneeProfileId) ?? 0) + (t.hours ?? 0));
+    }
+    return assigned;
+  }, [rawTickets, scopedTicketIds]);
+
   const scopedToday = useMemo(() => scopeEntries(entriesToday, scopedTicketIds, memberFilter), [entriesToday, scopedTicketIds, memberFilter]);
   const scopedWeek = useMemo(() => scopeEntries(entriesWeek, scopedTicketIds, memberFilter), [entriesWeek, scopedTicketIds, memberFilter]);
   const scopedMonth = useMemo(() => scopeEntries(entriesMonth, scopedTicketIds, memberFilter), [entriesMonth, scopedTicketIds, memberFilter]);
@@ -322,12 +498,25 @@ export function ProjectLeadTimeTrackingScreen() {
 
   // Reused verbatim from Reports → Finance (via the real Admin Time Tracking
   // screen's own import of it) — project category is the only billability
-  // signal, never re-derived here. Labeled "Logged"/"Internal" below instead
-  // of "Billable"/"Non-Billable" (same split, delivery-framed wording, no
-  // dollar amounts shown anywhere on this page).
+  // signal, never re-derived here. Only its `nonBillableHours` half feeds
+  // "Internal Hours" below; "Logged Hours" is its own real total (see
+  // `totalLoggedHours` below), never this function's `billableHours`, since
+  // that half silently excludes internal-category projects (e.g. JIRITA
+  // Live) — this function's own billable/non-billable split stays exactly
+  // as Admin Reports/Time Tracking already rely on it, untouched.
   const financeSummary = useMemo(
     () => buildFinanceKpiSummary(rawTickets, rawProjects, entriesForSelectedPeriod),
     [rawTickets, rawProjects, entriesForSelectedPeriod]
+  );
+
+  // "Logged Hours" — the real total hours logged this period across every
+  // project in scope (client + internal alike), summed directly off the
+  // exact same `entriesForSelectedPeriod` collection "Hours by Project"
+  // below already reads from — never buildFinanceKpiSummary's billable-only
+  // half, and never a second/duplicate query.
+  const totalLoggedHours = useMemo(
+    () => round1(entriesForSelectedPeriod.reduce((sum, e) => sum + e.minutes, 0) / 60),
+    [entriesForSelectedPeriod]
   );
 
   const viewRows = useMemo<LedTimesheetViewRow[]>(() => {
@@ -342,7 +531,14 @@ export function ProjectLeadTimeTrackingScreen() {
         hoursWeek;
 
       const weeklyCapacity = capacityByMember.get(m.id) ?? 0;
-      const capacityPct = weeklyCapacity > 0 ? Math.round((hoursWeek / weeklyCapacity) * 100) : 0;
+      // "Capacity" — workload risk, not timesheet compliance: same official
+      // assigned-hours-over-capacity definition as Team/Reports/Dashboards/
+      // Projects/Member Profile Modal (assignedHoursByMember above), never
+      // hours actually logged — this feeds both this row's own Capacity
+      // column and "Capacity Risk" below (overCapacityCount), so neither can
+      // disagree with the Member Profile Modal opened from this same row.
+      const assignedHours = assignedHoursByMember.get(m.id) ?? 0;
+      const capacityPct = weeklyCapacity > 0 ? Math.round((assignedHours / weeklyCapacity) * 100) : 0;
       const expected = expectedHoursForPeriod(weeklyCapacity, period, customRange);
       const status: TimesheetStatus = hoursSelected + 0.01 < expected ? "Missing" : "Complete";
 
@@ -351,7 +547,11 @@ export function ProjectLeadTimeTrackingScreen() {
         name: m.name,
         avatar: m.avatar,
         role: m.role,
-        projectSlug: m.projectSlugs[0],
+        // Same "exactly one led project → its slug, otherwise no scope"
+        // convention project-lead-reports-screen.tsx's own Member Profile
+        // Modal triggers already use, rather than arbitrarily picking the
+        // first of this member's own real projectSlugs.
+        projectSlug: m.projectSlugs.length === 1 ? m.projectSlugs[0] : undefined,
         hoursToday,
         hoursWeek,
         hoursMonth,
@@ -360,7 +560,7 @@ export function ProjectLeadTimeTrackingScreen() {
         status,
       };
     });
-  }, [visibleMembers, todayHours, weekHours, monthHours, customHours, capacityByMember, period, customRange]);
+  }, [visibleMembers, todayHours, weekHours, monthHours, customHours, capacityByMember, assignedHoursByMember, period, customRange]);
 
   const missingHours = useMemo(() => {
     return viewRows
@@ -372,6 +572,7 @@ export function ProjectLeadTimeTrackingScreen() {
           id: r.id,
           name: r.name,
           avatar: r.avatar,
+          projectSlug: r.projectSlug,
           periodLabel: periodDisplayLabel(period),
           missingHours: round1(Math.max(0, expected - r.hoursSelected)),
         };
@@ -389,6 +590,11 @@ export function ProjectLeadTimeTrackingScreen() {
     return totalCapacity > 0 ? Math.round((totalWeekHours / totalCapacity) * 100) : 0;
   }, [viewRows, capacityByMember]);
 
+  // "Capacity Risk" — count of distinct real profileIds whose assigned
+  // workload (r.capacityPct, computed above from assignedHoursByMember ÷
+  // each member's own canonical weeklyCapacity) exceeds 100%; `viewRows` is
+  // already deduped one row per profileId by `mergeLedTeams`, so no one is
+  // ever counted twice for being staffed on more than one led project.
   const overCapacityCount = useMemo(() => viewRows.filter((r) => r.capacityPct > 100).length, [viewRows]);
 
   const summary = {
@@ -442,13 +648,7 @@ export function ProjectLeadTimeTrackingScreen() {
   }, [rawProjects]);
 
   if (loadState === "loading") {
-    return (
-      <div className="max-w-5xl mx-auto px-6 py-6 pb-16">
-        <div className="h-full flex items-center justify-center text-sm text-slate-400 dark:text-zinc-500 py-20">
-          Loading time tracking…
-        </div>
-      </div>
-    );
+    return <ProjectLeadTimeTrackingLoadingSkeleton />;
   }
 
   if (loadState === "error") {
@@ -480,7 +680,7 @@ export function ProjectLeadTimeTrackingScreen() {
           <h1 className="text-xl font-bold text-slate-900 dark:text-zinc-50 tracking-tight leading-none">
             Time Tracking
           </h1>
-          <p className="text-xs text-slate-400 dark:text-zinc-500 mt-0.5">Wednesday, July 1, 2026</p>
+          <p className="text-xs text-slate-400 dark:text-zinc-500 mt-0.5">{formatHeaderDate(getTodayISO())}</p>
         </div>
         <PeriodSelector value={period} onChange={setPeriod} appliedRange={customRange} onApplyRange={setCustomRange} />
       </div>
@@ -497,7 +697,7 @@ export function ProjectLeadTimeTrackingScreen() {
 
       {/* ── Overview ─────────────────────────────────────────────────────── */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-8">
-        <KpiCard label="Logged Hours"       value={formatHours(summary.billableHours)}   sub={periodSubLabel(period, customRange)} accent />
+        <KpiCard label="Logged Hours"       value={formatHours(totalLoggedHours)}        sub={periodSubLabel(period, customRange)} accent />
         <KpiCard label="Internal Hours"     value={formatHours(summary.nonBillableHours)} sub={periodSubLabel(period, customRange)} />
         <KpiCard label="Hours Missing"      value={summary.hoursMissing}                  sub="team members" danger={summary.hoursMissing > 0} />
         <KpiCard label="Weekly Utilization" value={`${summary.weeklyUtilizationPct}%`}     sub="of capacity" />
@@ -576,6 +776,8 @@ export function ProjectLeadTimeTrackingScreen() {
                   <MemberTrigger
                     name={entry.name}
                     avatar={entry.avatar}
+                    profileId={entry.id}
+                    projectSlug={entry.projectSlug}
                     className="flex items-center gap-2 min-w-0"
                   >
                     {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -637,6 +839,7 @@ function TimesheetTableRow({ row }: { row: LedTimesheetViewRow }) {
           name={row.name}
           avatar={row.avatar}
           role={row.role}
+          profileId={row.id}
           projectSlug={row.projectSlug}
           className="flex items-center gap-2.5"
         >

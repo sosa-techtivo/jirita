@@ -9,7 +9,7 @@ import { MemberTrigger, useMemberProfile } from "@/components/member-profile";
 import { StatusBadge, HealthBadge } from "@/components/status-badge";
 import { ReportStatusBar, Section, KpiCard, BlockCompletion, AnimatedBar } from "@/components/reports-shared";
 import type { StatusItem } from "@/components/reports-shared";
-import { RecentActivityList } from "@/components/dashboard-shared";
+import { RecentActivityList, SkeletonBlock } from "@/components/dashboard-shared";
 import type { DashboardActivityEntry } from "@/components/dashboard-shared";
 import { FilterDropdown } from "@/components/tickets/filter-dropdown";
 import type { DropdownGroup } from "@/components/tickets/filter-dropdown";
@@ -263,6 +263,116 @@ const PulseIcon = (
     <path strokeLinecap="round" strokeLinejoin="round" d="M3 12h4l2-5 4 10 2-5h6" />
   </svg>
 );
+
+// ── Loading skeleton ──────────────────────────────────────────────────────────
+//
+// Mirrors this screen's own real Delivery-tab layout (header, tabs, KPI
+// strip, alerts banner, filter bar, Project Health/Upcoming Deadlines/Recent
+// Changes), built from the same shared `SkeletonBlock` primitive the
+// Admin/Project Lead/Member Dashboards, Projects list, and My Work already
+// use for their own loading states — never a second skeleton pattern.
+// Reuses the real `Section` container (with its real title/icon) for each
+// section below, same as Admin Reports' own loading state does, so only the
+// still-loading numbers/rows are placeholders. Shown both on first load and
+// on every re-run of the data-loading effect below (e.g. returning to a
+// backgrounded browser tab), so real content never has to share the screen
+// with stale data mid-refresh.
+function ProjectLeadReportsLoadingSkeleton() {
+  return (
+    <div className="max-w-5xl mx-auto px-6 py-6 pb-16">
+      {/* Page header */}
+      <div className="mb-3">
+        <SkeletonBlock className="h-[21px] w-24 mb-1.5" />
+        <SkeletonBlock className="h-3 w-40" />
+      </div>
+
+      {/* Tabs */}
+      <div className="mb-5">
+        <SkeletonBlock className="h-8 w-40 rounded-lg" />
+      </div>
+
+      {/* Top KPIs */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-8">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <div
+            key={i}
+            className="rounded-xl border border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900 px-5 pt-4 pb-4 shadow-sm shadow-slate-200/40 dark:shadow-black/20"
+          >
+            <SkeletonBlock className="h-[10px] w-16 mb-2" />
+            <SkeletonBlock className="h-6 w-10 mb-1.5" />
+            <SkeletonBlock className="h-3 w-14" />
+          </div>
+        ))}
+      </div>
+
+      {/* Alerts banner */}
+      <div className="mb-4">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-center gap-y-2 px-5 py-2.5 min-h-[44px] rounded-xl border border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900 shadow-sm shadow-slate-200/40 dark:shadow-black/20">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <SkeletonBlock key={i} className="h-3.5 w-32 mx-3" />
+          ))}
+        </div>
+      </div>
+
+      {/* Filters */}
+      <div className="flex items-center gap-1.5 flex-wrap mb-6 rounded-xl border border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900 px-4 py-2.5 shadow-sm shadow-slate-200/40 dark:shadow-black/20">
+        <SkeletonBlock className="h-[10px] w-10 mr-2" />
+        <SkeletonBlock className="h-7 w-20" />
+        <SkeletonBlock className="h-7 w-20" />
+        <SkeletonBlock className="h-7 w-16" />
+        <SkeletonBlock className="h-7 w-16" />
+      </div>
+
+      <div className="space-y-5">
+        {/* Project Health */}
+        <Section title="Project Health" icon={ProjectIcon}>
+          <div className="space-y-3">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <div key={i} className="flex items-center gap-3 py-1">
+                <SkeletonBlock className="h-6 w-6 rounded-md flex-shrink-0" />
+                <SkeletonBlock className="h-4 flex-1 max-w-[180px]" />
+                <SkeletonBlock className="h-5 w-16 rounded-full flex-shrink-0" />
+                <SkeletonBlock className="h-5 w-20 rounded-full flex-shrink-0" />
+                <SkeletonBlock className="h-4 w-8 flex-shrink-0" />
+                <SkeletonBlock className="h-4 w-20 flex-shrink-0" />
+              </div>
+            ))}
+          </div>
+        </Section>
+
+        {/* Upcoming Deadlines */}
+        <Section title="Upcoming Deadlines" icon={ClockIcon}>
+          <div className="space-y-2">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="flex items-center gap-2.5 py-1.5">
+                <SkeletonBlock className="h-1.5 w-1.5 rounded-full flex-shrink-0" />
+                <SkeletonBlock className="h-3.5 w-3.5 flex-shrink-0" />
+                <SkeletonBlock className="h-3.5 w-10 flex-shrink-0" />
+                <SkeletonBlock className="h-3.5 flex-1 max-w-[240px]" />
+                <SkeletonBlock className="h-3.5 w-14 flex-shrink-0" />
+              </div>
+            ))}
+          </div>
+        </Section>
+
+        {/* Recent Changes */}
+        <Section title="Recent Changes" icon={ClockIcon}>
+          <div className="space-y-3.5">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="flex items-start gap-3">
+                <SkeletonBlock className="h-6 w-6 rounded-full flex-shrink-0 mt-0.5" />
+                <div className="flex-1 min-w-0">
+                  <SkeletonBlock className="h-4 w-3/4 mb-1.5" />
+                  <SkeletonBlock className="h-3 w-1/3" />
+                </div>
+              </div>
+            ))}
+          </div>
+        </Section>
+      </div>
+    </div>
+  );
+}
 
 // ── Main component ────────────────────────────────────────────────────────────
 
@@ -595,8 +705,43 @@ export function ProjectLeadReportsScreen() {
     return { healthy, needsAttention, critical };
   }, [myProjects, healthRowsBySlug]);
 
+  // Real per-tier project slugs backing the "Project Health" alert's own
+  // navigation below — reuses the exact same `healthRowsBySlug`/
+  // RISK_TO_HEALTH already used for `healthCounts` above and for every
+  // project's own Health badge in the table below, just resolved down to
+  // each tier's real project slugs instead of a count; never a second/
+  // different definition of Health.
+  const projectSlugsByHealth = useMemo(() => {
+    const groups: Record<ProjectHealth, string[]> = { healthy: [], "needs-attention": [], critical: [] };
+    for (const p of myProjects) {
+      const risk = healthRowsBySlug.get(p.slug)?.risk ?? "on-track";
+      groups[RISK_TO_HEALTH[risk]].push(p.slug);
+    }
+    return groups;
+  }, [myProjects, healthRowsBySlug]);
+
+  // "Project Health" alert — each of the three states (Healthy/Needs
+  // Attention/Critical) navigates independently. Same real 0/1/2+ rule as
+  // every other navigable KPI/alert here: zero stays non-interactive; exactly
+  // one real project in that tier opens that project's own Project Overview
+  // directly (by its real slug); more than one hands off to the Projects
+  // module's own list with that tier's real `?health=` filter applied and
+  // visible (same query-state convention `?alerts=`/`?filter=` already use).
+  function handleProjectHealthClick(tier: ProjectHealth) {
+    const slugs = projectSlugsByHealth[tier];
+    if (slugs.length === 0) return;
+    if (slugs.length === 1) {
+      router.push(`/projects/${slugs[0]}`);
+      return;
+    }
+    router.push(`/projects?health=${tier}`);
+  }
+
   // ── Alerts banner — only real, calculable conditions: members over
-  //    capacity, blocked tickets, and the real Health split above. ────────
+  //    capacity, blocked tickets, and the real Health split above. Each
+  //    item reuses the exact same click-through logic/data as its own KPI
+  //    card above (handleTeamCapacityClick/handleBlockedTicketsClick) or the
+  //    real per-tier Health navigation just above — never a second rule. ──
   const statusItems = useMemo<StatusItem[]>(() => {
     const items: StatusItem[] = [];
     if (teamStats.overCapacityCount > 0) {
@@ -604,6 +749,7 @@ export function ProjectLeadReportsScreen() {
         id: "over-capacity",
         level: "warning",
         text: `${teamStats.overCapacityCount} team member${teamStats.overCapacityCount === 1 ? "" : "s"} over capacity`,
+        onClick: handleTeamCapacityClick,
       });
     }
     if (totalBlockedTickets > 0) {
@@ -611,14 +757,33 @@ export function ProjectLeadReportsScreen() {
         id: "blocked",
         level: "critical",
         text: `${totalBlockedTickets} ticket${totalBlockedTickets === 1 ? "" : "s"} blocked`,
+        onClick: handleBlockedTicketsClick,
       });
     }
     items.push({
       id: "health",
       level: healthCounts.critical > 0 ? "critical" : healthCounts.needsAttention > 0 ? "warning" : "ok",
       text: `${healthCounts.healthy} Healthy · ${healthCounts.needsAttention} Needs Attention · ${healthCounts.critical} Critical`,
+      segments: [
+        {
+          key: "healthy",
+          label: `${healthCounts.healthy} Healthy`,
+          onClick: healthCounts.healthy > 0 ? () => handleProjectHealthClick("healthy") : undefined,
+        },
+        {
+          key: "needs-attention",
+          label: `${healthCounts.needsAttention} Needs Attention`,
+          onClick: healthCounts.needsAttention > 0 ? () => handleProjectHealthClick("needs-attention") : undefined,
+        },
+        {
+          key: "critical",
+          label: `${healthCounts.critical} Critical`,
+          onClick: healthCounts.critical > 0 ? () => handleProjectHealthClick("critical") : undefined,
+        },
+      ],
     });
     return items.slice(0, 3);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- handleTeamCapacityClick/handleBlockedTicketsClick/handleProjectHealthClick close over teamStats/blockedTicketsList/projectSlugsByHealth (already listed) and are redefined every render; adding them here would only make this memo recompute unconditionally, same tradeoff already accepted for the KpiCard onClick props above.
   }, [teamStats.overCapacityCount, totalBlockedTickets, healthCounts]);
 
   // ── Filters (Delivery tab, cosmetic — mirrors the rest of Reports) —
@@ -682,13 +847,7 @@ export function ProjectLeadReportsScreen() {
   }
 
   if (loadState === "loading") {
-    return (
-      <div className="max-w-5xl mx-auto px-6 py-6 pb-16">
-        <div className="h-full flex items-center justify-center text-sm text-slate-400 dark:text-zinc-500 py-20">
-          Loading reports…
-        </div>
-      </div>
-    );
+    return <ProjectLeadReportsLoadingSkeleton />;
   }
 
   if (loadState === "error") {
@@ -829,7 +988,19 @@ export function ProjectLeadReportsScreen() {
                         const project = myProjects.find((p) => p.slug === row.id);
                         if (!project) return null;
                         return (
-                          <tr key={project.slug} className="hover:bg-slate-50/60 dark:hover:bg-zinc-800/30 transition-colors duration-150 cursor-default">
+                          <tr
+                            key={project.slug}
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => router.push(`/projects/${project.slug}`)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" || e.key === " ") {
+                                e.preventDefault();
+                                router.push(`/projects/${project.slug}`);
+                              }
+                            }}
+                            className="hover:bg-slate-50/60 dark:hover:bg-zinc-800/30 transition-colors duration-150 cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-500/40"
+                          >
                             <td className="py-2.5 pr-4">
                               <div className="flex items-center gap-2">
                                 <span className="w-6 h-6 rounded-md bg-slate-100 dark:bg-zinc-800 text-[9px] font-bold text-slate-500 dark:text-zinc-400 flex items-center justify-center flex-shrink-0">
@@ -872,7 +1043,19 @@ export function ProjectLeadReportsScreen() {
                   {upcomingDeadlines.map((ticket) => {
                     const isOverdue = Boolean(ticket.dueDate) && parseDisplayDate(ticket.dueDate as string) < todayISO;
                     return (
-                      <div key={ticket.id} className="flex items-center gap-2.5 py-1.5 px-2.5 -mx-2.5 rounded-lg">
+                      <div
+                        key={ticket.id}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => setPreview(ticket)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            setPreview(ticket);
+                          }
+                        }}
+                        className="flex items-center gap-2.5 py-1.5 px-2.5 -mx-2.5 rounded-lg cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-500/40"
+                      >
                         <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${isOverdue ? "bg-red-400" : "bg-slate-300 dark:bg-zinc-600"}`} />
                         <span className="flex-1 min-w-0 flex items-baseline gap-1.5">
                           <TicketTypeIcon type={ticket.type} />
