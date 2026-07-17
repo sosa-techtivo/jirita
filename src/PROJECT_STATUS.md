@@ -1,4 +1,4 @@
-> Last Updated: August 21, 2026
+> Last Updated: August 22, 2026
 
 ---
 
@@ -19,6 +19,8 @@ After that, the Admin Dashboard's own KPI cards (Assigned Tickets, Hours Burn, B
 After that, the Project Lead's own scoped Time Tracking view (`project-lead-time-tracking-screen.tsx`) became real — the last remaining fully-mock Time Tracking surface — scoped strictly to the projects this profile leads and reusing the Admin/Member screen's own real calculations/loaders (exported for this reuse) rather than a second implementation; see Current Sprint → Completed → Hours & Time Tracking → Project Lead. Separately, the Project Lead Dashboard's Current Delivery card (Completed Tickets, Remaining Work (renamed from "Remaining Hours"), Blocked Tickets) and its Attention Required cards (Blocked Tickets, Due Today, Over Capacity, Awaiting Review) all became real, independent click targets, following the same "0 → not clickable, 1 → open the Ticket Preview panel / Member Profile Modal directly, more than 1 → navigate to a filtered Tickets/Team view" pattern established by the Admin Dashboard's own KPI cards above — each reusing its own already-real source of truth, never a second query. A real, pre-existing bug was also found and fixed along the way: the Current Delivery card's "Target Date" had never actually read the real `projects.target_date` column (already being fetched, silently discarded) — it showed the nearest due date among the project's own open tickets instead, a different real field with a superficially similar value. `projects.target_date` is now also directly editable, via a new optional Target Date field on Project Settings' General section. All of the above is implemented and type/build-clean, not yet clicked through in a live browser — same "should work, not yet verified" status as everything else in this list.
 
 Most recently, the Member Dashboard's own Assigned Tickets and Due Today hero stats became real, independent click targets too, following the exact same "0 → not clickable, 1 → open the Ticket Preview panel directly, more than 1 → navigate to a filtered Tickets view" pattern already established above — reusing `activeWork`/the existing due-today filter, plus a real `?assignee=me` URL-driven initializer newly added to Tickets' own pre-existing "Assigned" filter (`tickets-screen.tsx`, previously FilterBar-only). Two real, pre-existing bugs in the shared Member Profile Modal were found and fixed along the way: `TicketListRow`'s assignee avatar (rendered by Member Dashboard's own "My Active Work" list, among others) never passed a real `profileId`, so a member's own active-work tickets resolved through the mock-name-matching fallback and showed 0 Active Tickets/Assigned Hours/Utilization instead of their real numbers — now fixed with the same real `profileId`-keyed fetch every other confirmed-real trigger already uses; separately, clicking "Expand" on a ticket opened *from inside* the Member Profile Modal navigated to the real Ticket Detail page but left both that inner ticket preview and the Member Profile Modal itself open on top of it (the modal's provider is mounted above the router and survives client-side navigation) — now closes both via its own already-existing local close callbacks. All three dashboards' loading states also gained a structural skeleton (a new shared `SkeletonBlock` primitive in `dashboard-shared.tsx`) in place of the old plain "Loading dashboard…" text, and a real bug found along the way — the Admin Dashboard's own data-loading effect never visibly reset to "loading" on a background refetch (e.g. after returning to a backgrounded browser tab, via `current-user-provider.tsx`'s existing focus-regain revalidation), unlike Project Lead's and Member's own effects — was fixed by applying that same existing reset there too. All of the above is implemented and type/build-clean, not yet clicked through in a live browser — same "should work, not yet verified" status as everything else in this list.
+
+Separately, the `/projects` list (Admin/Project Lead) had its own real Project Lead column/filter wired up — `ProjectSummary.lead` is now sourced from `project_memberships.project_role = 'lead'` (the same authoritative signal Team/the Dashboards already key off), not the older `owner_profile_id`-backed `ProjectSummary.owner` — reconciling a gap this file had been carrying since Project Settings' own "Project Lead" picker was removed. Most recently, a four-part pass unified the rest of that same list's remaining stale metrics onto real per-ticket data, then added a real tab-regain refresh for them: (1) the Health badge/filter and the "At Risk" KPI now read `buildProjectHealthRows`'s (`reports-screen.tsx`) real `risk`, never the stale, never-updated `projects.health` column, and the Admin Dashboard's own "Projects at Risk"/blocked-projects insight now reuses that exact same function instead of a second, duplicated blocked/overdue classification; (2) each row's progress bar/percentage reuses a new `computeProjectProgressPct` (also exported from `reports-screen.tsx`) — the same real done/total ticket-count formula Project Overview's own progress bar already used — instead of the always-`0` persisted `progress` field; (3) each row's Open/Blocked/Overdue counters read straight off that same `buildProjectHealthRows` result (extended with new `open`/`overdueOpen` fields alongside the pre-existing `blocked`) instead of the always-`0` persisted `openTickets`/`blockedTickets`/`overdueTickets` fields; (4) the list now refreshes all of the above on returning to a backgrounded browser tab, reusing the exact same mechanism the three Dashboards already rely on (`current-user-provider.tsx`'s existing window-focus-regain revalidation hands back a new `organization` reference, which this screen's own ticket-metrics effect already depended on — no new listener/polling added), and shows the same kind of `SkeletonBlock`-built structural skeleton the Dashboards already use (replacing the old plain "Loading projects…" text) both on first load and on every tab return. All of this is implemented and type/build-clean, not yet clicked through in a live browser — same "should work, not yet verified" status as everything else in this list.
 
 ---
 
@@ -109,7 +111,20 @@ Route: `/projects/[slug]/settings`, Admin/Project Lead only. Previously a fully 
 - A single **Save Changes** button (didn't exist before) persists only the fields this screen manages; the breadcrumb (`ProjectSettingsBreadcrumb`) reads the live project name from the same shared provider Sidebar/`/projects` use, so a rename shows up there immediately too
 - **+ Add new client** (`add-client-modal.tsx`): minimal name-only creation, backed by a new `clients` table (see Architecture Status) — created immediately and selected in the form; persisted to the project on the next Save like any other field. Basic per-organization duplicate names are rejected.
 - Danger Zone's Archive/Restore reuses `archive-project-modal.tsx`/`restoreProject` exactly as on the Projects list — no separate implementation
-- **Removed**: General's "Project Lead" picker (and the `loadOrganizationMembers` fetch that only existed to populate it) — it read/wrote the older `projects.owner_profile_id`, which is not the same field as Team's real `project_memberships.project_role` (see Team below, and Technical Debt for the resulting `owner_profile_id` boundary this leaves around `ProjectSummary.owner`, still used by the `/projects` list's Lead column/filter and Member's "My Projects"). Project Lead is now set exclusively via Team's "Make Project Lead" action.
+- **Removed**: General's "Project Lead" picker (and the `loadOrganizationMembers` fetch that only existed to populate it) — it read/wrote the older `projects.owner_profile_id`, which is not the same field as Team's real `project_memberships.project_role` (see Team below). Project Lead is now set exclusively via Team's "Make Project Lead" action. **Resolved**: the `/projects` list's own Lead column/filter has since been reconciled onto `project_memberships.project_role` too (see the new subsection below) — `ProjectSummary.owner`/`owner_profile_id` no longer has any Lead-column reader anywhere in the app (Member's "My Projects" was already on `project_role`; see Architecture Status → Projects).
+
+#### Health, Progress, Ticket Counters & Tab-Regain Refresh (real, Admin/Project Lead) — `projects-list-screen.tsx`
+
+The `/projects` list (`ManagedProjectsScreen`, Admin/Project Lead) previously showed several real-looking numbers that were actually always stale or `0` for real projects: the Health badge read the persisted `projects.health` column (never updated from the UI), the "At Risk" KPI duplicated its own blocked/overdue classification rather than reusing the one already established for the Admin Dashboard, and Progress/Open/Blocked/Overdue all read `ProjectSummary` fields (`progress`/`openTickets`/`blockedTickets`/`overdueTickets`) that the schema derives from `tickets` but nothing re-aggregates back onto `projects` rows — always `0`/`healthy` for a real project regardless of its actual tickets. A four-part pass fixed all of it, then added a real refresh so it can't go stale again on an open tab:
+
+- **Health/At Risk/Progress/Lead are now one real per-project computation**, reused everywhere they're shown on this screen (badge, Health filter, "At Risk" KPI) rather than parallel/duplicated rules:
+  - `buildProjectHealthRows` (`reports-screen.tsx`, already the Admin Dashboard's/per-project Reports'/Project Overview's own real health function) is called once per fetch, over every project's real tickets, and its `risk` (`"on-track"`/`"at-risk"`/`"blocked"`) is mapped onto the existing `ProjectHealth` badge vocabulary (`healthy`/`needs-attention`/`critical`). A project with no real tickets yet (the function's own "nothing to show" case) defaults to `healthy`, never a fabricated risk state.
+  - The Admin Dashboard's own "Projects at Risk" widget and its blocked-projects health insight (`dashboard-screen.tsx`) were refactored to call this exact same function too, replacing a second, locally-duplicated blocked-then-overdue classification — the two screens can no longer disagree about what counts as "at risk." (Each still separately computes its own row's `progressPct`/`affected`-ticket count for display, since those are presentation details `buildProjectHealthRows` doesn't return — not part of the classification rule itself.)
+  - `ProjectSummary.lead` (added ahead of this pass) is now sourced from `project_memberships.project_role = 'lead'` — the same real signal Team/the Dashboards already use — via a new batched query in `loadOrganizationProjects`, replacing the older `owner_profile_id`-backed Lead column/filter entirely.
+- **Progress reuses a new, exported `computeProjectProgressPct(tickets)`** (`reports-screen.tsx`) — the exact same real done/total ticket-count formula (rounded, `0%` with no tickets) Project Overview's own progress bar already used, so a project showing e.g. 17% on its own Project Overview shows the same 17% on this list, never a second/different calculation and never the always-`0` persisted `progress` column.
+- **Open/Blocked/Overdue reuse the same `buildProjectHealthRows` result** computed for Health above — the function gained two additional real fields, `open` (ticket count where `status !== "done"`, the same "open" definition Project Overview uses) and `overdueOpen` (open tickets whose due date is already past `todayISO`, the same clause the function already used internally for its own `risk`), alongside the pre-existing `blocked`. The list reads all three straight off that one result per project — no second pass over tickets, no more always-`0` `openTickets`/`blockedTickets`/`overdueTickets` fields.
+- **Real refresh on returning to the browser tab, with skeleton loaders** — `ManagedProjectsScreen` gained a `metricsStatus` state that resets to `"loading"` synchronously every time its ticket-fetch effect re-runs (same "reset before the async fetch resolves" pattern the Dashboards' own main effects already use). That effect already depended on `organization` (from `useCurrentUser()`), so it already re-fires whenever `current-user-provider.tsx`'s existing window `focus` listener revalidates the session on tab-regain and hands back a new `organization` reference — no new listener, no polling, nothing added while the tab stays hidden. While `metricsStatus` is `"loading"` (first load, and again on every tab return), the whole screen renders a new `ProjectsLoadingSkeleton` — built entirely from `dashboard-shared.tsx`'s existing `SkeletonBlock` primitive, matching the real header/Create Project button, KPI strip, search/filters, and row layout (both the Admin grid row and the Project Lead's stacked-block row) at approximately their real dimensions — replacing the old plain "Loading projects…" text loading state entirely.
+- Deliberately out of scope, unchanged: `awaitingReviewTickets`/`dueThisWeekTickets`/`activeMilestones` (still `0`/unpopulated for real projects — the Project Lead's own info chips/summary cells still read them), and the base project list itself (name/status/category/lead/target date, from `useOrganizationProjects()`) — its own provider-level refetch-on-focus already existed and is unaffected; only this screen's own ticket-derived metrics gained the visible loading/skeleton treatment.
 
 ### Project Overview
 
@@ -811,18 +826,16 @@ real now, but is unrelated to this one.)
   `project_memberships.project_role` (see Team below), set exclusively via
   Team's own "Make Project Lead" action. The `loadOrganizationMembers`
   fetch that only existed to populate this picker's roster was removed
-  along with it. Note this is a targeted removal, not a full migration off
-  `owner_profile_id`: `ProjectSummary.owner` (still `owner_profile_id`-
-  backed, per `loadOrganizationProjects` above) is what the `/projects`
-  list's own Lead column/filter still displays — that was untouched and
-  out of scope for this change, so `owner_profile_id` still has this one
-  remaining reader in the app, while Team's real `project_role` has its
-  own separate writer and is what Project Overview/Team/the Dashboards/
-  Member's "My Projects" already show as the lead (see the Member "My
-  Projects" bullet below — that screen was updated to read `project_role`
-  directly instead of `owner_profile_id`). Reconciling the `/projects`
-  list's own Lead column/filter onto `project_role` is the one remaining
-  piece of this — see Technical Debt.
+  along with it. **Resolved**: the `/projects` list's own Lead column/filter
+  has since been reconciled onto `project_role` too — `ProjectSummary.lead`
+  is now populated by a new batched `project_memberships` query in
+  `loadOrganizationProjects` (`project_role = 'lead'`, resolving to the same
+  `{id, name, avatar}` shape the rest of the app already uses for a person),
+  and the list's row/filter read that field instead of the older
+  `owner_profile_id`-backed `ProjectSummary.owner`. `owner_profile_id`
+  itself, and `updateProjectSettings`'s optional `ownerProfileId` param, are
+  both left in place (no schema change, no other caller removed) — they
+  simply have no remaining Lead-column reader anywhere in the app now.
 - `src/components/settings-ui.tsx` — `SelectField`/`TextField`/
   `NumberField` gained an optional `onChange` (`SelectField` also gained
   `options`) to become real controlled inputs; every existing call site
@@ -855,15 +868,44 @@ real now, but is unrelated to this one.)
 - **Real, URL-applied `?blocked=<slug,slug,...>` filter on `ManagedProjectsScreen`
   (`/projects`, Admin/Project Lead)** — backs the Admin Dashboard's own
   "projects currently blocked" health-insight click-through (see the
-  Dashboard section above): a project's `blockedTickets` column isn't
-  populated for real data (a derived-from-tickets field nothing
-  re-aggregates yet), so this couldn't reuse the existing Status/Health/
-  Priority filters — the Dashboard instead hands off the exact real project
-  slugs it already computed from real tickets, same query-state-handoff
-  precedent as Tickets' own `?alerts=`. Shown as a real, removable
-  `FilterChip` (reusing `tickets/filter-chip.tsx`, never a new chip design)
-  when active; combines via AND with every other existing filter.
-  `app/projects/page.tsx` is now wrapped in `<Suspense>` for this reason.
+  Dashboard section above): rather than have the Projects list re-derive
+  "which projects are blocked" itself, the Dashboard hands off the exact
+  real project slugs it already computed from real tickets, same
+  query-state-handoff precedent as Tickets' own `?alerts=`. Shown as a real,
+  removable `FilterChip` (reusing `tickets/filter-chip.tsx`, never a new
+  chip design) when active; combines via AND with every other existing
+  filter. `app/projects/page.tsx` is now wrapped in `<Suspense>` for this
+  reason. (This remains a precise slug handoff, not a stand-in for a
+  missing count — see the Health/Progress/Counters bullet below for the
+  list's own now-real per-row blocked count.)
+- **Health, Progress, Open/Blocked/Overdue are now real per-row values on
+  `ManagedProjectsScreen`, one shared computation** (previously the Health
+  badge/filter read the stale, never-updated `projects.health` column, and
+  Progress/Open/Blocked/Overdue all read always-`0` `ProjectSummary` fields
+  — see Current Sprint → Completed → Projects → "Health, Progress, Ticket
+  Counters & Tab-Regain Refresh" above for the full detail):
+  - Health badge, the Health filter, and the "At Risk" KPI all read
+    `buildProjectHealthRows`'s (`reports-screen.tsx`) real `risk`, computed
+    once per fetch over every project's real tickets — never `projects.health`.
+  - The Admin Dashboard's own "Projects at Risk"/blocked-projects insight
+    (`dashboard-screen.tsx`) now calls this exact same function too, instead
+    of a second, locally-duplicated blocked/overdue classification.
+  - Each row's Progress reuses a new, exported `computeProjectProgressPct`
+    (`reports-screen.tsx`) — the same real done/total ticket-count formula
+    Project Overview's own progress bar already used.
+  - Each row's Open/Blocked/Overdue counters read straight off that same
+    `buildProjectHealthRows` result (extended with two new fields, `open`
+    and `overdueOpen`, alongside the pre-existing `blocked`) — no second
+    pass over tickets, no more always-`0` `openTickets`/`blockedTickets`/
+    `overdueTickets`.
+  - The screen now also refreshes all of the above on returning to a
+    backgrounded browser tab (reusing the Dashboards' own existing
+    focus-regain mechanism — no new listener/polling) and shows a new
+    `SkeletonBlock`-built `ProjectsLoadingSkeleton` in place of the old
+    plain "Loading projects…" text, both on first load and on every tab
+    return.
+  - `awaitingReviewTickets`/`dueThisWeekTickets`/`activeMilestones` remain
+    out of scope — still always `0`/unpopulated for real projects.
 - Migrations (in addition to the ones above, all confirmed against the
   live project): `20260712000000_grant_authenticated_projects_read.sql`,
   `20260713000000_grant_authenticated_projects_insert.sql`,
@@ -1385,7 +1427,16 @@ way).
   - **Projects at Risk** — each row (name, risk badge, progress bar,
     percentage, affected-ticket text) is one single `<Link>` to
     `/projects/<slug>` (the project's own real slug) — no per-element
-    links. "Full report →" is unchanged, still `/reports`.
+    links. "Full report →" is unchanged, still `/reports`. **Resolved**:
+    this widget's own risk classification (and the blocked-projects health
+    insight above it) now reuses `buildProjectHealthRows` (`reports-screen.tsx`,
+    via a shared `healthRowsBySlug`) instead of a second, locally-duplicated
+    blocked-then-overdue calculation — the same real rule the Projects
+    list's own Health badge/filter/"At Risk" KPI now reuse too (see Current
+    Sprint → Completed → Projects and the Projects Architecture Status
+    entry above). Each row's own `progressPct`/affected-ticket count are
+    still computed locally, since those are display details the shared
+    function doesn't return.
 - **New global, org-wide Tickets view — `/tickets`** (`app/tickets/page.tsx`,
   no route param) — built to give the "All Projects" scope's own multi-project
   click-throughs above a real destination, since `/projects/[slug]/tickets`
@@ -1684,14 +1735,19 @@ navigation. No new migrations.
   code exists yet.
 
 Note also that Projects' own real rows still don't populate
-`openTickets`/`blockedTickets`/`overdueTickets`/`awaitingReviewTickets`/
-`dueThisWeekTickets`/`activeMilestones` — those are derived from `tickets`
-by design and default to 0 on the Projects list/Project Settings screens,
-since nothing yet re-aggregates those derived fields back onto the
-`projects` rows (see `docs/SUPABASE_MVP_SCHEMA.md`); the Admin Project
-Overview and per-project Reports both work around this by computing
-Progress/KPIs directly from real tickets at read time instead of relying
-on those stored-but-unpopulated fields.
+`openTickets`/`blockedTickets`/`overdueTickets`/`progress`/
+`awaitingReviewTickets`/`dueThisWeekTickets`/`activeMilestones` — those are
+derived from `tickets` by design and default to `0`/`healthy` on the
+`projects` table itself, since nothing re-aggregates those derived fields
+back onto the row (see `docs/SUPABASE_MVP_SCHEMA.md`). The Admin Project
+Overview, per-project Reports, **and, since this pass, the `/projects` list
+itself** all work around this the same way — computing Health/Progress/Open/
+Blocked/Overdue directly from real tickets at read time (via
+`buildProjectHealthRows`/`computeProjectProgressPct`, see Current Sprint →
+Completed → Projects) instead of relying on those stored-but-unpopulated
+fields. Only `awaitingReviewTickets`/`dueThisWeekTickets`/`activeMilestones`
+remain genuinely unpopulated/`0` anywhere in the app — still read by the
+Projects list's own Project Lead info chips/summary cells.
 
 ---
 
@@ -1810,7 +1866,7 @@ Current known items:
 - Role now comes from a real `organization_membership` when one exists; `current-user.ts`'s mock identities are a dev-only fallback (never in production) rather than the only source of truth. **Resolved**: the `RoleSwitcher` is now gated behind `isDevFallback` (only renders, with a visible "Dev fallback" badge, when there's no real membership) instead of always showing. No real server-side permission enforcement is wired into the UI yet for projects/tickets/etc. — the RLS policies in `supabase/migrations/20260708000000_mvp_schema.sql` are applied and enforce tenant isolation at the DB layer, but the UI doesn't call any of those tables yet.
 - **Resolved**: Note "Duplicate" and "Delete" menu actions in `NoteDetailModal` are now real (`duplicateNote`/`deleteNote`), no longer visual stubs — see Current Sprint → Completed → Project Notes.
 - In dev fallback only (no real organization membership — never in production): the Projects list no longer filters by the old `LEAD_PROJECT_SLUGS` array (removed since real data is scoped by RLS instead), so a Project Lead testing without a seeded Supabase project now sees the full mock projects list rather than just their 3 owned slugs, while the summary cells (Blocked Tickets, Due This Week, Team Members Over Capacity) still compute against the `LEAD_PROJECT_SLUGS`-scoped team aggregation — a minor mismatch specific to unauthenticated/dev-fallback local testing, not the real-org path.
-- Projects' real rows don't populate ticket-derived fields (`openTickets`, `blockedTickets`, `overdueTickets`, `awaitingReviewTickets`, `dueThisWeekTickets`, `progress`, `activeMilestones`) — by schema design these are derived from `tickets` and default to 0, and nothing yet re-aggregates them back onto the `projects` rows even though Tickets itself is now real (see `docs/SUPABASE_MVP_SCHEMA.md`), so the Projects list currently shows 0/empty progress bars for real projects on those specific fields.
+- **Resolved for Health/Progress/Open/Blocked/Overdue**: `projects.health`/`ProjectSummary.progress`/`openTickets`/`blockedTickets`/`overdueTickets` are still never re-aggregated onto the `projects` row itself (by schema design — see `docs/SUPABASE_MVP_SCHEMA.md`), but the `/projects` list no longer reads any of them: it now computes all five directly from real tickets at read time (`buildProjectHealthRows`/`computeProjectProgressPct`, `reports-screen.tsx`), the same work-around the Admin Project Overview/per-project Reports already used — see Current Sprint → Completed → Projects. `awaitingReviewTickets`/`dueThisWeekTickets`/`activeMilestones` remain unresolved — still `0`/unpopulated, still read by the Project Lead's own info chips/summary cells on that same screen.
 - **Users is implemented and passes `tsc`/`eslint`/`next build`, but has never been run against a live Supabase project or clicked through in a browser** — treat as "should work, not yet verified" until that verification pass happens (Team carried this same caveat as of the last update; it's since been confirmed live — see Architecture Status).
 - The Users list's inline Weekly Capacity cell (`CapacityCell`) still calls `updateOrganizationMember`, a direct client write — the same "permission denied for table organization_memberships" every other Users write used to hit before it got its own Server Action. Intentionally left as-is; it has no Server Action yet.
 - Resend Invitation (Users row menu) is still toast-only — no real resend path exists.
@@ -1823,7 +1879,7 @@ Current known items:
 - **Resolved**: `member-projects-screen.tsx` ("My Projects," Member role) is now real (`useOrganizationProjects()` + `loadProjectTeam`/`loadProjectTickets`), no longer reading `MEMBER_WORK` — see Architecture Status → Projects.
 - `project-lead-reports-screen.tsx` (the Project Lead's own scoped Reports view) is a separate component from `reports-screen.tsx` and remains fully mock, unaffected by company-wide Reports becoming real.
 - **Resolved**: `project-lead-time-tracking-screen.tsx` (the Project Lead's own scoped Time Tracking view) is now real too, scoped to exactly this profile's led projects and reusing `time-tracking-screen.tsx`'s own real calculations/loaders (exported for this reuse) rather than a second implementation — see Hours & Time Tracking → Project Lead. The three exports it used to import (`MEMBER_GROUPS`/`PROJECT_GROUPS`/`CLIENT_GROUPS`) have been deleted from `time-tracking-screen.tsx`, since they had no other consumer.
-- Project Settings' "Project Lead" field/picker was removed outright (it read/wrote `projects.owner_profile_id`). This is a targeted removal, not a full migration off that column: `ProjectSummary.owner` (still `owner_profile_id`-backed) is what the `/projects` list's own Lead column/filter still reads — untouched, so `owner_profile_id` still has this one remaining reader, while Team's real `project_memberships.project_role` (set via "Make Project Lead") has its own separate writer and is what Project Overview/Team/the Dashboards/Member's "My Projects" already show (the latter was updated to read `project_role` directly instead — see Architecture Status → Projects). Reconciling the `/projects` list's own Lead column/filter onto the real `project_role` is the one remaining piece of this — unresolved.
+- **Resolved**: Project Settings' "Project Lead" field/picker was removed outright (it read/wrote `projects.owner_profile_id`). The `/projects` list's own Lead column/filter has since been reconciled onto Team's real `project_memberships.project_role` too (`ProjectSummary.lead`, via a new batched query in `loadOrganizationProjects`) — `owner_profile_id`/`ProjectSummary.owner` no longer has any Lead-column reader anywhere in the app; see Architecture Status → Projects.
 - **New**: the Admin Dashboard's Recent Activity "View all activity →" action and its new org-wide `/activity` page, and Time Tracking's Admin/Member/Project Lead screens becoming real, haven't themselves been clicked through in a live browser yet — same "should work, not yet verified" caveat as Users/the Admin Project Overview/per-project Reports.
 - **New**: the Member Profile Modal's real-data fetch (see Architecture Status → Member Profile Modal) is wired for exactly two entry points — the Admin Dashboard's Team Workload and Recent Activity — plus `team-screen.tsx`, which already qualified before this fix. Every other `MemberTrigger`/`openMemberProfile` caller (Project Overview's team roster/ticket assignees/activity, Reports' Hours by Person/Workload/Billable Hours/Recent Changes, ticket assignees/comments/attachments across Board/List/Calendar/Insights/Ticket Detail/Quick Ticket Preview, Time Tracking's Timesheets/Members Missing Hours, My Work's Recently Updated) still opens the modal with only a name/avatar, so it still resolves through `resolveTeamMember`'s old name-matching/`unknown-*` fallback and can show stale/zeroed numbers for a real (non-mock-roster) org member. A real `profileId` is already obtainable at almost all of these sites today without any loader changes (`ticket.assigneeProfileId`, `ProjectTeamMember.id`, `PersonRow`/`WorkloadRow`/`MemberBillingRowReal.id`, `TimesheetViewRow.id`) — the remaining work is threading it through, plus three small additive loader fields (`TicketComment.authorProfileId`, `TicketAttachment.uploadedByProfileId`, and restructuring `insights-view.tsx`'s `AssigneeWorkload` map to key by id instead of name) for comment/attachment/insights callers specifically. Deliberately scoped out of this pass rather than attempted as one large migration.
 
@@ -1831,7 +1887,6 @@ Planned future work:
 
 - Live verification (click through each in a browser against a real Supabase project) of Users, the **Admin** Project Overview (including its new Project Activity history page), per-project Reports, Time Tracking (Admin/Member/Project Lead), the Dashboard's org-wide Activity History page, the Project Lead's and Member's own Project Overview, all three Dashboards' project scope selectors, My Work (Member), ticket-assignment restriction, Member's own `/projects` ("My Projects"), and global Search — the immediate next step, ahead of any new backend seam
 - Backend integration for the Project Lead's own scoped Reports view and the rest of Settings (everything else, including the Project Lead's own scoped Time Tracking view, is done — see Architecture Status; schema for the rest is designed in `docs/SUPABASE_MVP_SCHEMA.md` and applied via the migrations in `supabase/migrations/`, just not queried by the UI yet)
-- Reconciling the `/projects` list's own Lead column/filter (still `ProjectSummary.owner`/`projects.owner_profile_id`-backed) onto Team's real `project_memberships.project_role`, now that Project Settings no longer writes the former at all and Member's "My Projects" was already updated to read `project_role` directly
 - API layer
 - Real drag & drop (Kanban)
 - Real-time updates
