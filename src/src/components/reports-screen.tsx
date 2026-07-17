@@ -51,9 +51,11 @@ export interface ProjectRow {
   name:           string;
   shortName:      string;
   tickets:        number;
+  open:           number;
   completedHours: number;
   estimatedHours: number;
   blocked:        number;
+  overdueOpen:    number;
   completion:     number;
   risk:           Risk;
 }
@@ -703,6 +705,7 @@ export function buildProjectHealthRows(
     const loggedHours = projectTickets.reduce((sum, t) => sum + (minutesByTicketId.get(t.id) ?? 0) / 60, 0);
     const completion = estimatedHours > 0 ? Math.min(100, Math.round((loggedHours / estimatedHours) * 100)) : 0;
 
+    const open = projectTickets.filter((t) => t.status !== "done").length;
     const blocked = projectTickets.filter((t) => t.status === "blocked").length;
     const overdueOpenCount = projectTickets.filter(
       (t) => t.status !== "done" && t.dueDate && parseDisplayDate(t.dueDate) < todayISO
@@ -715,15 +718,30 @@ export function buildProjectHealthRows(
       name: project.name,
       shortName: project.projectCode,
       tickets: projectTickets.length,
+      open,
       completedHours: round1(loggedHours),
       estimatedHours: round1(estimatedHours),
       blocked,
+      overdueOpen: overdueOpenCount,
       completion,
       risk,
     });
   }
 
   return rows;
+}
+
+// Real per-project progress — the exact same ticket-count completion
+// formula Project Overview (admin-project-overview.tsx/
+// project-lead-project-overview.tsx) already uses for its own progress bar:
+// completed ("done") tickets over every real ticket in the project, rounded,
+// 0% when the project has no tickets yet (never a fabricated/default
+// value). Exported so any other real per-project progress display (e.g. the
+// Projects list) reuses this one definition instead of a second/stale one.
+export function computeProjectProgressPct(tickets: Ticket[]): number {
+  return tickets.length > 0
+    ? Math.round((tickets.filter((t) => t.status === "done").length / tickets.length) * 100)
+    : 0;
 }
 
 export interface DeliveryKpiSummary {

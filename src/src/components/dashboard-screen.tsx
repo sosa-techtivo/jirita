@@ -24,6 +24,7 @@ import type { OrganizationActivityEvent } from "@/lib/tickets";
 import { loadOrganizationWorkloadMembers } from "@/lib/projects";
 import type { OrgWorkloadMember } from "@/lib/projects";
 import { utilizationOf } from "@/components/member-profile-modal";
+import { buildProjectHealthRows } from "@/components/reports-screen";
 import {
   Card,
   ActiveTicketRow,
@@ -684,39 +685,50 @@ function AdminDashboard() {
       .slice(0, 5);
   }, [workloadMembers, scopedTickets]);
 
+  // Real per-project health/risk — single source of truth reused below by
+  // both Projects at Risk and the blocked-projects insight, rather than each
+  // re-deriving its own blocked/overdue classification. Same
+  // buildProjectHealthRows (reports-screen.tsx) the Projects module's own
+  // Health badge/filter/"At Risk" KPI now reuse, so "at risk" never means
+  // two different things across the app. `timeEntries` passed empty since
+  // only `risk`/`blocked` are read here (hours/completion are unused).
+  const healthRowsBySlug = useMemo(() => {
+    const projectRefs = scopedActiveProjects.map((p) => ({ slug: p.slug, name: p.name, projectCode: p.slug }));
+    const rows = buildProjectHealthRows(projectRefs, tickets, [], todayISO);
+    return new Map(rows.map((row) => [row.id, row]));
+  }, [scopedActiveProjects, tickets, todayISO]);
+
   // Projects at Risk — BLOCKED (>=1 active ticket in status "blocked") takes
   // priority over AT RISK (no blocked tickets, but >=1 active ticket whose
   // due date has already passed); a project meeting neither is left out
-  // entirely. "Active" ticket = status !== "done", same definition used
-  // everywhere else on this dashboard. Progress is completed/total over
+  // entirely, per the shared `risk` above. Progress is completed/total over
   // EVERY ticket in the project (not just active ones), guarded against 0
-  // total. Scoped to the org's active projects only — tickets can't be
-  // deleted in this schema, so no separate "not deleted" filter is needed.
+  // total — kept as its own local calculation since it's a display-only
+  // stat buildProjectHealthRows doesn't compute this way (its own
+  // `completion` is logged/estimated hours, a different metric).
   const projectsAtRisk = useMemo(() => {
     type RiskEntry = { slug: string; name: string; risk: "blocked" | "at-risk"; affected: number; progressPct: number };
     const activeProjects = scopedActiveProjects;
 
     const entries: RiskEntry[] = [];
     for (const project of activeProjects) {
-      const projectTickets = tickets.filter((t) => t.projectSlug === project.slug);
-      if (projectTickets.length === 0) continue;
+      const row = healthRowsBySlug.get(project.slug);
+      if (!row || row.risk === "on-track") continue;
 
+      const projectTickets = tickets.filter((t) => t.projectSlug === project.slug);
       const totalCount = projectTickets.length;
       const completedCount = projectTickets.filter((t) => t.status === "done").length;
       const progressPct = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
 
-      const blockedCount = projectTickets.filter((t) => t.status === "blocked").length;
-      if (blockedCount > 0) {
-        entries.push({ slug: project.slug, name: project.name, risk: "blocked", affected: blockedCount, progressPct });
+      if (row.risk === "blocked") {
+        entries.push({ slug: project.slug, name: project.name, risk: "blocked", affected: row.blocked, progressPct });
         continue;
       }
 
       const overdueCount = projectTickets.filter(
         (t) => t.status !== "done" && t.dueDate && parseDisplayDate(t.dueDate) < todayISO
       ).length;
-      if (overdueCount > 0) {
-        entries.push({ slug: project.slug, name: project.name, risk: "at-risk", affected: overdueCount, progressPct });
-      }
+      entries.push({ slug: project.slug, name: project.name, risk: "at-risk", affected: overdueCount, progressPct });
     }
 
     entries.sort((a, b) => {
@@ -726,7 +738,7 @@ function AdminDashboard() {
     });
 
     return entries.slice(0, 3);
-  }, [scopedActiveProjects, tickets, todayISO]);
+  }, [scopedActiveProjects, tickets, todayISO, healthRowsBySlug]);
 
   // Organization Health (the insights band) — each indicator below reuses
   // the same real definitions as the widget it's named after, but computed
@@ -736,16 +748,17 @@ function AdminDashboard() {
   // `projectsAtRisk`/`workload` arrays).
 
   // Same "active project + >=1 blocked ticket" criterion as Projects at
-  // Risk above, uncapped and blocked-only (no AT RISK projects here).
+  // Risk above, uncapped and blocked-only (no AT RISK projects here) — reuses
+  // the same shared `healthRowsBySlug` rather than re-filtering tickets.
   const blockedProjects = useMemo(() => {
     const activeProjects = scopedActiveProjects;
     const result: { slug: string; name: string; count: number }[] = [];
     for (const project of activeProjects) {
-      const blockedCount = tickets.filter((t) => t.projectSlug === project.slug && t.status === "blocked").length;
-      if (blockedCount > 0) result.push({ slug: project.slug, name: project.name, count: blockedCount });
+      const row = healthRowsBySlug.get(project.slug);
+      if (row && row.blocked > 0) result.push({ slug: project.slug, name: project.name, count: row.blocked });
     }
     return result;
-  }, [scopedActiveProjects, tickets]);
+  }, [scopedActiveProjects, healthRowsBySlug]);
   // "0 proyectos" naturally means no "blocked" insight item ever gets
   // pushed below, so there's nothing to gate here beyond having a real
   // href whenever the item does exist.

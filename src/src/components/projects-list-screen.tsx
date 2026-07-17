@@ -3,13 +3,19 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import type { ProjectHealth, ProjectPriority, ProjectStatus, ProjectSummary } from "@/lib/mock-projects";
-import { StatusBadge, PriorityBadge, HealthBadge, ProjectCategoryBadge, statusMeta, priorityMeta, healthMeta } from "@/components/status-badge";
+import type { ProjectHealth, ProjectStatus, ProjectSummary } from "@/lib/mock-projects";
+import { StatusBadge, HealthBadge, ProjectCategoryBadge, statusMeta, healthMeta } from "@/components/status-badge";
 import { FilterDropdown } from "@/components/tickets/filter-dropdown";
-import type { DropdownGroup } from "@/components/tickets/filter-dropdown";
+import type { DropdownGroup, DropdownOption } from "@/components/tickets/filter-dropdown";
 import { FilterChip } from "@/components/tickets/filter-chip";
 import { useCurrentUser } from "@/components/current-user-provider";
 import { useOrganizationProjects } from "@/components/organization-projects-provider";
+import { MemberTrigger } from "@/components/member-profile";
+import { loadOrganizationTickets } from "@/lib/tickets";
+import { SkeletonBlock } from "@/components/dashboard-shared";
+import { buildProjectHealthRows, computeProjectProgressPct } from "@/components/reports-screen";
+import type { Risk } from "@/components/reports-screen";
+import { getTodayISO } from "@/components/tickets/ticket-ui";
 import { canManage } from "@/lib/current-user";
 import { getTeamByProjectSlug } from "@/lib/mock-team";
 import { LEAD_PROJECT_SLUGS, aggregateTeam } from "@/components/project-lead-dashboard";
@@ -19,12 +25,7 @@ import { ArchiveProjectModal } from "@/components/archive-project-modal";
 
 const STATUS_ORDER: ProjectStatus[] = ["planning", "active", "on-hold", "completed", "archived"];
 const HEALTH_ORDER: ProjectHealth[] = ["healthy", "needs-attention", "critical"];
-const PRIORITY_ORDER: ProjectPriority[] = ["critical", "high", "medium", "low"];
 const MONTH_ORDER = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-
-const PRIORITY_GROUPS: DropdownGroup[] = [
-  { options: PRIORITY_ORDER.map((priority) => ({ value: priority, label: priorityMeta[priority].label })) },
-];
 
 // Independent from the Status filter — Health (Healthy / Needs Attention /
 // Critical) is its own real column, not a lifecycle status, so it gets its
@@ -39,12 +40,58 @@ const SORT_GROUPS: DropdownGroup[] = [
   {
     options: [
       { value: "name", label: "Name (A–Z)" },
-      { value: "priority", label: "Priority (High to Low)" },
       { value: "target-date", label: "Target Date (Soonest)" },
       { value: "progress", label: "Progress (Highest)" },
     ],
   },
 ];
+
+// Sentinel value for the "Project Lead" filter's "Unassigned" option — a
+// real profiles.id is a uuid, so this plain string can never collide with
+// one. Lets matchesLead below tell "no lead selected as a filter" (empty
+// leadFilter) apart from "Unassigned selected" (leadFilter contains this).
+const UNASSIGNED_LEAD_VALUE = "unassigned";
+
+// Single source of truth for project Health, everywhere it's shown in this
+// screen (badge, Health filter, "At Risk" KPI, the Lead's own summary line):
+// buildProjectHealthRows' real `risk` (reports-screen.tsx — same rule the
+// Admin Dashboard's "Projects at Risk" reuses), never the persisted,
+// UI-stale `project.health` column. A project absent from the computed rows
+// (buildProjectHealthRows skips projects with zero real tickets) has no
+// blocked/overdue ticket to be at risk from, so it defaults to "healthy".
+const RISK_TO_HEALTH: Record<Risk, ProjectHealth> = {
+  "on-track": "healthy",
+  "at-risk": "needs-attention",
+  blocked: "critical",
+};
+
+function resolveHealth(healthBySlug: Map<string, ProjectHealth>, slug: string): ProjectHealth {
+  return healthBySlug.get(slug) ?? "healthy";
+}
+
+// Same "no real tickets yet" default (0%) computeProjectProgressPct itself
+// returns for an empty ticket list — a project not yet in the map (data
+// still loading, or dev fallback) gets that same real "nothing to show"
+// value rather than a fabricated one.
+function resolveProgress(progressBySlug: Map<string, number>, slug: string): number {
+  return progressBySlug.get(slug) ?? 0;
+}
+
+interface TicketCounts {
+  open: number;
+  blocked: number;
+  overdue: number;
+}
+
+const ZERO_TICKET_COUNTS: TicketCounts = { open: 0, blocked: 0, overdue: 0 };
+
+// Same "no real tickets yet" default the other computed values above use —
+// a project absent from the map (buildProjectHealthRows skips projects with
+// zero real tickets) has nothing to count, so 0/0/0 rather than a
+// fabricated value.
+function resolveTicketCounts(countsBySlug: Map<string, TicketCounts>, slug: string): TicketCounts {
+  return countsBySlug.get(slug) ?? ZERO_TICKET_COUNTS;
+}
 
 function targetDateSortKey(targetDate: string): number {
   const [month, day] = targetDate.split(" ");
@@ -56,7 +103,7 @@ export function ProjectsListScreen() {
   const { user } = useCurrentUser();
   const { status, errorMessage, retry } = useOrganizationProjects();
 
-  if (status === "loading") return <ProjectsLoadingState />;
+  if (status === "loading") return <ProjectsLoadingSkeleton isProjectLead={user.role === "PROJECT_LEAD"} />;
   if (status === "error") return <ProjectsErrorState message={errorMessage} onRetry={retry} />;
 
   // Members don't manage projects — they work inside them. They get a
@@ -69,14 +116,6 @@ export function ProjectsListScreen() {
   }
 
   return <ManagedProjectsScreen />;
-}
-
-function ProjectsLoadingState() {
-  return (
-    <div className="max-w-4xl mx-auto px-4 sm:px-8 py-20 text-center text-sm text-slate-400 dark:text-zinc-500">
-      Loading projects…
-    </div>
-  );
 }
 
 function ProjectsErrorState({ message, onRetry }: { message: string | null; onRetry: () => void }) {
@@ -95,8 +134,136 @@ function ProjectsErrorState({ message, onRetry }: { message: string | null; onRe
   );
 }
 
+// Full-page skeleton — mirrors this screen's own real layout (header/Create
+// Project, KPI strip, search/filters, row list) using the same SkeletonBlock
+// primitive the Admin/Project Lead/Member Dashboards already build their own
+// skeletons out of (dashboard-shared.tsx), rather than a second skeleton
+// pattern. Shown both on the very first load (before the base project list
+// and its real tickets-derived metrics have resolved once) and again on
+// every tab-regain refresh (see ManagedProjectsScreen's own effect) — same
+// dimensions each time, so swapping it for the real content never shifts
+// the page.
+function ProjectsLoadingSkeleton({ isProjectLead }: { isProjectLead: boolean }) {
+  const kpiCount = isProjectLead ? 4 : 5;
+  const rowCount = isProjectLead ? 3 : 5;
+  return (
+    <div className="max-w-4xl mx-auto px-4 sm:px-8 py-10">
+      <div className="flex items-center justify-between gap-4">
+        <SkeletonBlock className="h-[22px] w-28" />
+        <SkeletonBlock className="h-8 w-36" />
+      </div>
+      <SkeletonBlock className="h-[14px] w-64 mt-2" />
+
+      <div className="mt-6 flex items-stretch divide-x divide-slate-100 dark:divide-zinc-800 rounded-xl border border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900 shadow-sm shadow-slate-200/40 dark:shadow-black/20 overflow-hidden">
+        {Array.from({ length: kpiCount }).map((_, i) => (
+          <div key={i} className="flex-1 px-4 py-3">
+            <SkeletonBlock className="h-[10px] w-16 mb-1.5" />
+            <SkeletonBlock className="h-6 w-10" />
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-6 flex flex-col sm:flex-row sm:items-center gap-3">
+        <SkeletonBlock className="h-8 w-full sm:w-56 flex-shrink-0" />
+        <div className="flex flex-wrap items-center gap-1.5">
+          <SkeletonBlock className="h-7 w-16" />
+          <SkeletonBlock className="h-7 w-16" />
+          {!isProjectLead && <SkeletonBlock className="h-7 w-28" />}
+          <SkeletonBlock className="h-7 w-20" />
+        </div>
+      </div>
+
+      <div className={isProjectLead ? "mt-3" : "mt-6"}>
+        <div className="divide-y divide-slate-100 dark:divide-zinc-800">
+          {Array.from({ length: rowCount }).map((_, i) =>
+            isProjectLead ? <LeadProjectRowSkeleton key={i} /> : <ProjectRowSkeleton key={i} />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Mirrors ProjectRow's own grid (name+metadata / progress bar / Health /
+// Project Lead / open-blocked-overdue counters / Target Date / action menu).
+function ProjectRowSkeleton() {
+  return (
+    <div className={`flex flex-col gap-2 sm:grid ${ROW_GRID_COLS} sm:gap-3 sm:items-center py-4 px-3 -mx-3`}>
+      <div className="min-w-0">
+        <div className="flex items-center gap-2.5">
+          <SkeletonBlock className="h-4 w-40" />
+          <SkeletonBlock className="h-4 w-14 rounded-full" />
+        </div>
+        <SkeletonBlock className="h-3.5 w-56 mt-1.5" />
+        <div className="mt-2 flex items-center gap-2">
+          <SkeletonBlock className="h-1 w-full max-w-[160px] rounded-full" />
+          <SkeletonBlock className="h-2.5 w-6" />
+        </div>
+      </div>
+
+      <div className="hidden sm:flex items-center">
+        <SkeletonBlock className="h-5 w-20 rounded-full" />
+      </div>
+
+      <div className="hidden sm:flex items-center gap-1.5">
+        <SkeletonBlock className="h-5 w-5 rounded-full flex-shrink-0" />
+        <SkeletonBlock className="h-3.5 w-20" />
+      </div>
+
+      <div className="hidden sm:flex items-center gap-2">
+        <SkeletonBlock className="h-3 w-10" />
+        <SkeletonBlock className="h-3 w-12" />
+        <SkeletonBlock className="h-3 w-12" />
+      </div>
+
+      <SkeletonBlock className="hidden sm:block h-3 w-14" />
+
+      <div className="flex items-center justify-end">
+        <SkeletonBlock className="h-6 w-6 rounded-lg" />
+      </div>
+    </div>
+  );
+}
+
+// Mirrors LeadProjectRow's own stacked blocks (identity+actions / progress
+// / info chips including Health/open/blocked/Target Date).
+function LeadProjectRowSkeleton() {
+  return (
+    <div className="flex flex-col gap-3 py-4 px-3 -mx-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <SkeletonBlock className="h-4 w-44" />
+            <SkeletonBlock className="h-4 w-14 rounded-full" />
+          </div>
+          <SkeletonBlock className="h-3.5 w-60 mt-1.5" />
+        </div>
+        <div className="flex items-center gap-1 flex-shrink-0">
+          <SkeletonBlock className="h-7 w-16 rounded-lg" />
+          <SkeletonBlock className="h-7 w-7 rounded-lg" />
+        </div>
+      </div>
+
+      <div className="flex items-center gap-2.5">
+        <SkeletonBlock className="h-1.5 flex-1 max-w-[220px] rounded-full" />
+        <SkeletonBlock className="h-3.5 w-8" />
+      </div>
+
+      <div className="flex flex-wrap items-center gap-1.5">
+        <SkeletonBlock className="h-5 w-20 rounded-full" />
+        <SkeletonBlock className="h-5 w-16 rounded-md" />
+        <SkeletonBlock className="h-5 w-20 rounded-md" />
+        <SkeletonBlock className="h-5 w-14 rounded-md" />
+        <SkeletonBlock className="h-5 w-16 rounded-md" />
+        <SkeletonBlock className="h-5 w-16 rounded-md" />
+        <SkeletonBlock className="h-5 w-16 rounded-md" />
+      </div>
+    </div>
+  );
+}
+
 function ManagedProjectsScreen() {
-  const { user } = useCurrentUser();
+  const { user, organization, isDevFallback } = useCurrentUser();
   const { projects: allProjects, restoreProject } = useOrganizationProjects();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -106,7 +273,6 @@ function ManagedProjectsScreen() {
   const [statusFilter, setStatusFilter] = useState<string[]>([]);
   const [healthFilter, setHealthFilter] = useState<string[]>([]);
   const [leadFilter, setLeadFilter] = useState<string[]>([]);
-  const [priorityFilter, setPriorityFilter] = useState<string[]>([]);
   const [sortBy, setSortBy] = useState<string[]>([]);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [editingProject, setEditingProject] = useState<ProjectSummary | null>(null);
@@ -137,21 +303,115 @@ function ManagedProjectsScreen() {
   // so the fetched list needs no further client-side filtering here.
   const baseProjects = allProjects;
 
+  // Health/"At Risk" — single real computation reused by the badge, the
+  // Health filter, and the "At Risk" KPI below (never separate/parallel
+  // evaluations of the same thing). Reuses buildProjectHealthRows
+  // (reports-screen.tsx), the exact same blocked-takes-priority-over-overdue
+  // rule the Admin Dashboard's own "Projects at Risk" widget already
+  // established (see that function's own comment) and per-project
+  // Reports/Project Overview already reuse, rather than a second/different
+  // definition. `timeEntries` is passed empty since only `risk`/`blocked`
+  // are read here (hours/completion on each row are unused). Computed over
+  // every project (not just active) so every row gets a real badge value;
+  // the "At Risk" KPI below still counts active projects only, matching the
+  // Dashboard's own real, active-projects-only scope.
+  const [healthBySlug, setHealthBySlug] = useState<Map<string, ProjectHealth>>(new Map());
+  const [atRiskCount, setAtRiskCount] = useState(0);
+  // Real per-project progress — reuses computeProjectProgressPct
+  // (reports-screen.tsx), the exact same ticket-count completion formula
+  // Project Overview's own progress bar already uses, off the same real
+  // tickets fetch above (never a second query or a re-derived formula), so
+  // this row's bar/percentage can never disagree with that project's own
+  // Project Overview.
+  const [progressBySlug, setProgressBySlug] = useState<Map<string, number>>(new Map());
+  // Real per-project open/blocked/overdue counts — read straight off the
+  // same buildProjectHealthRows rows computed for Health/At Risk just above
+  // (row.open/row.blocked/row.overdueOpen), never a second pass over
+  // `tickets` or a persisted ProjectSummary field.
+  const [ticketCountsBySlug, setTicketCountsBySlug] = useState<Map<string, TicketCounts>>(new Map());
+  // Real refresh-on-tab-regain — same mechanism the Admin/Project Lead/Member
+  // Dashboards already rely on (see dashboard-screen.tsx's own comment on its
+  // main effect): current-user-provider.tsx's window "focus" listener
+  // revalidates the session on every window-focus-regain (i.e. switching
+  // back to this browser tab) and hands back a new `organization` object
+  // reference each time, even when nothing changed. This effect already
+  // depends on `organization`, so it re-runs on that same signal — no
+  // second/duplicate focus or visibilitychange listener added here, and
+  // nothing runs while the tab stays hidden (the dashboards' own mechanism
+  // is itself a one-shot, event-driven check, never a timer/poll). Resetting
+  // `metricsStatus` to "loading" synchronously on every re-run (not just the
+  // first) is the same "show the skeleton again" pattern dashboard-screen.tsx's
+  // own main effect already uses.
+  const [metricsStatus, setMetricsStatus] = useState<"loading" | "ready">("loading");
+  useEffect(() => {
+    if (isDevFallback || !organization) return;
+    let cancelled = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: same "clear before the async fetch below resolves" pattern dashboard-screen.tsx's own main effect already uses
+    setMetricsStatus("loading");
+    (async () => {
+      const result = await loadOrganizationTickets(organization.id);
+      if (cancelled) return;
+      if (result.status !== "ready") {
+        setMetricsStatus("ready");
+        return;
+      }
+      const allProjects = result.projects.map((p) => ({ slug: p.slug, name: p.name, projectCode: p.slug }));
+      const rows = buildProjectHealthRows(allProjects, result.tickets, [], getTodayISO());
+      setHealthBySlug(new Map(rows.map((row) => [row.id, RISK_TO_HEALTH[row.risk]])));
+      const activeSlugs = new Set(result.projects.filter((p) => p.status === "active").map((p) => p.slug));
+      setAtRiskCount(rows.filter((row) => activeSlugs.has(row.id) && row.risk !== "on-track").length);
+      setTicketCountsBySlug(
+        new Map(rows.map((row) => [row.id, { open: row.open, blocked: row.blocked, overdue: row.overdueOpen }]))
+      );
+
+      const ticketsByProjectSlug = new Map<string, typeof result.tickets>();
+      for (const ticket of result.tickets) {
+        const list = ticketsByProjectSlug.get(ticket.projectSlug) ?? [];
+        list.push(ticket);
+        ticketsByProjectSlug.set(ticket.projectSlug, list);
+      }
+      setProgressBySlug(
+        new Map(
+          result.projects.map((p) => [p.slug, computeProjectProgressPct(ticketsByProjectSlug.get(p.slug) ?? [])])
+        )
+      );
+      setMetricsStatus("ready");
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isDevFallback, organization]);
+
   const statusGroups: DropdownGroup[] = useMemo(() => {
     const statuses = isProjectLead ? STATUS_ORDER.filter((s) => s !== "archived") : STATUS_ORDER;
     return [{ options: statuses.map((status) => ({ value: status, label: statusMeta[status].label })) }];
   }, [isProjectLead]);
 
+  // Built from the same `project.lead` (real profiles.id + name/avatar,
+  // sourced from project_memberships.project_role = 'lead') the row itself
+  // already renders — never a second/different resolution of "lead".
+  // Deduped by profileId so a person leading several projects appears once;
+  // "Unassigned" is only added when at least one project actually has no
+  // lead.
   const leadGroups: DropdownGroup[] = useMemo(() => {
-    const leads = Array.from(new Set(allProjects.map((project) => project.owner.name)));
-    return [
-      {
-        options: leads.map((name) => {
-          const project = allProjects.find((p) => p.owner.name === name)!;
-          return { value: name, label: name, avatar: project.owner.avatar };
-        }),
-      },
-    ];
+    const leadsById = new Map<string, { name: string; avatar: string }>();
+    let hasUnassigned = false;
+    for (const project of allProjects) {
+      if (project.lead) {
+        if (!leadsById.has(project.lead.id)) {
+          leadsById.set(project.lead.id, { name: project.lead.name, avatar: project.lead.avatar });
+        }
+      } else {
+        hasUnassigned = true;
+      }
+    }
+    const options: DropdownOption[] = Array.from(leadsById, ([id, lead]) => ({
+      value: id,
+      label: lead.name,
+      avatar: lead.avatar,
+    }));
+    if (hasUnassigned) options.push({ value: UNASSIGNED_LEAD_VALUE, label: "Unassigned" });
+    return [{ options }];
   }, [allProjects]);
 
   const summaryCells: { label: string; value: number; className?: string }[] = useMemo(() => {
@@ -185,10 +445,8 @@ function ManagedProjectsScreen() {
         className: "text-emerald-600 dark:text-emerald-400",
       },
       {
-        // Risk assessment lives on health now, not status — "at risk" means
-        // critical health regardless of lifecycle phase.
         label: "At Risk",
-        value: baseProjects.filter((p) => p.health === "critical").length,
+        value: atRiskCount,
         className: "text-red-600 dark:text-red-400",
       },
       {
@@ -202,23 +460,31 @@ function ManagedProjectsScreen() {
         className: "text-slate-500 dark:text-zinc-500",
       },
     ];
-  }, [isProjectLead, baseProjects]);
+  }, [isProjectLead, baseProjects, atRiskCount]);
 
   // Small reinforcement line above the list — makes it obvious this is the
   // Lead's own scoped set of projects, not the whole workspace.
   const leadSummaryLine = useMemo(() => {
     if (!isProjectLead) return "";
     const total = baseProjects.length;
-    const healthy = baseProjects.filter((p) => p.health === "healthy").length;
-    const needsAttention = baseProjects.filter((p) => p.health === "needs-attention").length;
-    const critical = baseProjects.filter((p) => p.health === "critical").length;
+    const healthy = baseProjects.filter((p) => resolveHealth(healthBySlug, p.slug) === "healthy").length;
+    const needsAttention = baseProjects.filter((p) => resolveHealth(healthBySlug, p.slug) === "needs-attention").length;
+    const critical = baseProjects.filter((p) => resolveHealth(healthBySlug, p.slug) === "critical").length;
     const parts: string[] = [];
     if (healthy > 0) parts.push(`${healthy} Healthy`);
     if (needsAttention > 0) parts.push(`${needsAttention} Needs Attention`);
     if (critical > 0) parts.push(`${critical} Critical`);
     const base = `Showing your ${total} project${total === 1 ? "" : "s"}`;
     return parts.length > 0 ? `${base} • ${parts.join(" • ")}` : base;
-  }, [isProjectLead, baseProjects]);
+  }, [isProjectLead, baseProjects, healthBySlug]);
+
+  // Same full-page skeleton swap dashboard-screen.tsx's own loadState
+  // gate uses — every metric this screen shows (Health/Progress/Open/
+  // Blocked/Overdue/At Risk KPI) comes from the effect above, so nothing
+  // real is ready to render until it resolves at least once, including on
+  // a tab-regain re-run. All hooks above have already run unconditionally,
+  // so this early return can't change hook order between renders.
+  if (metricsStatus === "loading") return <ProjectsLoadingSkeleton isProjectLead={isProjectLead} />;
 
   const query = search.trim().toLowerCase();
   const filtered = baseProjects
@@ -232,10 +498,14 @@ function ManagedProjectsScreen() {
       // Independent from Status — Health is its own real column
       // (healthy / needs-attention / critical), so this is a separate AND
       // condition rather than folded into matchesStatus, letting the two
-      // filters combine (e.g. Status=Active + Health=Critical).
-      const matchesHealth = healthFilter.length === 0 || healthFilter.includes(project.health);
-      const matchesLead = leadFilter.length === 0 || leadFilter.includes(project.owner.name);
-      const matchesPriority = priorityFilter.length === 0 || priorityFilter.includes(project.priority);
+      // filters combine (e.g. Status=Active + Health=Critical). Filters on
+      // the same computed health (buildProjectHealthRows) the badge below
+      // renders — never project.health directly.
+      const matchesHealth =
+        healthFilter.length === 0 || healthFilter.includes(resolveHealth(healthBySlug, project.slug));
+      const matchesLead =
+        leadFilter.length === 0 ||
+        (project.lead ? leadFilter.includes(project.lead.id) : leadFilter.includes(UNASSIGNED_LEAD_VALUE));
       const matchesSearch =
         query === "" ||
         project.name.toLowerCase().includes(query) ||
@@ -244,16 +514,14 @@ function ManagedProjectsScreen() {
         (project.client ?? "").toLowerCase().includes(query) ||
         project.owner.name.toLowerCase().includes(query);
       const matchesBlocked = !blockedSlugs || blockedSlugs.has(project.slug);
-      return matchesStatus && matchesHealth && matchesLead && matchesPriority && matchesSearch && matchesBlocked;
+      return matchesStatus && matchesHealth && matchesLead && matchesSearch && matchesBlocked;
     })
     .sort((a, b) => {
       switch (sortBy[0]) {
-        case "priority":
-          return PRIORITY_ORDER.indexOf(a.priority) - PRIORITY_ORDER.indexOf(b.priority);
         case "target-date":
           return targetDateSortKey(a.targetDate) - targetDateSortKey(b.targetDate);
         case "progress":
-          return b.progress - a.progress;
+          return resolveProgress(progressBySlug, b.slug) - resolveProgress(progressBySlug, a.slug);
         case "name":
           return a.name.localeCompare(b.name);
         default:
@@ -309,7 +577,6 @@ function ManagedProjectsScreen() {
           {!isProjectLead && (
             <FilterDropdown label="Project Lead" mode="multi" groups={leadGroups} selected={leadFilter} onChange={setLeadFilter} searchable />
           )}
-          <FilterDropdown label="Priority" mode="multi" groups={PRIORITY_GROUPS} selected={priorityFilter} onChange={setPriorityFilter} />
 
           <span className="w-px h-4 bg-slate-200 dark:bg-zinc-700 mx-1 hidden sm:block" />
 
@@ -338,11 +605,20 @@ function ManagedProjectsScreen() {
           <div className="divide-y divide-slate-100 dark:divide-zinc-800">
             {filtered.map((project) =>
               isProjectLead ? (
-                <LeadProjectRow key={project.slug} project={project} />
+                <LeadProjectRow
+                  key={project.slug}
+                  project={project}
+                  health={resolveHealth(healthBySlug, project.slug)}
+                  progress={resolveProgress(progressBySlug, project.slug)}
+                  ticketCounts={resolveTicketCounts(ticketCountsBySlug, project.slug)}
+                />
               ) : (
                 <ProjectRow
                   key={project.slug}
                   project={project}
+                  health={resolveHealth(healthBySlug, project.slug)}
+                  progress={resolveProgress(progressBySlug, project.slug)}
+                  ticketCounts={resolveTicketCounts(ticketCountsBySlug, project.slug)}
                   onEdit={setEditingProject}
                   onArchive={setArchivingProject}
                   onRestore={(p) => restoreProject(p.slug)}
@@ -383,11 +659,17 @@ const ROW_GRID_COLS = "sm:grid-cols-[minmax(0,1fr)_96px_116px_172px_60px_32px]";
 
 function ProjectRow({
   project,
+  health,
+  progress,
+  ticketCounts,
   onEdit,
   onArchive,
   onRestore,
 }: {
   project: ProjectSummary;
+  health: ProjectHealth;
+  progress: number;
+  ticketCounts: TicketCounts;
   onEdit: (project: ProjectSummary) => void;
   onArchive: (project: ProjectSummary) => void;
   onRestore: (project: ProjectSummary) => void;
@@ -413,37 +695,49 @@ function ProjectRow({
             {project.name}
           </h3>
           <StatusBadge status={project.status} />
-          <PriorityBadge priority={project.priority} />
           <ProjectCategoryBadge category={project.category} />
         </div>
         <p className="text-sm text-slate-500 dark:text-zinc-400 truncate mt-0.5">{project.description}</p>
         <div className="mt-2 flex items-center gap-2">
           <div className="max-w-[160px] w-full h-1 rounded-full bg-slate-100 overflow-hidden dark:bg-zinc-800">
-            <div className="h-full rounded-full bg-brand-500/70" style={{ width: `${project.progress}%` }} />
+            <div className="h-full rounded-full bg-brand-500/70" style={{ width: `${progress}%` }} />
           </div>
           <span className="text-[10px] text-slate-400 dark:text-zinc-500 tabular-nums flex-shrink-0">
-            {project.progress}%
+            {progress}%
           </span>
         </div>
       </div>
 
       <div className="hidden sm:flex items-center">
-        <HealthBadge health={project.health} />
+        <HealthBadge health={health} />
       </div>
 
       <div className="hidden sm:flex items-center gap-1.5 min-w-0 text-xs">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={project.owner.avatar} alt={project.owner.name} className="w-5 h-5 rounded-full flex-shrink-0" />
-        <span className="text-slate-600 dark:text-zinc-300 truncate">{project.owner.name}</span>
+        {project.lead ? (
+          <MemberTrigger
+            name={project.lead.name}
+            avatar={project.lead.avatar}
+            profileId={project.lead.id}
+            projectSlug={project.slug}
+            nested
+            className="flex items-center gap-1.5 min-w-0"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={project.lead.avatar} alt={project.lead.name} className="w-5 h-5 rounded-full flex-shrink-0" />
+            <span className="text-slate-600 dark:text-zinc-300 truncate">{project.lead.name}</span>
+          </MemberTrigger>
+        ) : (
+          <span className="text-slate-600 dark:text-zinc-300 truncate">Unassigned</span>
+        )}
       </div>
 
       <div className="hidden sm:flex items-center gap-2 whitespace-nowrap text-xs">
-        <span className="text-slate-500 dark:text-zinc-400">{project.openTickets} open</span>
-        <span className={project.blockedTickets > 0 ? "text-red-600 dark:text-red-400 font-medium" : "text-slate-400 dark:text-zinc-500"}>
-          {project.blockedTickets} blocked
+        <span className="text-slate-500 dark:text-zinc-400">{ticketCounts.open} open</span>
+        <span className={ticketCounts.blocked > 0 ? "text-red-600 dark:text-red-400 font-medium" : "text-slate-400 dark:text-zinc-500"}>
+          {ticketCounts.blocked} blocked
         </span>
-        <span className={project.overdueTickets > 0 ? "text-red-600 dark:text-red-400 font-medium" : "text-slate-400 dark:text-zinc-500"}>
-          {project.overdueTickets} overdue
+        <span className={ticketCounts.overdue > 0 ? "text-red-600 dark:text-red-400 font-medium" : "text-slate-400 dark:text-zinc-500"}>
+          {ticketCounts.overdue} overdue
         </span>
       </div>
 
@@ -474,7 +768,17 @@ function InfoChip({ tone = "neutral", children }: { tone?: "neutral" | "danger" 
   );
 }
 
-function LeadProjectRow({ project }: { project: ProjectSummary }) {
+function LeadProjectRow({
+  project,
+  health,
+  progress,
+  ticketCounts,
+}: {
+  project: ProjectSummary;
+  health: ProjectHealth;
+  progress: number;
+  ticketCounts: TicketCounts;
+}) {
   const router = useRouter();
   const team = getTeamByProjectSlug(project.slug);
   const overCapacityCount = team.filter((m) => m.assignedHours > m.weeklyCapacity).length;
@@ -497,7 +801,7 @@ function LeadProjectRow({ project }: { project: ProjectSummary }) {
       }}
       className="group flex flex-col gap-3 py-4 px-3 -mx-3 rounded-lg cursor-pointer outline-none hover:bg-slate-50 focus-visible:ring-2 focus-visible:ring-brand-500/40 dark:hover:bg-zinc-900/60 transition-colors"
     >
-      {/* Identity block: name/status/priority + quick actions */}
+      {/* Identity block: name/status + quick actions */}
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
@@ -505,7 +809,6 @@ function LeadProjectRow({ project }: { project: ProjectSummary }) {
               {project.name}
             </h3>
             <StatusBadge status={project.status} />
-            <PriorityBadge priority={project.priority} variant="badge" />
             <ProjectCategoryBadge category={project.category} />
           </div>
           <p className="text-sm text-slate-500 dark:text-zinc-400 truncate mt-0.5">{project.description}</p>
@@ -530,24 +833,24 @@ function LeadProjectRow({ project }: { project: ProjectSummary }) {
       {/* Progress block — bar + percentage together on one visible line */}
       <div className="flex items-center gap-2.5">
         <div className="flex-1 max-w-[220px] h-1.5 rounded-full bg-slate-100 overflow-hidden dark:bg-zinc-800">
-          <div className="h-full rounded-full bg-brand-500/70" style={{ width: `${project.progress}%` }} />
+          <div className="h-full rounded-full bg-brand-500/70" style={{ width: `${progress}%` }} />
         </div>
         <span className="text-xs font-semibold text-slate-700 dark:text-zinc-200 tabular-nums flex-shrink-0">
-          {project.progress}%
+          {progress}%
         </span>
       </div>
 
       {/* Info chips block — health, team, tickets, target date grouped as tags */}
       <div className="flex flex-wrap items-center gap-1.5">
-        <HealthBadge health={project.health} />
+        <HealthBadge health={health} />
         <InfoChip>
           {team.length} member{team.length === 1 ? "" : "s"}
         </InfoChip>
         <InfoChip tone={overCapacityCount > 0 ? "danger" : "neutral"}>
           {overCapacityCount > 0 ? `${overCapacityCount} over capacity` : "Balanced"}
         </InfoChip>
-        <InfoChip>{project.openTickets} open</InfoChip>
-        <InfoChip tone={project.blockedTickets > 0 ? "danger" : "neutral"}>{project.blockedTickets} blocked</InfoChip>
+        <InfoChip>{ticketCounts.open} open</InfoChip>
+        <InfoChip tone={ticketCounts.blocked > 0 ? "danger" : "neutral"}>{ticketCounts.blocked} blocked</InfoChip>
         <InfoChip tone={project.awaitingReviewTickets > 0 ? "warn" : "neutral"}>
           {project.awaitingReviewTickets} in review
         </InfoChip>

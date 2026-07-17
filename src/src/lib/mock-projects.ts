@@ -2,7 +2,6 @@
 // ProjectHealth now, so "at risk" is expressed as health: "critical" on an
 // otherwise "active" project rather than as a status of its own.
 export type ProjectStatus = "planning" | "active" | "on-hold" | "completed" | "archived";
-export type ProjectPriority = "critical" | "high" | "medium" | "low";
 export type ProjectHealth = "healthy" | "needs-attention" | "critical";
 
 // Client Project: has a billing Client and requires a rate; its time
@@ -27,9 +26,15 @@ export interface ProjectSummary {
   projectCode: string;
   description: string;
   status: ProjectStatus;
-  priority: ProjectPriority;
   health: ProjectHealth;
   owner: { name: string; avatar: string };
+  /** Real Project Lead — a project_memberships row with project_role = 'lead',
+   *  the same authoritative signal Team/the Dashboards already use (see
+   *  loadLeadProjects' own comment in lib/projects.ts for why this is a
+   *  different, separate field from `owner` above). null when the project
+   *  has no lead staffed yet; undefined for mock/dev-fallback projects that
+   *  never populate this field. */
+  lead?: { id: string; name: string; avatar: string } | null;
   updatedAt: string;
   targetDate: string;
   activeMilestones: number;
@@ -56,7 +61,6 @@ export const projects: ProjectSummary[] = [
     projectCode: "MBA",
     description: "iOS and Android banking experience for Meridian Bank.",
     status: "active",
-    priority: "high",
     health: "needs-attention",
     owner: { name: "Sarah Chen", avatar: avatar(47) },
     updatedAt: "Just now",
@@ -79,7 +83,6 @@ export const projects: ProjectSummary[] = [
     projectCode: "CWD",
     description: "Full marketing site rebuild for a long-standing retail client.",
     status: "on-hold",
-    priority: "medium",
     health: "critical",
     owner: { name: "Elena Rossi", avatar: avatar(5) },
     updatedAt: "1 week ago",
@@ -102,7 +105,6 @@ export const projects: ProjectSummary[] = [
     projectCode: "IPM",
     description: "Moving internal tooling off the legacy monolith onto the new platform.",
     status: "active",
-    priority: "high",
     health: "needs-attention",
     owner: { name: "Marcus Lee", avatar: avatar(12) },
     updatedAt: "2 hours ago",
@@ -123,7 +125,6 @@ export const projects: ProjectSummary[] = [
     projectCode: "CSP",
     description: "Self-service help center and ticketing for end customers.",
     status: "active",
-    priority: "medium",
     health: "healthy",
     owner: { name: "David Kim", avatar: avatar(22) },
     updatedAt: "3 hours ago",
@@ -144,7 +145,6 @@ export const projects: ProjectSummary[] = [
     projectCode: "DWR",
     description: "Consolidating analytics pipelines onto a single warehouse schema.",
     status: "active",
-    priority: "medium",
     health: "healthy",
     owner: { name: "Alejo Cadavid", avatar: avatar(33) },
     updatedAt: "Yesterday",
@@ -165,7 +165,6 @@ export const projects: ProjectSummary[] = [
     projectCode: "MSR",
     description: "New brand system and CMS migration ahead of the product launch.",
     status: "active",
-    priority: "critical",
     health: "critical",
     owner: { name: "Elena Rossi", avatar: avatar(5) },
     updatedAt: "2 days ago",
@@ -186,7 +185,6 @@ export const projects: ProjectSummary[] = [
     projectCode: "PAI",
     description: "Two-way sync with a banking partner's settlement API.",
     status: "on-hold",
-    priority: "low",
     health: "needs-attention",
     owner: { name: "David Kim", avatar: avatar(22) },
     updatedAt: "2 weeks ago",
@@ -209,7 +207,6 @@ export const projects: ProjectSummary[] = [
     projectCode: "EOT",
     description: "Internal HR tool for new-hire provisioning and training tracks.",
     status: "archived",
-    priority: "low",
     health: "healthy",
     owner: { name: "Marcus Lee", avatar: avatar(12) },
     updatedAt: "3 months ago",
@@ -230,7 +227,6 @@ export const projects: ProjectSummary[] = [
     projectCode: "VSR",
     description: "Annual third-party vendor security and compliance audit.",
     status: "completed",
-    priority: "medium",
     health: "healthy",
     owner: { name: "Alejo Cadavid", avatar: avatar(33) },
     updatedAt: "5 months ago",

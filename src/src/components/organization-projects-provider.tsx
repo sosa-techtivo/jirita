@@ -108,7 +108,6 @@ export function OrganizationProjectsProvider({ children }: { children: ReactNode
           projectCode: generateProjectCode(name),
           description: fields.description.trim(),
           status: "active",
-          priority: "medium",
           health: "healthy",
           owner: { name: "Unassigned", avatar: FALLBACK_AVATAR },
           updatedAt: "Just now",

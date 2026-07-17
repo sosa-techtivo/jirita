@@ -22,7 +22,7 @@
 import { getSupabaseBrowserClient } from "./supabase-client";
 import { resolveAvatarUrl } from "./membership";
 import { FALLBACK_AVATAR } from "./current-user";
-import type { ClientName, ProjectCategory, ProjectHealth, ProjectPriority, ProjectStatus, ProjectSummary } from "./mock-projects";
+import type { ClientName, ProjectCategory, ProjectHealth, ProjectStatus, ProjectSummary } from "./mock-projects";
 
 export type ProjectsResult =
   | { status: "ready"; projects: ProjectSummary[] }
@@ -86,17 +86,16 @@ const HEALTH_FROM_DB: Record<string, ProjectHealth> = {
   critical: "critical",
 };
 
-const PRIORITY_VALUES: ProjectPriority[] = ["critical", "high", "medium", "low"];
 const CATEGORY_VALUES: ProjectCategory[] = ["client", "internal"];
 
 interface ProjectRow {
+  id: string;
   slug: string;
   name: string;
   short_name: string | null;
   project_code: string;
   description: string | null;
   status: string;
-  priority: string;
   health: string;
   category: string;
   client_name: string | null;
@@ -118,7 +117,7 @@ interface OwnerProfileRow {
 }
 
 const PROJECT_COLUMNS =
-  "slug, name, short_name, project_code, description, status, priority, health, category, client_name, default_hourly_rate, owner_profile_id, target_date, updated_at, created_at";
+  "id, slug, name, short_name, project_code, description, status, health, category, client_name, default_hourly_rate, owner_profile_id, target_date, updated_at, created_at";
 
 // Kebab-cases a project name into a URL-safe slug (routes are
 // /projects/[slug]). Falls back to a timestamp if the name has no
@@ -147,7 +146,11 @@ export function generateProjectCode(name: string): string {
   return raw || `P${Date.now().toString().slice(-4)}`;
 }
 
-function rowToProjectSummary(row: ProjectRow, ownerRow: OwnerProfileRow | undefined): ProjectSummary {
+function rowToProjectSummary(
+  row: ProjectRow,
+  ownerRow: OwnerProfileRow | undefined,
+  leadRow?: OwnerProfileRow | undefined
+): ProjectSummary {
   const ownerName = ownerRow ? [ownerRow.first_name, ownerRow.last_name].filter(Boolean).join(" ") : "Unassigned";
 
   return {
@@ -157,12 +160,18 @@ function rowToProjectSummary(row: ProjectRow, ownerRow: OwnerProfileRow | undefi
     projectCode: row.project_code,
     description: row.description ?? "",
     status: STATUS_FROM_DB[row.status] ?? "planning",
-    priority: PRIORITY_VALUES.includes(row.priority as ProjectPriority) ? (row.priority as ProjectPriority) : "medium",
     health: HEALTH_FROM_DB[row.health] ?? "healthy",
     owner: {
       name: ownerName || "Unassigned",
       avatar: (ownerRow ? resolveAvatarUrl(ownerRow.avatar_url, ownerRow.updated_at) : null) ?? FALLBACK_AVATAR,
     },
+    lead: leadRow
+      ? {
+          id: leadRow.id,
+          name: [leadRow.first_name, leadRow.last_name].filter(Boolean).join(" ") || "Unassigned",
+          avatar: resolveAvatarUrl(leadRow.avatar_url, leadRow.updated_at) ?? FALLBACK_AVATAR,
+        }
+      : null,
     updatedAt: formatUpdatedAt(row.updated_at),
     targetDate: formatTargetDate(row.target_date),
     activeMilestones: 0,
@@ -277,9 +286,57 @@ export async function loadOrganizationProjects(
     }
   }
 
-  const projects: ProjectSummary[] = (rows ?? []).map((row) =>
-    rowToProjectSummary(row, row.owner_profile_id ? ownersById.get(row.owner_profile_id) : undefined)
+  // Real Project Lead is a project_memberships row with project_role =
+  // 'lead' — a separate, authoritative signal from owner_profile_id above
+  // (same reasoning as loadLeadProjects' own comment further down: Team and
+  // the Dashboards already key off project_role = 'lead', never
+  // owner_profile_id, so this mirrors that instead of introducing a second
+  // notion of "lead"). Batched the same way as the owner lookup just above,
+  // and merged into the same `ownersById` profiles map/query so a profile
+  // that's both someone's owner_profile_id and a project_role = 'lead'
+  // isn't fetched twice.
+  const projectIds = (rows ?? []).map((row) => row.id);
+  const leadProfileIdByProjectId = new Map<string, string>();
+  if (projectIds.length > 0) {
+    const { data: leadRows, error: leadError } = await supabase
+      .from("project_memberships")
+      .select("project_id, profile_id")
+      .eq("project_role", "lead")
+      .in("project_id", projectIds)
+      .returns<{ project_id: string; profile_id: string }[]>();
+
+    if (leadError) {
+      logDev("project lead memberships query failed", leadError);
+    } else {
+      for (const leadRow of leadRows ?? []) leadProfileIdByProjectId.set(leadRow.project_id, leadRow.profile_id);
+    }
+  }
+
+  const missingLeadProfileIds = Array.from(new Set(leadProfileIdByProjectId.values())).filter(
+    (id) => !ownersById.has(id)
   );
+  if (missingLeadProfileIds.length > 0) {
+    const { data: leadProfileRows, error: leadProfileError } = await supabase
+      .from("profiles")
+      .select("id, first_name, last_name, avatar_url, updated_at")
+      .in("id", missingLeadProfileIds)
+      .returns<OwnerProfileRow[]>();
+
+    if (leadProfileError) {
+      logDev("lead profiles query failed", leadProfileError);
+    } else {
+      for (const leadProfileRow of leadProfileRows ?? []) ownersById.set(leadProfileRow.id, leadProfileRow);
+    }
+  }
+
+  const projects: ProjectSummary[] = (rows ?? []).map((row) => {
+    const leadProfileId = leadProfileIdByProjectId.get(row.id);
+    return rowToProjectSummary(
+      row,
+      row.owner_profile_id ? ownersById.get(row.owner_profile_id) : undefined,
+      leadProfileId ? ownersById.get(leadProfileId) : undefined
+    );
+  });
 
   return { status: "ready", projects };
 }
@@ -288,7 +345,7 @@ export async function loadOrganizationProjects(
 // (the schema's own column default is "planning" — this overrides it per
 // product requirement), slug/project_code auto-derived from the name since
 // the create form doesn't collect them. Leaves owner_profile_id/category/
-// priority/health at their column defaults — not part of this flow.
+// health at their column defaults — not part of this flow.
 export async function createProject(params: {
   organizationId: string;
   name: string;
