@@ -12,13 +12,12 @@ import { useCurrentUser } from "@/components/current-user-provider";
 import { useOrganizationProjects } from "@/components/organization-projects-provider";
 import { MemberTrigger } from "@/components/member-profile";
 import { loadOrganizationTickets } from "@/lib/tickets";
+import { loadProjectTeam } from "@/lib/projects";
 import { SkeletonBlock } from "@/components/dashboard-shared";
 import { buildProjectHealthRows, computeProjectProgressPct } from "@/components/reports-screen";
 import type { Risk } from "@/components/reports-screen";
-import { getTodayISO } from "@/components/tickets/ticket-ui";
+import { getTodayISO, parseDisplayDate } from "@/components/tickets/ticket-ui";
 import { canManage } from "@/lib/current-user";
-import { getTeamByProjectSlug } from "@/lib/mock-team";
-import { LEAD_PROJECT_SLUGS, aggregateTeam } from "@/components/project-lead-dashboard";
 import { MemberProjectsScreen } from "@/components/member-projects-screen";
 import { CreateProjectModal } from "@/components/create-project-modal";
 import { ArchiveProjectModal } from "@/components/archive-project-modal";
@@ -91,6 +90,41 @@ const ZERO_TICKET_COUNTS: TicketCounts = { open: 0, blocked: 0, overdue: 0 };
 // fabricated value.
 function resolveTicketCounts(countsBySlug: Map<string, TicketCounts>, slug: string): TicketCounts {
   return countsBySlug.get(slug) ?? ZERO_TICKET_COUNTS;
+}
+
+interface RowTeamStats {
+  /** Real project_memberships roster size for this one project — never mock/derived. */
+  memberCount: number;
+  /** Count of that same real roster whose own assignedHours (this project's
+   *  own active tickets only) exceed their own weeklyCapacity — this
+   *  project's own state only, never mixed with any other project's load. */
+  overCapacityCount: number;
+}
+
+const ZERO_ROW_TEAM_STATS: RowTeamStats = { memberCount: 0, overCapacityCount: 0 };
+
+// Same "not loaded (yet)" default every other per-row map above uses — real
+// projects always populate a real entry here (see the effect below), so this
+// only ever surfaces before that fetch resolves, never in place of a real
+// empty roster.
+function resolveTeamStats(statsBySlug: Map<string, RowTeamStats>, slug: string): RowTeamStats {
+  return statsBySlug.get(slug) ?? ZERO_ROW_TEAM_STATS;
+}
+
+// Monday–Sunday containing todayISO — same "This Week" convention already
+// used by My Work/Member Dashboard/Member's own "My Projects" screen,
+// duplicated here as page-local glue (same precedent as those screens,
+// never a second/different definition of "this week").
+function getWeekRangeISO(todayISO: string): { start: string; end: string } {
+  const today = new Date(`${todayISO}T00:00:00`);
+  const day = today.getDay();
+  const monday = new Date(today);
+  monday.setDate(today.getDate() + (day === 0 ? -6 : 1 - day));
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+  const toISO = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return { start: toISO(monday), end: toISO(sunday) };
 }
 
 function targetDateSortKey(targetDate: string): number {
@@ -329,6 +363,20 @@ function ManagedProjectsScreen() {
   // (row.open/row.blocked/row.overdueOpen), never a second pass over
   // `tickets` or a persisted ProjectSummary field.
   const [ticketCountsBySlug, setTicketCountsBySlug] = useState<Map<string, TicketCounts>>(new Map());
+  // Project Lead summary KPIs only ("Due This Week"/"Over Capacity" below) —
+  // computed off the exact same real tickets fetch as everything else in
+  // this effect, never a second/parallel query.
+  const [dueThisWeekCount, setDueThisWeekCount] = useState(0);
+  // Global "Over Capacity" KPI — unique real profileIds over capacity in at
+  // least one of the Lead's own visible projects (never a per-project count
+  // summed across projects, so a person over capacity on two projects still
+  // counts once here).
+  const [overCapacityCount, setOverCapacityCount] = useState(0);
+  // Real per-row team stats — the same real `loadProjectTeam` roster/
+  // capacity Team itself reads, fetched once per project alongside the
+  // "Over Capacity" KPI above and reused for every row (never resolved by
+  // name/avatar, never `mock-team.ts`, never a second per-row fetch).
+  const [teamStatsBySlug, setTeamStatsBySlug] = useState<Map<string, RowTeamStats>>(new Map());
   // Real refresh-on-tab-regain — same mechanism the Admin/Project Lead/Member
   // Dashboards already rely on (see dashboard-screen.tsx's own comment on its
   // main effect): current-user-provider.tsx's window "focus" listener
@@ -375,12 +423,73 @@ function ManagedProjectsScreen() {
           result.projects.map((p) => [p.slug, computeProjectProgressPct(ticketsByProjectSlug.get(p.slug) ?? [])])
         )
       );
+
+      // "Due This Week" (Project Lead summary KPI) — open tickets (not
+      // "done") whose due date falls within the current Monday–Sunday week,
+      // off the same real tickets already fetched above.
+      const { start: weekStart, end: weekEnd } = getWeekRangeISO(getTodayISO());
+      setDueThisWeekCount(
+        result.tickets.filter((t) => {
+          if (t.status === "done" || !t.dueDate) return false;
+          const iso = parseDisplayDate(t.dueDate);
+          return Boolean(iso) && iso >= weekStart && iso <= weekEnd;
+        }).length
+      );
+
+      // Real per-project team roster/capacity (Project Lead only — Admin's
+      // rows/KPI strip have no team-member concept). One `loadProjectTeam`
+      // call per visible project — the same real function/roster Team
+      // itself reads, never `mock-team.ts`, never resolved by name/avatar —
+      // reused for both each row's own "N members"/"Balanced · N over
+      // capacity" chip (this project's own roster and this project's own
+      // ticket-derived assignedHours only, never mixed with any other
+      // project) and the global "Over Capacity" KPI (unique real profileIds
+      // over capacity in at least one visible project — a person over
+      // capacity on two projects still counts once, never summed/double
+      // counted across projects).
+      if (isProjectLead) {
+        const teamResults = await Promise.all(
+          result.projects.map((p) => loadProjectTeam(organization.id, p.slug))
+        );
+        if (cancelled) return;
+
+        const teamStats = new Map<string, RowTeamStats>();
+        const overCapacityProfileIds = new Set<string>();
+
+        result.projects.forEach((p, i) => {
+          const teamResult = teamResults[i];
+          const members = teamResult.status === "ready" ? teamResult.members : [];
+
+          const assignedHoursByProfileId = new Map<string, number>();
+          for (const ticket of ticketsByProjectSlug.get(p.slug) ?? []) {
+            if (ticket.status === "done" || !ticket.assigneeProfileId) continue;
+            assignedHoursByProfileId.set(
+              ticket.assigneeProfileId,
+              (assignedHoursByProfileId.get(ticket.assigneeProfileId) ?? 0) + (ticket.hours ?? 0)
+            );
+          }
+
+          let rowOverCapacity = 0;
+          for (const member of members) {
+            if ((assignedHoursByProfileId.get(member.id) ?? 0) > member.weeklyCapacity) {
+              rowOverCapacity++;
+              overCapacityProfileIds.add(member.id);
+            }
+          }
+
+          teamStats.set(p.slug, { memberCount: members.length, overCapacityCount: rowOverCapacity });
+        });
+
+        setTeamStatsBySlug(teamStats);
+        setOverCapacityCount(overCapacityProfileIds.size);
+      }
+
       setMetricsStatus("ready");
     })();
     return () => {
       cancelled = true;
     };
-  }, [isDevFallback, organization]);
+  }, [isDevFallback, organization, isProjectLead]);
 
   const statusGroups: DropdownGroup[] = useMemo(() => {
     const statuses = isProjectLead ? STATUS_ORDER.filter((s) => s !== "archived") : STATUS_ORDER;
@@ -416,24 +525,22 @@ function ManagedProjectsScreen() {
 
   const summaryCells: { label: string; value: number; className?: string }[] = useMemo(() => {
     if (isProjectLead) {
-      const team = aggregateTeam(LEAD_PROJECT_SLUGS);
-      const overCapacity = team.filter((m) => m.assignedHours > m.weeklyCapacity).length;
       return [
         { label: "My Projects", value: baseProjects.length },
         {
           label: "Blocked Tickets",
-          value: baseProjects.reduce((sum, p) => sum + p.blockedTickets, 0),
+          value: baseProjects.reduce((sum, p) => sum + resolveTicketCounts(ticketCountsBySlug, p.slug).blocked, 0),
           className: "text-red-600 dark:text-red-400",
         },
         {
           label: "Due This Week",
-          value: baseProjects.reduce((sum, p) => sum + p.dueThisWeekTickets, 0),
+          value: dueThisWeekCount,
           className: "text-amber-600 dark:text-amber-400",
         },
         {
-          label: "Team Members Over Capacity",
-          value: overCapacity,
-          className: overCapacity > 0 ? "text-red-600 dark:text-red-400" : "text-slate-500 dark:text-zinc-500",
+          label: "Over Capacity",
+          value: overCapacityCount,
+          className: overCapacityCount > 0 ? "text-red-600 dark:text-red-400" : "text-slate-500 dark:text-zinc-500",
         },
       ];
     }
@@ -460,7 +567,7 @@ function ManagedProjectsScreen() {
         className: "text-slate-500 dark:text-zinc-500",
       },
     ];
-  }, [isProjectLead, baseProjects, atRiskCount]);
+  }, [isProjectLead, baseProjects, atRiskCount, ticketCountsBySlug, dueThisWeekCount, overCapacityCount]);
 
   // Small reinforcement line above the list — makes it obvious this is the
   // Lead's own scoped set of projects, not the whole workspace.
@@ -533,13 +640,13 @@ function ManagedProjectsScreen() {
     <div className="max-w-4xl mx-auto px-4 sm:px-8 py-10">
       <div className="flex items-center justify-between gap-4">
         <h1 className="text-xl font-bold text-slate-900 tracking-tight dark:text-zinc-50">Projects</h1>
-        {canCreateProject && (
+        {canCreateProject && !isProjectLead && (
           <button
             type="button"
-            onClick={isProjectLead ? undefined : () => setShowCreateModal(true)}
+            onClick={() => setShowCreateModal(true)}
             className="text-sm font-medium text-slate-600 border border-slate-200 hover:bg-slate-50 rounded-lg px-3.5 py-2 transition-colors flex-shrink-0 dark:text-zinc-300 dark:border-zinc-700 dark:hover:bg-zinc-900"
           >
-            {isProjectLead ? "+ New Ticket" : "+ Create Project"}
+            + Create Project
           </button>
         )}
       </div>
@@ -611,6 +718,7 @@ function ManagedProjectsScreen() {
                   health={resolveHealth(healthBySlug, project.slug)}
                   progress={resolveProgress(progressBySlug, project.slug)}
                   ticketCounts={resolveTicketCounts(ticketCountsBySlug, project.slug)}
+                  teamStats={resolveTeamStats(teamStatsBySlug, project.slug)}
                 />
               ) : (
                 <ProjectRow
@@ -773,15 +881,15 @@ function LeadProjectRow({
   health,
   progress,
   ticketCounts,
+  teamStats,
 }: {
   project: ProjectSummary;
   health: ProjectHealth;
   progress: number;
   ticketCounts: TicketCounts;
+  teamStats: RowTeamStats;
 }) {
   const router = useRouter();
-  const team = getTeamByProjectSlug(project.slug);
-  const overCapacityCount = team.filter((m) => m.assignedHours > m.weeklyCapacity).length;
 
   function goToBoard(e: ReactMouseEvent) {
     e.stopPropagation();
@@ -844,10 +952,10 @@ function LeadProjectRow({
       <div className="flex flex-wrap items-center gap-1.5">
         <HealthBadge health={health} />
         <InfoChip>
-          {team.length} member{team.length === 1 ? "" : "s"}
+          {teamStats.memberCount} member{teamStats.memberCount === 1 ? "" : "s"}
         </InfoChip>
-        <InfoChip tone={overCapacityCount > 0 ? "danger" : "neutral"}>
-          {overCapacityCount > 0 ? `${overCapacityCount} over capacity` : "Balanced"}
+        <InfoChip tone={teamStats.overCapacityCount > 0 ? "danger" : "neutral"}>
+          {teamStats.overCapacityCount > 0 ? `${teamStats.overCapacityCount} over capacity` : "Balanced"}
         </InfoChip>
         <InfoChip>{ticketCounts.open} open</InfoChip>
         <InfoChip tone={ticketCounts.blocked > 0 ? "danger" : "neutral"}>{ticketCounts.blocked} blocked</InfoChip>
