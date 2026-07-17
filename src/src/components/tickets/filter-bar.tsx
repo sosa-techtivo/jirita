@@ -96,15 +96,17 @@ const QUICK_FILTERS = ["Mine", "Blocked", "High Priority", "Due Soon", "Recently
 // Labels for real URL-applied filters handed off from Project Overview's
 // Health Alert action and Project Reports' Delivery Progress cards
 // (?alerts=overdue,blocked,done,in-progress, etc. — see tickets-screen.tsx),
-// plus the Admin Dashboard's own "Due Today" KPI card and "tickets
-// completed this month" health insight. "overdue"/"due-today"/
-// "completed-this-month" aren't real ticket statuses, so they keep their
-// own label; every other type is a canonical TicketStatus and reuses the
-// app's existing STATUS_LABEL mapping instead of a parallel/duplicate label.
+// plus the Admin Dashboard's own "Due Today" KPI card, "tickets completed
+// this month" health insight, and the Project Lead Reports' own "Due This
+// Week" KPI. "overdue"/"due-today"/"completed-this-month"/"due-this-week"
+// aren't real ticket statuses, so they keep their own label; every other
+// type is a canonical TicketStatus and reuses the app's existing
+// STATUS_LABEL mapping instead of a parallel/duplicate label.
 const NON_STATUS_ALERT_LABEL: Record<string, string> = {
   overdue: "Overdue",
   "due-today": "Due Today",
   "completed-this-month": "Completed This Month",
+  "due-this-week": "Due This Week",
 };
 
 function alertChipLabel(type: string): string {

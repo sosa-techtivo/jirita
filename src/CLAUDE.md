@@ -275,9 +275,11 @@ Log), ticket-assignment restriction to active project members, Project →
 Team, Project Notes, the Admin/Project Lead/Member Dashboards (including
 their project scope selectors, and the Project Lead Dashboard's real,
 independently clickable Current Delivery/Attention Required KPI cards),
-company-wide Reports (Admin role), Project Overview (all three roles),
-per-project Reports (all roles), Time Tracking (all three roles), My Work
-(Member), Users, and global Search are all real.
+Reports — both the Admin's company-wide view and the Project Lead's own
+scoped view (Delivery + Team, including its own clickable KPI band),
+Project Overview (all three roles), per-project Reports (all roles), Time
+Tracking (all three roles), My Work (Member, including its own clickable
+KPI), Users, and global Search are all real.
 
 Auth/Profile through company-wide Reports (Admin) are confirmed working
 end-to-end against a live Supabase project. Everything from the Admin
@@ -289,9 +291,8 @@ Search) is implemented and passes `tsc`/`eslint`/`next build`, but has not
 yet been clicked through in a live browser — treat it as "should work, not
 yet verified."
 
-Only the Project Lead's own scoped Reports view
-(`project-lead-reports-screen.tsx`) and the rest of Settings
-(`/settings/*`) still run entirely on mock data.
+Only the rest of Settings (`/settings/*`) still runs entirely on mock
+data.
 
 **For the authoritative, feature-by-feature breakdown — every Server
 Action, migration, and real bug fixed along the way, and the exact

@@ -7,6 +7,7 @@ import type { DropdownGroup } from "@/components/tickets/filter-dropdown";
 import { useCurrentUser } from "@/components/current-user-provider";
 import { ReportStatusBar, KpiCard, Section, BlockCompletion, AnimatedBar } from "@/components/reports-shared";
 import type { StatusItem } from "@/components/reports-shared";
+import { SkeletonBlock } from "@/components/dashboard-shared";
 import { ProjectLeadReportsScreen } from "@/components/project-lead-reports-screen";
 import { getTicketDisplayKey } from "@/lib/mock-tickets";
 import type { Ticket, TicketStatus, TicketPriority } from "@/lib/mock-tickets";
@@ -85,6 +86,12 @@ interface ActivityEntry {
   id:     string;
   name:   string;
   avatar: string;
+  /** Real actor profiles.id (DeliveryActivityEvent.actorId) — in practice
+   *  always set whenever `name` is (buildRecentChanges already skips any
+   *  event whose actor didn't resolve to a real profile), so the Member
+   *  Profile Modal trigger below never has to fall back to name/avatar
+   *  matching. Optional only to match `actorId`'s own nullable column type. */
+  profileId?: string;
   /** The action fragment only — the ticket title never appears here; when
    *  `ticket` is set it renders on its own clickable line instead. */
   action: ReactNode;
@@ -1399,6 +1406,7 @@ function buildRecentChanges(
       id: event.id,
       name: event.actorName,
       avatar: event.actorAvatar,
+      profileId: event.actorId ?? undefined,
       action,
       actionText: describeDeliveryActivityText(event, memberNameById) ?? undefined,
       time: formatRelativeTime(event.createdAt),
@@ -1963,12 +1971,24 @@ function AdminReportsScreen() {
   const [deliveryLoadState, setDeliveryLoadState] = useState<"loading" | "ready" | "error">("loading");
   const [deliveryLoadError, setDeliveryLoadError] = useState<string | null>(null);
   const [deliveryRequestId, setDeliveryRequestId] = useState(0);
+  // Finance tab's own loading flag — same underlying fetch as
+  // deliveryLoadState above (Billing Period changes re-run the one effect
+  // below), but tracked separately so a Billing Period change only shows
+  // Finance's own KPIs/Billing Overview/Billable Hours by Member their own
+  // skeleton again, without touching Delivery's own (unrelated)
+  // loading/error gating. `deliveryLoadState`'s own "error" value is still
+  // reused as-is for Finance's error branches below — this only fixes the
+  // missing "loading" reset, never a second error path.
+  const [financeLoadState, setFinanceLoadState] = useState<"loading" | "ready">("loading");
 
   useEffect(() => {
     if (!organization) return;
     let cancelled = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: both tabs' own widgets must show their own skeleton again the instant this effect re-runs — on mount, on a Billing Period change, on Delivery's 7 filters (client-side, don't re-trigger this) staying put, and on tab-regain (organization gets a new reference from current-user-provider.tsx's existing focus listener, the same real refresh-on-focus mechanism the Dashboards/Projects/My Work already rely on) — same "reset before the async fetch resolves" pattern used elsewhere in this app.
+    setDeliveryLoadState("loading");
+    setFinanceLoadState("loading");
 
-    (async () => {
+    const fetchPromise = (async () => {
       const [ticketsResult, projectsResult, membersResult, capacitiesResult] = await Promise.all([
         loadOrganizationTickets(organization.id),
         loadOrganizationProjects(organization.id),
@@ -2033,6 +2053,16 @@ function AdminReportsScreen() {
       setRawDeliveryActivity(deliveryActivityResult.events);
       setDeliveryLoadState("ready");
     })();
+
+    // Settles Finance's own loading flag once this same fetch finishes,
+    // success or failure alike (Finance has no separate error UI of its
+    // own — deliveryLoadState === "error" already covers that) — guarded by
+    // `cancelled` so a stale in-flight request from a previous Billing
+    // Period can never clear the skeleton for a newer one already in
+    // flight.
+    fetchPromise.finally(() => {
+      if (!cancelled) setFinanceLoadState("ready");
+    });
 
     return () => {
       cancelled = true;
@@ -2217,6 +2247,19 @@ function AdminReportsScreen() {
     () => buildWorkloadRows(filteredTickets, rawMembers, rawCapacities, filteredTimeEntries, filteredActivityEvents),
     [filteredTickets, rawMembers, rawCapacities, filteredTimeEntries, filteredActivityEvents]
   );
+  // Real scope handoff for every Delivery-tab Member Profile Modal trigger
+  // below (Hours by Person, Workload, Recent Changes — all three read from
+  // `filteredTickets`/`filteredTicketsById`) — reuses the existing Project
+  // filter's own real selection, never a new interpretation of "scope":
+  // exactly one project selected means these widgets are already reading
+  // that one project's own tickets/team, so the modal should fetch that
+  // same project-scoped data; zero or 2+ selected means they're already
+  // aggregating across more than one project, so the modal aggregates
+  // org-wide too (its own existing no-slug mode) rather than arbitrarily
+  // picking one. Billable Hours by Member (Finance tab) is always org-wide
+  // (built from unfiltered `rawTickets`, never `filteredTickets`), so its
+  // own trigger below never passes this.
+  const deliveryProjectSlug = projectFilter.length === 1 ? projectFilter[0] : undefined;
 
   const hoursDistribution = useMemo(() => buildHoursDistribution(filteredTickets), [filteredTickets]);
   const hoursDistTotal = useMemo(
@@ -2342,38 +2385,53 @@ function AdminReportsScreen() {
       </div>
 
       {/* ── KPI strip ────────────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-8">
-        <KpiCard label="Projects"        value={kpiReady ? kpiSummary.activeProjects : "—"}     sub="active" />
-        <KpiCard label="Active Tickets"  value={kpiReady ? kpiSummary.activeTickets : "—"}       sub="open" />
-        <KpiCard
-          label="Hours Burn"
-          value={
-            kpiReady ? (
-              <>
-                {kpiSummary.loggedHours}
-                <span className="text-base font-medium ml-0.5">h</span>
-                <span className="text-sm font-normal text-brand-400 dark:text-brand-600 mx-1.5">/</span>
-                <span className="text-lg font-semibold text-brand-400 dark:text-brand-600">
-                  {kpiSummary.estimatedHours}h
-                </span>
-              </>
-            ) : (
-              "—"
-            )
-          }
-          sub={kpiReady ? `${kpiSummary.hoursBurnPct}% complete` : undefined}
-          progress={kpiReady ? kpiSummary.hoursBurnPct : undefined}
-          accent
-        />
-        <KpiCard label="Blocked"         value={kpiReady ? kpiSummary.blockedTickets : "—"}      sub="need attention" danger />
-        <KpiCard label="Done This Month" value={kpiReady ? kpiSummary.completedThisMonth : "—"}  sub={kpiReady ? `in ${currentMonthLabel}` : undefined} />
-        <KpiCard
-          label="Overdue"
-          value={kpiReady ? kpiSummary.overdueTickets : "—"}
-          sub="past due date"
-          danger={kpiReady && kpiSummary.overdueTickets > 0}
-        />
-      </div>
+      {deliveryLoadState === "loading" ? (
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-8">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div
+              key={i}
+              className="rounded-xl border border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900 px-5 pt-4 pb-4 shadow-sm shadow-slate-200/40 dark:shadow-black/20"
+            >
+              <SkeletonBlock className="h-[10px] w-16 mb-2" />
+              <SkeletonBlock className="h-6 w-12 mb-1.5" />
+              <SkeletonBlock className="h-3 w-16" />
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-8">
+          <KpiCard label="Projects"        value={kpiReady ? kpiSummary.activeProjects : "—"}     sub="active" />
+          <KpiCard label="Active Tickets"  value={kpiReady ? kpiSummary.activeTickets : "—"}       sub="open" />
+          <KpiCard
+            label="Hours Burn"
+            value={
+              kpiReady ? (
+                <>
+                  {kpiSummary.loggedHours}
+                  <span className="text-base font-medium ml-0.5">h</span>
+                  <span className="text-sm font-normal text-brand-400 dark:text-brand-600 mx-1.5">/</span>
+                  <span className="text-lg font-semibold text-brand-400 dark:text-brand-600">
+                    {kpiSummary.estimatedHours}h
+                  </span>
+                </>
+              ) : (
+                "—"
+              )
+            }
+            sub={kpiReady ? `${kpiSummary.hoursBurnPct}% complete` : undefined}
+            progress={kpiReady ? kpiSummary.hoursBurnPct : undefined}
+            accent
+          />
+          <KpiCard label="Blocked"         value={kpiReady ? kpiSummary.blockedTickets : "—"}      sub="need attention" danger />
+          <KpiCard label="Done This Month" value={kpiReady ? kpiSummary.completedThisMonth : "—"}  sub={kpiReady ? `in ${currentMonthLabel}` : undefined} />
+          <KpiCard
+            label="Overdue"
+            value={kpiReady ? kpiSummary.overdueTickets : "—"}
+            sub="past due date"
+            danger={kpiReady && kpiSummary.overdueTickets > 0}
+          />
+        </div>
+      )}
 
       {/* ── Sections ─────────────────────────────────────────────────────────── */}
       <div className="space-y-5">
@@ -2381,7 +2439,7 @@ function AdminReportsScreen() {
         {/* ── Hours by Person ───────────────────────────────────────────────── */}
         <Section
           title="Hours by Person"
-          count={personRows.length}
+          count={deliveryLoadState === "loading" ? undefined : personRows.length}
           icon={
             <svg className="w-3.5 h-3.5 text-slate-400 dark:text-zinc-500 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
               <circle cx="12" cy="8" r="4" />
@@ -2409,11 +2467,22 @@ function AdminReportsScreen() {
                 style={{ opacity: personFading ? 0 : 1 }}
               >
                 {deliveryLoadState === "loading" ? (
-                  <tr>
-                    <td colSpan={7} className="py-6 text-center text-sm text-slate-400 dark:text-zinc-500">
-                      Loading…
-                    </td>
-                  </tr>
+                  Array.from({ length: 3 }).map((_, i) => (
+                    <tr key={i}>
+                      <td className="py-2.5 pr-4">
+                        <div className="flex items-center gap-2.5">
+                          <SkeletonBlock className="h-6 w-6 rounded-full flex-shrink-0" />
+                          <SkeletonBlock className="h-4 w-28" />
+                        </div>
+                      </td>
+                      <td className="py-2.5 text-right"><SkeletonBlock className="h-4 w-8 ml-auto" /></td>
+                      <td className="py-2.5 text-right"><SkeletonBlock className="h-4 w-10 ml-auto" /></td>
+                      <td className="py-2.5 text-right"><SkeletonBlock className="h-4 w-10 ml-auto" /></td>
+                      <td className="py-2.5 text-right"><SkeletonBlock className="h-4 w-10 ml-auto" /></td>
+                      <td className="py-2.5 text-right"><SkeletonBlock className="h-4 w-10 ml-auto" /></td>
+                      <td className="py-2.5 text-right"><SkeletonBlock className="h-4 w-10 ml-auto" /></td>
+                    </tr>
+                  ))
                 ) : deliveryLoadState === "error" ? (
                   <tr>
                     <td colSpan={7} className="py-6 text-center text-sm text-slate-400 dark:text-zinc-500">
@@ -2440,7 +2509,13 @@ function AdminReportsScreen() {
                       className="hover:bg-slate-50/60 dark:hover:bg-zinc-800/30 transition-colors duration-150 cursor-default"
                     >
                       <td className="py-2.5 pr-4">
-                        <MemberTrigger name={row.name} avatar={row.avatar} className="flex items-center gap-2.5">
+                        <MemberTrigger
+                          name={row.name}
+                          avatar={row.avatar}
+                          profileId={row.id}
+                          projectSlug={deliveryProjectSlug}
+                          className="flex items-center gap-2.5"
+                        >
                           {/* eslint-disable-next-line @next/next/no-img-element */}
                           <img src={row.avatar} alt={row.name} className="w-6 h-6 rounded-full flex-shrink-0" />
                           <span className="font-medium text-slate-800 dark:text-zinc-200">{row.name}</span>
@@ -2479,7 +2554,7 @@ function AdminReportsScreen() {
         {/* ── Project Health ────────────────────────────────────────────────── */}
         <Section
           title="Project Health"
-          count={projectRows.length}
+          count={deliveryLoadState === "loading" ? undefined : projectRows.length}
           icon={
             <svg className="w-3.5 h-3.5 text-slate-400 dark:text-zinc-500 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
               <path d="M3 7l4-4h6l4 4" />
@@ -2513,11 +2588,21 @@ function AdminReportsScreen() {
               </thead>
               <tbody className="divide-y divide-slate-50 dark:divide-zinc-800/60">
                 {deliveryLoadState === "loading" ? (
-                  <tr>
-                    <td colSpan={6} className="py-6 text-center text-sm text-slate-400 dark:text-zinc-500">
-                      Loading…
-                    </td>
-                  </tr>
+                  Array.from({ length: 3 }).map((_, i) => (
+                    <tr key={i}>
+                      <td className="py-2.5 pr-4">
+                        <div className="flex items-center gap-2">
+                          <SkeletonBlock className="h-6 w-6 rounded-md flex-shrink-0" />
+                          <SkeletonBlock className="h-4 w-32" />
+                        </div>
+                      </td>
+                      <td className="py-2.5 text-right"><SkeletonBlock className="h-4 w-8 ml-auto" /></td>
+                      <td className="py-2.5 text-right"><SkeletonBlock className="h-4 w-16 ml-auto" /></td>
+                      <td className="py-2.5 text-right"><SkeletonBlock className="h-4 w-6 ml-auto" /></td>
+                      <td className="py-2.5 pl-4"><SkeletonBlock className="h-4 w-24" /></td>
+                      <td className="py-2.5 text-right"><SkeletonBlock className="h-5 w-14 ml-auto rounded-full" /></td>
+                    </tr>
+                  ))
                 ) : deliveryLoadState === "error" ? (
                   <tr>
                     <td colSpan={6} className="py-6 text-center text-sm text-slate-400 dark:text-zinc-500">
@@ -2600,7 +2685,23 @@ function AdminReportsScreen() {
           >
             <div className="space-y-4">
               {deliveryLoadState === "loading" ? (
-                <p className="text-sm text-slate-400 dark:text-zinc-500">Loading…</p>
+                <>
+                  {Array.from({ length: 3 }).map((_, i) => (
+                    <div key={i}>
+                      <div className="flex items-center justify-between mb-1">
+                        <div className="flex items-center gap-2">
+                          <SkeletonBlock className="h-5 w-5 rounded-full flex-shrink-0" />
+                          <SkeletonBlock className="h-4 w-24" />
+                        </div>
+                        <div className="text-right">
+                          <SkeletonBlock className="h-4 w-16 mb-1 ml-auto" />
+                          <SkeletonBlock className="h-3 w-10 ml-auto" />
+                        </div>
+                      </div>
+                      <SkeletonBlock className="h-1.5 w-full rounded-full" />
+                    </div>
+                  ))}
+                </>
               ) : deliveryLoadState === "error" ? (
                 <p className="text-sm text-slate-400 dark:text-zinc-500">
                   {deliveryLoadError ?? "Couldn't load Workload."}{" "}
@@ -2633,7 +2734,13 @@ function AdminReportsScreen() {
                   return (
                     <div key={entry.id}>
                       <div className="flex items-center justify-between mb-1">
-                        <MemberTrigger name={entry.name} avatar={entry.avatar} className="flex items-center gap-2">
+                        <MemberTrigger
+                          name={entry.name}
+                          avatar={entry.avatar}
+                          profileId={entry.id}
+                          projectSlug={deliveryProjectSlug}
+                          className="flex items-center gap-2"
+                        >
                           {/* eslint-disable-next-line @next/next/no-img-element */}
                           <img src={entry.avatar} alt={entry.name} className="w-5 h-5 rounded-full flex-shrink-0" />
                           <span className="text-sm font-medium text-slate-700 dark:text-zinc-300">
@@ -2691,34 +2798,50 @@ function AdminReportsScreen() {
             }
           >
             <div className="space-y-4">
-              {hoursDistribution.map((entry) => {
-                const pct = hoursDistTotal > 0 ? Math.round((entry.hours / hoursDistTotal) * 100) : 0;
-                return (
-                  <div key={entry.id}>
+              {deliveryLoadState === "loading" ? (
+                Array.from({ length: 5 }).map((_, i) => (
+                  <div key={i}>
                     <div className="flex items-center justify-between mb-1.5">
-                      <span className="text-sm font-medium text-slate-700 dark:text-zinc-300">
-                        {entry.label}
-                      </span>
-                      <span className="text-sm font-semibold text-slate-700 dark:text-zinc-200 tabular-nums">
-                        {entry.hours}h
-                      </span>
+                      <SkeletonBlock className="h-4 w-20" />
+                      <SkeletonBlock className="h-4 w-10" />
                     </div>
-                    <div className="h-1.5 rounded-full bg-slate-100 dark:bg-zinc-800 overflow-hidden">
-                      <AnimatedBar pct={pct} className={entry.barClass} />
-                    </div>
-                    <p className="mt-1 text-[11px] text-slate-400 dark:text-zinc-600 tabular-nums">
-                      {pct}%
-                    </p>
+                    <SkeletonBlock className="h-1.5 w-full rounded-full" />
                   </div>
-                );
-              })}
+                ))
+              ) : (
+                hoursDistribution.map((entry) => {
+                  const pct = hoursDistTotal > 0 ? Math.round((entry.hours / hoursDistTotal) * 100) : 0;
+                  return (
+                    <div key={entry.id}>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <span className="text-sm font-medium text-slate-700 dark:text-zinc-300">
+                          {entry.label}
+                        </span>
+                        <span className="text-sm font-semibold text-slate-700 dark:text-zinc-200 tabular-nums">
+                          {entry.hours}h
+                        </span>
+                      </div>
+                      <div className="h-1.5 rounded-full bg-slate-100 dark:bg-zinc-800 overflow-hidden">
+                        <AnimatedBar pct={pct} className={entry.barClass} />
+                      </div>
+                      <p className="mt-1 text-[11px] text-slate-400 dark:text-zinc-600 tabular-nums">
+                        {pct}%
+                      </p>
+                    </div>
+                  );
+                })
+              )}
             </div>
-            <p className="mt-4 text-[11px] text-slate-400 dark:text-zinc-600 tabular-nums">
+            <div className="mt-4 text-[11px] text-slate-400 dark:text-zinc-600 tabular-nums">
               Total:{" "}
-              <span className="font-semibold text-slate-600 dark:text-zinc-400">
-                {hoursDistTotal}h
-              </span>
-            </p>
+              {deliveryLoadState === "loading" ? (
+                <SkeletonBlock className="h-3 w-10 inline-block align-middle" />
+              ) : (
+                <span className="font-semibold text-slate-600 dark:text-zinc-400">
+                  {hoursDistTotal}h
+                </span>
+              )}
+            </div>
           </Section>
         </div>
 
@@ -2734,7 +2857,17 @@ function AdminReportsScreen() {
         >
           <div className="space-y-5">
             {deliveryLoadState === "loading" ? (
-              <p className="text-sm text-slate-400 dark:text-zinc-500">Loading…</p>
+              <ul className="space-y-3.5">
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <li key={i} className="flex items-start gap-3">
+                    <SkeletonBlock className="h-6 w-6 rounded-full flex-shrink-0 mt-0.5" />
+                    <div className="flex-1 min-w-0">
+                      <SkeletonBlock className="h-4 w-3/4 mb-1.5" />
+                      <SkeletonBlock className="h-3 w-1/3" />
+                    </div>
+                  </li>
+                ))}
+              </ul>
             ) : deliveryLoadState === "error" ? (
               <p className="text-sm text-slate-400 dark:text-zinc-500">
                 {deliveryLoadError ?? "Couldn't load Recent Changes."}{" "}
@@ -2760,7 +2893,13 @@ function AdminReportsScreen() {
                   <ul className="space-y-3.5">
                     {entries.map((entry) => (
                       <li key={entry.id} className="flex items-start gap-3">
-                        <MemberTrigger name={entry.name} avatar={entry.avatar} className="flex-shrink-0 mt-0.5 rounded-full">
+                        <MemberTrigger
+                          name={entry.name}
+                          avatar={entry.avatar}
+                          profileId={entry.profileId}
+                          projectSlug={deliveryProjectSlug}
+                          className="flex-shrink-0 mt-0.5 rounded-full"
+                        >
                           {/* eslint-disable-next-line @next/next/no-img-element */}
                           <img
                             src={entry.avatar}
@@ -2770,7 +2909,13 @@ function AdminReportsScreen() {
                         </MemberTrigger>
                         <div className="text-sm leading-snug min-w-0 flex-1">
                           <p className="text-slate-700 dark:text-zinc-300">
-                            <MemberTrigger name={entry.name} avatar={entry.avatar} className="font-medium text-slate-900 dark:text-zinc-100 hover:underline">
+                            <MemberTrigger
+                              name={entry.name}
+                              avatar={entry.avatar}
+                              profileId={entry.profileId}
+                              projectSlug={deliveryProjectSlug}
+                              className="font-medium text-slate-900 dark:text-zinc-100 hover:underline"
+                            >
                               {entry.name}
                             </MemberTrigger>{" "}
                             {entry.action}
@@ -2820,38 +2965,53 @@ function AdminReportsScreen() {
             <PeriodSelector value={period} onChange={setPeriod} customRange={customRange} onCustomRangeChange={setCustomRange} />
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-8">
-            <KpiCard
-              label="Billable Hours"
-              value={financeReady ? <>{financeKpiSummary.billableHours}<span className="text-base font-medium ml-0.5">h</span></> : "—"}
-              sub="this period"
-              accent
-            />
-            <KpiCard
-              label="Non-billable Hours"
-              value={financeReady ? <>{financeKpiSummary.nonBillableHours}<span className="text-base font-medium ml-0.5">h</span></> : "—"}
-              sub="internal / overhead"
-            />
-            <KpiCard
-              label="Utilization"
-              value={financeReady ? `${financeKpiSummary.utilizationPct}%` : "—"}
-              sub="billable ÷ logged"
-              progress={financeReady ? Math.min(financeKpiSummary.utilizationPct, 100) : undefined}
-              accent
-            />
-            <KpiCard
-              label="Estimated Revenue"
-              value={financeReady ? formatCurrency(financeKpiSummary.estimatedRevenue) : "—"}
-              sub="billable hours × rate"
-              accent
-            />
-          </div>
+          {financeLoadState === "loading" ? (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-8">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <div
+                  key={i}
+                  className="rounded-xl border border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900 px-5 pt-4 pb-4 shadow-sm shadow-slate-200/40 dark:shadow-black/20"
+                >
+                  <SkeletonBlock className="h-[10px] w-24 mb-2" />
+                  <SkeletonBlock className="h-6 w-16 mb-1.5" />
+                  <SkeletonBlock className="h-3 w-20" />
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-8">
+              <KpiCard
+                label="Billable Hours"
+                value={financeReady ? <>{financeKpiSummary.billableHours}<span className="text-base font-medium ml-0.5">h</span></> : "—"}
+                sub="this period"
+                accent
+              />
+              <KpiCard
+                label="Non-billable Hours"
+                value={financeReady ? <>{financeKpiSummary.nonBillableHours}<span className="text-base font-medium ml-0.5">h</span></> : "—"}
+                sub="internal / overhead"
+              />
+              <KpiCard
+                label="Utilization"
+                value={financeReady ? `${financeKpiSummary.utilizationPct}%` : "—"}
+                sub="billable ÷ logged"
+                progress={financeReady ? Math.min(financeKpiSummary.utilizationPct, 100) : undefined}
+                accent
+              />
+              <KpiCard
+                label="Estimated Revenue"
+                value={financeReady ? formatCurrency(financeKpiSummary.estimatedRevenue) : "—"}
+                sub="billable hours × rate"
+                accent
+              />
+            </div>
+          )}
 
           {/* ── Sections ─────────────────────────────────────────────────── */}
           <div className="space-y-5">
             <Section
               title="Billing Overview"
-              count={billingOverviewRows.length}
+              count={financeLoadState === "loading" ? undefined : billingOverviewRows.length}
               icon={
                 <svg className="w-3.5 h-3.5 text-slate-400 dark:text-zinc-500 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.66 0-3 .672-3 1.5S10.34 11 12 11s3 .672 3 1.5-1.34 1.5-3 1.5m0-6V6m0 1v6m0 0v1m0-1c-1.66 0-3-.672-3-1.5M17 7H9a2 2 0 00-2 2v6a2 2 0 002 2h8a2 2 0 002-2V9a2 2 0 00-2-2z" />
@@ -2880,12 +3040,16 @@ function AdminReportsScreen() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-50 dark:divide-zinc-800/60">
-                    {deliveryLoadState === "loading" ? (
-                      <tr>
-                        <td colSpan={5} className="py-6 text-center text-sm text-slate-400 dark:text-zinc-500">
-                          Loading…
-                        </td>
-                      </tr>
+                    {financeLoadState === "loading" ? (
+                      Array.from({ length: 3 }).map((_, i) => (
+                        <tr key={i}>
+                          <td className="py-2.5 pr-4"><SkeletonBlock className="h-4 w-32" /></td>
+                          <td className="py-2.5 text-right"><SkeletonBlock className="h-4 w-10 ml-auto" /></td>
+                          <td className="py-2.5 text-right"><SkeletonBlock className="h-4 w-10 ml-auto" /></td>
+                          <td className="py-2.5 text-right"><SkeletonBlock className="h-4 w-14 ml-auto" /></td>
+                          <td className="py-2.5 text-right"><SkeletonBlock className="h-4 w-16 ml-auto" /></td>
+                        </tr>
+                      ))
                     ) : deliveryLoadState === "error" ? (
                       <tr>
                         <td colSpan={5} className="py-6 text-center text-sm text-slate-400 dark:text-zinc-500">
@@ -2939,14 +3103,26 @@ function AdminReportsScreen() {
                     <tr className="border-t border-slate-100 dark:border-zinc-800">
                       <td className="pt-2.5 font-semibold text-slate-600 dark:text-zinc-300">Total</td>
                       <td className="pt-2.5 text-right font-semibold text-slate-800 dark:text-zinc-200 tabular-nums">
-                        {financeReady ? financeKpiSummary.billableHours : 0}h
+                        {financeLoadState === "loading" ? (
+                          <SkeletonBlock className="h-4 w-10 ml-auto" />
+                        ) : (
+                          <>{financeReady ? financeKpiSummary.billableHours : 0}h</>
+                        )}
                       </td>
                       <td className="pt-2.5 text-right text-slate-500 dark:text-zinc-400 tabular-nums">
-                        {financeReady ? financeKpiSummary.nonBillableHours : 0}h
+                        {financeLoadState === "loading" ? (
+                          <SkeletonBlock className="h-4 w-10 ml-auto" />
+                        ) : (
+                          <>{financeReady ? financeKpiSummary.nonBillableHours : 0}h</>
+                        )}
                       </td>
                       <td className="pt-2.5" />
                       <td className="pt-2.5 text-right font-bold text-brand-700 dark:text-brand-400 tabular-nums">
-                        {formatCurrency(financeReady ? financeKpiSummary.estimatedRevenue : 0)}
+                        {financeLoadState === "loading" ? (
+                          <SkeletonBlock className="h-4 w-16 ml-auto" />
+                        ) : (
+                          formatCurrency(financeReady ? financeKpiSummary.estimatedRevenue : 0)
+                        )}
                       </td>
                     </tr>
                   </tfoot>
@@ -2956,7 +3132,7 @@ function AdminReportsScreen() {
 
             <Section
               title="Billable Hours by Member"
-              count={billableHoursByMemberRows.length}
+              count={financeLoadState === "loading" ? undefined : billableHoursByMemberRows.length}
               icon={
                 <svg className="w-3.5 h-3.5 text-slate-400 dark:text-zinc-500 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
                   <circle cx="12" cy="8" r="4" />
@@ -2986,12 +3162,16 @@ function AdminReportsScreen() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-50 dark:divide-zinc-800/60">
-                    {deliveryLoadState === "loading" ? (
-                      <tr>
-                        <td colSpan={5} className="py-6 text-center text-sm text-slate-400 dark:text-zinc-500">
-                          Loading…
-                        </td>
-                      </tr>
+                    {financeLoadState === "loading" ? (
+                      Array.from({ length: 3 }).map((_, i) => (
+                        <tr key={i}>
+                          <td className="py-2.5 pr-4"><SkeletonBlock className="h-4 w-32" /></td>
+                          <td className="py-2.5 text-right"><SkeletonBlock className="h-4 w-10 ml-auto" /></td>
+                          <td className="py-2.5 text-right"><SkeletonBlock className="h-4 w-10 ml-auto" /></td>
+                          <td className="py-2.5 text-right"><SkeletonBlock className="h-4 w-10 ml-auto" /></td>
+                          <td className="py-2.5 text-right"><SkeletonBlock className="h-4 w-16 ml-auto" /></td>
+                        </tr>
+                      ))
                     ) : deliveryLoadState === "error" ? (
                       <tr>
                         <td colSpan={5} className="py-6 text-center text-sm text-slate-400 dark:text-zinc-500">
@@ -3015,7 +3195,7 @@ function AdminReportsScreen() {
                       billableHoursByMemberRows.map((row) => (
                         <tr key={row.id} className="hover:bg-slate-50/60 dark:hover:bg-zinc-800/30 transition-colors duration-150 cursor-default">
                           <td className="py-2.5 pr-4">
-                            <MemberTrigger name={row.name} avatar={row.avatar} className="flex items-center gap-2.5">
+                            <MemberTrigger name={row.name} avatar={row.avatar} profileId={row.id} className="flex items-center gap-2.5">
                               {/* eslint-disable-next-line @next/next/no-img-element */}
                               <img src={row.avatar} alt={row.name} className="w-6 h-6 rounded-full flex-shrink-0" />
                               <span className="font-medium text-slate-800 dark:text-zinc-200">{row.name}</span>

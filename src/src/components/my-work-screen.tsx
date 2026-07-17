@@ -22,6 +22,7 @@ import {
 } from "@/components/tickets/ticket-ui";
 import { MemberTrigger } from "@/components/member-profile";
 import { useCurrentUser } from "@/components/current-user-provider";
+import { SkeletonBlock } from "@/components/dashboard-shared";
 import {
   loadOrganizationTickets,
   loadOrganizationActivity,
@@ -204,6 +205,95 @@ const KPI_MODE_LABELS: Record<KpiMode, string> = {
   "due-soon": "Due this week",
   hours:    "By hours",
 };
+
+// ── Loading skeleton ──────────────────────────────────────────────────────────
+//
+// Mirrors this screen's own real layout (header, KPI strip, My Hours/My Time
+// bars, toolbar, ticket rows), built from the same shared `SkeletonBlock`
+// primitive the Admin/Project Lead/Member Dashboards and the Projects list
+// already use for their own loading states — never a second skeleton
+// pattern. Shown both on first load and on every re-run of the data-loading
+// effect below (e.g. returning to a backgrounded browser tab), so real
+// content never has to share the screen with stale data mid-refresh.
+function MyWorkLoadingSkeleton({ showMyTime }: { showMyTime: boolean }) {
+  return (
+    <div className="max-w-5xl mx-auto px-6 py-6 pb-16">
+      {/* Header */}
+      <div className="flex items-start justify-between mb-6 gap-4">
+        <div>
+          <SkeletonBlock className="h-[21px] w-56 mb-1.5" />
+          <SkeletonBlock className="h-3 w-32" />
+        </div>
+        <SkeletonBlock className="h-8 w-28 flex-shrink-0" />
+      </div>
+
+      {/* KPI strip */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div
+            key={i}
+            className="rounded-xl border border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900 px-5 py-4 shadow-sm shadow-slate-200/40 dark:shadow-black/20"
+          >
+            <SkeletonBlock className="h-[10px] w-24 mb-2" />
+            <SkeletonBlock className="h-6 w-12 mb-1.5" />
+            <SkeletonBlock className="h-3 w-16" />
+          </div>
+        ))}
+      </div>
+
+      {/* My Hours breakdown */}
+      <div className="mt-3 flex items-center gap-5 rounded-xl border border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900 px-5 py-3.5 shadow-sm shadow-slate-200/40 dark:shadow-black/20">
+        <SkeletonBlock className="h-[10px] w-16 flex-shrink-0" />
+        <div className="flex items-center gap-6 flex-1">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <div key={i} className="flex-shrink-0">
+              <SkeletonBlock className="h-[10px] w-12 mb-1" />
+              <SkeletonBlock className="h-4 w-8" />
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* My Time (Member only) */}
+      {showMyTime && (
+        <div className="mt-3 flex items-center gap-5 rounded-xl border border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900 px-5 py-3.5 shadow-sm shadow-slate-200/40 dark:shadow-black/20">
+          <SkeletonBlock className="h-[10px] w-14 flex-shrink-0" />
+          <div className="flex items-center gap-6 flex-1">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="flex-shrink-0">
+                <SkeletonBlock className="h-[10px] w-16 mb-1" />
+                <SkeletonBlock className="h-4 w-10" />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Toolbar */}
+      <div className="mt-8 flex items-center justify-between gap-4 mb-4 flex-wrap">
+        <SkeletonBlock className="h-[10px] w-20" />
+        <div className="flex items-center gap-1.5">
+          <SkeletonBlock className="h-7 w-16" />
+          <SkeletonBlock className="h-7 w-16" />
+          <SkeletonBlock className="h-7 w-16" />
+          <SkeletonBlock className="h-7 w-16" />
+          <SkeletonBlock className="h-7 w-24" />
+        </div>
+      </div>
+
+      {/* Ticket rows */}
+      <div className="divide-y divide-slate-100 dark:divide-zinc-800">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <div key={i} className="flex items-center gap-3 py-3">
+            <SkeletonBlock className="h-4 flex-1" />
+            <SkeletonBlock className="h-4 w-16" />
+            <SkeletonBlock className="h-6 w-6 rounded-full flex-shrink-0" />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 // ── KPI card (clickable) ──────────────────────────────────────────────────────
 
@@ -647,13 +737,7 @@ export function MyWorkScreen() {
   const showMyTime = user.role === "MEMBER";
 
   if (loadState === "loading") {
-    return (
-      <div className="max-w-5xl mx-auto px-6 py-6 pb-16">
-        <div className="h-full flex items-center justify-center text-sm text-slate-400 dark:text-zinc-500 py-20">
-          Loading your work…
-        </div>
-      </div>
-    );
+    return <MyWorkLoadingSkeleton showMyTime={showMyTime} />;
   }
 
   if (loadState === "error") {

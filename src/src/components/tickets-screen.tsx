@@ -432,6 +432,26 @@ export function TicketsScreen({ slug, projectName }: { slug?: string; projectNam
     const monthPrefix = todayISO.slice(0, 7);
     const isCompletedThisMonth = (t: Ticket) => t.status === "done" && t.updatedAtISO?.slice(0, 7) === monthPrefix;
 
+    // Due This Week — the exact same real Monday–Sunday "this week"
+    // convention already established by Projects/My Work/Member Dashboard/
+    // the Project Lead's own Reports "Due This Week" KPI, never a second/
+    // different definition of "this week". Same non-done + real due date
+    // requirement as Overdue/Due Today above.
+    const weekDay = new Date(`${todayISO}T00:00:00`).getDay();
+    const weekMonday = new Date(`${todayISO}T00:00:00`);
+    weekMonday.setDate(weekMonday.getDate() + (weekDay === 0 ? -6 : 1 - weekDay));
+    const weekSunday = new Date(weekMonday);
+    weekSunday.setDate(weekMonday.getDate() + 6);
+    const toWeekBoundISO = (d: Date) =>
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const weekStartISO = toWeekBoundISO(weekMonday);
+    const weekEndISO = toWeekBoundISO(weekSunday);
+    const isDueThisWeek = (t: Ticket) => {
+      if (t.status === "done" || !t.dueDate) return false;
+      const dueISO = parseDisplayDate(t.dueDate);
+      return Boolean(dueISO) && dueISO >= weekStartISO && dueISO <= weekEndISO;
+    };
+
     // Local calendar date (not UTC — same reasoning as getTodayISO) behind a
     // full timestamp, so Created/Updated Date ranges compare day-to-day like
     // the date-only inputs that set them, not exact instants.
@@ -510,6 +530,7 @@ export function TicketsScreen({ slug, projectName }: { slug?: string; projectNam
           type === "overdue" ? isOverdue(t) :
           type === "due-today" ? isDueToday(t) :
           type === "completed-this-month" ? isCompletedThisMonth(t) :
+          type === "due-this-week" ? isDueThisWeek(t) :
           t.status === type
         );
         if (!matchesAlert) return false;

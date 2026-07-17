@@ -69,6 +69,8 @@ export function KpiCard({
   accent,
   danger,
   progress,
+  disabled,
+  onClick,
 }: {
   label: string;
   value: ReactNode;
@@ -76,18 +78,19 @@ export function KpiCard({
   accent?: boolean;
   danger?: boolean;
   progress?: number;
+  /** True when there's nothing real to navigate to (e.g. "My Projects" with
+   *  zero real projects) — suppresses the hover/lift affordance below and
+   *  is never wrapped in a button, so it never shows a cursor or responds
+   *  to a click. Only "My Projects" (Project Lead Reports) passes this
+   *  today; every other card omits both this and `onClick` and keeps its
+   *  existing plain, non-interactive rendering exactly as before. */
+  disabled?: boolean;
+  /** Real navigation handler — when present (and not `disabled`), the whole
+   *  card becomes a single clickable surface instead of a plain block. */
+  onClick?: () => void;
 }) {
-  return (
-    <div
-      className={[
-        "rounded-xl border px-5 pt-4 shadow-sm shadow-slate-200/40 dark:shadow-black/20",
-        "transition-all duration-200 hover:shadow-md hover:-translate-y-px",
-        progress !== undefined ? "pb-3" : "pb-4",
-        accent
-          ? "border-brand-100 dark:border-brand-700/40 bg-brand-50/40 dark:bg-brand-500/5"
-          : "border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900",
-      ].join(" ")}
-    >
+  const content = (
+    <>
       <p
         className={[
           "text-[10px] font-bold uppercase tracking-widest mb-1",
@@ -114,8 +117,28 @@ export function KpiCard({
           <div className="h-full rounded-full bg-brand-500" style={{ width: `${progress}%` }} />
         </div>
       )}
-    </div>
+    </>
   );
+
+  const baseClassName = [
+    "rounded-xl border px-5 pt-4 shadow-sm shadow-slate-200/40 dark:shadow-black/20",
+    "transition-all duration-200",
+    progress !== undefined ? "pb-3" : "pb-4",
+    accent
+      ? "border-brand-100 dark:border-brand-700/40 bg-brand-50/40 dark:bg-brand-500/5"
+      : "border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900",
+    disabled ? "" : "hover:shadow-md hover:-translate-y-px",
+  ].join(" ");
+
+  if (onClick && !disabled) {
+    return (
+      <button type="button" onClick={onClick} className={`${baseClassName} text-left w-full`}>
+        {content}
+      </button>
+    );
+  }
+
+  return <div className={baseClassName}>{content}</div>;
 }
 
 export function Section({

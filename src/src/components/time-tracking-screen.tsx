@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { FilterDropdown } from "@/components/tickets/filter-dropdown";
 import type { DropdownGroup } from "@/components/tickets/filter-dropdown";
 import { KpiCard, Section } from "@/components/reports-shared";
+import { SkeletonBlock } from "@/components/dashboard-shared";
 import { useCurrentUser } from "@/components/current-user-provider";
 import { ProjectLeadTimeTrackingScreen } from "@/components/project-lead-time-tracking-screen";
 import { MemberTrigger } from "@/components/member-profile";
@@ -450,6 +451,12 @@ export function TimeTrackingScreen() {
   const [loadState, setLoadState] = useState<"loading" | "ready" | "error">("loading");
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loadRequestId, setLoadRequestId] = useState(0);
+  // Custom Range's own loading flag — kept separate from `loadState` (never
+  // added to the effect below's own dependency array) since that effect
+  // already depends on `loadState` itself; folding a Custom-Range-only
+  // loading signal into that same state would make the effect re-run
+  // (and re-cancel/cancel-itself) purely because of its own state update.
+  const [customRangeLoading, setCustomRangeLoading] = useState(false);
 
   const isProjectLead = user.role === "PROJECT_LEAD";
 
@@ -459,6 +466,8 @@ export function TimeTrackingScreen() {
     // this org-wide Admin/Member data for them.
     if (!organization || isProjectLead) return;
     let cancelled = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: every data-dependent block below must show its own skeleton again the instant this effect re-runs — on mount and on tab-regain (organization gets a new reference from current-user-provider.tsx's existing focus listener, the same real refresh-on-focus mechanism the Dashboards/Projects/My Work/Reports already rely on) — same "reset before the async fetch resolves" pattern used elsewhere in this app.
+    setLoadState("loading");
 
     (async () => {
       const [ticketsResult, projectsResult, usersResult, capacitiesResult] = await Promise.all([
@@ -514,6 +523,8 @@ export function TimeTrackingScreen() {
     if (!organization || isProjectLead) return;
     if (period !== "custom" || loadState !== "ready") return;
     let cancelled = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: shows the same skeleton again while a new Custom Range is fetched, mirroring the main effect above — `customRangeLoading` is never a dependency of this effect, so this can't cause it to re-run itself.
+    setCustomRangeLoading(true);
     const ticketIds = rawTickets.map((t) => t.id);
 
     (async () => {
@@ -521,9 +532,11 @@ export function TimeTrackingScreen() {
       if (cancelled) return;
       if (result.status === "error") {
         logDev("custom range time entries query failed", result.message);
+        setCustomRangeLoading(false);
         return;
       }
       setEntriesCustom(result.entries);
+      setCustomRangeLoading(false);
     })();
 
     return () => { cancelled = true; };
@@ -689,6 +702,19 @@ export function TimeTrackingScreen() {
     });
   }, [visibleMembers, todayHours, yesterdayHours, weekHours, monthHours, customHours, capacityByMember, billingByMember, period, customRange]);
 
+  // Real scope handoff for every Member Profile Modal trigger below
+  // (Timesheets, Members Missing Hours) — reuses the existing Project
+  // filter's own real selection (the same one already narrowing
+  // capacityTicketIds/billingTicketIds above), never a new interpretation
+  // of "scope": exactly one project selected means this page's own rows are
+  // already reading that one project's own tickets/team, so the modal
+  // should fetch that same project-scoped data; zero or 2+ selected means
+  // this page is already aggregating across more than one project, so the
+  // modal aggregates org-wide too (its own existing no-slug mode) rather
+  // than arbitrarily picking one project out of a member's own real
+  // `projectSlugs` list.
+  const timeTrackingProjectSlug = projectFilter.length === 1 ? projectFilter[0] : undefined;
+
   const missingHoursList = useMemo(() => {
     return viewRows
       .filter((r) => r.status === "Missing")
@@ -760,16 +786,6 @@ export function TimeTrackingScreen() {
     return <ProjectLeadTimeTrackingScreen />;
   }
 
-  if (loadState === "loading") {
-    return (
-      <div className="max-w-5xl mx-auto px-6 py-6 pb-16">
-        <div className="h-full flex items-center justify-center text-sm text-slate-400 dark:text-zinc-500 py-20">
-          Loading time tracking…
-        </div>
-      </div>
-    );
-  }
-
   if (loadState === "error") {
     return (
       <div className="max-w-5xl mx-auto px-6 py-6 pb-16">
@@ -789,6 +805,13 @@ export function TimeTrackingScreen() {
       </div>
     );
   }
+
+  // Every data-dependent block below (Overview KPIs, Timesheets, Members
+  // Missing Hours, Billing by Client) gates on this — header/period
+  // selector/filters below are never gated by it, so they stay visible and
+  // operative through the very first load, a Billing Period/filter change,
+  // and a tab-regain refresh alike.
+  const isLoading = loadState === "loading" || customRangeLoading;
 
   return (
     <div className="max-w-5xl mx-auto px-6 py-6 pb-16">
@@ -816,18 +839,33 @@ export function TimeTrackingScreen() {
       </div>
 
       {/* ── Overview ─────────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-8">
-        <KpiCard label="Billable Hours"     value={formatHours(summary.billableHours)}     sub={periodSubLabel(period, customRange)} accent />
-        <KpiCard label="Non-Billable Hours" value={formatHours(summary.nonBillableHours)}   sub={periodSubLabel(period, customRange)} />
-        <KpiCard label="Members Missing Hours" value={summary.hoursMissing}                 sub="team members" danger={summary.hoursMissing > 0} />
-        <KpiCard label="Weekly Utilization" value={`${summary.weeklyUtilizationPct}%`}       sub="of capacity" />
-        <KpiCard label="Projected Billing"  value={formatCurrency(summary.projectedBilling)} sub={periodSubLabel(period, customRange)} accent />
-      </div>
+      {isLoading ? (
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-8">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <div
+              key={i}
+              className="rounded-xl border border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900 px-5 pt-4 pb-4 shadow-sm shadow-slate-200/40 dark:shadow-black/20"
+            >
+              <SkeletonBlock className="h-[10px] w-20 mb-2" />
+              <SkeletonBlock className="h-6 w-14 mb-1.5" />
+              <SkeletonBlock className="h-3 w-16" />
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-8">
+          <KpiCard label="Billable Hours"     value={formatHours(summary.billableHours)}     sub={periodSubLabel(period, customRange)} accent />
+          <KpiCard label="Non-Billable Hours" value={formatHours(summary.nonBillableHours)}   sub={periodSubLabel(period, customRange)} />
+          <KpiCard label="Missing Hours"         value={summary.hoursMissing}                 sub="team members" danger={summary.hoursMissing > 0} />
+          <KpiCard label="Weekly Utilization" value={`${summary.weeklyUtilizationPct}%`}       sub="of capacity" />
+          <KpiCard label="Projected Billing"  value={formatCurrency(summary.projectedBilling)} sub={periodSubLabel(period, customRange)} accent />
+        </div>
+      )}
 
       {/* ── Timesheets ───────────────────────────────────────────────────── */}
       <Section
         title="Timesheets"
-        count={viewRows.length}
+        count={isLoading ? undefined : viewRows.length}
         icon={
           <svg className="w-3.5 h-3.5 text-slate-400 dark:text-zinc-500 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
             <circle cx="12" cy="12" r="9" />
@@ -865,9 +903,40 @@ export function TimeTrackingScreen() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50 dark:divide-zinc-800/60">
-              {viewRows.map((row) => (
-                <TimesheetTableRow key={row.id} row={row} referenceColumns={referenceColumns} />
-              ))}
+              {isLoading ? (
+                Array.from({ length: 3 }).map((_, i) => (
+                  <tr key={i}>
+                    <td className="py-2.5 pr-4">
+                      <div className="flex items-center gap-2.5">
+                        <SkeletonBlock className="h-7 w-7 rounded-full flex-shrink-0" />
+                        <div className="min-w-0">
+                          <SkeletonBlock className="h-4 w-28 mb-1" />
+                          <SkeletonBlock className="h-3 w-16" />
+                        </div>
+                      </div>
+                    </td>
+                    {referenceColumns.map((col) => (
+                      <td key={col.label} className="py-2.5 text-right">
+                        <SkeletonBlock className="h-4 w-10 ml-auto" />
+                      </td>
+                    ))}
+                    <td className="py-2.5 pl-4 text-right"><SkeletonBlock className="h-4 w-10 ml-auto" /></td>
+                    <td className="py-2.5 text-right"><SkeletonBlock className="h-4 w-10 ml-auto" /></td>
+                    <td className="py-2.5 pl-4 text-right"><SkeletonBlock className="h-4 w-10 ml-auto" /></td>
+                    <td className="py-2.5 pl-4 text-right"><SkeletonBlock className="h-5 w-16 ml-auto rounded-full" /></td>
+                    <td className="py-2.5 pl-4 text-right"><SkeletonBlock className="h-4 w-14 ml-auto" /></td>
+                  </tr>
+                ))
+              ) : (
+                viewRows.map((row) => (
+                  <TimesheetTableRow
+                    key={row.id}
+                    row={row}
+                    referenceColumns={referenceColumns}
+                    modalProjectSlug={timeTrackingProjectSlug}
+                  />
+                ))
+              )}
             </tbody>
           </table>
         </div>
@@ -878,14 +947,29 @@ export function TimeTrackingScreen() {
       <div className="grid md:grid-cols-2 gap-5 mt-6">
         <Section
           title="Members Missing Hours"
-          count={missingHoursList.length}
+          count={isLoading ? undefined : missingHoursList.length}
           icon={
             <svg className="w-3.5 h-3.5 text-slate-400 dark:text-zinc-500 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
             </svg>
           }
         >
-          {missingHoursList.length === 0 ? (
+          {isLoading ? (
+            <div>
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} className="flex items-center justify-between gap-2 py-2 border-b border-slate-100 dark:border-zinc-800/70 last:border-0">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <SkeletonBlock className="h-6 w-6 rounded-full flex-shrink-0" />
+                    <div className="min-w-0">
+                      <SkeletonBlock className="h-[13px] w-24 mb-1" />
+                      <SkeletonBlock className="h-[11px] w-16" />
+                    </div>
+                  </div>
+                  <SkeletonBlock className="h-[11px] w-14 flex-shrink-0" />
+                </div>
+              ))}
+            </div>
+          ) : missingHoursList.length === 0 ? (
             <p className="text-[13px] text-slate-400 dark:text-zinc-600 py-1">Everyone is caught up for this period.</p>
           ) : (
             <div>
@@ -894,6 +978,8 @@ export function TimeTrackingScreen() {
                   <MemberTrigger
                     name={entry.name}
                     avatar={entry.avatar}
+                    profileId={entry.id}
+                    projectSlug={timeTrackingProjectSlug}
                     className="flex items-center gap-2 min-w-0"
                   >
                     {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -914,7 +1000,7 @@ export function TimeTrackingScreen() {
 
         <Section
           title="Billing by Client"
-          count={clientBillingRows.length}
+          count={isLoading ? undefined : clientBillingRows.length}
           icon={
             <svg className="w-3.5 h-3.5 text-slate-400 dark:text-zinc-500 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.657 0-3 .672-3 1.5S10.343 11 12 11s3 .672 3 1.5-1.343 1.5-3 1.5m0-6V6m0 1c1.11 0 2.08.402 2.599 1M12 8V6m0 8v1m0-1c-1.11 0-2.08-.402-2.599-1M12 15v2" />
@@ -922,21 +1008,35 @@ export function TimeTrackingScreen() {
             </svg>
           }
         >
-          <div>
-            {clientBillingRows.map((c) => (
-              <div key={c.client} className="flex items-center justify-between gap-2 py-2 border-b border-slate-100 dark:border-zinc-800/70 last:border-0">
-                <p className="text-[13px] font-medium text-slate-800 dark:text-zinc-200 truncate">{c.client}</p>
-                <div className="text-right flex-shrink-0">
-                  <p className="text-[13px] font-semibold text-slate-800 dark:text-zinc-200 tabular-nums">
-                    {formatCurrency(c.projectedBilling)}
-                  </p>
-                  <p className="text-[11px] text-slate-400 dark:text-zinc-500 tabular-nums">
-                    {formatHours(c.billableHours)} billable
-                  </p>
+          {isLoading ? (
+            <div>
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} className="flex items-center justify-between gap-2 py-2 border-b border-slate-100 dark:border-zinc-800/70 last:border-0">
+                  <SkeletonBlock className="h-[13px] w-24" />
+                  <div className="text-right flex-shrink-0">
+                    <SkeletonBlock className="h-[13px] w-16 mb-1 ml-auto" />
+                    <SkeletonBlock className="h-[11px] w-20 ml-auto" />
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          ) : (
+            <div>
+              {clientBillingRows.map((c) => (
+                <div key={c.client} className="flex items-center justify-between gap-2 py-2 border-b border-slate-100 dark:border-zinc-800/70 last:border-0">
+                  <p className="text-[13px] font-medium text-slate-800 dark:text-zinc-200 truncate">{c.client}</p>
+                  <div className="text-right flex-shrink-0">
+                    <p className="text-[13px] font-semibold text-slate-800 dark:text-zinc-200 tabular-nums">
+                      {formatCurrency(c.projectedBilling)}
+                    </p>
+                    <p className="text-[11px] text-slate-400 dark:text-zinc-500 tabular-nums">
+                      {formatHours(c.billableHours)} billable
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </Section>
       </div>
     </div>
@@ -946,9 +1046,17 @@ export function TimeTrackingScreen() {
 function TimesheetTableRow({
   row,
   referenceColumns,
+  modalProjectSlug,
 }: {
   row: TimesheetViewRow;
   referenceColumns: ReferenceColumn[];
+  /** Real scope handoff for this row's own Member Profile Modal trigger —
+   *  see the parent's own `timeTrackingProjectSlug` comment. Deliberately
+   *  not `row.projectSlug` (that field is only the first of this member's
+   *  possibly-several real `projectSlugs`, kept solely for "View Work
+   *  History"'s own single-project link below, not a real "this page is
+   *  scoped to one project" signal). */
+  modalProjectSlug?: string;
 }) {
   const router = useRouter();
 
@@ -964,7 +1072,8 @@ function TimesheetTableRow({
           name={row.name}
           avatar={row.avatar}
           role={row.role}
-          projectSlug={row.projectSlug}
+          profileId={row.id}
+          projectSlug={modalProjectSlug}
           className="flex items-center gap-2.5"
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}

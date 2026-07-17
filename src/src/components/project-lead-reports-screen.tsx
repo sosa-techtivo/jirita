@@ -1,147 +1,194 @@
 "use client";
 
-import { useState } from "react";
-import { projects } from "@/lib/mock-projects";
+import { useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import type { ProjectHealth } from "@/lib/mock-projects";
 import type { TeamMember } from "@/lib/mock-team";
-import { LEAD_PROJECT_SLUGS, aggregateTeam, PROJECT_TICKETS } from "@/components/project-lead-dashboard";
 import { utilizationOf, capacityBarColor, capacityTextColor, remainingAvailabilityLabel } from "@/components/member-profile-modal";
-import { MemberTrigger } from "@/components/member-profile";
+import { MemberTrigger, useMemberProfile } from "@/components/member-profile";
 import { StatusBadge, HealthBadge } from "@/components/status-badge";
 import { ReportStatusBar, Section, KpiCard, BlockCompletion, AnimatedBar } from "@/components/reports-shared";
 import type { StatusItem } from "@/components/reports-shared";
-import { RECENT_ACTIVITY, RecentActivityList } from "@/components/dashboard-shared";
+import { RecentActivityList } from "@/components/dashboard-shared";
+import type { DashboardActivityEntry } from "@/components/dashboard-shared";
 import { FilterDropdown } from "@/components/tickets/filter-dropdown";
 import type { DropdownGroup } from "@/components/tickets/filter-dropdown";
+import { FilterChip } from "@/components/tickets/filter-chip";
 import { getTicketDisplayKey } from "@/lib/mock-tickets";
-import type { Ticket } from "@/lib/mock-tickets";
+import type { Ticket, TicketStatus } from "@/lib/mock-tickets";
 import { TicketPreviewPanel } from "@/components/tickets/ticket-preview-panel";
-import { TicketTypeIcon } from "@/components/tickets/ticket-ui";
+import {
+  TicketTypeIcon,
+  getTodayISO,
+  parseDisplayDate,
+  STATUS_LABEL,
+  PRIORITY_LABEL,
+  PRIORITY_VALUES,
+} from "@/components/tickets/ticket-ui";
+import { useCurrentUser } from "@/components/current-user-provider";
+import { useOrganizationProjects } from "@/components/organization-projects-provider";
+import { loadOrganizationTickets, loadOrganizationActivity } from "@/lib/tickets";
+import type { OrganizationActivityEvent } from "@/lib/tickets";
+import { loadProjectTeam } from "@/lib/projects";
+import type { ProjectTeamMember } from "@/lib/projects";
+import { buildProjectHealthRows, computeProjectProgressPct } from "@/components/reports-screen";
+import type { Risk } from "@/components/reports-screen";
 
-// A Project Lead's Reports has no company-wide or billing data at all — every
-// number here is scoped to LEAD_PROJECT_SLUGS (the same projects their
-// Dashboard and Projects list already scope to). Two tabs answer the two
-// questions a Lead actually has: is delivery on track, and is the team okay.
+// ── Delivery tab (real) ──────────────────────────────────────────────────────
+//
+// Every number on this tab, plus the 6 top KPIs shared with the Team tab
+// below it, is now real Supabase data, scoped to exactly the projects this
+// profile leads (`useOrganizationProjects()` — the same real, RLS-scoped
+// "staffed on" list Projects' own Project Lead view already reads, so "My
+// Projects" here can never disagree with that screen). Reuses
+// buildProjectHealthRows/computeProjectProgressPct (reports-screen.tsx,
+// already exported and reused the same way by Projects/Dashboard) rather
+// than a second definition of Health/Progress/Risk.
+//
+// The Team tab further down (Hours by Person, Workload, Blocked Work by
+// Member, Team Health) is also real now — see teamStats below — and reuses
+// the exact same per-member capacity/utilization functions Team itself
+// uses (member-profile-modal.tsx), never a second formula.
 
-const MY_PROJECTS = projects.filter((p) => LEAD_PROJECT_SLUGS.includes(p.slug));
-const MY_PROJECT_NAMES = MY_PROJECTS.map((p) => p.name);
-const TEAM = aggregateTeam(LEAD_PROJECT_SLUGS);
-
-// No per-member "blocked hours" field exists on TeamMember yet — this stands
-// in for a future Time Tracking breakdown, kept internally consistent with
-// each member's existing assignedHours/weeklyCapacity in mock-team.ts.
-const BLOCKED_HOURS_BY_MEMBER: Record<string, number> = {
-  "Sarah Chen": 4,
-  "Marcus Lee": 10,
-  "Alejo Cadavid": 0,
-  "David Kim": 2,
-  "Elena Rossi": 6,
-  "Jordan Wu": 0,
+const RISK_TO_HEALTH: Record<Risk, ProjectHealth> = {
+  "on-track": "healthy",
+  "at-risk": "needs-attention",
+  blocked: "critical",
 };
 
-function blockedHoursOf(member: TeamMember): number {
-  return BLOCKED_HOURS_BY_MEMBER[member.name] ?? 0;
+// Real page-header date — "Weekday, Month Day, Year", same real
+// getTodayISO()-based convention (and toLocaleDateString pattern) Admin
+// Reports' own header already uses, duplicated here as page-local glue
+// rather than importing a non-exported helper from that file.
+function formatHeaderDate(todayISO: string): string {
+  return new Date(`${todayISO}T00:00:00`).toLocaleDateString("en-US", {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+// Monday–Sunday containing todayISO — same "This Week" convention already
+// used by Projects/My Work/Member Dashboard, duplicated here as page-local
+// glue (same precedent as those screens), never a second/different
+// definition of "this week".
+function getWeekRangeISO(todayISO: string): { start: string; end: string } {
+  const today = new Date(`${todayISO}T00:00:00`);
+  const day = today.getDay();
+  const monday = new Date(today);
+  monday.setDate(today.getDate() + (day === 0 ? -6 : 1 - day));
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+  const toISO = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return { start: toISO(monday), end: toISO(sunday) };
+}
+
+// Real "Recent Changes" — same real ticket_activity feed
+// (loadOrganizationActivity) and the same 5-event-type mapping the Admin
+// and Project Lead Dashboards already use for their own "Recent Activity",
+// just resolved across every led project's own real tickets/name instead
+// of one already-selected project.
+const RECENT_CHANGES_LIMIT = 10;
+
+function buildActivityEntries(
+  events: OrganizationActivityEvent[],
+  ticketsById: Map<string, Ticket>,
+  projectNameBySlug: Map<string, string>
+): DashboardActivityEntry[] {
+  return events.map((event) => {
+    const ticket = ticketsById.get(event.ticketId);
+    const projectName = ticket ? projectNameBySlug.get(ticket.projectSlug) ?? ticket.projectSlug : "";
+    const base = {
+      id: event.id,
+      avatar: event.actorAvatar,
+      name: event.actorName ?? "Someone",
+      actorProfileId: event.actorProfileId ?? undefined,
+      ticket,
+      project: projectName,
+      time: event.time,
+    };
+
+    if (event.type === "blocked") return { ...base, type: "blocked" as const, verb: "marked" };
+    if (event.type === "completed") return { ...base, type: "completed" as const, verb: "completed" };
+    if (event.type === "hours") {
+      return {
+        ...base,
+        type: "hours" as const,
+        verb: "updated the estimate on",
+        detail: <span className="font-medium">{event.oldHours}h → {event.newHours}h</span>,
+      };
+    }
+    if (event.type === "assigned") {
+      return {
+        ...base,
+        type: "assigned" as const,
+        verb: "reassigned",
+        detail: <>to <span className="font-medium">{event.newAssigneeName}</span></>,
+      };
+    }
+    return {
+      ...base,
+      type: "priority" as const,
+      verb: event.priorityRaised ? "raised priority on" : "lowered priority on",
+      detail: <span className="font-medium">{event.oldPriorityLabel} → {event.newPriorityLabel}</span>,
+    };
+  });
+}
+
+// ── Team tab (real) ──────────────────────────────────────────────────────────
+//
+// Now backed by the exact same real per-member data (teamStats, computed
+// once in the main component below from loadProjectTeam/real tickets) the
+// Team Capacity KPI and the top KPI strip already use — never a second
+// roster or a parallel utilization/over-capacity rule.
+
+interface RealTeamMemberStat {
+  id: string;
+  name: string;
+  avatar: string;
+  role: string;
+  /** Every one of the Lead's own real projects this member is staffed on —
+   *  used to scope the Member Profile Modal precisely (only when this
+   *  resolves to exactly one project) and to decide the Team Capacity KPI's
+   *  own navigation target (a single common project vs. Reports > Team). */
+  projectSlugs: string[];
+  weeklyCapacity: number;
+  assignedHours: number;
+  blockedHours: number;
+  isOverCapacity: boolean;
+}
+
+// Reuses Team's own real per-member capacity functions (utilizationOf/
+// capacityBarColor/capacityTextColor/remainingAvailabilityLabel, all from
+// member-profile-modal.tsx) — they only ever read weeklyCapacity/
+// assignedHours, so a real per-member stat can stand in for the full
+// TeamMember shape those functions expect without a second formula.
+function toTeamMemberShape(member: RealTeamMemberStat): TeamMember {
+  return {
+    id: member.id,
+    projectSlug: member.projectSlugs[0] ?? "",
+    name: member.name,
+    role: member.role,
+    email: "",
+    avatar: member.avatar,
+    status: "Available",
+    weeklyCapacity: member.weeklyCapacity,
+    assignedHours: member.assignedHours,
+    activeTicketIds: [],
+  };
 }
 
 // Reuses the exact same 3-tier vocabulary/badge as project health, so a
-// member's status reads the same way a project's does.
-function healthOf(member: TeamMember): ProjectHealth {
-  const pct = utilizationOf(member);
-  if (pct > 100) return "critical";
-  if (pct >= 90 || blockedHoursOf(member) >= 6) return "needs-attention";
+// member's status reads the same way a project's does — same thresholds
+// this screen already established, now fed real utilization/blocked hours
+// instead of a mock lookup.
+function healthOfReal(utilizationPct: number, blockedHours: number): ProjectHealth {
+  if (utilizationPct > 100) return "critical";
+  if (utilizationPct >= 90 || blockedHours >= 6) return "needs-attention";
   return "healthy";
 }
-
-// ── Top KPIs (both tabs) ──────────────────────────────────────────────────────
-
-const TOTAL_BLOCKED_TICKETS = MY_PROJECTS.reduce((sum, p) => sum + p.blockedTickets, 0);
-const TOTAL_DUE_THIS_WEEK = MY_PROJECTS.reduce((sum, p) => sum + p.dueThisWeekTickets, 0);
-const OVER_CAPACITY_COUNT = TEAM.filter((m) => utilizationOf(m) > 100).length;
-const TOTAL_ASSIGNED_HOURS = TEAM.reduce((sum, m) => sum + m.assignedHours, 0);
-const TOTAL_CAPACITY_HOURS = TEAM.reduce((sum, m) => sum + m.weeklyCapacity, 0);
-const TEAM_UTILIZATION_PCT = Math.round((TOTAL_ASSIGNED_HOURS / TOTAL_CAPACITY_HOURS) * 100);
-const AVG_PROJECT_PROGRESS = Math.round(MY_PROJECTS.reduce((sum, p) => sum + p.progress, 0) / MY_PROJECTS.length);
-
-// ── Alerts banner (Delivery tab) ──────────────────────────────────────────────
-
-function buildStatusItems(): StatusItem[] {
-  const items: StatusItem[] = [];
-
-  const overCapacity = TEAM.filter((m) => utilizationOf(m) > 100);
-  if (overCapacity.length > 0) {
-    items.push({
-      id: "over-capacity",
-      level: "warning",
-      text: `${overCapacity.length} team member${overCapacity.length === 1 ? "" : "s"} over capacity`,
-    });
-  }
-
-  const mostBlocked = [...MY_PROJECTS].sort((a, b) => b.blockedTickets - a.blockedTickets)[0];
-  if (mostBlocked && mostBlocked.blockedTickets > 0) {
-    items.push({
-      id: "blocked-project",
-      level: "critical",
-      text: `${mostBlocked.name} blocked`,
-    });
-  }
-
-  const onTrackCount = MY_PROJECTS.filter((p) => p.status === "active").length;
-  items.push({ id: "on-track", level: "ok", text: `${onTrackCount} of ${MY_PROJECTS.length} projects on track` });
-
-  return items.slice(0, 3);
-}
-
-const STATUS_ITEMS = buildStatusItems();
-
-// ── Filters (Delivery tab, cosmetic — mirrors the rest of Reports) ───────────
-
-const PROJECT_GROUPS: DropdownGroup[] = [
-  { options: MY_PROJECTS.map((p) => ({ value: p.slug, label: p.name })) },
-];
-
-const ASSIGNEE_GROUPS: DropdownGroup[] = [
-  { options: TEAM.map((m) => ({ value: m.name, label: m.name, avatar: m.avatar })) },
-];
-
-const STATUS_GROUPS: DropdownGroup[] = [
-  {
-    options: [
-      { value: "planning", label: "Planning" },
-      { value: "active", label: "Active" },
-      { value: "on-hold", label: "On Hold" },
-      { value: "completed", label: "Completed" },
-    ],
-  },
-];
-
-const PRIORITY_GROUPS: DropdownGroup[] = [
-  {
-    options: [
-      { value: "critical", label: "Critical" },
-      { value: "high", label: "High" },
-      { value: "medium", label: "Medium" },
-      { value: "low", label: "Low" },
-    ],
-  },
-];
-
-// ── Upcoming Deadlines (Delivery tab) — same ticket pools the Lead's own
-//    Dashboard uses, just scoped to all their projects instead of just
-//    whichever one is active there. ───────────────────────────────────────────
-
-const TODAY = new Date(2026, 5, 30);
-
-function parseDue(dueDate?: string): number {
-  return dueDate ? new Date(`${dueDate}, 2026`).getTime() : Infinity;
-}
-
-const UPCOMING_DEADLINES = LEAD_PROJECT_SLUGS.flatMap((slug) => PROJECT_TICKETS[slug] ?? [])
-  .filter((t) => t.dueDate)
-  .sort((a, b) => parseDue(a.dueDate) - parseDue(b.dueDate));
-
-// ── Recent Changes (Delivery tab) ─────────────────────────────────────────────
-
-const MY_RECENT_ACTIVITY = RECENT_ACTIVITY.filter((entry) => MY_PROJECT_NAMES.includes(entry.project));
 
 // ── Tabs ──────────────────────────────────────────────────────────────────────
 
@@ -220,12 +267,449 @@ const PulseIcon = (
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function ProjectLeadReportsScreen() {
-  const [tab, setTab] = useState<ReportTab>("delivery");
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const { organization } = useCurrentUser();
+  const { projects: myProjects } = useOrganizationProjects();
+  const { openMemberProfile } = useMemberProfile();
+
+  // Real query-state handoff for the Team Capacity KPI's own "2+ people
+  // over capacity across several projects" case below — same `?param=`
+  // URL-as-source-of-truth precedent as Tickets' own `?alerts=`/Projects'
+  // own `?blocked=`, seeded once on mount rather than kept continuously
+  // synced back to the URL on every manual tab switch.
+  const [tab, setTab] = useState<ReportTab>(() => (searchParams.get("tab") === "team" ? "team" : "delivery"));
+  const [teamCapacityFilterActive, setTeamCapacityFilterActive] = useState(
+    () => searchParams.get("filter") === "over-capacity"
+  );
   const [projectFilter, setProjectFilter] = useState<string[]>([]);
   const [assigneeFilter, setAssigneeFilter] = useState<string[]>([]);
   const [statusFilter, setStatusFilter] = useState<string[]>([]);
   const [priorityFilter, setPriorityFilter] = useState<string[]>([]);
   const [preview, setPreview] = useState<Ticket | null>(null);
+
+  function clearTeamCapacityFilter() {
+    setTeamCapacityFilterActive(false);
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("filter");
+    const qs = params.toString();
+    router.replace(`/reports${qs ? `?${qs}` : ""}`);
+  }
+
+  // ── Real data load — tickets across every led project, that same
+  //    project's own real team roster/capacity, and the same real
+  //    ticket_activity feed the Dashboards already use for "Recent
+  //    Activity" — one fetch backs every widget below, no per-widget query. ─
+  const [rawTickets, setRawTickets] = useState<Ticket[]>([]);
+  const [teamBySlug, setTeamBySlug] = useState<Map<string, ProjectTeamMember[]>>(new Map());
+  const [activityEvents, setActivityEvents] = useState<OrganizationActivityEvent[]>([]);
+  const [loadState, setLoadState] = useState<"loading" | "ready" | "error">("loading");
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [requestId, setRequestId] = useState(0);
+
+  useEffect(() => {
+    if (!organization) return;
+    let cancelled = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: clears the previous scope's data the instant this effect re-runs, before the async fetch below resolves, same pattern used elsewhere in this app.
+    setLoadState("loading");
+
+    (async () => {
+      const ticketsResult = await loadOrganizationTickets(organization.id);
+      if (cancelled) return;
+      if (ticketsResult.status === "error") {
+        setLoadState("error");
+        setLoadError(ticketsResult.message);
+        return;
+      }
+
+      const teamResults = await Promise.all(myProjects.map((p) => loadProjectTeam(organization.id, p.slug)));
+      if (cancelled) return;
+
+      const ticketIds = ticketsResult.tickets.map((t) => t.id);
+      const activityResult = await loadOrganizationActivity(ticketIds, RECENT_CHANGES_LIMIT);
+      if (cancelled) return;
+      if (activityResult.status === "error") {
+        setLoadState("error");
+        setLoadError(activityResult.message);
+        return;
+      }
+
+      const teamMap = new Map<string, ProjectTeamMember[]>();
+      myProjects.forEach((p, i) => {
+        const teamResult = teamResults[i];
+        teamMap.set(p.slug, teamResult.status === "ready" ? teamResult.members : []);
+      });
+
+      setRawTickets(ticketsResult.tickets);
+      setTeamBySlug(teamMap);
+      setActivityEvents(activityResult.events);
+      setLoadState("ready");
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [organization, myProjects, requestId]);
+
+  const todayISO = getTodayISO();
+
+  const ticketsByProjectSlug = useMemo(() => {
+    const map = new Map<string, Ticket[]>();
+    for (const t of rawTickets) {
+      const list = map.get(t.projectSlug) ?? [];
+      list.push(t);
+      map.set(t.projectSlug, list);
+    }
+    return map;
+  }, [rawTickets]);
+
+  // Real Health/Blocked/Progress — one shared computation (buildProjectHealthRows,
+  // reports-screen.tsx) reused by the Project Health table, the Blocked
+  // Tickets KPI, and the alerts banner below, never a parallel rule.
+  const healthRows = useMemo(
+    () =>
+      buildProjectHealthRows(
+        myProjects.map((p) => ({ slug: p.slug, name: p.name, projectCode: p.projectCode })),
+        rawTickets,
+        [],
+        todayISO
+      ),
+    [myProjects, rawTickets, todayISO]
+  );
+  const healthRowsBySlug = useMemo(() => new Map(healthRows.map((r) => [r.id, r])), [healthRows]);
+
+  const progressBySlug = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const p of myProjects) {
+      map.set(p.slug, computeProjectProgressPct(ticketsByProjectSlug.get(p.slug) ?? []));
+    }
+    return map;
+  }, [myProjects, ticketsByProjectSlug]);
+
+  const totalBlockedTickets = useMemo(() => healthRows.reduce((sum, r) => sum + r.blocked, 0), [healthRows]);
+
+  // Real ticket list backing the "Blocked Tickets" KPI's own navigation
+  // below — the exact same real `rawTickets` already summed (via
+  // healthRows) into `totalBlockedTickets` above, just resolved down to the
+  // actual tickets instead of a count; never a second query/recount.
+  const blockedTicketsList = useMemo(() => rawTickets.filter((t) => t.status === "blocked"), [rawTickets]);
+
+  const weekRange = useMemo(() => getWeekRangeISO(todayISO), [todayISO]);
+  // Real ticket list backing the "Due This Week" KPI's own navigation below
+  // — the exact same real `rawTickets` and Monday–Sunday week bounds
+  // already used for this KPI's own count, just resolved down to the
+  // actual tickets instead of a count; never a second query or a
+  // different "this week" definition.
+  const dueThisWeekList = useMemo(
+    () =>
+      rawTickets.filter((t) => {
+        if (t.status === "done" || !t.dueDate) return false;
+        const iso = parseDisplayDate(t.dueDate);
+        return Boolean(iso) && iso >= weekRange.start && iso <= weekRange.end;
+      }),
+    [rawTickets, weekRange]
+  );
+  const totalDueThisWeek = dueThisWeekList.length;
+
+  // Real Team Capacity/Utilization — reuses Team's own real per-member
+  // definition (assignedHours from that project's own active tickets,
+  // greater than the real weeklyCapacity loadProjectTeam already resolves
+  // with its own org-then-project fallback), evaluated per led project and
+  // unioned by profileId (same "count unique people, never per-project"
+  // rule Projects' own Over Capacity KPI already established) rather than a
+  // second calculation.
+  const teamStats = useMemo(() => {
+    const byProfileId = new Map<string, RealTeamMemberStat>();
+    const overCapacityProfileIds = new Set<string>();
+
+    for (const project of myProjects) {
+      const members = teamBySlug.get(project.slug) ?? [];
+      const projectTickets = ticketsByProjectSlug.get(project.slug) ?? [];
+
+      const assignedByProfileId = new Map<string, number>();
+      const blockedByProfileId = new Map<string, number>();
+      for (const t of projectTickets) {
+        if (!t.assigneeProfileId) continue;
+        if (t.status === "blocked") {
+          blockedByProfileId.set(t.assigneeProfileId, (blockedByProfileId.get(t.assigneeProfileId) ?? 0) + (t.hours ?? 0));
+        }
+        if (t.status === "done") continue;
+        assignedByProfileId.set(t.assigneeProfileId, (assignedByProfileId.get(t.assigneeProfileId) ?? 0) + (t.hours ?? 0));
+      }
+
+      for (const member of members) {
+        const assignedInProject = assignedByProfileId.get(member.id) ?? 0;
+        const blockedInProject = blockedByProfileId.get(member.id) ?? 0;
+        const existing = byProfileId.get(member.id);
+        if (existing) {
+          existing.weeklyCapacity += member.weeklyCapacity;
+          existing.assignedHours += assignedInProject;
+          existing.blockedHours += blockedInProject;
+          existing.projectSlugs.push(project.slug);
+        } else {
+          byProfileId.set(member.id, {
+            id: member.id,
+            name: member.name,
+            avatar: member.avatar,
+            role: member.title,
+            projectSlugs: [project.slug],
+            weeklyCapacity: member.weeklyCapacity,
+            assignedHours: assignedInProject,
+            blockedHours: blockedInProject,
+            isOverCapacity: false,
+          });
+        }
+        if (assignedInProject > member.weeklyCapacity) overCapacityProfileIds.add(member.id);
+      }
+    }
+
+    for (const id of overCapacityProfileIds) {
+      const member = byProfileId.get(id);
+      if (member) member.isOverCapacity = true;
+    }
+
+    const members = Array.from(byProfileId.values()).sort((a, b) => a.name.localeCompare(b.name));
+    const totalCapacityHours = members.reduce((sum, m) => sum + m.weeklyCapacity, 0);
+    const totalAssignedHours = rawTickets
+      .filter((t) => t.status !== "done" && t.assigneeProfileId)
+      .reduce((sum, t) => sum + (t.hours ?? 0), 0);
+    const utilizationPct = totalCapacityHours > 0 ? Math.round((totalAssignedHours / totalCapacityHours) * 100) : 0;
+
+    return {
+      members,
+      overCapacityCount: overCapacityProfileIds.size,
+      totalCapacityHours,
+      totalAssignedHours,
+      utilizationPct,
+    };
+  }, [myProjects, teamBySlug, ticketsByProjectSlug, rawTickets]);
+
+  // "Team Capacity" KPI — reuses `teamStats.members`, the exact same real
+  // per-member collection already driving this KPI's own displayed count
+  // (unique by profileId, never summed per-project) — no second query, no
+  // duplicated capacity/utilization rule. Zero stays non-interactive;
+  // exactly one real person over capacity opens their Member Profile Modal
+  // directly (real profileId, scoped to their own project only when they
+  // have exactly one); more than one hands off to that one project's real
+  // Team page when every one of them shares the exact same single project,
+  // or to this same page's own Team tab (filtered, real, `?filter=
+  // over-capacity`) when they span more than one — never an arbitrarily
+  // picked project.
+  function handleTeamCapacityClick() {
+    const overCapacityMembers = teamStats.members.filter((m) => m.isOverCapacity);
+    if (overCapacityMembers.length === 0) return;
+
+    if (overCapacityMembers.length === 1) {
+      const member = overCapacityMembers[0];
+      openMemberProfile({
+        name: member.name,
+        avatar: member.avatar,
+        profileId: member.id,
+        projectSlug: member.projectSlugs.length === 1 ? member.projectSlugs[0] : undefined,
+      });
+      return;
+    }
+
+    const involvedSlugs = new Set(overCapacityMembers.flatMap((m) => m.projectSlugs));
+    if (involvedSlugs.size === 1) {
+      router.push(`/projects/${Array.from(involvedSlugs)[0]}/team`);
+      return;
+    }
+
+    router.push("/reports?tab=team&filter=over-capacity");
+  }
+
+  // "Blocked Tickets" KPI — reuses `blockedTicketsList`, the exact same
+  // real tickets already summed into this KPI's own displayed count above
+  // — no second query, no duplicated status check. Same real 0/1/2+ rule
+  // already established by the other navigable KPIs: zero stays
+  // non-interactive; exactly one opens it directly in the existing Ticket
+  // Preview panel (no new modal, no navigating to the list); more than one
+  // hands off to the Tickets module's own org-wide view with the real
+  // `?alerts=blocked` filter applied and visible (same query-state
+  // convention Tickets' own filter bar already reads) — RLS already scopes
+  // that destination to this same Project Lead's own visible projects, so
+  // it can never show a project outside their real scope.
+  function handleBlockedTicketsClick() {
+    if (blockedTicketsList.length === 0) return;
+    if (blockedTicketsList.length === 1) {
+      setPreview(blockedTicketsList[0]);
+      return;
+    }
+    router.push("/tickets?alerts=blocked");
+  }
+
+  // "Due This Week" KPI — reuses `dueThisWeekList`, the exact same real
+  // tickets/week-range already used for this KPI's own displayed count
+  // above — no second query, no different "this week" definition. Same
+  // real 0/1/2+ rule as the other navigable KPIs: zero stays
+  // non-interactive; exactly one opens it directly in the existing Ticket
+  // Preview panel; more than one hands off to the Tickets module's own
+  // org-wide view with the real `?alerts=due-this-week` filter applied and
+  // visible (same query-state convention `?alerts=blocked`/`due-today`
+  // already use) — RLS already scopes that destination to this same
+  // Project Lead's own visible projects.
+  function handleDueThisWeekClick() {
+    if (dueThisWeekList.length === 0) return;
+    if (dueThisWeekList.length === 1) {
+      setPreview(dueThisWeekList[0]);
+      return;
+    }
+    router.push("/tickets?alerts=due-this-week");
+  }
+
+  // Team tab's own real member list — the exact same `teamStats.members`
+  // the Team Capacity KPI already reads, narrowed to only the real
+  // over-capacity ones when that KPI's own `?filter=over-capacity` handoff
+  // is active, never a second/different member list.
+  const displayedTeamMembers = useMemo(
+    () => (teamCapacityFilterActive ? teamStats.members.filter((m) => m.isOverCapacity) : teamStats.members),
+    [teamCapacityFilterActive, teamStats.members]
+  );
+
+  // "Sprint Progress" replacement — JIRITA has no real sprint source in
+  // Supabase, so this reuses the same real ticket-count Progress every
+  // project already computes (computeProjectProgressPct, reports-screen.tsx
+  // — same formula Project Health's own Progress column below uses),
+  // averaged across the Lead's own real projects, rather than inventing
+  // sprint data.
+  const avgProgressPct = useMemo(() => {
+    if (myProjects.length === 0) return 0;
+    const total = myProjects.reduce((sum, p) => sum + (progressBySlug.get(p.slug) ?? 0), 0);
+    return Math.round(total / myProjects.length);
+  }, [myProjects, progressBySlug]);
+
+  // Real project Health counts (Healthy/Needs Attention/Critical) — same
+  // official definition as Projects (buildProjectHealthRows' own risk,
+  // defaulting to "healthy" for a project with no real tickets yet).
+  const healthCounts = useMemo(() => {
+    let healthy = 0;
+    let needsAttention = 0;
+    let critical = 0;
+    for (const p of myProjects) {
+      const risk = healthRowsBySlug.get(p.slug)?.risk ?? "on-track";
+      if (risk === "blocked") critical++;
+      else if (risk === "at-risk") needsAttention++;
+      else healthy++;
+    }
+    return { healthy, needsAttention, critical };
+  }, [myProjects, healthRowsBySlug]);
+
+  // ── Alerts banner — only real, calculable conditions: members over
+  //    capacity, blocked tickets, and the real Health split above. ────────
+  const statusItems = useMemo<StatusItem[]>(() => {
+    const items: StatusItem[] = [];
+    if (teamStats.overCapacityCount > 0) {
+      items.push({
+        id: "over-capacity",
+        level: "warning",
+        text: `${teamStats.overCapacityCount} team member${teamStats.overCapacityCount === 1 ? "" : "s"} over capacity`,
+      });
+    }
+    if (totalBlockedTickets > 0) {
+      items.push({
+        id: "blocked",
+        level: "critical",
+        text: `${totalBlockedTickets} ticket${totalBlockedTickets === 1 ? "" : "s"} blocked`,
+      });
+    }
+    items.push({
+      id: "health",
+      level: healthCounts.critical > 0 ? "critical" : healthCounts.needsAttention > 0 ? "warning" : "ok",
+      text: `${healthCounts.healthy} Healthy · ${healthCounts.needsAttention} Needs Attention · ${healthCounts.critical} Critical`,
+    });
+    return items.slice(0, 3);
+  }, [teamStats.overCapacityCount, totalBlockedTickets, healthCounts]);
+
+  // ── Filters (Delivery tab, cosmetic — mirrors the rest of Reports) —
+  //    real projects/members/statuses/priorities only, restricted to values
+  //    that actually occur in the current real scope (same "only real
+  //    values" precedent Admin Reports already established). ─────────────
+  const projectGroups = useMemo<DropdownGroup[]>(
+    () => [{ options: myProjects.map((p) => ({ value: p.slug, label: p.name })) }],
+    [myProjects]
+  );
+  const assigneeGroups = useMemo<DropdownGroup[]>(
+    () => [{ options: teamStats.members.map((m) => ({ value: m.id, label: m.name, avatar: m.avatar })) }],
+    [teamStats.members]
+  );
+  const statusGroups = useMemo<DropdownGroup[]>(() => {
+    const present = new Set(rawTickets.map((t) => t.status));
+    const order = Object.keys(STATUS_LABEL) as TicketStatus[];
+    return [{ options: order.filter((s) => present.has(s)).map((s) => ({ value: s, label: STATUS_LABEL[s] })) }];
+  }, [rawTickets]);
+  const priorityGroups = useMemo<DropdownGroup[]>(() => {
+    const present = new Set(rawTickets.map((t) => t.priority));
+    return [{ options: PRIORITY_VALUES.filter((p) => present.has(p)).map((p) => ({ value: p, label: PRIORITY_LABEL[p] })) }];
+  }, [rawTickets]);
+
+  // ── Upcoming Deadlines — real open tickets with a due date, across every
+  //    led project, nearest first. ────────────────────────────────────────
+  const upcomingDeadlines = useMemo(
+    () =>
+      rawTickets
+        .filter((t) => t.status !== "done" && t.dueDate)
+        .slice()
+        .sort((a, b) => parseDisplayDate(a.dueDate as string).localeCompare(parseDisplayDate(b.dueDate as string))),
+    [rawTickets]
+  );
+
+  // ── Recent Changes — real ticket_activity feed, resolved against this
+  //    project's own real tickets/names (never the mock catalog). ────────
+  const ticketsById = useMemo(() => new Map(rawTickets.map((t) => [t.id, t])), [rawTickets]);
+  const projectNameBySlug = useMemo(() => new Map(myProjects.map((p) => [p.slug, p.name])), [myProjects]);
+  const recentChanges = useMemo(
+    () => buildActivityEntries(activityEvents, ticketsById, projectNameBySlug),
+    [activityEvents, ticketsById, projectNameBySlug]
+  );
+
+  // "My Projects" KPI — reuses `myProjects`, the exact same real collection
+  // already driving this KPI's own displayed count, regardless of health/
+  // status — no second query, no duplicated scope. Same real 0/1/2+ rule
+  // already established by the other navigable KPIs in this app: zero
+  // stays non-interactive; exactly one navigates straight to that real
+  // project's own Project Overview (by its real slug, never by name); more
+  // than one navigates to the Projects module's own list (no extra
+  // filters), reusing the exact same routes every other "open a project" /
+  // "open the Projects list" trigger already uses.
+  function handleMyProjectsClick() {
+    if (myProjects.length === 0) return;
+    if (myProjects.length === 1) {
+      router.push(`/projects/${myProjects[0].slug}`);
+      return;
+    }
+    router.push("/projects");
+  }
+
+  if (loadState === "loading") {
+    return (
+      <div className="max-w-5xl mx-auto px-6 py-6 pb-16">
+        <div className="h-full flex items-center justify-center text-sm text-slate-400 dark:text-zinc-500 py-20">
+          Loading reports…
+        </div>
+      </div>
+    );
+  }
+
+  if (loadState === "error") {
+    return (
+      <div className="max-w-5xl mx-auto px-6 py-6 pb-16">
+        <div className="flex flex-col items-center justify-center text-center px-4 py-20">
+          <h3 className="text-sm font-semibold text-slate-700 dark:text-zinc-200">Couldn&apos;t load reports</h3>
+          <p className="text-sm text-slate-400 mt-1 max-w-xs dark:text-zinc-500">
+            {loadError ?? "Something went wrong."}
+          </p>
+          <button
+            type="button"
+            onClick={() => setRequestId((id) => id + 1)}
+            className="mt-5 text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3.5 py-2 shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-500 dark:hover:bg-brand-600 dark:shadow-brand-500/20"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-5xl mx-auto px-6 py-6 pb-16">
@@ -235,7 +719,7 @@ export function ProjectLeadReportsScreen() {
         <h1 className="text-xl font-bold text-slate-900 dark:text-zinc-50 tracking-tight leading-none">
           Reports
         </h1>
-        <p className="text-xs text-slate-400 dark:text-zinc-500 mt-0.5">Monday, June 30, 2026</p>
+        <p className="text-xs text-slate-400 dark:text-zinc-500 mt-0.5">{formatHeaderDate(todayISO)}</p>
       </div>
 
       {/* ── Tabs ─────────────────────────────────────────────────────────── */}
@@ -245,32 +729,48 @@ export function ProjectLeadReportsScreen() {
 
       {/* ── Top KPIs — always visible, both tabs ────────────────────────── */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-8">
-        <KpiCard label="My Projects" value={MY_PROJECTS.length} sub="active" />
+        <KpiCard
+          label="My Projects"
+          value={myProjects.length}
+          sub="active"
+          disabled={myProjects.length === 0}
+          onClick={handleMyProjectsClick}
+        />
         <KpiCard
           label="Team Capacity"
-          value={OVER_CAPACITY_COUNT}
-          sub={`of ${TEAM.length} over capacity`}
-          danger={OVER_CAPACITY_COUNT > 0}
+          value={teamStats.overCapacityCount}
+          sub={`of ${teamStats.members.length} over capacity`}
+          danger={teamStats.overCapacityCount > 0}
+          disabled={teamStats.overCapacityCount === 0}
+          onClick={handleTeamCapacityClick}
         />
         <KpiCard
           label="Blocked Tickets"
-          value={TOTAL_BLOCKED_TICKETS}
+          value={totalBlockedTickets}
           sub="need attention"
-          danger={TOTAL_BLOCKED_TICKETS > 0}
+          danger={totalBlockedTickets > 0}
+          disabled={totalBlockedTickets === 0}
+          onClick={handleBlockedTicketsClick}
         />
-        <KpiCard label="Due This Week" value={TOTAL_DUE_THIS_WEEK} sub="tickets" />
+        <KpiCard
+          label="Due This Week"
+          value={totalDueThisWeek}
+          sub="tickets"
+          disabled={totalDueThisWeek === 0}
+          onClick={handleDueThisWeekClick}
+        />
         <KpiCard
           label="Team Utilization"
-          value={`${TEAM_UTILIZATION_PCT}%`}
+          value={`${teamStats.utilizationPct}%`}
           sub="assigned ÷ capacity"
-          progress={TEAM_UTILIZATION_PCT}
+          progress={teamStats.utilizationPct}
           accent
         />
         <KpiCard
-          label="Sprint Progress"
-          value={`${AVG_PROJECT_PROGRESS}%`}
-          sub="avg across projects"
-          progress={AVG_PROJECT_PROGRESS}
+          label="Avg. Progress"
+          value={`${avgProgressPct}%`}
+          sub="across projects"
+          progress={avgProgressPct}
           accent
         />
       </div>
@@ -279,7 +779,7 @@ export function ProjectLeadReportsScreen() {
         <>
           {/* ── Alerts banner ────────────────────────────────────────────── */}
           <div className="mb-4">
-            <ReportStatusBar items={STATUS_ITEMS} />
+            <ReportStatusBar items={statusItems} />
           </div>
 
           {/* ── Filters ──────────────────────────────────────────────────── */}
@@ -287,15 +787,15 @@ export function ProjectLeadReportsScreen() {
             <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600 mr-2">
               Filter
             </span>
-            <FilterDropdown label="Project" mode="multi" groups={PROJECT_GROUPS} selected={projectFilter} onChange={setProjectFilter} />
-            <FilterDropdown label="Assignee" mode="multi" groups={ASSIGNEE_GROUPS} selected={assigneeFilter} onChange={setAssigneeFilter} searchable />
-            <FilterDropdown label="Status" mode="multi" groups={STATUS_GROUPS} selected={statusFilter} onChange={setStatusFilter} />
-            <FilterDropdown label="Priority" mode="multi" groups={PRIORITY_GROUPS} selected={priorityFilter} onChange={setPriorityFilter} />
+            <FilterDropdown label="Project" mode="multi" groups={projectGroups} selected={projectFilter} onChange={setProjectFilter} />
+            <FilterDropdown label="Assignee" mode="multi" groups={assigneeGroups} selected={assigneeFilter} onChange={setAssigneeFilter} searchable />
+            <FilterDropdown label="Status" mode="multi" groups={statusGroups} selected={statusFilter} onChange={setStatusFilter} />
+            <FilterDropdown label="Priority" mode="multi" groups={priorityGroups} selected={priorityFilter} onChange={setPriorityFilter} />
           </div>
 
           <div className="space-y-5">
             {/* ── Project Health (+ Progress) ─────────────────────────────── */}
-            <Section title="Project Health" count={MY_PROJECTS.length} icon={ProjectIcon}>
+            <Section title="Project Health" count={healthRows.length} icon={ProjectIcon}>
               <div className="overflow-x-auto -mx-5 px-5">
                 <table className="w-full text-sm min-w-[560px]">
                   <thead>
@@ -318,68 +818,88 @@ export function ProjectLeadReportsScreen() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-50 dark:divide-zinc-800/60">
-                    {MY_PROJECTS.map((project) => (
-                      <tr key={project.slug} className="hover:bg-slate-50/60 dark:hover:bg-zinc-800/30 transition-colors duration-150 cursor-default">
-                        <td className="py-2.5 pr-4">
-                          <div className="flex items-center gap-2">
-                            <span className="w-6 h-6 rounded-md bg-slate-100 dark:bg-zinc-800 text-[9px] font-bold text-slate-500 dark:text-zinc-400 flex items-center justify-center flex-shrink-0">
-                              {project.shortName}
-                            </span>
-                            <span className="font-medium text-slate-800 dark:text-zinc-200 truncate">{project.name}</span>
-                          </div>
-                        </td>
-                        <td className="py-2.5">
-                          <StatusBadge status={project.status} />
-                        </td>
-                        <td className="py-2.5">
-                          <HealthBadge health={project.health} />
-                        </td>
-                        <td className="py-2.5 text-right tabular-nums">
-                          {project.blockedTickets > 0 ? (
-                            <span className="font-medium text-red-600 dark:text-red-400">{project.blockedTickets}</span>
-                          ) : (
-                            <span className="text-slate-300 dark:text-zinc-600">—</span>
-                          )}
-                        </td>
-                        <td className="py-2.5 pl-4">
-                          <BlockCompletion pct={project.progress} />
+                    {healthRows.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="py-6 text-center text-sm text-slate-400 dark:text-zinc-500">
+                          No real projects in the current report scope.
                         </td>
                       </tr>
-                    ))}
+                    ) : (
+                      healthRows.map((row) => {
+                        const project = myProjects.find((p) => p.slug === row.id);
+                        if (!project) return null;
+                        return (
+                          <tr key={project.slug} className="hover:bg-slate-50/60 dark:hover:bg-zinc-800/30 transition-colors duration-150 cursor-default">
+                            <td className="py-2.5 pr-4">
+                              <div className="flex items-center gap-2">
+                                <span className="w-6 h-6 rounded-md bg-slate-100 dark:bg-zinc-800 text-[9px] font-bold text-slate-500 dark:text-zinc-400 flex items-center justify-center flex-shrink-0">
+                                  {project.shortName}
+                                </span>
+                                <span className="font-medium text-slate-800 dark:text-zinc-200 truncate">{project.name}</span>
+                              </div>
+                            </td>
+                            <td className="py-2.5">
+                              <StatusBadge status={project.status} />
+                            </td>
+                            <td className="py-2.5">
+                              <HealthBadge health={RISK_TO_HEALTH[row.risk]} />
+                            </td>
+                            <td className="py-2.5 text-right tabular-nums">
+                              {row.blocked > 0 ? (
+                                <span className="font-medium text-red-600 dark:text-red-400">{row.blocked}</span>
+                              ) : (
+                                <span className="text-slate-300 dark:text-zinc-600">—</span>
+                              )}
+                            </td>
+                            <td className="py-2.5 pl-4">
+                              <BlockCompletion pct={progressBySlug.get(project.slug) ?? 0} />
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
                   </tbody>
                 </table>
               </div>
             </Section>
 
             {/* ── Upcoming Deadlines (replaces Hours Distribution) ────────── */}
-            <Section title="Upcoming Deadlines" count={UPCOMING_DEADLINES.length} icon={ClockIcon}>
-              <div className="space-y-1">
-                {UPCOMING_DEADLINES.map((ticket) => {
-                  const isOverdue = parseDue(ticket.dueDate) < TODAY.getTime();
-                  return (
-                    <div key={ticket.id} className="flex items-center gap-2.5 py-1.5 px-2.5 -mx-2.5 rounded-lg">
-                      <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${isOverdue ? "bg-red-400" : "bg-slate-300 dark:bg-zinc-600"}`} />
-                      <span className="flex-1 min-w-0 flex items-baseline gap-1.5">
-                        <TicketTypeIcon type={ticket.type} />
-                        <span className="text-[11px] font-mono font-medium text-slate-400 dark:text-zinc-500 flex-shrink-0">
-                          {getTicketDisplayKey(ticket)}
+            <Section title="Upcoming Deadlines" count={upcomingDeadlines.length} icon={ClockIcon}>
+              {upcomingDeadlines.length === 0 ? (
+                <p className="text-xs text-slate-400 dark:text-zinc-600 py-2">No upcoming deadlines.</p>
+              ) : (
+                <div className="space-y-1">
+                  {upcomingDeadlines.map((ticket) => {
+                    const isOverdue = Boolean(ticket.dueDate) && parseDisplayDate(ticket.dueDate as string) < todayISO;
+                    return (
+                      <div key={ticket.id} className="flex items-center gap-2.5 py-1.5 px-2.5 -mx-2.5 rounded-lg">
+                        <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${isOverdue ? "bg-red-400" : "bg-slate-300 dark:bg-zinc-600"}`} />
+                        <span className="flex-1 min-w-0 flex items-baseline gap-1.5">
+                          <TicketTypeIcon type={ticket.type} />
+                          <span className="text-[11px] font-mono font-medium text-slate-400 dark:text-zinc-500 flex-shrink-0">
+                            {getTicketDisplayKey(ticket)}
+                          </span>
+                          <span className="min-w-0 text-[13px] text-slate-700 dark:text-zinc-300 truncate">
+                            {ticket.title}
+                          </span>
                         </span>
-                        <span className="min-w-0 text-[13px] text-slate-700 dark:text-zinc-300 truncate">
-                          {ticket.title}
+                        <span className={`text-[11px] font-semibold flex-shrink-0 ${isOverdue ? "text-red-500 dark:text-red-400" : "text-slate-500 dark:text-zinc-400"}`}>
+                          {ticket.dueDate}
                         </span>
-                      </span>
-                      <span className={`text-[11px] font-semibold flex-shrink-0 ${isOverdue ? "text-red-500 dark:text-red-400" : "text-slate-500 dark:text-zinc-400"}`}>
-                        {ticket.dueDate}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </Section>
 
             {/* ── Recent Changes ──────────────────────────────────────────── */}
             <Section title="Recent Changes" icon={ClockIcon}>
-              <RecentActivityList items={MY_RECENT_ACTIVITY} onOpenTicket={setPreview} />
+              {recentChanges.length === 0 ? (
+                <p className="text-sm text-slate-400 dark:text-zinc-500">No real changes in the current report scope.</p>
+              ) : (
+                <RecentActivityList items={recentChanges} onOpenTicket={setPreview} />
+              )}
             </Section>
           </div>
         </>
@@ -388,23 +908,33 @@ export function ProjectLeadReportsScreen() {
       {tab === "team" && (
         <div className="space-y-5">
 
+          {/* Real ?filter=over-capacity handoff from this same page's own
+              Team Capacity KPI (2+ real people over capacity across more
+              than one project) — same removable FilterChip style/pattern
+              Projects' own `?blocked=` handoff already uses. */}
+          {teamCapacityFilterActive && (
+            <div className="flex items-center gap-1.5">
+              <FilterChip label="Over Capacity" active onToggle={clearTeamCapacityFilter} />
+            </div>
+          )}
+
           {/* ── Team Capacity + Team Utilization ────────────────────────── */}
           <Section title="Team Capacity" icon={PeopleIcon}>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <KpiCard label="Total Capacity" value={<>{TOTAL_CAPACITY_HOURS}<span className="text-base font-medium ml-0.5">h</span></>} sub="per week" />
-              <KpiCard label="Assigned" value={<>{TOTAL_ASSIGNED_HOURS}<span className="text-base font-medium ml-0.5">h</span></>} sub="this week" />
+              <KpiCard label="Total Capacity" value={<>{teamStats.totalCapacityHours}<span className="text-base font-medium ml-0.5">h</span></>} sub="per week" />
+              <KpiCard label="Assigned" value={<>{teamStats.totalAssignedHours}<span className="text-base font-medium ml-0.5">h</span></>} sub="this week" />
               <KpiCard
                 label="Team Utilization"
-                value={`${TEAM_UTILIZATION_PCT}%`}
-                sub={`${OVER_CAPACITY_COUNT} over capacity`}
-                progress={TEAM_UTILIZATION_PCT}
+                value={`${teamStats.utilizationPct}%`}
+                sub={`${teamStats.overCapacityCount} over capacity`}
+                progress={teamStats.utilizationPct}
                 accent
               />
             </div>
           </Section>
 
           {/* ── Hours by Person ──────────────────────────────────────────── */}
-          <Section title="Hours by Person" count={TEAM.length} icon={PersonIcon}>
+          <Section title="Hours by Person" count={displayedTeamMembers.length} icon={PersonIcon}>
             <div className="overflow-x-auto -mx-5 px-5">
               <table className="w-full text-sm min-w-[480px]">
                 <thead>
@@ -427,32 +957,48 @@ export function ProjectLeadReportsScreen() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50 dark:divide-zinc-800/60">
-                  {TEAM.map((member) => {
-                    const pct = utilizationOf(member);
-                    return (
-                      <tr key={member.name} className="hover:bg-slate-50/60 dark:hover:bg-zinc-800/30 transition-colors duration-150 cursor-default">
-                        <td className="py-2.5 pr-4">
-                          <MemberTrigger name={member.name} avatar={member.avatar} role={member.role} projectSlug={member.projectSlug} className="flex items-center gap-2.5">
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img src={member.avatar} alt={member.name} className="w-6 h-6 rounded-full flex-shrink-0" />
-                            <span className="font-medium text-slate-800 dark:text-zinc-200">{member.name}</span>
-                          </MemberTrigger>
-                        </td>
-                        <td className="py-2.5 text-right font-semibold text-slate-800 dark:text-zinc-200 tabular-nums">
-                          {member.assignedHours}h
-                        </td>
-                        <td className="py-2.5 text-right text-slate-500 dark:text-zinc-400 tabular-nums">
-                          {member.weeklyCapacity}h
-                        </td>
-                        <td className="py-2.5 text-right">
-                          <span className={`font-semibold tabular-nums ${capacityTextColor(pct)}`}>{pct}%</span>
-                        </td>
-                        <td className="py-2.5 text-right text-xs text-slate-500 dark:text-zinc-400 tabular-nums">
-                          {remainingAvailabilityLabel(member)}
-                        </td>
-                      </tr>
-                    );
-                  })}
+                  {displayedTeamMembers.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="py-6 text-center text-sm text-slate-400 dark:text-zinc-500">
+                        No real team members in the current scope.
+                      </td>
+                    </tr>
+                  ) : (
+                    displayedTeamMembers.map((member) => {
+                      const shape = toTeamMemberShape(member);
+                      const pct = utilizationOf(shape);
+                      return (
+                        <tr key={member.id} className="hover:bg-slate-50/60 dark:hover:bg-zinc-800/30 transition-colors duration-150 cursor-default">
+                          <td className="py-2.5 pr-4">
+                            <MemberTrigger
+                              name={member.name}
+                              avatar={member.avatar}
+                              role={member.role}
+                              profileId={member.id}
+                              projectSlug={member.projectSlugs.length === 1 ? member.projectSlugs[0] : undefined}
+                              className="flex items-center gap-2.5"
+                            >
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img src={member.avatar} alt={member.name} className="w-6 h-6 rounded-full flex-shrink-0" />
+                              <span className="font-medium text-slate-800 dark:text-zinc-200">{member.name}</span>
+                            </MemberTrigger>
+                          </td>
+                          <td className="py-2.5 text-right font-semibold text-slate-800 dark:text-zinc-200 tabular-nums">
+                            {member.assignedHours}h
+                          </td>
+                          <td className="py-2.5 text-right text-slate-500 dark:text-zinc-400 tabular-nums">
+                            {member.weeklyCapacity}h
+                          </td>
+                          <td className="py-2.5 text-right">
+                            <span className={`font-semibold tabular-nums ${capacityTextColor(pct)}`}>{pct}%</span>
+                          </td>
+                          <td className="py-2.5 text-right text-xs text-slate-500 dark:text-zinc-400 tabular-nums">
+                            {remainingAvailabilityLabel(shape)}
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
                 </tbody>
               </table>
             </div>
@@ -461,28 +1007,40 @@ export function ProjectLeadReportsScreen() {
           {/* ── Workload ─────────────────────────────────────────────────── */}
           <Section title="Workload" icon={BarsIcon}>
             <div className="space-y-4">
-              {TEAM.map((member) => {
-                const pct = utilizationOf(member);
-                return (
-                  <div key={member.name}>
-                    <div className="flex items-center justify-between mb-1">
-                      <MemberTrigger name={member.name} avatar={member.avatar} role={member.role} projectSlug={member.projectSlug} className="flex items-center gap-2">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={member.avatar} alt={member.name} className="w-5 h-5 rounded-full flex-shrink-0" />
-                        <span className="text-sm font-medium text-slate-700 dark:text-zinc-300">{member.name}</span>
-                      </MemberTrigger>
-                      <p className="text-sm font-semibold text-slate-700 dark:text-zinc-200 tabular-nums leading-tight">
-                        {member.assignedHours}h
-                        <span className="font-normal text-slate-400 dark:text-zinc-600">{" / "}{member.weeklyCapacity}h</span>
-                        <span className={`ml-2 font-semibold ${capacityTextColor(pct)}`}>{pct}%</span>
-                      </p>
+              {displayedTeamMembers.length === 0 ? (
+                <p className="text-sm text-slate-400 dark:text-zinc-500">No real team members in the current scope.</p>
+              ) : (
+                displayedTeamMembers.map((member) => {
+                  const shape = toTeamMemberShape(member);
+                  const pct = utilizationOf(shape);
+                  return (
+                    <div key={member.id}>
+                      <div className="flex items-center justify-between mb-1">
+                        <MemberTrigger
+                          name={member.name}
+                          avatar={member.avatar}
+                          role={member.role}
+                          profileId={member.id}
+                          projectSlug={member.projectSlugs.length === 1 ? member.projectSlugs[0] : undefined}
+                          className="flex items-center gap-2"
+                        >
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={member.avatar} alt={member.name} className="w-5 h-5 rounded-full flex-shrink-0" />
+                          <span className="text-sm font-medium text-slate-700 dark:text-zinc-300">{member.name}</span>
+                        </MemberTrigger>
+                        <p className="text-sm font-semibold text-slate-700 dark:text-zinc-200 tabular-nums leading-tight">
+                          {member.assignedHours}h
+                          <span className="font-normal text-slate-400 dark:text-zinc-600">{" / "}{member.weeklyCapacity}h</span>
+                          <span className={`ml-2 font-semibold ${capacityTextColor(pct)}`}>{pct}%</span>
+                        </p>
+                      </div>
+                      <div className="h-1.5 rounded-full bg-slate-100 dark:bg-zinc-800 overflow-hidden">
+                        <AnimatedBar pct={Math.min(pct, 100)} className={capacityBarColor(pct)} />
+                      </div>
                     </div>
-                    <div className="h-1.5 rounded-full bg-slate-100 dark:bg-zinc-800 overflow-hidden">
-                      <AnimatedBar pct={Math.min(pct, 100)} className={capacityBarColor(pct)} />
-                    </div>
-                  </div>
-                );
-              })}
+                  );
+                })
+              )}
             </div>
           </Section>
 
@@ -501,34 +1059,46 @@ export function ProjectLeadReportsScreen() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50 dark:divide-zinc-800/60">
-                  {TEAM.map((member) => {
-                    const blocked = blockedHoursOf(member);
-                    return (
-                      <tr key={member.name} className="hover:bg-slate-50/60 dark:hover:bg-zinc-800/30 transition-colors duration-150 cursor-default">
+                  {displayedTeamMembers.length === 0 ? (
+                    <tr>
+                      <td colSpan={2} className="py-6 text-center text-sm text-slate-400 dark:text-zinc-500">
+                        No real team members in the current scope.
+                      </td>
+                    </tr>
+                  ) : (
+                    displayedTeamMembers.map((member) => (
+                      <tr key={member.id} className="hover:bg-slate-50/60 dark:hover:bg-zinc-800/30 transition-colors duration-150 cursor-default">
                         <td className="py-2.5 pr-4">
-                          <MemberTrigger name={member.name} avatar={member.avatar} role={member.role} projectSlug={member.projectSlug} className="flex items-center gap-2.5">
+                          <MemberTrigger
+                            name={member.name}
+                            avatar={member.avatar}
+                            role={member.role}
+                            profileId={member.id}
+                            projectSlug={member.projectSlugs.length === 1 ? member.projectSlugs[0] : undefined}
+                            className="flex items-center gap-2.5"
+                          >
                             {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img src={member.avatar} alt={member.name} className="w-6 h-6 rounded-full flex-shrink-0" />
                             <span className="font-medium text-slate-800 dark:text-zinc-200">{member.name}</span>
                           </MemberTrigger>
                         </td>
                         <td className="py-2.5 text-right tabular-nums">
-                          {blocked > 0 ? (
-                            <span className="font-medium text-red-600 dark:text-red-400">{blocked}h</span>
+                          {member.blockedHours > 0 ? (
+                            <span className="font-medium text-red-600 dark:text-red-400">{member.blockedHours}h</span>
                           ) : (
                             <span className="text-slate-300 dark:text-zinc-600">—</span>
                           )}
                         </td>
                       </tr>
-                    );
-                  })}
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>
           </Section>
 
           {/* ── Team Health ──────────────────────────────────────────────── */}
-          <Section title="Team Health" count={TEAM.length} icon={PulseIcon}>
+          <Section title="Team Health" count={displayedTeamMembers.length} icon={PulseIcon}>
             <div className="overflow-x-auto -mx-5 px-5">
               <table className="w-full text-sm min-w-[360px]">
                 <thead>
@@ -542,20 +1112,38 @@ export function ProjectLeadReportsScreen() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50 dark:divide-zinc-800/60">
-                  {TEAM.map((member) => (
-                    <tr key={member.name} className="hover:bg-slate-50/60 dark:hover:bg-zinc-800/30 transition-colors duration-150 cursor-default">
-                      <td className="py-2.5 pr-4">
-                        <MemberTrigger name={member.name} avatar={member.avatar} role={member.role} projectSlug={member.projectSlug} className="flex items-center gap-2.5">
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img src={member.avatar} alt={member.name} className="w-6 h-6 rounded-full flex-shrink-0" />
-                          <span className="font-medium text-slate-800 dark:text-zinc-200">{member.name}</span>
-                        </MemberTrigger>
-                      </td>
-                      <td className="py-2.5">
-                        <HealthBadge health={healthOf(member)} />
+                  {displayedTeamMembers.length === 0 ? (
+                    <tr>
+                      <td colSpan={2} className="py-6 text-center text-sm text-slate-400 dark:text-zinc-500">
+                        No real team members in the current scope.
                       </td>
                     </tr>
-                  ))}
+                  ) : (
+                    displayedTeamMembers.map((member) => {
+                      const pct = utilizationOf(toTeamMemberShape(member));
+                      return (
+                        <tr key={member.id} className="hover:bg-slate-50/60 dark:hover:bg-zinc-800/30 transition-colors duration-150 cursor-default">
+                          <td className="py-2.5 pr-4">
+                            <MemberTrigger
+                              name={member.name}
+                              avatar={member.avatar}
+                              role={member.role}
+                              profileId={member.id}
+                              projectSlug={member.projectSlugs.length === 1 ? member.projectSlugs[0] : undefined}
+                              className="flex items-center gap-2.5"
+                            >
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img src={member.avatar} alt={member.name} className="w-6 h-6 rounded-full flex-shrink-0" />
+                              <span className="font-medium text-slate-800 dark:text-zinc-200">{member.name}</span>
+                            </MemberTrigger>
+                          </td>
+                          <td className="py-2.5">
+                            <HealthBadge health={healthOfReal(pct, member.blockedHours)} />
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
                 </tbody>
               </table>
             </div>
