@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
+import { useRouter } from "next/navigation";
 import type { Ticket, TicketStatus } from "@/lib/mock-tickets";
 import { getTicketDisplayKey } from "@/lib/mock-tickets";
 import { TicketListRow } from "@/components/tickets/ticket-card";
@@ -213,6 +214,7 @@ function KpiCard({
   accent,
   danger,
   active,
+  disabled,
   onClick,
 }: {
   label: string;
@@ -221,23 +223,18 @@ function KpiCard({
   accent?: boolean;
   danger?: boolean;
   active?: boolean;
+  /** True when there's nothing real to act on (e.g. "Assigned Tickets" with
+   *  zero real tickets) — renders the exact same content as a plain,
+   *  non-interactive block instead of a button, so it never shows a
+   *  cursor/hover affordance or responds to a click, same as every other
+   *  real KPI card elsewhere that goes non-interactive at zero. Only
+   *  "Assigned Tickets" passes this today; every other card here keeps its
+   *  existing always-interactive toggle behavior unchanged. */
+  disabled?: boolean;
   onClick?: () => void;
 }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={[
-        "rounded-xl border px-5 py-4 w-full text-left transition-all duration-150",
-        "shadow-sm shadow-slate-200/40 dark:shadow-black/20",
-        accent
-          ? "border-brand-100 dark:border-brand-900/40 bg-brand-50/40 dark:bg-brand-950/15 hover:border-brand-200 dark:hover:border-brand-800"
-          : "border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900 hover:border-slate-300 dark:hover:border-zinc-600",
-        active
-          ? "ring-2 ring-brand-500/40 dark:ring-brand-500/30 !border-brand-300 dark:!border-brand-700"
-          : "hover:shadow-md",
-      ].join(" ")}
-    >
+  const content = (
+    <>
       <p
         className={[
           "text-[10px] font-bold uppercase tracking-widest mb-1",
@@ -259,6 +256,36 @@ function KpiCard({
       {sub && (
         <p className="text-xs text-slate-400 dark:text-zinc-600 mt-1">{sub}</p>
       )}
+    </>
+  );
+
+  const baseClassName = [
+    "rounded-xl border px-5 py-4 w-full text-left transition-all duration-150",
+    "shadow-sm shadow-slate-200/40 dark:shadow-black/20",
+    accent
+      ? "border-brand-100 dark:border-brand-900/40 bg-brand-50/40 dark:bg-brand-950/15"
+      : "border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900",
+  ];
+
+  if (disabled) {
+    return <div className={baseClassName.join(" ")}>{content}</div>;
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={[
+        ...baseClassName,
+        accent
+          ? "hover:border-brand-200 dark:hover:border-brand-800"
+          : "hover:border-slate-300 dark:hover:border-zinc-600",
+        active
+          ? "ring-2 ring-brand-500/40 dark:ring-brand-500/30 !border-brand-300 dark:!border-brand-700"
+          : "hover:shadow-md",
+      ].join(" ")}
+    >
+      {content}
     </button>
   );
 }
@@ -366,6 +393,7 @@ const VIEW_ICONS: Record<WorkView, ReactNode> = {
 
 export function MyWorkScreen() {
   const { user, userId, organization, isDevFallback } = useCurrentUser();
+  const router = useRouter();
 
   const [loadState, setLoadState] = useState<"loading" | "ready" | "error">(isDevFallback ? "ready" : "loading");
   const [loadErrorMessage, setLoadErrorMessage] = useState<string | null>(null);
@@ -552,6 +580,27 @@ export function MyWorkScreen() {
     setKpiMode((prev) => (prev === mode ? null : mode));
   }
 
+  // "Assigned Tickets" KPI — reuses `myTickets`, the exact same real,
+  // per-user (assigneeProfileId === userId) ticket list already driving
+  // this KPI's own displayed count, regardless of status — no second
+  // query, no duplicated assignee criteria. Same real 0/1/2+ rule already
+  // established by the Admin/Member Dashboards' own navigable KPI cards:
+  // zero stays non-interactive; exactly one opens it directly in the
+  // existing Ticket Preview panel (no new modal); more than one hands off
+  // to the org-wide Tickets view with the real `?assignee=me` filter
+  // applied and visible (Tickets' existing "Assigned" filter, already
+  // readable from the URL the same way `?alerts=` is — same destination/
+  // param the Admin Dashboard's own "Assigned Tickets" KPI already uses for
+  // its own "All Projects" case).
+  function handleAssignedTicketsClick() {
+    if (myTickets.length === 0) return;
+    if (myTickets.length === 1) {
+      setPreviewTicket(myTickets[0]);
+      return;
+    }
+    router.push("/tickets?assignee=me");
+  }
+
   // Displayed tickets: the 4 dropdown filters above, further narrowed by
   // whichever KPI quick-filter is active — so group/board counts always
   // match what's actually visible, never the unfiltered totals the KPI
@@ -671,8 +720,8 @@ export function MyWorkScreen() {
             label="Assigned Tickets"
             value={myTickets.length}
             sub={`${activeCount} active`}
-            active={kpiMode === "all"}
-            onClick={() => handleKpiClick("all")}
+            disabled={myTickets.length === 0}
+            onClick={handleAssignedTicketsClick}
           />
           <KpiCard
             label="Estimated Hours"
