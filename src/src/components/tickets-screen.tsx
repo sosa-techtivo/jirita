@@ -175,15 +175,18 @@ export function TicketsScreen({ slug, projectName }: { slug?: string; projectNam
   // Controlled here (not local to FilterBar) so they can be combined with
   // the quick-filter chips below in one shared filteredTickets — see
   // filter-bar.tsx's own comment on why these are now props, not state.
-  // Seeded from `?assignee=me` (same real-URL-state handoff `?alerts=`
-  // already uses) so a dashboard KPI can deep-link straight to "my
-  // tickets" with the existing Assigned filter already applied and visible
-  // (the FilterDropdown button itself relabels to "Assigned: Me") — the
-  // only recognized value is the literal sentinel "me" (matches `isMine`
-  // below); any other `?assignee=` value is left unhandled here.
-  const [assigned, setAssigned] = useState<string[]>(
-    () => (searchParams.get("assignee") === "me" ? ["me"] : [])
-  );
+  // Seeded from `?assignee=` (same real-URL-state handoff `?alerts=`
+  // already uses) so a dashboard KPI/report widget can deep-link straight
+  // to one person's tickets with the existing Assigned filter already
+  // applied and visible. Recognizes the literal sentinels "me" (matches
+  // `isMine` below) and "unassigned" (matches `isUnassigned` below), or
+  // any other value as a real `assigneeProfileId` — the exact same three
+  // cases the filter's own apply logic further down already handles, so
+  // this only widens what's accepted from the URL, never a second rule.
+  const [assigned, setAssigned] = useState<string[]>(() => {
+    const raw = searchParams.get("assignee");
+    return raw ? [raw] : [];
+  });
   const [priority, setPriority] = useState<string[]>([]);
   const [status,   setStatus]   = useState<string[]>([]);
   // "Add Filter" filters — activeAddFilters tracks which chips are showing

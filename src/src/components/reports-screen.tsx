@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useMemo, useRef } from "react";
-import type { ReactNode } from "react";
 import { FilterDropdown } from "@/components/tickets/filter-dropdown";
 import type { DropdownGroup } from "@/components/tickets/filter-dropdown";
 import { useCurrentUser } from "@/components/current-user-provider";
@@ -13,17 +12,15 @@ import { getTicketDisplayKey } from "@/lib/mock-tickets";
 import type { Ticket, TicketStatus, TicketPriority } from "@/lib/mock-tickets";
 import type { ProjectStatus, ProjectSummary } from "@/lib/mock-projects";
 import { TicketPreviewPanel } from "@/components/tickets/ticket-preview-panel";
-import { TicketTypeIcon, getTodayISO, parseDisplayDate, formatISODate } from "@/components/tickets/ticket-ui";
+import { getTodayISO, parseDisplayDate, PriorityBadge, StatusBadge, PRIORITY_VALUES } from "@/components/tickets/ticket-ui";
 import { MemberTrigger } from "@/components/member-profile";
 import {
   loadOrganizationTickets,
   loadOrganizationLoggedTimeForRange,
   loadHoursAndAssigneeActivityForRange,
-  loadDeliveryActivityForTickets,
-  formatRelativeTime,
-  STATUS_FROM_DB,
+  loadTicketsCompletedInRange,
 } from "@/lib/tickets";
-import type { OrganizationTimeEntry, HoursOrAssigneeActivityEvent, DeliveryActivityEvent } from "@/lib/tickets";
+import type { OrganizationTimeEntry, HoursOrAssigneeActivityEvent } from "@/lib/tickets";
 import {
   loadOrganizationProjects,
   loadOrganizationWorkloadMembers,
@@ -80,27 +77,6 @@ interface HoursEntry {
   label:    string;
   hours:    number;
   barClass: string;
-}
-
-interface ActivityEntry {
-  id:     string;
-  name:   string;
-  avatar: string;
-  /** Real actor profiles.id (DeliveryActivityEvent.actorId) — in practice
-   *  always set whenever `name` is (buildRecentChanges already skips any
-   *  event whose actor didn't resolve to a real profile), so the Member
-   *  Profile Modal trigger below never has to fall back to name/avatar
-   *  matching. Optional only to match `actorId`'s own nullable column type. */
-  profileId?: string;
-  /** The action fragment only — the ticket title never appears here; when
-   *  `ticket` is set it renders on its own clickable line instead. */
-  action: ReactNode;
-  /** Plain-text mirror of `action` — same underlying real values, just not
-   *  JSX — used only by Export (CSV/Excel/PDF can't render ReactNode). */
-  actionText?: string;
-  time:   string;
-  group:  "today" | "yesterday" | "earlier";
-  ticket?: Ticket;
 }
 
 type PeriodKey = "this-month" | "last-month" | "this-quarter" | "custom";
@@ -265,12 +241,6 @@ function buildHoursDistribution(tickets: Ticket[]): HoursEntry[] {
     ),
   }));
 }
-
-const ACTIVITY_GROUPS = [
-  { id: "today",     label: "Today",            key: "today"     as const },
-  { id: "yesterday", label: "Yesterday",         key: "yesterday" as const },
-  { id: "earlier",   label: "Earlier This Week", key: "earlier"   as const },
-];
 
 // ── Filter groups ─────────────────────────────────────────────────────────────
 
@@ -770,17 +740,29 @@ export interface DeliveryKpiSummary {
 // buildProjectHealthRows uses for its own at-risk/overdue check), and
 // Hours Burn is the exact same registered/estimated/capped-at-100%/0%-
 // when-no-estimate formula Project Health's Completion column already
-// uses, just totaled org-wide instead of per-project. "Done This Month"
-// reuses the same real signal Admin Dashboard already established for
-// this exact problem (no completed_at column exists): a "done" ticket's
-// own updated_at falling in the real current calendar month — never the
-// selected report period, since this KPI is explicitly about the current
-// calendar month regardless of what period is selected elsewhere.
+// uses, just totaled org-wide instead of per-project. `completedThisMonth`
+// (the field name is kept for the two other real callers below, even
+// though it's no longer always "this month" — see next paragraph) defaults
+// to the same current-calendar-month/`updated_at` proxy Admin Dashboard
+// already established (no `completed_at` column exists) when
+// `completedInPeriodCount` isn't supplied — Admin/Project Lead Project
+// Overview's own two calls (they have no report period of their own) never
+// pass it, so their numbers are completely unchanged by the paragraph below.
+//
+// AdminReportsScreen's own Delivery tab call *does* pass
+// `completedInPeriodCount` — the real count of `status_changed`→`done`
+// `ticket_activity` rows within Delivery's own selected report period
+// (`loadTicketsCompletedInRange`, the same real transition-to-done signal
+// `project-reports-screen.tsx` already uses — never `updated_at` there),
+// so "Done This Month"/"Done Last Month"/"Done This Quarter"/"Done in
+// Range" always reflects the period actually selected on that tab, not a
+// permanently-fixed current month.
 export function buildDeliveryKpiSummary(
   tickets: Ticket[],
   projects: { status: ProjectStatus }[],
   timeEntries: { minutes: number }[],
-  todayISO: string
+  todayISO: string,
+  completedInPeriodCount?: number
 ): DeliveryKpiSummary {
   const activeProjects = projects.filter((p) => p.status === "active").length;
   const activeTickets = tickets.filter((t) => t.status !== "done").length;
@@ -793,9 +775,10 @@ export function buildDeliveryKpiSummary(
   const blockedTickets = tickets.filter((t) => t.status === "blocked").length;
 
   const monthPrefix = todayISO.slice(0, 7);
-  const completedThisMonth = tickets.filter(
-    (t) => t.status === "done" && t.updatedAtISO?.slice(0, 7) === monthPrefix
-  ).length;
+  const completedThisMonth =
+    completedInPeriodCount !== undefined
+      ? completedInPeriodCount
+      : tickets.filter((t) => t.status === "done" && t.updatedAtISO?.slice(0, 7) === monthPrefix).length;
 
   const overdueTickets = tickets.filter(
     (t) => t.status !== "done" && t.dueDate && parseDisplayDate(t.dueDate) < todayISO
@@ -1107,6 +1090,17 @@ function getCurrentWeekBounds(): { start: string; end: string } {
   return { start: toISODate(monday), end: toISODate(nextMonday) };
 }
 
+// Exclusive upper bound (date-only, the day right after the given date) for
+// a real inclusive-start/exclusive-end `ticket_activity` range query — same
+// date-only-bounds convention getCurrentWeekBounds above already uses, just
+// for the Delivery tab's own selected report period instead of a fixed
+// "this week".
+function exclusiveEndDate(dateISO: string): string {
+  const d = new Date(`${dateISO}T00:00:00`);
+  d.setDate(d.getDate() + 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
 // Real "Workload" rows — only people with at least one real active
 // (status !== "done") ticket assigned to them within the current report
 // scope. Reuses the exact same real weekly-capacity source as Hours by
@@ -1172,10 +1166,13 @@ function buildWorkloadRows(
     const member = memberById.get(profileId);
     if (!member) continue;
 
-    const assignedHours = personTickets.reduce((sum, t) => {
-      const loggedHours = (loggedMinutesByTicketId.get(t.id) ?? 0) / 60;
-      return sum + Math.max((t.hours ?? 0) - loggedHours, 0);
-    }, 0);
+    // Same official assigned-hours-over-capacity definition Team/Dashboards/
+    // Member Profile Modal/Project Lead Time Tracking already share: the
+    // plain sum of each active ticket's own real `hours` estimate, never
+    // netted against hours already logged this period (that would make
+    // this "remaining work," a different, already-real concept —
+    // buildHoursByPersonRows' own blockedHours further below).
+    const assignedHours = personTickets.reduce((sum, t) => sum + (t.hours ?? 0), 0);
 
     const weeklyCapacity = capacityByProfileId.get(profileId) ?? 0;
     const utilizationPct = weeklyCapacity > 0 ? Math.round((assignedHours / weeklyCapacity) * 100) : 0;
@@ -1195,233 +1192,190 @@ function buildWorkloadRows(
   return rows.sort((a, b) => b.utilizationPct - a.utilizationPct);
 }
 
-// Real "today"/"yesterday"/"earlier" bucket for one event, using the
-// viewer's real local calendar day (never the raw UTC timestamp string) —
-// same convention getTodayISO() itself already uses.
-function localDateISO(iso: string): string {
-  const d = new Date(iso);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+// Real tickets grouped by real profileId — never by name/avatar/email. A
+// ticket belongs to a member's group when EITHER is true: (a) it's
+// currently assigned to them and not Done, or (b) they logged real time on
+// it within the active period, regardless of who (if anyone) it's
+// currently assigned to or whether it's since moved to Done — real
+// historical work a ticket's current assignee/status alone would hide
+// (reassigned, unassigned, or completed since). A ticket satisfying both
+// rules for the same member still appears once, with hours summed once
+// (see addTicketToGroup's own dedupe below). The same ticket can
+// legitimately appear in more than one member's group when more than one
+// person logged real time on it — each group only ever shows that group's
+// own member's hours, never another's. `t.assignee` (name/avatar) is
+// already resolved to a real value by rowToTicket (lib/tickets.ts) for
+// every real ticket, reused as-is (with the org member roster) rather than
+// re-deriving identity here.
+interface MemberTicketRow {
+  ticket: Ticket;
+  /** Real hours this exact group's own member logged on this exact ticket
+   *  — never the ticket's own `hours` estimate, never assigned/capacity
+   *  hours, and never another assignee's own logged time on the same
+   *  ticket. Summed from real `ticket_time_entries` rows already scoped to
+   *  the active Period and every other Delivery filter (see
+   *  `filteredTimeEntries`, reused as-is — no second query). */
+  loggedHours: number;
 }
 
-function groupForActivity(createdAtISO: string, todayISO: string): "today" | "yesterday" | "earlier" {
-  const eventDateISO = localDateISO(createdAtISO);
-  if (eventDateISO === todayISO) return "today";
-  const yesterday = new Date(`${todayISO}T00:00:00`);
-  yesterday.setDate(yesterday.getDate() - 1);
-  if (eventDateISO === localDateISO(yesterday.toISOString())) return "yesterday";
-  return "earlier";
+interface MemberTicketGroup {
+  key: string;
+  profileId: string | null;
+  name: string;
+  avatar: string;
+  tickets: MemberTicketRow[];
+  /** Sum of this exact group's own already-computed `loggedHours` per
+   *  ticket (never a separate recomputation from raw minutes) — always
+   *  matches the sum of the hours actually shown in this group's own
+   *  ticket list. */
+  totalLoggedHours: number;
 }
 
-// Turns one real ticket_activity row into the action fragment Recent
-// Changes renders next to the actor's name — same wording/format already
-// established by this exact widget's design (e.g. "changed Hours — 8h →
-// 12h", "moved from To Do to In Progress"), built only from real
-// status/priority enum values and real resolved names — never the row's
-// raw text alone. Returns null when the event can't be honestly described
-// from what's actually available (e.g. an old/new profile id that doesn't
-// resolve to a real known member) — the caller skips those rather than
-// guessing.
-function describeDeliveryActivity(event: DeliveryActivityEvent, memberNameById: Map<string, string>): ReactNode | null {
-  switch (event.eventType) {
-    case "ticket_created":
-      return "created this ticket";
+function compareTicketsForMemberGroup(a: Ticket, b: Ticket, todayISO: string): number {
+  const aBlocked = a.status === "blocked" ? 0 : 1;
+  const bBlocked = b.status === "blocked" ? 0 : 1;
+  if (aBlocked !== bBlocked) return aBlocked - bBlocked;
 
-    case "status_changed": {
-      // old_value/new_value here are the raw DB enum text (snake_case,
-      // e.g. "to_do"/"in_progress") — the same conversion rowToTicket
-      // itself already applies, needed before these can be looked up
-      // against the app's own display-domain TicketStatus values/labels.
-      const oldStatus = event.oldValue ? STATUS_FROM_DB[event.oldValue] : undefined;
-      const newStatus = event.newValue ? STATUS_FROM_DB[event.newValue] : undefined;
-      const oldLabel = oldStatus ? STATUS_FILTER_LABELS[oldStatus] : undefined;
-      const newLabel = newStatus ? STATUS_FILTER_LABELS[newStatus] : undefined;
-      if (!oldLabel || !newLabel) return null;
-      if (newStatus === "done") {
-        return <>moved to <span className="text-emerald-600 dark:text-emerald-400 font-medium">Done</span></>;
-      }
-      if (newStatus === "blocked") {
-        return <>moved to <span className="text-red-600 dark:text-red-400 font-medium">Blocked</span></>;
-      }
-      return <>moved from {oldLabel} to <span className="font-medium">{newLabel}</span></>;
-    }
+  const aOverdue = a.dueDate && parseDisplayDate(a.dueDate) < todayISO ? 0 : 1;
+  const bOverdue = b.dueDate && parseDisplayDate(b.dueDate) < todayISO ? 0 : 1;
+  if (aOverdue !== bOverdue) return aOverdue - bOverdue;
 
-    case "hours_changed": {
-      if (event.oldValue && event.newValue) {
-        return <>changed Hours — <span className="font-medium">{event.oldValue}h → {event.newValue}h</span></>;
-      }
-      if (!event.oldValue && event.newValue) {
-        return <>estimated Hours — <span className="font-medium">{event.newValue}h</span></>;
-      }
-      if (event.oldValue && !event.newValue) {
-        return <>cleared the Hours estimate — <span className="font-medium">was {event.oldValue}h</span></>;
-      }
-      return null;
-    }
+  const aPriorityIdx = PRIORITY_VALUES.indexOf(a.priority);
+  const bPriorityIdx = PRIORITY_VALUES.indexOf(b.priority);
+  if (aPriorityIdx !== bPriorityIdx) return aPriorityIdx - bPriorityIdx;
 
-    case "priority_changed": {
-      const oldLabel = event.oldValue ? PRIORITY_FILTER_LABELS[event.oldValue as TicketPriority] : undefined;
-      const newLabel = event.newValue ? PRIORITY_FILTER_LABELS[event.newValue as TicketPriority] : undefined;
-      if (!newLabel) return null;
-      if (oldLabel) return <>changed Priority — <span className="font-medium">{oldLabel} → {newLabel}</span></>;
-      return <>set Priority — <span className="font-medium">{newLabel}</span></>;
-    }
-
-    case "due_date_changed": {
-      const oldLabel = event.oldValue ? formatISODate(event.oldValue) : undefined;
-      const newLabel = event.newValue ? formatISODate(event.newValue) : undefined;
-      if (oldLabel && newLabel) return <>changed Due Date — <span className="font-medium">{oldLabel} → {newLabel}</span></>;
-      if (!oldLabel && newLabel) return <>set Due Date — <span className="font-medium">{newLabel}</span></>;
-      if (oldLabel && !newLabel) return <>cleared the Due Date — <span className="font-medium">was {oldLabel}</span></>;
-      return null;
-    }
-
-    case "assignee_changed": {
-      const oldName = event.oldValue ? memberNameById.get(event.oldValue) : undefined;
-      const newName = event.newValue ? memberNameById.get(event.newValue) : undefined;
-      if (event.oldValue && !oldName) return null;
-      if (event.newValue && !newName) return null;
-      if (oldName && newName) return <>changed assignee — <span className="font-medium">{oldName} → {newName}</span></>;
-      if (!oldName && newName) return <>assigned to <span className="font-medium">{newName}</span></>;
-      if (oldName && !newName) return <>unassigned — <span className="font-medium">was {oldName}</span></>;
-      return null;
-    }
-
-    case "relation_added":
-      if (!event.fieldName || !event.newValue) return null;
-      return <>linked this ticket to <span className="font-medium">{event.newValue}</span> ({event.fieldName})</>;
-
-    case "relation_removed":
-      if (!event.fieldName || !event.oldValue) return null;
-      return <>removed the link to <span className="font-medium">{event.oldValue}</span> ({event.fieldName})</>;
-
-    default:
-      return null;
+  const aDue = a.dueDate ? parseDisplayDate(a.dueDate) : null;
+  const bDue = b.dueDate ? parseDisplayDate(b.dueDate) : null;
+  if (aDue !== bDue) {
+    if (!aDue) return 1;
+    if (!bDue) return -1;
+    return aDue < bDue ? -1 : 1;
   }
+
+  return getTicketDisplayKey(a).localeCompare(getTicketDisplayKey(b));
 }
 
-// Plain-text mirror of describeDeliveryActivity above — same event types,
-// same real status/priority/name resolution, same conditions for "can't be
-// honestly described" (returns null) — only the output is a template
-// string instead of JSX, since Export (CSV/Excel/PDF) can't render
-// ReactNode. Kept as a literal sibling rather than deriving one from the
-// other so neither has to compromise its own output shape.
-function describeDeliveryActivityText(event: DeliveryActivityEvent, memberNameById: Map<string, string>): string | null {
-  switch (event.eventType) {
-    case "ticket_created":
-      return "created this ticket";
-
-    case "status_changed": {
-      const oldStatus = event.oldValue ? STATUS_FROM_DB[event.oldValue] : undefined;
-      const newStatus = event.newValue ? STATUS_FROM_DB[event.newValue] : undefined;
-      const oldLabel = oldStatus ? STATUS_FILTER_LABELS[oldStatus] : undefined;
-      const newLabel = newStatus ? STATUS_FILTER_LABELS[newStatus] : undefined;
-      if (!oldLabel || !newLabel) return null;
-      return `moved from ${oldLabel} to ${newLabel}`;
-    }
-
-    case "hours_changed": {
-      if (event.oldValue && event.newValue) return `changed Hours — ${event.oldValue}h → ${event.newValue}h`;
-      if (!event.oldValue && event.newValue) return `estimated Hours — ${event.newValue}h`;
-      if (event.oldValue && !event.newValue) return `cleared the Hours estimate — was ${event.oldValue}h`;
-      return null;
-    }
-
-    case "priority_changed": {
-      const oldLabel = event.oldValue ? PRIORITY_FILTER_LABELS[event.oldValue as TicketPriority] : undefined;
-      const newLabel = event.newValue ? PRIORITY_FILTER_LABELS[event.newValue as TicketPriority] : undefined;
-      if (!newLabel) return null;
-      if (oldLabel) return `changed Priority — ${oldLabel} → ${newLabel}`;
-      return `set Priority — ${newLabel}`;
-    }
-
-    case "due_date_changed": {
-      const oldLabel = event.oldValue ? formatISODate(event.oldValue) : undefined;
-      const newLabel = event.newValue ? formatISODate(event.newValue) : undefined;
-      if (oldLabel && newLabel) return `changed Due Date — ${oldLabel} → ${newLabel}`;
-      if (!oldLabel && newLabel) return `set Due Date — ${newLabel}`;
-      if (oldLabel && !newLabel) return `cleared the Due Date — was ${oldLabel}`;
-      return null;
-    }
-
-    case "assignee_changed": {
-      const oldName = event.oldValue ? memberNameById.get(event.oldValue) : undefined;
-      const newName = event.newValue ? memberNameById.get(event.newValue) : undefined;
-      if (event.oldValue && !oldName) return null;
-      if (event.newValue && !newName) return null;
-      if (oldName && newName) return `changed assignee — ${oldName} → ${newName}`;
-      if (!oldName && newName) return `assigned to ${newName}`;
-      if (oldName && !newName) return `unassigned — was ${oldName}`;
-      return null;
-    }
-
-    case "relation_added":
-      if (!event.fieldName || !event.newValue) return null;
-      return `linked this ticket to ${event.newValue} (${event.fieldName})`;
-
-    case "relation_removed":
-      if (!event.fieldName || !event.oldValue) return null;
-      return `removed the link to ${event.oldValue} (${event.fieldName})`;
-
-    default:
-      return null;
-  }
-}
-
-const RECENT_CHANGES_LIMIT = 15;
-
-// Real "Recent Changes" — every event is resolved against the same
-// filteredTickets every other Delivery widget already uses (a ticket
-// outside the current filters/scope silently drops its events), never
-// shown without a real resolved actor, and relation_added/relation_removed
-// (logged as one row per side of the same real action) are deduped to a
-// single entry per real link change.
-function buildRecentChanges(
-  events: DeliveryActivityEvent[],
-  ticketsById: Map<string, Ticket>,
-  memberNameById: Map<string, string>,
+function buildTicketsByMember(
+  tickets: Ticket[],
+  timeEntries: OrganizationTimeEntry[],
+  members: OrgWorkloadMember[],
   todayISO: string
-): ActivityEntry[] {
-  const seen = new Set<string>();
-  const entries: ActivityEntry[] = [];
+): MemberTicketGroup[] {
+  // Real logged minutes per (ticketId, profileId) pair, from the exact same
+  // already-period/filter-scoped time entries every other Delivery widget
+  // reads from — one pass, never a query per ticket or member. `loggedBy`
+  // can be null (a real, profile-less entry); collapsed to "" so it's only
+  // ever attributed to Unassigned, never a real person.
+  const minutesByTicketAndProfile = new Map<string, number>();
+  // Real, identified (non-null loggedBy) profileIds who logged time on each
+  // real ticket within the period — drives which member groups a ticket
+  // historically belongs to regardless of its current assignee/status, and
+  // keeps a currently-unassigned ticket out of Unassigned once a real
+  // member's hours are attached to it.
+  const loggedProfileIdsByTicket = new Map<string, Set<string>>();
 
-  for (const event of events) {
-    if (entries.length >= RECENT_CHANGES_LIMIT) break;
-
-    const ticket = ticketsById.get(event.ticketId);
-    if (!ticket) continue;
-    if (!event.actorName) continue;
-
-    const action = describeDeliveryActivity(event, memberNameById);
-    if (action === null) continue;
-
-    if (event.eventType === "relation_added" || event.eventType === "relation_removed") {
-      const myCode = getTicketDisplayKey(ticket);
-      const otherCode = event.newValue ?? event.oldValue ?? "";
-      const dedupeKey = `${event.eventType}|${event.actorId ?? ""}|${event.createdAt}|${[myCode, otherCode].sort().join("|")}`;
-      if (seen.has(dedupeKey)) continue;
-      seen.add(dedupeKey);
+  for (const entry of timeEntries) {
+    const profileKey = entry.loggedBy ?? "";
+    const minuteKey = `${entry.ticketId}|${profileKey}`;
+    minutesByTicketAndProfile.set(minuteKey, (minutesByTicketAndProfile.get(minuteKey) ?? 0) + entry.minutes);
+    if (entry.loggedBy) {
+      const set = loggedProfileIdsByTicket.get(entry.ticketId) ?? new Set<string>();
+      set.add(entry.loggedBy);
+      loggedProfileIdsByTicket.set(entry.ticketId, set);
     }
-
-    entries.push({
-      id: event.id,
-      name: event.actorName,
-      avatar: event.actorAvatar,
-      profileId: event.actorId ?? undefined,
-      action,
-      actionText: describeDeliveryActivityText(event, memberNameById) ?? undefined,
-      time: formatRelativeTime(event.createdAt),
-      group: groupForActivity(event.createdAt, todayISO),
-      ticket,
-    });
   }
 
-  return entries;
+  // Real name/avatar per profileId — the org-wide roster first (covers
+  // every real member regardless of whether they're a given ticket's
+  // *current* assignee), each real ticket's own already-resolved
+  // `assignee` as a fallback for any real assignee the roster doesn't
+  // carry. Never a placeholder/`unknown-*` — see addTicketToGroup below.
+  const identityByProfileId = new Map<string, { name: string; avatar: string }>();
+  for (const m of members) identityByProfileId.set(m.id, { name: m.name, avatar: m.avatar });
+  for (const t of tickets) {
+    if (t.assigneeProfileId && !identityByProfileId.has(t.assigneeProfileId)) {
+      identityByProfileId.set(t.assigneeProfileId, { name: t.assignee.name, avatar: t.assignee.avatar });
+    }
+  }
+
+  const groupsByKey = new Map<string, MemberTicketGroup>();
+  const includedTicketIdsByGroup = new Map<string, Set<string>>();
+
+  function addTicketToGroup(t: Ticket, key: string, profileId: string | null) {
+    let seen = includedTicketIdsByGroup.get(key);
+    if (!seen) {
+      seen = new Set<string>();
+      includedTicketIdsByGroup.set(key, seen);
+    }
+    if (seen.has(t.id)) return; // already included — never a second row, never double-counted hours
+
+    let group = groupsByKey.get(key);
+    if (!group) {
+      const name = profileId === null ? t.assignee.name : identityByProfileId.get(profileId)?.name;
+      const avatar = profileId === null ? t.assignee.avatar : identityByProfileId.get(profileId)?.avatar;
+      // A real profileId that resolves to no real name/avatar (neither the
+      // org roster nor any real ticket's own assignee) is skipped rather
+      // than shown with a guessed/placeholder identity.
+      if (name === undefined || avatar === undefined) return;
+      group = { key, profileId, name, avatar, tickets: [], totalLoggedHours: 0 };
+      groupsByKey.set(key, group);
+    }
+
+    seen.add(t.id);
+    const minutes = minutesByTicketAndProfile.get(`${t.id}|${profileId ?? ""}`) ?? 0;
+    group.tickets.push({ ticket: t, loggedHours: round1(minutes / 60) });
+  }
+
+  for (const t of tickets) {
+    const loggedProfileIds = loggedProfileIdsByTicket.get(t.id);
+
+    // Rule (a): currently assigned to a real member, and not Done.
+    if (t.assigneeProfileId && t.status !== "done") {
+      addTicketToGroup(t, t.assigneeProfileId, t.assigneeProfileId);
+    }
+
+    // Rule (b): any real member who logged time on this ticket within the
+    // period — independent of current assignee/status (covers reassigned,
+    // unassigned, and Done-but-worked-on-this-period tickets alike).
+    if (loggedProfileIds) {
+      for (const profileId of loggedProfileIds) {
+        addTicketToGroup(t, profileId, profileId);
+      }
+    }
+
+    // Unassigned: only ever tickets with no *current* assignee, and only
+    // when no real identified member's hours are already attached to it
+    // (that ticket belongs in their group(s) via rule (b) instead) — same
+    // "not Done, unless real hours were logged on it this period" shape as
+    // rules (a)/(b), just for "no one."
+    if (t.assigneeProfileId == null && !loggedProfileIds) {
+      const hasUnattributedHours = (minutesByTicketAndProfile.get(`${t.id}|`) ?? 0) > 0;
+      if (t.status !== "done" || hasUnattributedHours) {
+        addTicketToGroup(t, "unassigned", null);
+      }
+    }
+  }
+
+  for (const group of groupsByKey.values()) {
+    group.tickets.sort((a, b) => compareTicketsForMemberGroup(a.ticket, b.ticket, todayISO));
+    // Sum of the exact per-ticket values just sorted above — always equals
+    // what the group's own ticket list actually shows, never a separate
+    // recomputation from raw minutes.
+    group.totalLoggedHours = round1(group.tickets.reduce((sum, row) => sum + row.loggedHours, 0));
+  }
+
+  return Array.from(groupsByKey.values()).sort((a, b) => {
+    if (a.key === "unassigned") return 1;
+    if (b.key === "unassigned") return -1;
+    if (a.tickets.length !== b.tickets.length) return b.tickets.length - a.tickets.length;
+    return a.name.localeCompare(b.name);
+  });
 }
 
 // ── Export (Delivery tab only) ───────────────────────────────────────────────
 // Every field below is read straight from state/memos AdminReportsScreen
 // already computed for the widgets themselves (kpiSummary, statusItems,
-// personRows, projectRows, workloadRows, hoursDistribution, recentChanges)
+// personRows, projectRows, workloadRows, hoursDistribution, ticketsByMember)
 // — no export-specific query, no recomputation with different rules.
 
 interface DeliveryExportData {
@@ -1434,7 +1388,7 @@ interface DeliveryExportData {
   workloadRows:       WorkloadRow[];
   hoursDistribution:  HoursEntry[];
   hoursDistTotal:     number;
-  recentChanges:      ActivityEntry[];
+  ticketsByMember:    MemberTicketGroup[];
 }
 
 interface ExportSection {
@@ -1532,14 +1486,19 @@ function buildDeliveryExportSections(data: DeliveryExportData): ExportSection[] 
   });
 
   sections.push({
-    title: "Recent Changes",
-    headers: ["When", "Person", "Change", "Ticket"],
-    rows: data.recentChanges.map((entry) => [
-      entry.time,
-      entry.name,
-      entry.actionText ?? "",
-      entry.ticket ? `${getTicketDisplayKey(entry.ticket)} — ${entry.ticket.title}` : "",
-    ]),
+    title: "Tickets by Member",
+    headers: ["Member", "Ticket", "Title", "Priority", "Status", "Due Date", "Hours Logged"],
+    rows: data.ticketsByMember.flatMap((group) =>
+      group.tickets.map(({ ticket: t, loggedHours }) => [
+        group.name,
+        getTicketDisplayKey(t),
+        t.title,
+        PRIORITY_FILTER_LABELS[t.priority],
+        STATUS_FILTER_LABELS[t.status],
+        t.dueDate ?? "",
+        `${loggedHours}h`,
+      ])
+    ),
   });
 
   return sections;
@@ -1920,11 +1879,23 @@ function AdminReportsScreen() {
 
   const [tab, setTab] = useState<ReportTab>("delivery");
 
-  // Shared report period — the only visible control for it today is the
-  // Finance tab's "Billing Period" selector, but the state itself (and now
-  // Hours by Person's real query below) is shared across both tabs.
+  // Finance's own "Billing Period" — independent of Delivery's own period
+  // below (separate state, separate query, separate export label) so
+  // switching one tab's period can never affect the other's, and each
+  // keeps its own selection switching back and forth between tabs during
+  // this session.
   const [period, setPeriod] = useState<PeriodKey>("this-month");
   const [customRange, setCustomRange] = useState<CustomRange>(DEFAULT_CUSTOM_RANGE);
+
+  // Delivery's own report period — same real PeriodSelector component/
+  // PeriodKey/CustomRange/realRangeForPeriod Finance's own already uses,
+  // just a second, independent instance of all of them. Scopes every
+  // time-entry/activity-derived Delivery metric (Hours Burn's logged half,
+  // Hours by Person's Completed, Tickets by Member, Done-in-period) —
+  // never the "current state" ones (Active Tickets/Blocked/Overdue/
+  // Workload), which stay filter-scoped only, same as before.
+  const [deliveryPeriod, setDeliveryPeriod] = useState<PeriodKey>("this-month");
+  const [deliveryCustomRange, setDeliveryCustomRange] = useState<CustomRange>(DEFAULT_CUSTOM_RANGE);
 
   const [projectFilter,  setProjectFilter]  = useState<string[]>([]);
   const [assigneeFilter, setAssigneeFilter] = useState<string[]>([]);
@@ -1955,19 +1926,32 @@ function AdminReportsScreen() {
   }
 
   // ── Delivery tab: single shared real data source ──────────────────────────
-  // One fetch, scoped to the shared report period, backs every widget below
-  // (Health Alerts, KPI strip, Hours by Person, Project Health) — no widget
-  // issues its own query. The 7 filters above are applied client-side to
-  // this one raw dataset (see filteredTickets/filteredProjects below), and
-  // every widget derives from that same filtered result, so they can never
-  // disagree with each other.
+  // One fetch backs every widget below (Health Alerts, KPI strip, Hours by
+  // Person, Project Health) — no widget issues its own query. Tickets/
+  // Projects/Members/Capacities are org-wide, not period-scoped, so they're
+  // shared as-is by both tabs; `rawTimeEntries` stays Finance's own real
+  // time entries (scoped to Finance's own `period`/`customRange` above),
+  // while `rawDeliveryTimeEntries`/`rawDeliveryCompletedCount` below are the
+  // real Delivery-period-scoped equivalents Delivery's own widgets read
+  // from instead — two independent range queries off the same real
+  // `ticketIds`, never two independent ticket/project/member fetches. The
+  // 7 filters above are applied client-side to the shared raw tickets (see
+  // filteredTickets/filteredProjects below), and every Delivery widget
+  // derives from that same filtered result, so they can never disagree
+  // with each other.
   const [rawTickets,        setRawTickets]        = useState<Ticket[]>([]);
   const [rawProjects,       setRawProjects]       = useState<ProjectSummary[]>([]);
   const [rawMembers,        setRawMembers]        = useState<OrgWorkloadMember[]>([]);
   const [rawCapacities,     setRawCapacities]     = useState<MemberWeeklyCapacityEntry[]>([]);
   const [rawTimeEntries,    setRawTimeEntries]    = useState<OrganizationTimeEntry[]>([]);
   const [rawActivityEvents, setRawActivityEvents] = useState<HoursOrAssigneeActivityEvent[]>([]);
-  const [rawDeliveryActivity, setRawDeliveryActivity] = useState<DeliveryActivityEvent[]>([]);
+  // Delivery's own real, period-scoped data — see the block comment above.
+  const [rawDeliveryTimeEntries, setRawDeliveryTimeEntries] = useState<OrganizationTimeEntry[]>([]);
+  // Real count of `status_changed`→`done` ticket_activity rows within
+  // Delivery's own selected period (loadTicketsCompletedInRange) — the
+  // "Done This Month"/"Done Last Month"/"Done This Quarter"/"Done in
+  // Range" KPI's real value, never `updated_at`.
+  const [rawDeliveryCompletedCount, setRawDeliveryCompletedCount] = useState(0);
   const [deliveryLoadState, setDeliveryLoadState] = useState<"loading" | "ready" | "error">("loading");
   const [deliveryLoadError, setDeliveryLoadError] = useState<string | null>(null);
   const [deliveryRequestId, setDeliveryRequestId] = useState(0);
@@ -2019,12 +2003,15 @@ function AdminReportsScreen() {
       }
 
       const ticketIds = ticketsResult.tickets.map((t) => t.id);
-      const { from, to } = realRangeForPeriod(period, customRange, getTodayISO());
+      const todayISO = getTodayISO();
+      const { from, to } = realRangeForPeriod(period, customRange, todayISO);
+      const deliveryRange = realRangeForPeriod(deliveryPeriod, deliveryCustomRange, todayISO);
       const weekBounds = getCurrentWeekBounds();
-      const [timeResult, activityResult, deliveryActivityResult] = await Promise.all([
+      const [timeResult, activityResult, deliveryTimeResult, deliveryCompletedResult] = await Promise.all([
         loadOrganizationLoggedTimeForRange(ticketIds, from, to),
         loadHoursAndAssigneeActivityForRange(ticketIds, weekBounds.start, weekBounds.end),
-        loadDeliveryActivityForTickets(ticketIds),
+        loadOrganizationLoggedTimeForRange(ticketIds, deliveryRange.from, deliveryRange.to),
+        loadTicketsCompletedInRange(ticketIds, deliveryRange.from, exclusiveEndDate(deliveryRange.to)),
       ]);
       if (cancelled) return;
 
@@ -2038,9 +2025,14 @@ function AdminReportsScreen() {
         setDeliveryLoadError(activityResult.message);
         return;
       }
-      if (deliveryActivityResult.status === "error") {
+      if (deliveryTimeResult.status === "error") {
         setDeliveryLoadState("error");
-        setDeliveryLoadError(deliveryActivityResult.message);
+        setDeliveryLoadError(deliveryTimeResult.message);
+        return;
+      }
+      if (deliveryCompletedResult.status === "error") {
+        setDeliveryLoadState("error");
+        setDeliveryLoadError(deliveryCompletedResult.message);
         return;
       }
 
@@ -2050,7 +2042,8 @@ function AdminReportsScreen() {
       setRawCapacities(capacitiesResult.capacities);
       setRawTimeEntries(timeResult.entries);
       setRawActivityEvents(activityResult.events);
-      setRawDeliveryActivity(deliveryActivityResult.events);
+      setRawDeliveryTimeEntries(deliveryTimeResult.entries);
+      setRawDeliveryCompletedCount(deliveryCompletedResult.ticketIds.length);
       setDeliveryLoadState("ready");
     })();
 
@@ -2067,7 +2060,7 @@ function AdminReportsScreen() {
     return () => {
       cancelled = true;
     };
-  }, [organization, period, customRange, deliveryRequestId]);
+  }, [organization, period, customRange, deliveryPeriod, deliveryCustomRange, deliveryRequestId]);
 
   // ── Filter option lists — real values only, drawn from the unfiltered
   //    raw org data above (never a static catalog), and restricted to
@@ -2168,9 +2161,15 @@ function AdminReportsScreen() {
 
   const filteredTicketIds = useMemo(() => new Set(filteredTickets.map((t) => t.id)), [filteredTickets]);
 
+  // Delivery's own period-scoped logged time (rawDeliveryTimeEntries — see
+  // the fetch effect above), never Finance's rawTimeEntries: Hours Burn,
+  // Hours by Person's Completed/Remaining, Project Health's Completion, and
+  // Workload's `filteredActivityEvents`-based capacity math all read this
+  // same filtered slice, so they all move together with Delivery's own
+  // Period selector while Finance's Billing Period stays untouched.
   const filteredTimeEntries = useMemo(
-    () => rawTimeEntries.filter((e) => filteredTicketIds.has(e.ticketId)),
-    [rawTimeEntries, filteredTicketIds]
+    () => rawDeliveryTimeEntries.filter((e) => filteredTicketIds.has(e.ticketId)),
+    [rawDeliveryTimeEntries, filteredTicketIds]
   );
 
   const filteredActivityEvents = useMemo(
@@ -2207,13 +2206,36 @@ function AdminReportsScreen() {
   const kpiSummary = useMemo<DeliveryKpiSummary | null>(
     () =>
       deliveryLoadState === "ready"
-        ? buildDeliveryKpiSummary(filteredTickets, filteredProjects, filteredTimeEntries, getTodayISO())
+        ? buildDeliveryKpiSummary(
+            filteredTickets,
+            filteredProjects,
+            filteredTimeEntries,
+            getTodayISO(),
+            rawDeliveryCompletedCount
+          )
         : null,
-    [deliveryLoadState, filteredTickets, filteredProjects, filteredTimeEntries]
+    [deliveryLoadState, filteredTickets, filteredProjects, filteredTimeEntries, rawDeliveryCompletedCount]
   );
 
   const kpiReady = kpiSummary !== null;
-  const currentMonthLabel = new Date(`${getTodayISO()}T00:00:00`).toLocaleDateString("en-US", { month: "long" });
+
+  // Adaptive "Done …" KPI label/sub — Delivery's own Period, never the
+  // fixed current calendar month: This Month/Last Month/This Quarter read
+  // naturally as "Done <period>"; Custom Range has no single period name,
+  // so it falls back to "Done in Range" with the resolved date range as
+  // its sub-label.
+  const deliveryPeriodLabel =
+    deliveryPeriod === "custom"
+      ? formatRangeLabel(deliveryCustomRange)
+      : PERIOD_OPTIONS.find((o) => o.key === deliveryPeriod)?.label ?? deliveryPeriod;
+  const deliveryCompletedLabel =
+    deliveryPeriod === "this-month"
+      ? "Done This Month"
+      : deliveryPeriod === "last-month"
+      ? "Done Last Month"
+      : deliveryPeriod === "this-quarter"
+      ? "Done This Quarter"
+      : "Done in Range";
 
   // Finance KPI strip — reuses the exact same real rawTickets/rawProjects/
   // rawTimeEntries Delivery's own shared fetch above already loaded for
@@ -2248,17 +2270,17 @@ function AdminReportsScreen() {
     [filteredTickets, rawMembers, rawCapacities, filteredTimeEntries, filteredActivityEvents]
   );
   // Real scope handoff for every Delivery-tab Member Profile Modal trigger
-  // below (Hours by Person, Workload, Recent Changes — all three read from
-  // `filteredTickets`/`filteredTicketsById`) — reuses the existing Project
-  // filter's own real selection, never a new interpretation of "scope":
-  // exactly one project selected means these widgets are already reading
-  // that one project's own tickets/team, so the modal should fetch that
-  // same project-scoped data; zero or 2+ selected means they're already
-  // aggregating across more than one project, so the modal aggregates
-  // org-wide too (its own existing no-slug mode) rather than arbitrarily
-  // picking one. Billable Hours by Member (Finance tab) is always org-wide
-  // (built from unfiltered `rawTickets`, never `filteredTickets`), so its
-  // own trigger below never passes this.
+  // below (Hours by Person, Workload, Tickets by Member — all three read
+  // from `filteredTickets`) — reuses the existing Project filter's own real
+  // selection, never a new interpretation of "scope": exactly one project
+  // selected means these widgets are already reading that one project's own
+  // tickets/team, so the modal should fetch that same project-scoped data;
+  // zero or 2+ selected means they're already aggregating across more than
+  // one project, so the modal aggregates org-wide too (its own existing
+  // no-slug mode) rather than arbitrarily picking one. Billable Hours by
+  // Member (Finance tab) is always org-wide (built from unfiltered
+  // `rawTickets`, never `filteredTickets`), so its own trigger below never
+  // passes this.
   const deliveryProjectSlug = projectFilter.length === 1 ? projectFilter[0] : undefined;
 
   const hoursDistribution = useMemo(() => buildHoursDistribution(filteredTickets), [filteredTickets]);
@@ -2267,13 +2289,46 @@ function AdminReportsScreen() {
     [hoursDistribution]
   );
 
-  const filteredTicketsById = useMemo(() => new Map(filteredTickets.map((t) => [t.id, t])), [filteredTickets]);
-  const memberNameById = useMemo(() => new Map(rawMembers.map((m) => [m.id, m.name])), [rawMembers]);
-
-  const recentChanges = useMemo(
-    () => buildRecentChanges(rawDeliveryActivity, filteredTicketsById, memberNameById, getTodayISO()),
-    [rawDeliveryActivity, filteredTicketsById, memberNameById]
+  // Tickets by Member — a real member's own group can legitimately include
+  // a ticket no longer (or never) assigned to them, whenever they logged
+  // real hours on it this period (see buildTicketsByMember's own doc), so
+  // this block deliberately reuses `filteredProjects`/`filteredProjectSlugs`
+  // (Project + Client scoping — unchanged, still shared with every other
+  // Delivery widget) but builds its own ticket/time-entry scope on top,
+  // applying Status/Priority/Labels/Hours the same way `filteredTickets`
+  // does while leaving the Assignee filter out of the ticket-level scope
+  // entirely — Member instead narrows which *groups* are shown, after
+  // grouping, exactly as this block's own spec requires ("Member limita
+  // los grupos visibles"), never which tickets a person's real historical
+  // hours can surface. Never a second/duplicate ticket or time-entry
+  // query — both still come straight from the same `rawTickets`/
+  // `rawTimeEntries` every other Delivery widget already loaded.
+  const ticketsByMemberScope = useMemo(
+    () =>
+      rawTickets.filter((t) => {
+        if (!filteredProjectSlugs.has(t.projectSlug)) return false;
+        if (statusFilter.length > 0 && !statusFilter.includes(t.status)) return false;
+        if (priorityFilter.length > 0 && !priorityFilter.includes(t.priority)) return false;
+        if (labelFilter.length > 0 && !t.labels.some((l) => labelFilter.includes(l))) return false;
+        if (hoursFilter.length > 0 && !hoursFilter.some((b) => hoursInBucket(t.hours, b))) return false;
+        return true;
+      }),
+    [rawTickets, filteredProjectSlugs, statusFilter, priorityFilter, labelFilter, hoursFilter]
   );
+  const ticketsByMemberScopeIds = useMemo(
+    () => new Set(ticketsByMemberScope.map((t) => t.id)),
+    [ticketsByMemberScope]
+  );
+  const timeEntriesForMemberBlock = useMemo(
+    () => rawDeliveryTimeEntries.filter((e) => ticketsByMemberScopeIds.has(e.ticketId)),
+    [rawDeliveryTimeEntries, ticketsByMemberScopeIds]
+  );
+
+  const ticketsByMember = useMemo(() => {
+    const groups = buildTicketsByMember(ticketsByMemberScope, timeEntriesForMemberBlock, rawMembers, getTodayISO());
+    if (assigneeFilter.length === 0) return groups;
+    return groups.filter((g) => g.profileId !== null && assigneeFilter.includes(g.profileId));
+  }, [ticketsByMemberScope, timeEntriesForMemberBlock, rawMembers, assigneeFilter]);
 
   // Alerts banner — derived from the already-real personRows/kpiSummary
   // above, no separate fetch or rule of its own.
@@ -2310,7 +2365,7 @@ function AdminReportsScreen() {
 
   const deliveryExportData = useMemo<DeliveryExportData>(
     () => ({
-      periodLabel,
+      periodLabel: deliveryPeriodLabel,
       filterSummary,
       statusItems,
       kpiSummary,
@@ -2319,11 +2374,11 @@ function AdminReportsScreen() {
       workloadRows,
       hoursDistribution,
       hoursDistTotal,
-      recentChanges,
+      ticketsByMember,
     }),
     [
-      periodLabel, filterSummary, statusItems, kpiSummary, personRows, projectRows,
-      workloadRows, hoursDistribution, hoursDistTotal, recentChanges,
+      deliveryPeriodLabel, filterSummary, statusItems, kpiSummary, personRows, projectRows,
+      workloadRows, hoursDistribution, hoursDistTotal, ticketsByMember,
     ]
   );
 
@@ -2384,6 +2439,21 @@ function AdminReportsScreen() {
         <FilterDropdown label="Hours"      mode="single" groups={HOURS_GROUPS}         selected={hoursFilter}    onChange={setHoursFilter} />
       </div>
 
+      {/* ── Reporting period — Delivery's own, independent of Finance's own
+          Billing Period above; same real PeriodSelector component/behavior,
+          combines with the 7 filters above without resetting either. ───── */}
+      <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
+        <h2 className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600">
+          Reporting Period
+        </h2>
+        <PeriodSelector
+          value={deliveryPeriod}
+          onChange={setDeliveryPeriod}
+          customRange={deliveryCustomRange}
+          onCustomRangeChange={setDeliveryCustomRange}
+        />
+      </div>
+
       {/* ── KPI strip ────────────────────────────────────────────────────────── */}
       {deliveryLoadState === "loading" ? (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-8">
@@ -2423,7 +2493,7 @@ function AdminReportsScreen() {
             accent
           />
           <KpiCard label="Blocked"         value={kpiReady ? kpiSummary.blockedTickets : "—"}      sub="need attention" danger />
-          <KpiCard label="Done This Month" value={kpiReady ? kpiSummary.completedThisMonth : "—"}  sub={kpiReady ? `in ${currentMonthLabel}` : undefined} />
+          <KpiCard label={deliveryCompletedLabel} value={kpiReady ? kpiSummary.completedThisMonth : "—"}  sub={kpiReady ? deliveryPeriodLabel : undefined} />
           <KpiCard
             label="Overdue"
             value={kpiReady ? kpiSummary.overdueTickets : "—"}
@@ -2845,32 +2915,44 @@ function AdminReportsScreen() {
           </Section>
         </div>
 
-        {/* ── Recent Changes ────────────────────────────────────────────────── */}
+        {/* ── Tickets by Member ────────────────────────────────────────────── */}
         <Section
-          title="Recent Changes"
+          title="Tickets by Member"
+          count={deliveryLoadState === "loading" ? undefined : ticketsByMember.reduce((sum, g) => sum + g.tickets.length, 0)}
           icon={
             <svg className="w-3.5 h-3.5 text-slate-400 dark:text-zinc-500 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-              <circle cx="12" cy="12" r="10" />
-              <path d="M12 6v6l4 2" />
+              <circle cx="12" cy="8" r="4" />
+              <path d="M4 21c0-4 4-6 8-6s8 2 8 6" />
             </svg>
           }
         >
           <div className="space-y-5">
             {deliveryLoadState === "loading" ? (
-              <ul className="space-y-3.5">
-                {Array.from({ length: 4 }).map((_, i) => (
-                  <li key={i} className="flex items-start gap-3">
-                    <SkeletonBlock className="h-6 w-6 rounded-full flex-shrink-0 mt-0.5" />
-                    <div className="flex-1 min-w-0">
-                      <SkeletonBlock className="h-4 w-3/4 mb-1.5" />
-                      <SkeletonBlock className="h-3 w-1/3" />
+              Array.from({ length: 3 }).map((_, gi) => (
+                <div key={gi}>
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <SkeletonBlock className="h-6 w-6 rounded-full flex-shrink-0" />
+                      <SkeletonBlock className="h-4 w-24" />
                     </div>
-                  </li>
-                ))}
-              </ul>
+                    <SkeletonBlock className="h-3 w-20" />
+                  </div>
+                  <ul className="space-y-1.5 pl-8">
+                    {Array.from({ length: 3 }).map((_, ti) => (
+                      <li key={ti} className="flex items-center gap-3 py-1">
+                        <SkeletonBlock className="h-3 w-16 flex-shrink-0" />
+                        <SkeletonBlock className="h-3 flex-1" />
+                        <SkeletonBlock className="h-3 w-8 flex-shrink-0" />
+                        <SkeletonBlock className="h-4 w-14 rounded-md flex-shrink-0" />
+                      </li>
+                    ))}
+                  </ul>
+                  <SkeletonBlock className="h-3 w-24 mt-1.5 ml-8" />
+                </div>
+              ))
             ) : deliveryLoadState === "error" ? (
               <p className="text-sm text-slate-400 dark:text-zinc-500">
-                {deliveryLoadError ?? "Couldn't load Recent Changes."}{" "}
+                {deliveryLoadError ?? "Couldn't load Tickets by Member."}{" "}
                 <button
                   type="button"
                   onClick={() => setDeliveryRequestId((id) => id + 1)}
@@ -2879,72 +2961,78 @@ function AdminReportsScreen() {
                   Retry
                 </button>
               </p>
-            ) : recentChanges.length === 0 ? (
-              <p className="text-sm text-slate-400 dark:text-zinc-500">No real changes in the current report scope.</p>
+            ) : ticketsByMember.length === 0 ? (
+              <p className="text-sm text-slate-400 dark:text-zinc-500">No real active tickets in the current report scope.</p>
             ) : (
-            ACTIVITY_GROUPS.map((ag) => {
-              const entries = recentChanges.filter((e) => e.group === ag.key);
-              if (entries.length === 0) return null;
-              return (
-                <div key={ag.id}>
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-300 dark:text-zinc-700 mb-2.5">
-                    {ag.label}
-                  </p>
-                  <ul className="space-y-3.5">
-                    {entries.map((entry) => (
-                      <li key={entry.id} className="flex items-start gap-3">
-                        <MemberTrigger
-                          name={entry.name}
-                          avatar={entry.avatar}
-                          profileId={entry.profileId}
-                          projectSlug={deliveryProjectSlug}
-                          className="flex-shrink-0 mt-0.5 rounded-full"
+              ticketsByMember.map((group) => (
+                <div key={group.key}>
+                  <div className="flex items-center justify-between mb-2">
+                    {group.profileId ? (
+                      <MemberTrigger
+                        name={group.name}
+                        avatar={group.avatar}
+                        profileId={group.profileId}
+                        projectSlug={deliveryProjectSlug}
+                        className="flex items-center gap-2"
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={group.avatar} alt={group.name} className="w-6 h-6 rounded-full flex-shrink-0" />
+                        <span className="text-sm font-medium text-slate-900 dark:text-zinc-100 hover:underline">
+                          {group.name}
+                        </span>
+                      </MemberTrigger>
+                    ) : (
+                      <span className="flex items-center gap-2">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={group.avatar} alt={group.name} className="w-6 h-6 rounded-full flex-shrink-0" />
+                        <span className="text-sm font-medium text-slate-700 dark:text-zinc-300">
+                          {group.name}
+                        </span>
+                      </span>
+                    )}
+                    <span className="text-xs font-semibold text-slate-400 dark:text-zinc-500 tabular-nums flex-shrink-0">
+                      {group.tickets.length} ticket{group.tickets.length === 1 ? "" : "s"}
+                    </span>
+                  </div>
+                  <ul className="space-y-1 pl-8">
+                    {group.tickets.map(({ ticket: t, loggedHours }) => (
+                      <li key={t.id}>
+                        <button
+                          type="button"
+                          onClick={() => setPreview(t)}
+                          className="group/ref w-full flex items-center gap-3 py-1 text-left"
                         >
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img
-                            src={entry.avatar}
-                            alt={entry.name}
-                            className="w-6 h-6 rounded-full"
-                          />
-                        </MemberTrigger>
-                        <div className="text-sm leading-snug min-w-0 flex-1">
-                          <p className="text-slate-700 dark:text-zinc-300">
-                            <MemberTrigger
-                              name={entry.name}
-                              avatar={entry.avatar}
-                              profileId={entry.profileId}
-                              projectSlug={deliveryProjectSlug}
-                              className="font-medium text-slate-900 dark:text-zinc-100 hover:underline"
-                            >
-                              {entry.name}
-                            </MemberTrigger>{" "}
-                            {entry.action}
-                          </p>
-                          {entry.ticket && (
-                            <button
-                              type="button"
-                              onClick={() => setPreview(entry.ticket!)}
-                              className="group/ref mt-1 flex items-baseline gap-1.5 min-w-0 max-w-full text-left"
-                            >
-                              <TicketTypeIcon type={entry.ticket.type} />
-                              <span className="text-[11px] font-mono font-semibold text-slate-500 dark:text-zinc-400 group-hover/ref:text-brand-600 dark:group-hover/ref:text-brand-400 flex-shrink-0">
-                                {getTicketDisplayKey(entry.ticket)}
-                              </span>
-                              <span className="text-sm font-medium text-slate-700 dark:text-zinc-300 group-hover/ref:text-brand-600 dark:group-hover/ref:text-brand-400 group-hover/ref:underline truncate">
-                                {entry.ticket.title}
-                              </span>
-                            </button>
+                          <span className="text-xs font-mono text-slate-400 dark:text-zinc-500 flex-shrink-0 w-16">
+                            {getTicketDisplayKey(t)}
+                          </span>
+                          <span className="flex-1 min-w-0 text-sm text-slate-700 dark:text-zinc-300 group-hover/ref:text-brand-600 dark:group-hover/ref:text-brand-400 group-hover/ref:underline truncate">
+                            {t.title}
+                          </span>
+                          {t.dueDate && (
+                            <span className="text-[11px] text-slate-400 dark:text-zinc-500 flex-shrink-0">
+                              {t.dueDate}
+                            </span>
                           )}
-                          <p className="text-xs text-slate-400 dark:text-zinc-500 mt-0.5">
-                            {entry.time}
-                          </p>
-                        </div>
+                          {/* Real hours this member logged on this ticket
+                              (ticket_time_entries, period+filters-scoped)
+                              — never the ticket's own estimate. */}
+                          <span className="text-[11px] text-slate-400 dark:text-zinc-500 flex-shrink-0 tabular-nums">
+                            {loggedHours}h
+                          </span>
+                          <PriorityBadge priority={t.priority} />
+                          <StatusBadge status={t.status} />
+                        </button>
                       </li>
                     ))}
                   </ul>
+                  {/* Real per-group total — sum of this same group's own
+                      already-shown per-ticket logged hours, never a
+                      separate KPI/card and never clickable. */}
+                  <p className="pl-8 mt-1 text-[11px] text-slate-400 dark:text-zinc-500">
+                    Total Logged: <span className="tabular-nums">{group.totalLoggedHours}h</span>
+                  </p>
                 </div>
-              );
-            })
+              ))
             )}
           </div>
         </Section>
