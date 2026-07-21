@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { AvailabilityStatus, TeamMember } from "@/lib/mock-team";
 import { TEAM_MEMBER_REMOVED_EVENT, TEAM_PROJECT_LEAD_CHANGED_EVENT } from "@/lib/mock-team";
-import { getTicketById, getTicketDisplayKey, tickets as ALL_TICKETS } from "@/lib/mock-tickets";
+import { getTicketById, getTicketDisplayKey } from "@/lib/mock-tickets";
 import type { Ticket } from "@/lib/mock-tickets";
 import { StatusBadge as TicketStatusBadge, PriorityBadge, TicketTypeIcon, ActivityTimeline } from "@/components/tickets/ticket-ui";
 import type { MockActivity } from "@/components/tickets/ticket-ui";
@@ -15,7 +15,6 @@ import type { User, UserStatus } from "@/lib/mock-users";
 import { fullName } from "@/lib/mock-users";
 import type { Role } from "@/lib/current-user";
 import { ROLE_LABELS } from "@/lib/current-user";
-import { getProjectBySlug } from "@/lib/mock-projects";
 import { loadProjectTickets, loadOrganizationTickets, loadUserActivity } from "@/lib/tickets";
 import type { UserActivityEvent } from "@/lib/tickets";
 import { generatePasswordResetLink } from "@/lib/users";
@@ -27,7 +26,9 @@ import {
   loadOrganizationMemberWeeklyCapacities,
 } from "@/lib/projects";
 import { useCurrentUser } from "@/components/current-user-provider";
+import { useOrganizationProjects } from "@/components/organization-projects-provider";
 import { ResetPasswordLinkModal } from "@/components/reset-password-link-modal";
+import { SkeletonBlock } from "@/components/dashboard-shared";
 
 // The one Member Profile Modal used everywhere in the app a member is
 // clicked — ticket assignees, activity-feed actors, comment authors, team
@@ -40,6 +41,49 @@ import { ResetPasswordLinkModal } from "@/components/reset-password-link-modal";
 // from the Users page, /users) to additionally get a
 // Profile/Projects/Permissions/Security/Activity tab bar. A caller passes
 // one or the other, never both.
+
+// ── Real refresh-on-focus-regain, shared by the Users page and this
+// modal's own Projects/Activity tabs ────────────────────────────────────────
+//
+// current-user-provider.tsx's own window "focus" listener already
+// revalidates the session and hands back a new `organization` object
+// reference on every focus regain — several real screens (Dashboards,
+// Projects list) piggyback on that for free simply by depending on
+// `organization` in their own data effect. That mechanism only covers
+// window-level focus, not `document.visibilityState` (e.g. switching back
+// to this browser tab without the OS window itself losing focus), which
+// this task explicitly also requires. Exported so both this file's own
+// tabs and users-screen.tsx (the Users list itself) can reuse one real
+// implementation instead of three independent ones.
+export function useRefreshOnFocusAndVisibility(onRefresh: () => void) {
+  const onRefreshRef = useRef(onRefresh);
+  useEffect(() => {
+    onRefreshRef.current = onRefresh;
+  });
+  // Collapses focus+visibilitychange firing together (revisiting a
+  // browser tab commonly fires both in the same tick) into one real call —
+  // never a timer/poll, purely event-driven, same as the provider's own
+  // listener above.
+  const lastRunAtRef = useRef(0);
+
+  useEffect(() => {
+    function refresh() {
+      const now = Date.now();
+      if (now - lastRunAtRef.current < 300) return;
+      lastRunAtRef.current = now;
+      onRefreshRef.current();
+    }
+    function onVisibilityChange() {
+      if (document.visibilityState === "visible") refresh();
+    }
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, []);
+}
 
 // ── Status & capacity styling ───────────────────────────────────────────────────
 
@@ -97,7 +141,7 @@ export function CapacityBar({ pct }: { pct: number }) {
   const safePct = Number.isFinite(pct) ? Math.min(Math.max(pct, 0), 100) : 0;
   return (
     <div className="h-1.5 rounded-full bg-slate-100 dark:bg-zinc-800 overflow-hidden">
-      <div className={`h-full rounded-full ${capacityBarColor(safePct)}`} style={{ width: `${safePct}%` }} />
+      <div className={`h-full rounded-full ${capacityBarColor(pct)}`} style={{ width: `${safePct}%` }} />
     </div>
   );
 }
@@ -705,23 +749,134 @@ function ProfileTabContent({ user }: { user: User }) {
   );
 }
 
-// Derived live from the ticket dataset rather than mock-team.ts's TeamMember
-// rows, so every assigned project shows real numbers — not every project a
-// user is on has a corresponding TeamMember row (that roster only covers
-// mobile-banking-app/internal-platform-migration today).
+// Real data only — project name/slug/id/Lead come from useOrganizationProjects()
+// (the same already-loaded, real `project_memberships.project_role = 'lead'`-
+// backed list Work History/Reports already reuse, never mock-projects.ts),
+// and each project's Active Tickets/Assigned Hours come from real tickets
+// filtered by `assigneeProfileId === user.id` — the exact same "active =
+// not done" definition and hours sum team-screen.tsx's own member cards and
+// this same modal's own non-user-mode fetch (above) already use, never a
+// name-string match. One `loadOrganizationTickets` call covers every one of
+// this user's real project memberships at once, never one query per project.
 function ProjectsTabContent({ user }: { user: User }) {
+  const { organization, isDevFallback } = useCurrentUser();
+  const { projects: orgProjects, status: orgProjectsStatus } = useOrganizationProjects();
+  const [ticketsStatus, setTicketsStatus] = useState<"loading" | "ready" | "error">("loading");
+  const [tickets, setTickets] = useState<Ticket[]>([]);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  // Once the first real fetch has ever succeeded, a later refresh (tab
+  // regain, window focus, visibilitychange) that fails must never blank
+  // out already-valid tickets with an error box/zeros — only the true
+  // first load ever shows the loading skeleton or the error state.
+  const hasLoadedRef = useRef(false);
+  const unmountedRef = useRef(false);
+  // Only the most recent request's result is ever applied — same
+  // "requestId" guard users-screen.tsx's own runFetch already uses, so a
+  // slower, older response (e.g. from switching tabs quickly) can never
+  // overwrite a newer one.
+  const requestIdRef = useRef(0);
+  const lastRunAtRef = useRef(0);
+
+  const fetchProjectsData = useCallback(() => {
+    if (user.projectSlugs.length === 0) {
+      hasLoadedRef.current = true;
+      setTicketsStatus("ready");
+      return;
+    }
+    if (isDevFallback || !organization) return;
+    const now = Date.now();
+    if (now - lastRunAtRef.current < 300) return;
+    lastRunAtRef.current = now;
+    if (!hasLoadedRef.current) {
+      setTicketsStatus("loading");
+      setErrorMessage(null);
+    }
+    const requestId = ++requestIdRef.current;
+    loadOrganizationTickets(organization.id).then((result) => {
+      if (unmountedRef.current || requestIdRef.current !== requestId) return;
+      if (result.status === "error") {
+        if (!hasLoadedRef.current) {
+          setTicketsStatus("error");
+          setErrorMessage(result.message);
+        }
+        return;
+      }
+      hasLoadedRef.current = true;
+      setTickets(result.tickets);
+      setTicketsStatus("ready");
+    });
+  }, [organization, isDevFallback, user.projectSlugs.length]);
+
+  // Separate from the fetch-triggering effect below (whose own deps
+  // change — e.g. `organization`'s reference on every focus regain — and
+  // would otherwise mark this true on every one of those re-runs, not just
+  // a real unmount).
+  useEffect(() => {
+    return () => {
+      unmountedRef.current = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: triggers the real fetch on mount and on every focus-regain-driven `organization` change; fetchProjectsData's own hasLoadedRef guard keeps this from flickering back to the skeleton on a background refresh
+    fetchProjectsData();
+  }, [fetchProjectsData]);
+
+  // Real refresh on window focus regain and tab-visibility regain — see
+  // useRefreshOnFocusAndVisibility's own doc above.
+  useRefreshOnFocusAndVisibility(fetchProjectsData);
+
   if (user.projectSlugs.length === 0) {
     return <p className="text-sm text-slate-400 dark:text-zinc-500 py-2">Not assigned to any projects yet.</p>;
   }
-  const name = fullName(user);
+
+  // Never render 0 active tickets/0h assigned while the real data is still
+  // in flight — real skeleton rows instead, one per real project
+  // membership already known from `user.projectSlugs` (never a guessed
+  // count), same structure as the real rows below.
+  if (ticketsStatus === "loading" || orgProjectsStatus === "loading") {
+    return (
+      <div className="divide-y divide-slate-100 dark:divide-zinc-800 rounded-xl border border-slate-200 dark:border-zinc-700/70">
+        {user.projectSlugs.map((slug) => (
+          <div key={slug} className="px-4 py-3">
+            <SkeletonBlock className="h-[13px] w-40" />
+            <SkeletonBlock className="h-[11px] w-56 mt-1.5" />
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  if (ticketsStatus === "error") {
+    return (
+      <div
+        role="alert"
+        className="flex items-start gap-2 rounded-lg border border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/10 px-3 py-2.5 text-[12.5px] text-red-700 dark:text-red-400"
+      >
+        <svg className="w-4 h-4 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="9" />
+          <path d="M12 8v5M12 16h.01" strokeLinecap="round" />
+        </svg>
+        <span>{errorMessage ?? "Couldn't load projects."}</span>
+      </div>
+    );
+  }
+
+  const activeByProjectSlug = new Map<string, Ticket[]>();
+  for (const t of tickets) {
+    if (t.assigneeProfileId !== user.id || t.status === "done") continue;
+    const list = activeByProjectSlug.get(t.projectSlug) ?? [];
+    list.push(t);
+    activeByProjectSlug.set(t.projectSlug, list);
+  }
+
   return (
     <div className="divide-y divide-slate-100 dark:divide-zinc-800 rounded-xl border border-slate-200 dark:border-zinc-700/70">
       {user.projectSlugs.map((slug) => {
-        const project = getProjectBySlug(slug);
-        const projectTickets = ALL_TICKETS.filter((t) => t.projectSlug === slug && t.assignee.name === name);
-        const activeTickets = projectTickets.filter((t) => t.status !== "done");
-        const assignedHours = projectTickets.reduce((sum, t) => sum + (t.hours ?? 0), 0);
-        const isLead = project?.owner.name === name;
+        const project = orgProjects.find((p) => p.slug === slug);
+        const activeTickets = activeByProjectSlug.get(slug) ?? [];
+        const assignedHours = activeTickets.reduce((sum, t) => sum + (t.hours ?? 0), 0);
+        const isLead = project?.lead?.id === user.id;
         return (
           <div key={slug} className="px-4 py-3">
             <Link
@@ -969,30 +1124,71 @@ function ActivityTabContent({ user }: { user: User }) {
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [ticketEvents, setTicketEvents] = useState<UserActivityEvent[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  // Same "never blank valid data on a background-refresh failure" and
+  // "only the latest request wins" guards as ProjectsTabContent above.
+  const hasLoadedRef = useRef(false);
+  const unmountedRef = useRef(false);
+  const requestIdRef = useRef(0);
+  const lastRunAtRef = useRef(0);
 
-  useEffect(() => {
-    let cancelled = false;
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: clears the previous member's activity the moment a different profile opens, before the async fetch below resolves
-    setStatus("loading");
-    setTicketEvents([]);
-    setErrorMessage(null);
+  const fetchActivity = useCallback(() => {
+    const now = Date.now();
+    if (now - lastRunAtRef.current < 300) return;
+    lastRunAtRef.current = now;
+    if (!hasLoadedRef.current) {
+      setStatus("loading");
+      setErrorMessage(null);
+    }
+    const requestId = ++requestIdRef.current;
     loadUserActivity(user.id).then((result) => {
-      if (cancelled) return;
+      if (unmountedRef.current || requestIdRef.current !== requestId) return;
       if (result.status === "error") {
-        setStatus("error");
-        setErrorMessage(result.message);
+        if (!hasLoadedRef.current) {
+          setStatus("error");
+          setErrorMessage(result.message);
+        }
         return;
       }
+      hasLoadedRef.current = true;
       setTicketEvents(result.events);
       setStatus("ready");
     });
-    return () => {
-      cancelled = true;
-    };
   }, [user.id]);
 
+  // Separate from the fetch-triggering effect below so this only flips on
+  // a real unmount, never on a `fetchActivity` identity change.
+  useEffect(() => {
+    return () => {
+      unmountedRef.current = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    hasLoadedRef.current = false;
+    fetchActivity();
+  }, [fetchActivity]);
+
+  // Real refresh on window focus regain and tab-visibility regain — see
+  // useRefreshOnFocusAndVisibility's own doc above.
+  useRefreshOnFocusAndVisibility(fetchActivity);
+
   if (status === "loading") {
-    return <p className="text-sm text-slate-400 dark:text-zinc-500 py-2">Loading activity…</p>;
+    return (
+      <div>
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div key={i} className="flex gap-3.5">
+            <div className="flex flex-col items-center w-4 flex-shrink-0">
+              <SkeletonBlock className="w-2 h-2 rounded-full mt-1.5 flex-shrink-0" />
+              {i < 3 && <div className="w-px flex-1 bg-slate-200 dark:bg-zinc-800 mt-1 min-h-[20px]" />}
+            </div>
+            <div className={`flex-1 min-w-0 ${i === 3 ? "pb-0" : "pb-4"}`}>
+              <SkeletonBlock className="h-3 w-48" />
+              <SkeletonBlock className="h-2.5 w-16 mt-1.5" />
+            </div>
+          </div>
+        ))}
+      </div>
+    );
   }
 
   if (status === "error") {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { FilterDropdown } from "@/components/tickets/filter-dropdown";
 import type { DropdownGroup } from "@/components/tickets/filter-dropdown";
@@ -53,6 +53,13 @@ import type { OrganizationTimeEntry } from "@/lib/tickets";
 // weekly-utilization math, and Logged/Internal Hours via
 // buildFinanceKpiSummary) is imported and reused verbatim from the real,
 // connected Admin/Member Time Tracking screen — never re-implemented here.
+
+// Synthetic Client-filter value for "projects with no real client" — never
+// written to Supabase, never a fabricated client. Matched against each
+// project's own real `client` field (null/absent), not `category`, so a
+// mis-tagged project (e.g. category "internal" but a real client set) is
+// never miscounted either way.
+const NO_CLIENT_FILTER_VALUE = "__no-client__";
 
 interface LedTeamMember {
   id: string;
@@ -110,12 +117,40 @@ function formatHeaderDate(todayISO: string): string {
   });
 }
 
+// Resolves the single real project a Timesheets row's "View →" (Work
+// History) action should scope to — never a name/position guess. Priority:
+// (1) the active Project filter's real slug, whenever it narrows to exactly
+// one selected project; (2) this member's own single led project when the
+// filter doesn't apply; (3) the Project Lead's own single led project
+// overall, as a last real-data fallback. `undefined` means genuinely
+// ambiguous (member staffed on >1 led project, no filter narrowing it to
+// one) — the row's own action then falls back to the real, existing global
+// "/time-tracking/team/{profileId}/work-history" route (every real project
+// this Lead leads) instead of guessing a single one.
+function resolveWorkHistoryProjectSlug(
+  memberProjectSlugs: string[],
+  projectFilter: string[],
+  leadProjects: LeadProject[]
+): string | undefined {
+  if (projectFilter.length === 1) return projectFilter[0];
+  if (memberProjectSlugs.length === 1) return memberProjectSlugs[0];
+  if (leadProjects.length === 1) return leadProjects[0].slug;
+  return undefined;
+}
+
 interface LedTimesheetViewRow {
   id: string;
   name: string;
   avatar: string;
   role: string;
   projectSlug?: string;
+  /** Real, unambiguous single-project scope for this row's own "View →"
+   *  (Work History) action — see resolveWorkHistoryProjectSlug above.
+   *  `undefined` routes the action to the global, multi-project Work
+   *  History instead (never disabled). Kept separate from `projectSlug`
+   *  (the Member column's own Member Profile Modal scope) so that
+   *  trigger's existing behavior is untouched. */
+  workHistoryProjectSlug?: string;
   hoursToday: number;
   hoursWeek: number;
   hoursMonth: number;
@@ -451,7 +486,11 @@ export function ProjectLeadTimeTrackingScreen() {
       const project = projectBySlug.get(t.projectSlug);
       if (clientFilter.length > 0) {
         const client = project?.client as string | undefined;
-        if (project?.category !== "client" || client !== clientFilter[0]) continue;
+        if (clientFilter[0] === NO_CLIENT_FILTER_VALUE) {
+          if (client) continue;
+        } else if (project?.category !== "client" || client !== clientFilter[0]) {
+          continue;
+        }
       }
       ids.add(t.id);
     }
@@ -552,6 +591,7 @@ export function ProjectLeadTimeTrackingScreen() {
         // Modal triggers already use, rather than arbitrarily picking the
         // first of this member's own real projectSlugs.
         projectSlug: m.projectSlugs.length === 1 ? m.projectSlugs[0] : undefined,
+        workHistoryProjectSlug: resolveWorkHistoryProjectSlug(m.projectSlugs, projectFilter, leadProjects),
         hoursToday,
         hoursWeek,
         hoursMonth,
@@ -560,7 +600,7 @@ export function ProjectLeadTimeTrackingScreen() {
         status,
       };
     });
-  }, [visibleMembers, todayHours, weekHours, monthHours, customHours, capacityByMember, assignedHoursByMember, period, customRange]);
+  }, [visibleMembers, todayHours, weekHours, monthHours, customHours, capacityByMember, assignedHoursByMember, period, customRange, projectFilter, leadProjects]);
 
   const missingHours = useMemo(() => {
     return viewRows
@@ -644,7 +684,12 @@ export function ProjectLeadTimeTrackingScreen() {
           .filter((c): c is string => Boolean(c))
       )
     );
-    return clients.length === 0 ? [] : [{ options: clients.map((c) => ({ value: c, label: c })) }];
+    const options = clients.map((c) => ({ value: c, label: c }));
+    // Real absence-of-client signal (each project's own `client` field),
+    // never inferred from `category` alone — see NO_CLIENT_FILTER_VALUE note.
+    const hasNoClientProject = rawProjects.some((p) => !p.client);
+    if (hasNoClientProject) options.push({ value: NO_CLIENT_FILTER_VALUE, label: "No Client" });
+    return options.length === 0 ? [] : [{ options }];
   }, [rawProjects]);
 
   if (loadState === "loading") {
@@ -832,6 +877,18 @@ export function ProjectLeadTimeTrackingScreen() {
 }
 
 function TimesheetTableRow({ row }: { row: LedTimesheetViewRow }) {
+  const router = useRouter();
+  const goToWorkHistory = useCallback(() => {
+    // A resolved single project → its own real Work History page; otherwise
+    // (this row genuinely spans more than one of this Lead's led projects)
+    // → the real global Work History, scoped to this Lead's own led
+    // projects — never disabled, never a guessed single project.
+    router.push(
+      row.workHistoryProjectSlug
+        ? `/projects/${row.workHistoryProjectSlug}/team/${row.id}/work-history`
+        : `/time-tracking/team/${row.id}/work-history`
+    );
+  }, [router, row.workHistoryProjectSlug, row.id]);
   return (
     <tr className="hover:bg-slate-50/60 dark:hover:bg-zinc-800/30 transition-colors duration-150">
       <td className="py-2.5 pr-4">
@@ -869,6 +926,7 @@ function TimesheetTableRow({ row }: { row: LedTimesheetViewRow }) {
       <td className="py-2.5 pl-4 text-right">
         <button
           type="button"
+          onClick={goToWorkHistory}
           className="text-[12px] font-medium text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300 whitespace-nowrap transition-colors"
         >
           View →

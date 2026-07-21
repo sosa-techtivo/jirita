@@ -1159,6 +1159,11 @@ export interface ProjectMemberWorkHistorySummary {
   totalHours: number;
   /** Pre-formatted relative time, or null when there's no history at all yet. */
   lastActivityLabel: string | null;
+  /** Real count of qualifying ticket_activity rows — only set by the
+   *  aggregated "across led projects" summary below (the global Work
+   *  History route's own 4th "Activities" KPI); the single-project summary
+   *  above never sets it since that page only ever renders 3 KPI tiles. */
+  activityCount?: number;
 }
 
 export type ProjectMemberWorkHistorySummaryResult =
@@ -1177,6 +1182,11 @@ export interface ProjectMemberWorkHistoryEntry {
   activityCount: number;
   /** Pre-formatted relative time ("3 days ago") — same convention as TicketComment/TicketActivityEvent/UserActivityEvent. */
   lastActivityLabel: string;
+  /** Real project slug this entry belongs to — only set by the aggregated
+   *  "across led projects" loaders below (loadTeamMemberWorkHistory*
+   *  AcrossProjects); the single-project loaders above never set it since
+   *  their caller already has the one real slug. */
+  projectSlug?: string;
 }
 
 export type ProjectMemberWorkHistoryPageResult =
@@ -1306,6 +1316,348 @@ export async function loadProjectMemberWorkHistoryPage(
     hours: Math.round(row.hours * 10) / 10,
     activityCount: row.activity_count,
     lastActivityLabel: formatRelativeTime(row.last_activity_at),
+  }));
+
+  return { status: "ready", entries };
+}
+
+// ── Work History aggregated across every project a Project Lead leads ──────
+// Backs only the Project Lead's own global "/time-tracking/team/[userId]/
+// work-history" route (project-lead-time-tracking-screen.tsx's Timesheets
+// "View →" action, for a row whose member spans more than one of that
+// Lead's real led projects and no single Project filter narrows it to one).
+// `leadProjectSlugs` here is always the caller's already-resolved real led
+// projects (loadLeadProjects) — never picked/guessed by this module.
+
+export type TeamWorkHistoryActivityFilter =
+  | "time_logged"
+  | "comments"
+  | "status_changes"
+  | "assignments"
+  | "attachments";
+
+// Real ticket_activity event_type values (see buildActivityLabel above for
+// the authoritative full list) mapped to each Activity filter option — never
+// an invented event type. "Attachments" spans all three real attachment
+// events (upload/rename/delete) since the filter has no finer distinction.
+const ACTIVITY_FILTER_EVENT_TYPES: Record<TeamWorkHistoryActivityFilter, string[]> = {
+  time_logged: ["time_logged"],
+  comments: ["added_a_comment"],
+  status_changes: ["status_changed"],
+  assignments: ["assignee_changed"],
+  attachments: ["attachment_uploaded", "attachment_renamed", "attachment_deleted"],
+};
+
+export interface TeamWorkHistoryFilters {
+  /** Real led project slug to narrow to, or undefined for every led project. */
+  projectSlug?: string;
+  /** Case-insensitive substring match against ticket code or title only. */
+  search?: string;
+  /** Inclusive date-only range — same work_date/created_at convention every
+   *  other Period-based feature in this app already uses. */
+  period?: { from: string; to: string };
+  status?: TicketStatus;
+  activity?: TeamWorkHistoryActivityFilter;
+}
+
+interface TeamWorkHistoryRow {
+  ticketId: string;
+  ticketKey: string;
+  title: string;
+  status: TicketStatus;
+  priority: TicketPriority;
+  projectSlug: string;
+  hours: number;
+  activityCount: number;
+  lastActivityAt: string;
+}
+
+type TeamWorkHistoryRowsResult =
+  | { status: "ready"; rows: TeamWorkHistoryRow[] }
+  | { status: "error"; message: string };
+
+// Real, all-time participation universe across every given real led
+// project — one call to the exact same two RPCs the single-project Work
+// History page already uses (never re-derived participation rules), each
+// project's own full real ticket_count becoming that project's own
+// page_size so every one of this person's matching tickets comes back
+// without a second, arbitrary cap.
+async function fetchLedProjectParticipationRows(
+  organizationId: string,
+  slugs: string[],
+  profileId: string
+): Promise<TeamWorkHistoryRowsResult> {
+  if (slugs.length === 0) return { status: "ready", rows: [] };
+
+  const projectResults = await Promise.all(
+    slugs.map(async (slug) => ({ slug, result: await resolveWorkHistoryProjectId(organizationId, slug) }))
+  );
+  const failedProject = projectResults.find((r) => r.result.status === "error");
+  if (failedProject && failedProject.result.status === "error") return failedProject.result;
+  const projects: { slug: string; projectId: string }[] = [];
+  for (const { slug, result } of projectResults) {
+    if (result.status === "ready" && result.projectId) projects.push({ slug, projectId: result.projectId });
+  }
+  if (projects.length === 0) return { status: "ready", rows: [] };
+
+  const supabase = getSupabaseBrowserClient();
+
+  const perProjectRows = await Promise.all(
+    projects.map(async ({ slug, projectId }) => {
+      const { data: summaryData, error: summaryError } = await supabase
+        .rpc("project_member_work_history_summary", { target_project_id: projectId, target_profile_id: profileId })
+        .maybeSingle<{ ticket_count: number }>();
+      if (summaryError) {
+        logDev("team work history participation summary rpc failed", summaryError);
+        return { status: "error" as const, message: summaryError.message };
+      }
+      const ticketCount = summaryData?.ticket_count ?? 0;
+      if (ticketCount === 0) return { status: "ready" as const, rows: [] as TeamWorkHistoryRow[] };
+
+      const { data: projectCodeRow, error: projectCodeError } = await supabase
+        .from("projects")
+        .select("project_code")
+        .eq("id", projectId)
+        .maybeSingle<{ project_code: string }>();
+      if (projectCodeError) {
+        logDev("team work history project code lookup failed", projectCodeError);
+        return { status: "error" as const, message: projectCodeError.message };
+      }
+      const projectCode = projectCodeRow?.project_code ?? "";
+
+      const { data, error } = await supabase.rpc("project_member_work_history_page", {
+        target_project_id: projectId,
+        target_profile_id: profileId,
+        page_size: ticketCount,
+        page_offset: 0,
+      });
+      if (error) {
+        logDev("team work history participation page rpc failed", error);
+        return { status: "error" as const, message: error.message };
+      }
+
+      const rows = (data ?? []) as WorkHistoryPageRow[];
+      return {
+        status: "ready" as const,
+        rows: rows.map(
+          (row): TeamWorkHistoryRow => ({
+            ticketId: row.ticket_id,
+            ticketKey: `${projectCode}-${row.ticket_number}`,
+            title: row.title,
+            status: STATUS_FROM_DB[row.status] ?? "backlog",
+            priority: row.priority as TicketPriority,
+            projectSlug: slug,
+            hours: Math.round(row.hours * 10) / 10,
+            activityCount: row.activity_count,
+            lastActivityAt: row.last_activity_at,
+          })
+        ),
+      };
+    })
+  );
+
+  const failedRows = perProjectRows.find((r) => r.status === "error");
+  if (failedRows && failedRows.status === "error") return failedRows;
+
+  return { status: "ready", rows: perProjectRows.flatMap((r) => (r.status === "ready" ? r.rows : [])) };
+}
+
+export type TeamWorkHistoryProjectOptionsResult =
+  | { status: "ready"; projectSlugs: string[] }
+  | { status: "error"; message: string };
+
+// Real led-project slugs the Project filter should offer — only the ones
+// this exact member has any all-time real participation in (never every
+// project the Lead leads regardless of this member's history), independent
+// of whatever Search/Period/Status/Activity filters are currently active
+// (same "options come from the full scope, not the filtered result"
+// convention the rest of this app's filter dropdowns already follow).
+export async function loadTeamMemberWorkHistoryProjectOptions(
+  organizationId: string,
+  leadProjectSlugs: string[],
+  profileId: string
+): Promise<TeamWorkHistoryProjectOptionsResult> {
+  const result = await fetchLedProjectParticipationRows(organizationId, leadProjectSlugs, profileId);
+  if (result.status === "error") return result;
+  const withRealHistory = result.rows.filter((row) => row.hours > 0 || row.activityCount > 0);
+  return { status: "ready", projectSlugs: Array.from(new Set(withRealHistory.map((row) => row.projectSlug))) };
+}
+
+async function fetchScopedTimeEntryRows(
+  supabase: ReturnType<typeof getSupabaseBrowserClient>,
+  ticketIds: string[],
+  profileId: string,
+  period?: { from: string; to: string }
+): Promise<{ status: "ready"; rows: { ticket_id: string; minutes: number; created_at: string }[] } | { status: "error"; message: string }> {
+  if (ticketIds.length === 0) return { status: "ready", rows: [] };
+  let query = supabase
+    .from("ticket_time_entries")
+    .select("ticket_id, minutes, created_at")
+    .in("ticket_id", ticketIds)
+    .eq("logged_by", profileId);
+  if (period) query = query.gte("work_date", period.from).lte("work_date", period.to);
+  const { data, error } = await query.returns<{ ticket_id: string; minutes: number; created_at: string }[]>();
+  if (error) {
+    logDev("team work history scoped time entries query failed", error);
+    return { status: "error", message: error.message };
+  }
+  return { status: "ready", rows: data ?? [] };
+}
+
+async function fetchScopedActivityRows(
+  supabase: ReturnType<typeof getSupabaseBrowserClient>,
+  ticketIds: string[],
+  profileId: string,
+  period?: { from: string; to: string },
+  eventTypes?: string[]
+): Promise<{ status: "ready"; rows: { ticket_id: string; created_at: string }[] } | { status: "error"; message: string }> {
+  if (ticketIds.length === 0) return { status: "ready", rows: [] };
+  let query = supabase
+    .from("ticket_activity")
+    .select("ticket_id, created_at")
+    .in("ticket_id", ticketIds)
+    .eq("actor_profile_id", profileId);
+  if (eventTypes) query = query.in("event_type", eventTypes);
+  if (period) {
+    const start = new Date(`${period.from}T00:00:00`);
+    const endExclusive = new Date(`${period.to}T00:00:00`);
+    endExclusive.setDate(endExclusive.getDate() + 1);
+    query = query.gte("created_at", start.toISOString()).lt("created_at", endExclusive.toISOString());
+  }
+  const { data, error } = await query.returns<{ ticket_id: string; created_at: string }[]>();
+  if (error) {
+    logDev("team work history scoped activity query failed", error);
+    return { status: "error", message: error.message };
+  }
+  return { status: "ready", rows: data ?? [] };
+}
+
+// Applies every real Work History filter (Project/Search/Period/Status/
+// Activity) on top of the real participation universe above, recomputing
+// per-ticket hours/activity/last-activity from raw ticket_time_entries/
+// ticket_activity rows only when Period or Activity narrows the default
+// "All time, All Activity" view (which otherwise stays byte-identical to
+// the RPCs' own all-time aggregates — zero drift from the unfiltered
+// default). "Time Logged" hours only count while the Activity filter is
+// unset or itself "Time Logged" — every other Activity type isn't a time
+// entry, so Hours Logged reports 0 rather than a number unrelated to the
+// chosen activity type. A ticket only survives with real qualifying hours
+// or activity (never zero/zero), matching "Tickets Worked On" below.
+async function computeTeamWorkHistoryRows(
+  organizationId: string,
+  leadProjectSlugs: string[],
+  profileId: string,
+  filters: TeamWorkHistoryFilters
+): Promise<TeamWorkHistoryRowsResult> {
+  const scopedSlugs = filters.projectSlug
+    ? leadProjectSlugs.filter((slug) => slug === filters.projectSlug)
+    : leadProjectSlugs;
+
+  const universe = await fetchLedProjectParticipationRows(organizationId, scopedSlugs, profileId);
+  if (universe.status === "error") return universe;
+
+  const search = filters.search?.trim().toLowerCase();
+  const candidates = universe.rows.filter((row) => {
+    if (filters.status && row.status !== filters.status) return false;
+    if (search && !row.ticketKey.toLowerCase().includes(search) && !row.title.toLowerCase().includes(search)) {
+      return false;
+    }
+    return true;
+  });
+
+  if (!filters.period && !filters.activity) {
+    return {
+      status: "ready",
+      rows: candidates
+        .filter((row) => row.hours > 0 || row.activityCount > 0)
+        .sort((a, b) => new Date(b.lastActivityAt).getTime() - new Date(a.lastActivityAt).getTime()),
+    };
+  }
+
+  const ticketIds = candidates.map((row) => row.ticketId);
+  const supabase = getSupabaseBrowserClient();
+  const includeHours = !filters.activity || filters.activity === "time_logged";
+  const eventTypes = filters.activity ? ACTIVITY_FILTER_EVENT_TYPES[filters.activity] : undefined;
+
+  const [timeResult, activityResult] = await Promise.all([
+    includeHours
+      ? fetchScopedTimeEntryRows(supabase, ticketIds, profileId, filters.period)
+      : Promise.resolve({ status: "ready" as const, rows: [] }),
+    fetchScopedActivityRows(supabase, ticketIds, profileId, filters.period, eventTypes),
+  ]);
+  if (timeResult.status === "error") return timeResult;
+  if (activityResult.status === "error") return activityResult;
+
+  const hoursByTicket = new Map<string, number>();
+  const lastByTicket = new Map<string, string>();
+  const bumpLast = (ticketId: string, createdAt: string) => {
+    const prev = lastByTicket.get(ticketId);
+    if (!prev || new Date(createdAt).getTime() > new Date(prev).getTime()) lastByTicket.set(ticketId, createdAt);
+  };
+  for (const row of timeResult.rows) {
+    hoursByTicket.set(row.ticket_id, (hoursByTicket.get(row.ticket_id) ?? 0) + row.minutes / 60);
+    bumpLast(row.ticket_id, row.created_at);
+  }
+  const countByTicket = new Map<string, number>();
+  for (const row of activityResult.rows) {
+    countByTicket.set(row.ticket_id, (countByTicket.get(row.ticket_id) ?? 0) + 1);
+    bumpLast(row.ticket_id, row.created_at);
+  }
+
+  const rows: TeamWorkHistoryRow[] = [];
+  for (const row of candidates) {
+    const hours = Math.round((hoursByTicket.get(row.ticketId) ?? 0) * 10) / 10;
+    const activityCount = countByTicket.get(row.ticketId) ?? 0;
+    if (hours <= 0 && activityCount <= 0) continue;
+    rows.push({ ...row, hours, activityCount, lastActivityAt: lastByTicket.get(row.ticketId) ?? row.lastActivityAt });
+  }
+  rows.sort((a, b) => new Date(b.lastActivityAt).getTime() - new Date(a.lastActivityAt).getTime());
+
+  return { status: "ready", rows };
+}
+
+export async function loadTeamMemberWorkHistorySummaryAcrossProjects(
+  organizationId: string,
+  leadProjectSlugs: string[],
+  profileId: string,
+  filters: TeamWorkHistoryFilters = {}
+): Promise<ProjectMemberWorkHistorySummaryResult> {
+  const result = await computeTeamWorkHistoryRows(organizationId, leadProjectSlugs, profileId, filters);
+  if (result.status === "error") return result;
+
+  const ticketCount = result.rows.length;
+  const totalHours = Math.round(result.rows.reduce((sum, row) => sum + row.hours, 0) * 10) / 10;
+  const activityCount = result.rows.reduce((sum, row) => sum + row.activityCount, 0);
+  // Rows are already sorted most-recent-first.
+  const lastActivityLabel = result.rows.length > 0 ? formatRelativeTime(result.rows[0].lastActivityAt) : null;
+
+  return { status: "ready", summary: { ticketCount, totalHours, activityCount, lastActivityLabel } };
+}
+
+export async function loadTeamMemberWorkHistoryPageAcrossProjects(
+  organizationId: string,
+  leadProjectSlugs: string[],
+  profileId: string,
+  filters: TeamWorkHistoryFilters,
+  page: number,
+  pageSize: number
+): Promise<ProjectMemberWorkHistoryPageResult> {
+  const result = await computeTeamWorkHistoryRows(organizationId, leadProjectSlugs, profileId, filters);
+  if (result.status === "error") return result;
+
+  const start = Math.max(0, (page - 1) * pageSize);
+  const pageRows = result.rows.slice(start, start + pageSize);
+
+  const entries: ProjectMemberWorkHistoryEntry[] = pageRows.map((row) => ({
+    ticketId: row.ticketId,
+    ticketKey: row.ticketKey,
+    title: row.title,
+    status: row.status,
+    priority: row.priority,
+    hours: row.hours,
+    activityCount: row.activityCount,
+    lastActivityLabel: formatRelativeTime(row.lastActivityAt),
+    projectSlug: row.projectSlug,
   }));
 
   return { status: "ready", entries };

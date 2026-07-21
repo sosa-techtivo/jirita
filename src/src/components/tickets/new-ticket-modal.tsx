@@ -20,41 +20,6 @@ const ALL_LABELS = [
   "Notifications", "Onboarding", "Performance", "Security",
 ];
 
-const LABEL_HINTS: Array<{ words: string[]; label: string }> = [
-  { words: ["security", "secure", "auth", "authentication", "password", "encrypt", "pci", "kyc", "mfa", "biometric", "token", "otp", "2fa"], label: "Security" },
-  { words: ["bug", "fix", "crash", "error", "fail", "broken", "regression", "defect", "wrong", "invalid"], label: "Bug" },
-  { words: ["api", "endpoint", "rest", "rate", "limit", "webhook", "graphql", "integration", "vendor", "third", "party", "external"], label: "API" },
-  { words: ["notification", "push", "alert", "email", "sms", "notify", "message", "reminder"], label: "Notifications" },
-  { words: ["performance", "slow", "fast", "latency", "speed", "cache", "optimize", "paginate", "pagination", "load", "memory"], label: "Performance" },
-  { words: ["design", "ui", "ux", "layout", "style", "visual", "mockup", "responsive", "screen", "interface"], label: "Design" },
-  { words: ["accessibility", "a11y", "aria", "wcag", "keyboard", "voiceover", "talkback", "reader"], label: "Accessibility" },
-  { words: ["compliance", "regulation", "legal", "policy", "gdpr", "audit", "requirement", "standard"], label: "Compliance" },
-  { words: ["onboarding", "welcome", "tutorial", "guide", "first", "setup", "walkthrough", "introduction"], label: "Onboarding" },
-  { words: ["ios", "iphone", "apple", "safari", "faceid", "touchid", "biometric", "appstore"], label: "iOS" },
-  { words: ["dark", "theme", "night", "color", "palette", "chart", "graph"], label: "Dark Mode" },
-  { words: ["integration", "connect", "sync", "import", "export", "oauth", "sso"], label: "Integration" },
-  { words: ["enhancement", "improve", "add", "new", "feature", "request", "support"], label: "Enhancement" },
-  { words: ["marketing", "copy", "screenshot", "listing", "store", "promo"], label: "Marketing" },
-];
-
-function getSuggestedLabels(title: string, selected: string[]): string[] {
-  if (title.trim().length < 3) return [];
-  const words = title.toLowerCase().split(/\W+/).filter((w) => w.length >= 3);
-  const scores = new Map<string, number>();
-  for (const { words: keywords, label } of LABEL_HINTS) {
-    if (selected.includes(label)) continue;
-    for (const w of words) {
-      if (keywords.some((k) => k.includes(w) || w.includes(k))) {
-        scores.set(label, (scores.get(label) ?? 0) + 1);
-      }
-    }
-  }
-  return [...scores.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 5)
-    .map(([label]) => label);
-}
-
 // Simple MVP similarity: partial word overlap against the current project's
 // own tickets only (never other projects) — no fuzzy/advanced matching.
 function getDuplicates(title: string, projectTickets: Ticket[]): Ticket[] {
@@ -288,9 +253,8 @@ export function NewTicketModal({
   }, [criteria.length]);
 
   // Derived
-  const duplicates      = getDuplicates(title, tickets);
-  const suggestedLabels = getSuggestedLabels(title, labels);
-  const canSubmit       = title.trim().length > 0 && !submitting;
+  const duplicates = getDuplicates(title, tickets);
+  const canSubmit  = title.trim().length > 0 && !submitting;
 
   const toggleLabel = (label: string) =>
     setLabels((prev) =>
@@ -461,40 +425,6 @@ export function NewTicketModal({
                 }}
                 className={INPUT + " text-[15px] font-medium py-2.5"}
               />
-
-              {/* Suggested + selected labels inline under title */}
-              {(labels.length > 0 || suggestedLabels.length > 0) && (
-                <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-                  {labels.map((l) => (
-                    <button
-                      key={l}
-                      type="button"
-                      onClick={() => toggleLabel(l)}
-                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-brand-500 dark:bg-brand-600 text-white hover:bg-brand-600 dark:hover:bg-brand-700 transition-colors"
-                    >
-                      {l}
-                      <svg className="w-2.5 h-2.5 opacity-70" fill="none" stroke="currentColor" strokeWidth="3" viewBox="0 0 24 24">
-                        <path d="M18 6L6 18M6 6l12 12" strokeLinecap="round" />
-                      </svg>
-                    </button>
-                  ))}
-
-                  {labels.length > 0 && suggestedLabels.length > 0 && (
-                    <span className="w-px h-3.5 bg-slate-200 dark:bg-zinc-700 mx-0.5 flex-shrink-0" />
-                  )}
-
-                  {suggestedLabels.map((l) => (
-                    <button
-                      key={l}
-                      type="button"
-                      onClick={() => toggleLabel(l)}
-                      className="px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-100 dark:bg-zinc-800 text-slate-500 dark:text-zinc-400 hover:bg-brand-50 hover:text-brand-700 dark:hover:bg-brand-950/40 dark:hover:text-brand-300 border border-transparent hover:border-brand-200 dark:hover:border-brand-800 transition-colors"
-                    >
-                      + {l}
-                    </button>
-                  ))}
-                </div>
-              )}
             </div>
 
             {/* Description */}

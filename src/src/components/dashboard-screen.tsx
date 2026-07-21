@@ -368,7 +368,7 @@ function WorkloadRow({
       </MemberTrigger>
       <div className="flex-1 h-1.5 rounded-full bg-slate-100 dark:bg-zinc-800 overflow-hidden">
         <div
-          className={`h-full rounded-full transition-all duration-300 ${isOver ? "bg-amber-400" : isHigh ? "bg-amber-300" : "bg-brand-500"}`}
+          className={`h-full rounded-full transition-all duration-300 ${isOver ? "bg-red-500" : isHigh ? "bg-amber-300" : "bg-brand-500"}`}
           style={{ width: `${pct}%` }}
         />
       </div>

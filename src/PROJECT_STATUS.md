@@ -1,4 +1,4 @@
-> Last Updated: July 17, 2026
+> Last Updated: July 22, 2026
 
 ---
 
@@ -23,6 +23,18 @@ Most recently, the Member Dashboard's own Assigned Tickets and Due Today hero st
 Separately, the `/projects` list (Admin/Project Lead) had its own real Project Lead column/filter wired up — `ProjectSummary.lead` is now sourced from `project_memberships.project_role = 'lead'` (the same authoritative signal Team/the Dashboards already key off), not the older `owner_profile_id`-backed `ProjectSummary.owner` — reconciling a gap this file had been carrying since Project Settings' own "Project Lead" picker was removed. Most recently, a four-part pass unified the rest of that same list's remaining stale metrics onto real per-ticket data, then added a real tab-regain refresh for them: (1) the Health badge/filter and the "At Risk" KPI now read `buildProjectHealthRows`'s (`reports-screen.tsx`) real `risk`, never the stale, never-updated `projects.health` column, and the Admin Dashboard's own "Projects at Risk"/blocked-projects insight now reuses that exact same function instead of a second, duplicated blocked/overdue classification; (2) each row's progress bar/percentage reuses a new `computeProjectProgressPct` (also exported from `reports-screen.tsx`) — the same real done/total ticket-count formula Project Overview's own progress bar already used — instead of the always-`0` persisted `progress` field; (3) each row's Open/Blocked/Overdue counters read straight off that same `buildProjectHealthRows` result (extended with new `open`/`overdueOpen` fields alongside the pre-existing `blocked`) instead of the always-`0` persisted `openTickets`/`blockedTickets`/`overdueTickets` fields; (4) the list now refreshes all of the above on returning to a backgrounded browser tab, reusing the exact same mechanism the three Dashboards already rely on (`current-user-provider.tsx`'s existing window-focus-regain revalidation hands back a new `organization` reference, which this screen's own ticket-metrics effect already depended on — no new listener/polling added), and shows the same kind of `SkeletonBlock`-built structural skeleton the Dashboards already use (replacing the old plain "Loading projects…" text) both on first load and on every tab return. All of this is implemented and type/build-clean, not yet clicked through in a live browser — same "should work, not yet verified" status as everything else in this list.
 
 Most recently, that same Projects list's Project Lead KPI band (Blocked Tickets, Due This Week, Over Capacity) and each row's team-size chip were reconciled onto real data too (`buildProjectHealthRows`, a real Monday–Sunday ticket filter, and `loadProjectTeam` deduped by `profileId` across projects), replacing always-`0` persisted fields or `mock-team.ts`; My Work's own Assigned Tickets KPI became an independent click target following the same 0/1/2+ rule as every other real KPI card. After that, the Project Lead's own scoped Reports view (`project-lead-reports-screen.tsx`) — the last remaining fully-mock Reports surface — was rebuilt end-to-end onto real Supabase data: both its Delivery tab and its Team tab (converted in full, by explicit choice, rather than patched around) now read real tickets/team/activity data scoped to this profile's own led projects, reusing the Admin Reports' own `buildProjectHealthRows`/`computeProjectProgressPct` rather than a second calculation, and its top KPI band (My Projects, Team Capacity, Blocked Tickets, Due This Week) gained the same real, independent-click-target treatment as every other dashboard/reports KPI in this list — the Due This Week KPI's own navigation required one small, additive extension to Tickets' `?alerts=` filter mechanism (`due-this-week`). Along the way, My Work and the Admin's company-wide Reports/Time Tracking screens gained a full structural skeleton loader plus a real refresh on returning to a backgrounded browser tab (same precedent as the Dashboards), the remaining Member Profile Modal triggers on company-wide Reports and Time Tracking were fixed to pass a real `profileId`/`projectSlug`, a hydration bug in Reports' Hours Distribution was fixed, and Time Tracking's "Members Missing Hours" KPI was relabeled "Missing Hours". All of the above is implemented and type/build-clean, not yet clicked through in a live browser — same "should work, not yet verified" status as everything else in this list.
+
+After that, the Project Lead Reports Delivery tab's alerts bar and its Project Health table rows/Upcoming Deadlines list were wired to their existing real navigation targets (Member Profile Modal, Ticket Preview, Project Overview, filtered Team/Tickets/Projects — the Projects list's own Health filter/badge now also seeds from a real `?health=` param so a multi-project Health click lands with it applied), and its plain-text loading state became a real skeleton matching the Dashboards/Projects/My Work. Alongside this, four real, pre-existing bugs were found and fixed in Project Lead Time Tracking: two Member Profile Modal triggers were missing a real `profileId`; the "Logged Hours" KPI was only totaling Finance's billable-only hours instead of every real `entriesForSelectedPeriod`; a member's weekly capacity was being *summed* across each of their own led projects instead of resolved to one canonical value (`mergeLedTeams`, `Math.max` across a member's per-project rows — the same convention `loadMemberWeeklyCapacity` already used); and "Capacity Risk"/the Timesheets Capacity column were realigned onto the same shared assigned-hours/capacity definition Team/Reports/Dashboards/Projects/the Member Profile Modal all already share. The page header's fixed date was also replaced with the real current date, and it gained the same real loading skeleton on initial load/autorefresh as the rest of Time Tracking.
+
+Most recently, Project Lead Time Tracking's Timesheets "View →" action — previously dead (no `onClick` at all) — was wired up in stages: first to the shared Member Profile Modal with a real `profileId`, then re-pointed to Work History to match the Admin Time Tracking screen's own "Review →" convention, resolving to a single real project (the active Project filter when it selects exactly one, else the row's own single led project, else this Lead's own single led project overall) or, when a row genuinely spans more than one led project with nothing narrowing it further, to a brand-new **global** Work History page (`/time-tracking/team/[userId]/work-history`) rather than being disabled or guessing — see Confirmed working → Project → Team below for that page's own detail. The Client filter in the same screen gained a synthetic **No Client** option (frontend-only — never written to Supabase, never a fabricated client) for internal projects, determined by each project's own real `client` field being null/absent, never by `category` or project name, and only offered when at least one such project exists in the Lead's own scope. Separately, a real, pre-existing bug in the shared `CapacityBar` component (`member-profile-modal.tsx`, used by the Member Profile Modal's own "Current Workload" bar, Team's member cards, and per-project Reports' Team Workload) was found and fixed: its fill color was computed from the *width-clamped* percentage, so the `pct > 100` "over capacity" branch could never be reached and the bar stayed amber no matter how over-allocated someone was — it now colors off the real, unclamped percentage. The Admin Dashboard's own independent "Team Workload" card (`dashboard-screen.tsx`'s `WorkloadRow`, a separate, non-shared implementation) had the same symptom for a different reason — it never had a red state at all — and was fixed the same way. New Ticket's automatic keyword-based label-suggestion chips under the Title field (`LABEL_HINTS`/`getSuggestedLabels`, and the inline "+ Label" chip row) were removed outright at the user's request — Labels are now exclusively added via More Options → Labels → Add label, the same picker every other flow already used. All of the above is implemented and type/build-clean, not yet clicked through in a live browser — same "should work, not yet verified" status as everything else in this list.
+
+Also most recently, that same new global Work History page was given a real, full filter/KPI system — Search (ticket code/title, case-insensitive), Project (single-select, real led-project slugs only, only ones this member has real history in), Period (Today/This Week [Monday–Sunday]/This Month/Custom Range, reusing Time Tracking's own `PeriodSelector`/date-range helpers verbatim), Status (the shared `STATUS_LABEL` source of truth), and Activity (Time Logged/Comments/Status Changes/Assignments/Attachments, mapped to real `ticket_activity.event_type` values audited against `buildActivityLabel`'s own full list — every one of the five had a real backing event type, none were invented) — plus a 4th "Activities" KPI alongside Tickets Worked On/Hours Logged/Last Activity, a skeleton on filter/page changes only (never on the silent focus-regain refresh), a contextual empty state, and a reset to page 1 on any filter change. The same filter/KPI system was then reused, not duplicated, for the **existing** per-project Work History page (`/projects/[slug]/team/[userId]/work-history`) when opened by an **Admin**: the page now detects the viewer's real role and, for an Admin only, renders the identical filter/KPI UI scoped to every real project in the organization (`useOrganizationProjects()`, already loaded, no new query) instead of just this Lead's own led projects, with Project pre-selected to the real `[slug]` the Admin entered from and switchable to "All Projects" or any other org project the member has real history in, without ever changing the URL. A Project Lead or Member opening this same route still sees the exact original, unfiltered single-project view, byte-for-byte unchanged. No new RPC or migration was needed for any of this — the new `loadTeamMemberWorkHistorySummaryAcrossProjects`/`loadTeamMemberWorkHistoryPageAcrossProjects`/`loadTeamMemberWorkHistoryProjectOptions` (`lib/tickets.ts`) all reuse the existing per-project `project_member_work_history_summary`/`_page` RPCs (called once per real project in scope, merged/sorted/paginated client-side), falling back to direct `ticket_time_entries`/`ticket_activity` queries — always scoped to the already-resolved real ticket-id participation set plus the real `profileId` — only when a Period or Activity filter narrows past those RPCs' own all-time aggregates. All of the above is implemented and type/build-clean, not yet clicked through in a live browser — same "should work, not yet verified" status as everything else in this list.
+
+Separately, a read-only audit of Admin's Users → View Profile flow (all five tabs: Profile, Projects, Permissions, Security, Activity) found one real bug, since **resolved**: the Projects tab's per-project "N active tickets"/"Nh assigned" figures (the project-membership list itself was already real and correct) were computed from `lib/mock-tickets.ts`'s static dataset, matched by `assignee.name` string equality, never the real `assigneeProfileId`/`loadProjectTickets` this same modal's own non-user-mode view and Team's member cards already use two hundred lines above in the same file — so real users on real projects always showed 0 active tickets/0h assigned regardless of their actual workload, and "Project Lead" never displayed correctly for a real lead in that tab either (`getProjectBySlug` hit the same mock-only `mock-projects.ts`). Profile, Permissions, Security, and Activity were all already real (Permissions' role-description copy is intentionally static, matching its own "role-based, can't be customized per person" footer text; Security's `browser`/`os`/`device` are honestly omitted, never fabricated, when absent).
+
+The fix: the Projects tab now resolves project name/slug/id/Lead from `useOrganizationProjects()` (the same already-loaded, real `project_memberships.project_role = 'lead'`-backed list Work History/Reports already reuse — no new query, never `mock-projects.ts`), and Active Tickets/Assigned Hours from one real `loadOrganizationTickets` call (covering every one of this user's real project memberships at once, never one query per project) filtered by `assigneeProfileId === user.id && status !== "done"` — the exact same "active" definition and hours sum Team's own member cards and this modal's own non-user-mode fetch already use, reused rather than re-derived. The `mock-tickets`/`mock-projects` imports this tab used were removed outright (`getTicketById`/`getTicketDisplayKey` from `mock-tickets.ts` stay, still used by the unrelated non-user-mode ticket-preview path). A real loading skeleton (row count matching the user's own real project count, never a guessed number) and a real error state (same red-alert-box pattern `ActivityTabContent` already used) replace what was previously an instant, always-`0` render — the tab can never show `0 active tickets`/`0h assigned` while the real data is still in flight.
+
+Most recently, Admin → Users gained real auto-refresh and skeleton loading throughout. A new shared `useRefreshOnFocusAndVisibility` hook (`member-profile-modal.tsx`, exported for `users-screen.tsx` to reuse rather than a second implementation) listens for both window `focus` regain and `document.visibilitychange` → `"visible"` — the shared `current-user-provider.tsx` focus listener several other real screens already piggyback on (via its own `organization` reference changing) only covers the former — registering each listener exactly once per mount and collapsing the two firing together (common when revisiting a browser tab) into a single real call via a 300ms guard. The Users list, and this modal's own Projects and Activity tabs (Profile/Permissions/Security need no refresh logic of their own — they render straight from the already-loaded `user` prop, no query), all now use it. Every one of those three real fetches also gained a `hasLoadedRef`-style guard: the loading skeleton and the error state only ever appear on that surface's true first load — a background refresh (focus/visibility regain, or the existing `organization`-driven re-run) that fails now leaves the last real, valid data on screen instead of blanking it to zeros or an error box, and only the newest of several in-flight requests is ever applied (a `requestId` guard, same convention `users-screen.tsx`'s own fetch already used). Closing the loop: if View Profile is open when the Users list refreshes, it now stays open on the same real user (re-resolved by the same real `profileId`, never by name/email/avatar/array position) and the same active tab, instead of being left showing a stale snapshot. The Users list itself also gained a real structural skeleton (`SkeletonBlock`-built, mirroring its own header/search+filters/table exactly) in place of the old plain "Loading users…" text, shown only on that same true-first-load — same precedent the Dashboards/Projects list/Work History already established. No Supabase changes, no new queries — this is entirely a real-data presentation/refresh-timing pass on top of already-correct loaders. All of the above is implemented and type/build-clean, not yet clicked through in a live browser — same "should work, not yet verified" status as everything else in this list.
 
 ---
 
@@ -1257,7 +1269,18 @@ rather than trust anything the browser claims.
   `ticket_created` and "Joined the workspace" stay as their own entries;
   capped at the 10 most recent after grouping. The Security tab shows the
   real `lastLogin` and its "Generate Reset Link" button calls
-  `generatePasswordResetLink`.
+  `generatePasswordResetLink`. **Profile and Permissions tabs are real**
+  (org-role-derived; Permissions' description copy is intentionally static
+  per role). **Resolved**: the Projects tab is now real too — project
+  name/slug/id/Lead from `useOrganizationProjects()`, Active Tickets/
+  Assigned Hours from one real `loadOrganizationTickets` call filtered by
+  `assigneeProfileId === user.id && status !== "done"`, never
+  `mock-tickets.ts`/`mock-projects.ts` or name matching (see Technical
+  Debt). All four data-bearing tabs (Projects/Activity/Security's reset
+  link/the list itself) now also share one real `useRefreshOnFocusAndVisibility`
+  hook (window `focus` + `document.visibilitychange`, deduped) and a real
+  loading skeleton on first load only — a background refresh never blanks
+  already-valid data.
 - `src/app/accept-invite/` + `src/components/accept-invite-screen.tsx` —
   the real "set your password" landing page for both invite methods.
 - `.env.example` — `NEXT_PUBLIC_APP_URL`, the app's own public base URL
@@ -1320,6 +1343,31 @@ screen only — every other `mock-team.ts` consumer is untouched.
   shared inner table function, so the participation rule exists in exactly
   one place. Clicking a ticket reuses the real Ticket Detail route
   directly, never `TicketPreviewPanel`.
+- **New: a global counterpart, `src/app/time-tracking/team/[userId]/work-history/`**,
+  reusing the exact same `work-history-screen.tsx` component (a `slug?`
+  prop now makes it optional) rather than a second page/design. Three real
+  modes live in one component: **"project"** (`slug` set, non-Admin viewer)
+  — the original page above, byte-for-byte unchanged; **"team"** (no
+  `slug`, the Project Lead's own route) — aggregates across every real
+  project this profile leads (`loadLeadProjects`); **"admin"** (`slug` set,
+  `user.role === "ADMIN"`) — the *same* `/projects/[slug]/team/[userId]/work-history`
+  route as "project," but scoped to every real org project
+  (`useOrganizationProjects()`) instead, with Project pre-selected to the
+  entry `[slug]`. "team"/"admin" both add a real filter row (Search/
+  Project/Period/Status/Activity) and a 4th "Activities" KPI, sharing one
+  data effect and one set of `lib/tickets.ts` functions — no duplicated
+  fetch/filter logic between the two.
+- `src/lib/tickets.ts` — `loadTeamMemberWorkHistorySummaryAcrossProjects`,
+  `loadTeamMemberWorkHistoryPageAcrossProjects`,
+  `loadTeamMemberWorkHistoryProjectOptions`, `TeamWorkHistoryFilters`/
+  `TeamWorkHistoryActivityFilter` (new). All reuse the existing
+  `project_member_work_history_summary`/`_page` RPCs above (called once per
+  real project in the given scope, merged/sorted/paginated client-side) —
+  no new RPC, no new migration. Period/Activity filtering falls back to
+  direct `ticket_time_entries`/`ticket_activity` reads, always scoped to
+  the already-resolved real ticket-id participation set plus the real
+  `profileId`, only when those filters narrow past the RPCs' own all-time
+  aggregates.
 - Migrations, in order (all confirmed against the live project):
   `20260803000000_add_project_creator_membership.sql`,
   `20260804000000_grant_authenticated_project_memberships_read.sql`,
@@ -1537,10 +1585,20 @@ almost all of them) hit this path.
 - **View Work History** (`MemberMenu`) now always uses this same real
   `profileId`/`slug` for its route, so it can no longer build an
   `unknown-*` URL. With no real `slug` (All Projects), it's omitted from
-  the menu entirely (never shown disabled) — no global/cross-project Work
-  History page exists to link to instead. If that leaves the menu with zero
-  items (e.g. All Projects, no other action applicable), the "⋯" trigger
-  button itself is now omitted rather than opening an empty popover.
+  the menu entirely (never shown disabled). If that leaves the menu with
+  zero items (e.g. All Projects, no other action applicable), the "⋯"
+  trigger button itself is now omitted rather than opening an empty
+  popover. **Note (now stale as written above)**: a global/cross-project
+  Work History page *does* now exist (`/time-tracking/team/[userId]/work-history`,
+  see Confirmed working → Project → Team) — this `MemberMenu` item itself
+  was not revisited to link to it; still worth a follow-up pass.
+- **Real, pre-existing `CapacityBar` bug fixed**: the shared bar this
+  modal's own "Current Workload" stat renders (also used by Team's member
+  cards and per-project Reports' Team Workload) computed its fill color
+  from the already width-clamped percentage, so its `pct > 100` red branch
+  could never be reached — an over-100%-utilized member's bar stayed amber
+  no matter how over-allocated they were. Now colors off the real,
+  unclamped percentage; only the bar's *width* stays clamped to 100%.
 - **Since widened to company-wide Reports and Time Tracking**: Reports'
   Hours by Person, Workload, Recent Changes, and Billable Hours by Member
   (`reports-screen.tsx`), and Time Tracking's Timesheets and Missing Hours
@@ -1755,6 +1813,28 @@ for this reuse) rather than a second implementation.
 - The three mock-only exports this screen used to import
   (`MEMBER_GROUPS`/`PROJECT_GROUPS`/`CLIENT_GROUPS`) were deleted from
   `time-tracking-screen.tsx` — no other consumer.
+- **Client filter gained a synthetic "No Client" option** for internal
+  projects — determined by each real project's own `client` field being
+  null/absent (never by `category` alone or by project name), and only
+  offered when at least one such project actually exists in this Lead's own
+  scope. Frontend-only sentinel value, never written to Supabase.
+- **Four real, pre-existing bugs fixed**: two Timesheets/Missing-Hours
+  Member Profile Modal triggers were missing a real `profileId`; "Logged
+  Hours" totaled Finance's billable-only hours instead of every real
+  `entriesForSelectedPeriod`; weekly capacity was summed across a member's
+  own led projects instead of resolved to one canonical value via
+  `mergeLedTeams` (`Math.max` across their per-project rows); "Capacity
+  Risk" and the Timesheets Capacity column now use the same shared
+  assigned-hours/capacity definition Team/Reports/Dashboards/Projects/the
+  Member Profile Modal already share. The header's fixed date was replaced
+  with the real current date, and the page gained the same loading skeleton
+  on initial load/autorefresh as the rest of Time Tracking.
+- **Timesheets "View →" is now wired** (previously had no `onClick` at
+  all): resolves to a single real project (the active Project filter when
+  it selects exactly one, else the row's own single led project, else this
+  Lead's own single led project overall) or, when a row genuinely spans
+  more than one led project, to the new global Work History page below —
+  never disabled, never a guessed project.
 
 ## Confirmed working (Global Search)
 
@@ -1847,7 +1927,8 @@ Current working routes:
 - `/tickets` — new org-wide, all-projects Tickets view (no route param); reuses `TicketsScreen` with `slug` omitted; not on the Sidebar's main nav, reached only via the Admin Dashboard's own KPI-card/health-insight click-throughs, same "link-only" precedent as `/activity`/Work History
 - `/projects/[slug]/notes`
 - `/projects/[slug]/team` — Admin/Project Lead only (real roster, Add/Remove Member)
-- `/projects/[slug]/team/[userId]/work-history` — dedicated, server-side-paginated Work History page
+- `/projects/[slug]/team/[userId]/work-history` — dedicated, server-side-paginated Work History page (Admin viewers get a real Search/Project/Period/Status/Activity filter row + 4th "Activities" KPI, scoped to every real org project; Project Lead/Member see the original unfiltered single-project view, unchanged)
+- `/time-tracking/team/[userId]/work-history` — new global counterpart (Project Lead only entry point today, via Timesheets' "View →"); same filter/KPI system as above, scoped to this Lead's own led projects; not on the Sidebar's main nav, same "link-only" precedent as `/projects/[slug]/team/[userId]/work-history`
 - `/projects/[slug]/activity` — dedicated, server-side-paginated Project Activity history page (new)
 - `/projects/[slug]/reports` — real end-to-end, every role
 - `/projects/[slug]/settings` — Admin/Project Lead only (per-project General/Billing/Danger Zone)
@@ -1957,6 +2038,7 @@ Current known items:
 - **Resolved**: Project Settings' "Project Lead" field/picker was removed outright (it read/wrote `projects.owner_profile_id`). The `/projects` list's own Lead column/filter has since been reconciled onto Team's real `project_memberships.project_role` too (`ProjectSummary.lead`, via a new batched query in `loadOrganizationProjects`) — `owner_profile_id`/`ProjectSummary.owner` no longer has any Lead-column reader anywhere in the app; see Architecture Status → Projects.
 - **New**: the Admin Dashboard's Recent Activity "View all activity →" action and its new org-wide `/activity` page, and Time Tracking's Admin/Member/Project Lead screens becoming real, haven't themselves been clicked through in a live browser yet — same "should work, not yet verified" caveat as Users/the Admin Project Overview/per-project Reports.
 - **New, expanded since**: the Member Profile Modal's real-data fetch (see Architecture Status → Member Profile Modal) was originally wired for exactly two entry points — the Admin Dashboard's Team Workload and Recent Activity — plus `team-screen.tsx`, which already qualified before that fix. It has since been extended to every trigger on company-wide Reports (Hours by Person, Workload, Recent Changes, Billable Hours by Member) and Time Tracking (Timesheets, Missing Hours). Every other remaining `MemberTrigger`/`openMemberProfile` caller (Project Overview's team roster/ticket assignees/activity, ticket assignees/comments/attachments across Board/List/Calendar/Insights/Ticket Detail/Quick Ticket Preview, My Work's Recently Updated) still opens the modal with only a name/avatar, so it still resolves through `resolveTeamMember`'s old name-matching/`unknown-*` fallback and can show stale/zeroed numbers for a real (non-mock-roster) org member. A real `profileId` is already obtainable at almost all of these remaining sites today without any loader changes (`ticket.assigneeProfileId`, `ProjectTeamMember.id`) — the remaining work is threading it through, plus two small additive loader fields (`TicketComment.authorProfileId`, `TicketAttachment.uploadedByProfileId`, and restructuring `insights-view.tsx`'s `AssigneeWorkload` map to key by id instead of name) for comment/attachment/insights callers specifically. Deliberately scoped out of this pass rather than attempted as one large migration.
+- **Resolved**: the Member Profile Modal's own **user-mode** Projects tab (`ProjectsTabContent`, opened from Admin → Users → View Profile) used to compute each project's "N active tickets"/"Nh assigned" from `lib/mock-tickets.ts`'s static dataset, matched by `t.assignee.name === fullName(user)` string equality — never `assigneeProfileId`/`loadProjectTickets`, the real pattern this same file's own non-user-mode view and `team-screen.tsx` already use. Now real: `loadOrganizationTickets` filtered by `assigneeProfileId === user.id && status !== "done"`, and project name/slug/id/Lead from `useOrganizationProjects()` — the `mock-tickets`/`mock-projects` imports this tab used were removed (see Confirmed working → Users → Member Profile Modal).
 
 Planned future work:
 

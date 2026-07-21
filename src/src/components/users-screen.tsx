@@ -16,10 +16,11 @@ import {
 } from "@/lib/users";
 import { FilterDropdown } from "@/components/tickets/filter-dropdown";
 import type { DropdownGroup } from "@/components/tickets/filter-dropdown";
-import { MemberProfileModal, UserStatusBadge } from "@/components/member-profile-modal";
+import { MemberProfileModal, UserStatusBadge, useRefreshOnFocusAndVisibility } from "@/components/member-profile-modal";
 import type { ProfileTab } from "@/components/member-profile-modal";
 import { InviteUserModal } from "@/components/invite-user-modal";
 import { ResetPasswordLinkModal } from "@/components/reset-password-link-modal";
+import { SkeletonBlock } from "@/components/dashboard-shared";
 
 // ── Role badge ────────────────────────────────────────────────────────────────
 
@@ -34,6 +35,75 @@ function RoleBadge({ role }: { role: Role }) {
     <span className={`inline-flex items-center text-[11px] font-semibold px-2.5 py-0.5 rounded-full flex-shrink-0 ${ROLE_BADGE_CLASS[role]}`}>
       {ROLE_LABELS[role]}
     </span>
+  );
+}
+
+// ── Loading skeleton ─────────────────────────────────────────────────────────
+// Mirrors this screen's own real layout (header/Invite, search+filters,
+// table+rows) using the same SkeletonBlock primitive the Dashboards/
+// Projects list already build their own skeletons out of, rather than a
+// second skeleton pattern. Shown on the real initial load only — a
+// focus/visibility-driven background refresh never resets `loadState` back
+// to "loading" (see the real fetch effect below), so it never re-appears
+// and never blanks the table the user is already looking at.
+function UsersLoadingSkeleton() {
+  return (
+    <div className="max-w-6xl mx-auto px-4 sm:px-8 py-10">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <SkeletonBlock className="h-[22px] w-20" />
+          <SkeletonBlock className="h-[14px] w-64 mt-2" />
+        </div>
+        <SkeletonBlock className="h-8 w-32" />
+      </div>
+
+      <div className="mt-6 flex flex-col sm:flex-row sm:items-center gap-3">
+        <SkeletonBlock className="h-8 w-full sm:w-64 flex-shrink-0" />
+        <div className="flex items-center gap-1.5">
+          <SkeletonBlock className="h-7 w-16" />
+          <SkeletonBlock className="h-7 w-16" />
+          <SkeletonBlock className="h-7 w-20" />
+        </div>
+      </div>
+
+      <div className="mt-6 rounded-xl border border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900 shadow-sm shadow-slate-200/40 dark:shadow-black/20 overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm min-w-[900px]">
+            <thead>
+              <tr className="border-b border-slate-100 dark:border-zinc-800">
+                <th className="py-2.5 pl-5 text-left"><SkeletonBlock className="h-[10px] w-10" /></th>
+                <th className="py-2.5 text-left"><SkeletonBlock className="h-[10px] w-12" /></th>
+                <th className="py-2.5 text-left"><SkeletonBlock className="h-[10px] w-10" /></th>
+                <th className="py-2.5 text-left"><SkeletonBlock className="h-[10px] w-12" /></th>
+                <th className="py-2.5 text-right"><SkeletonBlock className="h-[10px] w-14 ml-auto" /></th>
+                <th className="py-2.5 text-right"><SkeletonBlock className="h-[10px] w-20 ml-auto" /></th>
+                <th className="py-2.5 text-right"><SkeletonBlock className="h-[10px] w-16 ml-auto" /></th>
+                <th className="py-2.5 pr-5 text-right"><SkeletonBlock className="h-[10px] w-12 ml-auto" /></th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-50 dark:divide-zinc-800/60">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <tr key={i}>
+                  <td className="py-2.5 pl-5 pr-4">
+                    <div className="flex items-center gap-2.5">
+                      <SkeletonBlock className="w-7 h-7 rounded-full flex-shrink-0" />
+                      <SkeletonBlock className="h-3.5 w-28" />
+                    </div>
+                  </td>
+                  <td className="py-2.5 pr-4"><SkeletonBlock className="h-3.5 w-36" /></td>
+                  <td className="py-2.5 pr-4"><SkeletonBlock className="h-4 w-20 rounded-full" /></td>
+                  <td className="py-2.5 pr-4"><SkeletonBlock className="h-4 w-16 rounded-full" /></td>
+                  <td className="py-2.5 pr-4 text-right"><SkeletonBlock className="h-3.5 w-6 ml-auto" /></td>
+                  <td className="py-2.5 pr-4 text-right"><SkeletonBlock className="h-3.5 w-10 ml-auto" /></td>
+                  <td className="py-2.5 pr-4 text-right"><SkeletonBlock className="h-3.5 w-16 ml-auto" /></td>
+                  <td className="py-2.5 pr-5 text-right"><SkeletonBlock className="h-6 w-6 rounded-lg ml-auto" /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -330,19 +400,42 @@ export function UsersScreen() {
   // the menu only ever offers one or the other based on current status).
   const membershipStatusChangeIds = useRef<Set<string>>(new Set());
   const generatingResetLinkIds = useRef<Set<string>>(new Set());
+  // Once the first real load has ever succeeded, a later background
+  // refresh (focus/visibility regain) that fails must never blank the
+  // table with an error screen or stale zeros — only the true first load
+  // ever shows the skeleton or the error state.
+  const hasLoadedRef = useRef(false);
+  // Collapses `organization`'s own focus-driven reference change and the
+  // explicit focus/visibilitychange listener below firing together into a
+  // single real request.
+  const lastRunAtRef = useRef(0);
 
   // No mock fallback here (unlike e.g. Projects' dev-only mock roster) —
   // this module has no real backend without a real organization, so dev
   // fallback simply shows an empty list rather than fabricated accounts.
   const runFetch = useCallback(() => {
     if (isDevFallback || !organization) return;
+    const now = Date.now();
+    if (now - lastRunAtRef.current < 300) return;
+    lastRunAtRef.current = now;
+    if (!hasLoadedRef.current) setLoadState("loading");
     const requestId = ++requestIdRef.current;
     loadOrganizationUsers(organization.id).then((result) => {
       if (requestIdRef.current !== requestId) return;
       if (result.status === "ready") {
+        hasLoadedRef.current = true;
         setUsersList(result.users);
+        // If View Profile is open, keep it open on the same real user and
+        // the same active tab — just resolved fresh by the same real
+        // `profileId`, never by name/email/avatar/array position, and
+        // never closed by a background refresh.
+        setProfileTarget((prev) => {
+          if (!prev) return prev;
+          const updated = result.users.find((u) => u.id === prev.user.id);
+          return updated ? { user: updated, tab: prev.tab } : prev;
+        });
         setLoadState("ready");
-      } else {
+      } else if (!hasLoadedRef.current) {
         setLoadErrorMessage(result.message);
         setLoadState("error");
       }
@@ -352,6 +445,10 @@ export function UsersScreen() {
   useEffect(() => {
     runFetch();
   }, [runFetch]);
+
+  // Real refresh on window focus regain and tab-visibility regain — search
+  // and filters live in their own separate state below, untouched by this.
+  useRefreshOnFocusAndVisibility(runFetch);
 
   const searchId = useId();
 
@@ -526,11 +623,7 @@ export function UsersScreen() {
   }
 
   if (loadState === "loading") {
-    return (
-      <div className="h-full flex items-center justify-center text-sm text-slate-400 dark:text-zinc-500">
-        Loading users…
-      </div>
-    );
+    return <UsersLoadingSkeleton />;
   }
 
   if (loadState === "error") {
