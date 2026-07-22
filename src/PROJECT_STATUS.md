@@ -58,6 +58,10 @@ Most recently, Ticket Detail's plain "Loading ticket…" text was replaced with 
 
 Most recently, the workspace-wide **Settings** screen (General, Danger Zone) was retired outright, by explicit product decision: JIRITA runs as a single-tenant solution, so workspace-level configuration (Workspace Name, Active Days, Default Role, Default Capacity) is no longer meant to be Admin-editable through the UI. "Settings" no longer appears in the sidebar for any role, and `/settings`/`/settings/[section]` (every subroute) now just redirect to the Dashboard instead of rendering the old screen. No Supabase table, column, or migration changed — the current real values (Techtivo / Monday–Friday / Member / 40h/week) remain exactly as configured, and every existing consumer of them (Invite User's defaults, Time Tracking's expected-hours calculation) keeps reading the same columns unchanged. Project Settings — a distinct, per-project screen — is completely unaffected. See Architecture Status → "Removed (Settings → General & Danger Zone)" for the full detail.
 
+Most recently, all three **Project Overview** variants (Admin, Project Lead, Member) gained a real structural loading skeleton in place of the old plain "Loading project…" text, shown only on the true first load — no data-loading effect changed. Admin and Project Lead share one `ProjectOverviewSkeleton` (both variants render the identical layout shape), while Member — whose layout genuinely differs — gets its own `MemberProjectOverviewSkeleton`. See Architecture Status → "Project Overview → loading skeleton" for the full detail.
+
+Most recently, **Tickets** (`tickets-screen.tsx`, every view — Board/List/Calendar/Timeline/Insights, both per-project and the org-wide `/tickets` mode) gained a real background refresh on tab focus/visibility regain, reusing the existing shared `useRefreshOnFocusAndVisibility` hook rather than a second implementation, plus a real structural loading skeleton (header, filter bar, quick-stats line, and the Board's own 6 real columns with card placeholders) in place of the old plain "Loading tickets…" text. The refresh only ever swaps in a freshly-fetched ticket list once it arrives — filters, search, the selected view, and the sessionStorage-based navigation/scroll state are untouched, and a background refresh never re-shows the skeleton or blanks the screen once real tickets already exist. See Architecture Status → "Tickets → focus/visibility auto-refresh + loading skeleton" for the full detail.
+
 ---
 
 # Repository Structure
@@ -1165,6 +1169,51 @@ real too, each covered by its own section above/below.
   its RLS policies, and the `relation_added`/`relation_removed` Activity
   triggers).
 
+## Tickets → focus/visibility auto-refresh + loading skeleton
+
+`tickets-screen.tsx` (the five-view orchestrator — Board/List/Calendar/
+Timeline/Insights, both per-project and the org-wide `/tickets` mode)
+gained a real background refresh on tab focus/visibility regain, and a
+real structural loading skeleton in place of the old plain "Loading
+tickets…" text.
+
+- **Refresh**: reuses the existing shared `useRefreshOnFocusAndVisibility`
+  hook (`member-profile-modal.tsx`, already used by `users-screen.tsx`) —
+  listens to both `window` `focus` and `document.visibilitychange` →
+  `"visible"`, with its own internal 300ms guard collapsing the two firing
+  together (common when revisiting a tab) into one real call. No polling,
+  no new timers. `runFetch` itself gained the same `hasLoadedRef`/
+  `lastRunAtRef` pattern `users-screen.tsx` already established: a second,
+  redundant 300ms guard inside `runFetch` (covers the case where
+  `organization`'s own focus-driven reference change — via
+  `current-user-provider.tsx` — and the explicit listener above fire
+  within the same tick), and — once the first real load has ever
+  succeeded — a background refresh never resets `loadState` back to
+  `"loading"` and never blanks the screen on a failed refresh; it only
+  ever swaps in the freshly-fetched `ticketList` once it actually arrives.
+  Since every view (Board/List/Calendar/Timeline/Insights), the header's
+  Tickets/Estimated/Blocked counters, and each Board column's own counts
+  all already derive from the one shared `filteredTickets` (built from
+  `ticketList` + the current filters), a refreshed `ticketList` alone is
+  enough to bring every one of those up to date — no per-section refetch
+  logic was needed. Filters, search, selected view, and the sessionStorage-
+  based navigation/scroll-restore state are all independent React state
+  never touched by `runFetch`, so they survive the refresh unchanged.
+- **Skeleton**: `TicketsScreenSkeleton` mirrors the real header (title +
+  description), the "+ New Ticket" button (gated on `canCreateTicket`,
+  already known synchronously — no layout shift), the search/filter bar,
+  the quick-filter chip row, the Tickets/Estimated/Blocked summary line,
+  and the Board's own 6 real columns (Backlog/To Do/In Progress/Blocked/
+  In Review/Done) each with a small, representative number of card
+  placeholders — using the existing `SkeletonBlock` primitive only. Shown
+  only on the true first load (gated by the same `hasLoadedRef` the
+  refresh logic above uses), regardless of which view (`view` state) is
+  actually selected, since it only ever appears before any real ticket
+  data exists in the first place.
+- Scope: only `tickets-screen.tsx` was touched. No change to filtering/
+  search/creation/edit/drag-and-drop logic, permissions, navigation, or to
+  List/Calendar/Timeline/Insights/Board themselves.
+
 ## Confirmed working (Ticket assignment — restricted to active project members)
 
 A ticket's Assignee can now only ever be a real, active member of that
@@ -1452,6 +1501,32 @@ implementation.
 - No new migrations — pure application-layer query/rendering work on top of
   already-real `projects`/`tickets`/`ticket_activity`/`ticket_time_entries`/
   `project_memberships` tables.
+
+## Project Overview → loading skeleton
+
+All three Project Overview variants gained a real structural loading
+skeleton in place of the old plain "Loading project…" text, shown only on
+the true first load — none of their data-loading effects changed.
+
+- **Admin and Project Lead** share one `ProjectOverviewSkeleton`
+  (`admin-project-overview.tsx`, exported and imported by
+  `project-lead-project-overview.tsx` rather than a second copy) — both
+  variants render the exact same layout shape (header, alert banner,
+  4-cell KPI strip, a 2-cards-left/2-cards-right grid), so one skeleton
+  faithfully represents both. The "+ New Ticket" button placeholder is
+  gated on `canManageProject`, already known synchronously (from the
+  signed-in role), so there's no layout shift once real data lands.
+- **Member** gets its own `MemberProjectOverviewSkeleton`
+  (`project-overview.tsx`) — its layout genuinely differs (a different
+  KPI set, "My Project Work" with its own List/Board toggle row instead
+  of "Active Work", "My Activity" instead of "Project Activity", and a
+  right column with up to 3 cards — Needs My Attention/Team/Quick Links —
+  instead of Admin/Project Lead's fixed 2), so it wasn't forced through
+  the shared shape.
+- Both use the existing `SkeletonBlock` primitive only (no new skeleton
+  primitive). Scope: only the three Project Overview components were
+  touched — no change to any data-loading effect, query, permission
+  check, or clickable element.
 
 ## Confirmed working (Dashboard — Admin, Project Lead, and Member)
 

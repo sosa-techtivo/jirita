@@ -22,7 +22,7 @@ import {
   buildDeliveryStatusItems,
 } from "@/components/reports-screen";
 import type { PersonRow, ProjectRow as DeliveryProjectRow } from "@/components/reports-screen";
-import { ExpandableDescription, TicketGroup, ProjectHealthRow } from "@/components/admin-project-overview";
+import { ExpandableDescription, TicketGroup, ProjectHealthRow, ProjectOverviewSkeleton } from "@/components/admin-project-overview";
 import type { TeamMember, HealthRow, HealthStatus } from "@/components/admin-project-overview";
 
 // The Project Lead Project Overview is the same real project-health read as
@@ -187,13 +187,7 @@ export function ProjectLeadProjectOverview({ slug = "mobile-banking-app" }: { sl
   }
 
   if (loadState === "loading") {
-    return (
-      <div className="max-w-4xl mx-auto px-8 py-10">
-        <div className="h-full flex items-center justify-center text-sm text-slate-400 dark:text-zinc-500 py-20">
-          Loading project…
-        </div>
-      </div>
-    );
+    return <ProjectOverviewSkeleton canManageProject={canManageProject} />;
   }
 
   if (loadState === "error" || !project) {

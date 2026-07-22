@@ -25,6 +25,7 @@ import {
   activityEventToEntry,
 } from "@/components/admin-project-overview";
 import type { ActivityEntry, TeamMember } from "@/components/admin-project-overview";
+import { SkeletonBlock } from "@/components/dashboard-shared";
 
 // The Member Project Overview is a personal workspace inside the project —
 // "what do I need to work on here today?" — not a scaled-down Project Lead
@@ -222,6 +223,124 @@ export function ProjectOverviewBreadcrumb({ slug }: { slug: string }) {
   );
 }
 
+// ── Loading skeleton ─────────────────────────────────────────────────────────
+// The Member view's own layout differs from Admin/Project Lead's shared
+// ProjectOverviewSkeleton (admin-project-overview.tsx) — a different KPI
+// set, "My Project Work" (with its own List/Board toggle row) instead of
+// "Active Work", "My Activity" instead of "Project Activity", and a
+// 2-or-3-card right column (Needs My Attention/Team/Quick Links) instead of
+// Admin's fixed 2 (Team/Project Health) — so it gets its own skeleton rather
+// than forcing a mismatched shape through the shared one. Mirrors the real
+// render below section-for-section/proportion-for-proportion, using the
+// same `SkeletonBlock` primitive as every other skeleton in this app. Shown
+// only for the true first load (`loadState === "loading"`) — this branch is
+// only ever reached once the role is already known to be MEMBER (see the
+// ADMIN/PROJECT_LEAD returns above), so ADMIN/PROJECT_LEAD never render it.
+function MemberProjectOverviewSkeleton() {
+  return (
+    <div className="max-w-4xl mx-auto px-8 py-10">
+      {/* ===== Project Header ===== */}
+      <div className="flex items-start justify-between">
+        <div className="flex items-start gap-4">
+          <SkeletonBlock className="w-11 h-11 rounded-xl flex-shrink-0" />
+          <div>
+            <div className="flex items-center gap-2.5">
+              <SkeletonBlock className="h-6 w-48 rounded" />
+              <SkeletonBlock className="h-5 w-16 rounded-md" />
+            </div>
+            <SkeletonBlock className="h-4 w-72 rounded mt-2" />
+            <SkeletonBlock className="h-3 w-32 rounded mt-3" />
+          </div>
+        </div>
+      </div>
+
+      {/* ===== Alert banner ===== */}
+      <SkeletonBlock className="h-9 w-full rounded-md mt-5" />
+
+      {/* ===== KPI strip ===== */}
+      <div className="mt-6 flex items-stretch divide-x divide-slate-100 dark:divide-zinc-800 rounded-xl border border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900 shadow-sm shadow-slate-200/40 dark:shadow-black/20 overflow-hidden">
+        {[0, 1, 2, 3].map((i) => (
+          <div key={i} className="flex-1 px-5 py-4">
+            <SkeletonBlock className="h-2.5 w-20 rounded mb-2" />
+            <SkeletonBlock className="h-6 w-10 rounded" />
+          </div>
+        ))}
+      </div>
+
+      {/* ===== My Project Work + My Activity, Needs My Attention + Team + Quick Links ===== */}
+      <div className="mt-10 grid grid-cols-3 gap-8 items-start">
+        {/* Left column */}
+        <div className="col-span-2 space-y-6">
+          <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/40 dark:border-zinc-700/70 dark:bg-zinc-900 dark:shadow-black/20">
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <SkeletonBlock className="h-3 w-28 rounded" />
+              <SkeletonBlock className="h-7 w-24 rounded-lg" />
+            </div>
+            <div className="space-y-2.5">
+              {[0, 1, 2].map((i) => (
+                <SkeletonBlock key={i} className="h-9 w-full rounded-lg" />
+              ))}
+            </div>
+          </section>
+
+          <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/40 dark:border-zinc-700/70 dark:bg-zinc-900 dark:shadow-black/20">
+            <SkeletonBlock className="h-3 w-24 rounded mb-4" />
+            <div className="space-y-4">
+              {[0, 1, 2].map((i) => (
+                <div key={i} className="flex items-start gap-3">
+                  <SkeletonBlock className="w-6 h-6 rounded-full flex-shrink-0 mt-0.5" />
+                  <div className="flex-1 space-y-1.5">
+                    <SkeletonBlock className="h-3.5 w-3/4 rounded" />
+                    <SkeletonBlock className="h-2.5 w-16 rounded" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        </div>
+
+        {/* Right column */}
+        <div className="space-y-6">
+          <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/40 dark:border-zinc-700/70 dark:bg-zinc-900 dark:shadow-black/20">
+            <SkeletonBlock className="h-3 w-32 rounded mb-3" />
+            <div className="space-y-3">
+              {[0, 1].map((i) => (
+                <div key={i} className="space-y-1.5">
+                  <SkeletonBlock className="h-3.5 w-4/5 rounded" />
+                  <SkeletonBlock className="h-2.5 w-16 rounded" />
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/40 dark:border-zinc-700/70 dark:bg-zinc-900 dark:shadow-black/20">
+            <div className="mb-3 space-y-1.5">
+              <SkeletonBlock className="h-3 w-12 rounded" />
+              <SkeletonBlock className="h-2.5 w-24 rounded" />
+            </div>
+            <div className="space-y-3">
+              {[0, 1, 2].map((i) => (
+                <div key={i} className="flex items-center gap-2.5">
+                  <SkeletonBlock className="w-7 h-7 rounded-full flex-shrink-0" />
+                  <div className="flex-1 space-y-1">
+                    <SkeletonBlock className="h-3.5 w-24 rounded" />
+                    <SkeletonBlock className="h-2.5 w-16 rounded" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/40 dark:border-zinc-700/70 dark:bg-zinc-900 dark:shadow-black/20">
+            <SkeletonBlock className="h-3 w-24 rounded mb-3" />
+            <SkeletonBlock className="h-3.5 w-32 rounded" />
+          </section>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function ProjectOverview({ slug = "mobile-banking-app" }: { slug?: string }) {
   const { user, userId, organization, isDevFallback } = useCurrentUser();
   // Declared before the role branches below so hook order stays identical
@@ -326,13 +445,7 @@ export function ProjectOverview({ slug = "mobile-banking-app" }: { slug?: string
   }
 
   if (loadState === "loading") {
-    return (
-      <div className="max-w-4xl mx-auto px-8 py-10">
-        <div className="h-full flex items-center justify-center text-sm text-slate-400 dark:text-zinc-500 py-20">
-          Loading project…
-        </div>
-      </div>
-    );
+    return <MemberProjectOverviewSkeleton />;
   }
 
   if (loadState === "error" || !project) {

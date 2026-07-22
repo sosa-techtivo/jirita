@@ -27,6 +27,8 @@ import { TicketPreviewPanel } from "@/components/tickets/ticket-preview-panel";
 import { useCurrentUser } from "@/components/current-user-provider";
 import { canManage } from "@/lib/current-user";
 import { getDefaultTicketView } from "@/lib/user-preferences";
+import { SkeletonBlock } from "@/components/dashboard-shared";
+import { useRefreshOnFocusAndVisibility } from "@/components/member-profile-modal";
 
 // ── Persisted state shape ─────────────────────────────────────────────────────
 
@@ -72,6 +74,85 @@ export function presetTicketsFilter(slug: string, chips: string[]) {
     searchQuery: "",
     scrollTop: 0,
   });
+}
+
+// ── Loading skeleton ─────────────────────────────────────────────────────────
+// Shown only for the true first load (`loadState === "loading"`, now gated
+// by `hasLoadedRef` above so a background focus/visibility refresh never
+// re-shows it once real tickets already exist). Mirrors the real header/
+// filter-bar/quick-stats/Board layout below section-for-section and
+// proportion-for-proportion — same 6 real columns board-view.tsx itself
+// renders (Backlog/To Do/In Progress/Blocked/In Review/Done), each with a
+// small, representative number of card placeholders, never a fabricated
+// count pretending to be real data — so nothing shifts once real tickets
+// land. Uses the existing `SkeletonBlock` primitive only (no new skeleton
+// primitive). List/Calendar/Timeline/Insights are unaffected — this is only
+// ever shown before any real ticket data exists, before `view` even matters.
+const TICKETS_SKELETON_COLUMN_CARD_COUNTS = [3, 2, 2, 1, 1, 2];
+
+function TicketsScreenSkeleton({ showNewTicketButton }: { showNewTicketButton: boolean }) {
+  return (
+    <div className="h-full flex flex-col" aria-busy="true">
+      {/* Page header */}
+      <div className="flex-shrink-0 px-6 pt-5 pb-0">
+        <div className="flex items-start justify-between gap-4 mb-4">
+          <div>
+            <SkeletonBlock className="h-7 w-24 rounded mb-2" />
+            <SkeletonBlock className="h-4 w-72 rounded" />
+          </div>
+          <div className="flex items-center gap-3 flex-shrink-0 mt-0.5">
+            <SkeletonBlock className="h-8 w-40 rounded-lg" />
+            {showNewTicketButton && <SkeletonBlock className="h-8 w-28 rounded-lg" />}
+          </div>
+        </div>
+
+        {/* Search + filters */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <SkeletonBlock className="h-8 w-64 rounded-md" />
+          <SkeletonBlock className="h-8 w-24 rounded-md" />
+          <SkeletonBlock className="h-8 w-24 rounded-md" />
+          <SkeletonBlock className="h-8 w-24 rounded-md" />
+          <SkeletonBlock className="h-8 w-28 rounded-md" />
+        </div>
+        <div className="flex items-center gap-2 mt-2">
+          <SkeletonBlock className="h-6 w-16 rounded-full" />
+          <SkeletonBlock className="h-6 w-20 rounded-full" />
+          <SkeletonBlock className="h-6 w-24 rounded-full" />
+        </div>
+
+        {/* Quick stats — Tickets · Estimated · Blocked */}
+        <div className="mt-3">
+          <SkeletonBlock className="h-3 w-64 rounded" />
+        </div>
+
+        <div className="mt-3 border-b border-slate-200 dark:border-zinc-800" />
+      </div>
+
+      {/* Board columns */}
+      <div className="flex-1 min-h-0 overflow-x-auto">
+        <div className="flex gap-4 h-full px-6 pt-4 pb-6">
+          {TICKETS_SKELETON_COLUMN_CARD_COUNTS.map((cardCount, i) => (
+            <div
+              key={i}
+              className="flex-1 min-w-[170px] flex flex-col min-h-0 rounded-xl bg-slate-100/60 dark:bg-zinc-800/40 border border-slate-200/80 dark:border-zinc-700/30"
+            >
+              <div className="flex-shrink-0 px-4 pt-4 pb-3">
+                <div className="flex items-center justify-between gap-2">
+                  <SkeletonBlock className="h-2.5 w-16 rounded" />
+                  <SkeletonBlock className="h-4 w-5 rounded-full" />
+                </div>
+              </div>
+              <div className="flex-1 min-h-0 px-3 pb-3 space-y-1.5">
+                {Array.from({ length: cardCount }).map((_, j) => (
+                  <SkeletonBlock key={j} className="h-16 w-full rounded-lg" />
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -201,10 +282,27 @@ export function TicketsScreen({ slug, projectName }: { slug?: string; projectNam
   const [updatedDateFilter,  setUpdatedDateFilter]  = useState<DateRangeValue>(EMPTY_DATE_RANGE);
 
   const requestIdRef = useRef(0);
+  // Once the first real load has ever succeeded, a later background refresh
+  // (tab focus/visibility regain) must never blank the screen back to the
+  // skeleton or an error state — only the true first load ever shows those;
+  // a failed background refresh just leaves the last real, valid ticket
+  // list on screen instead. Same convention as users-screen.tsx's own
+  // `hasLoadedRef`.
+  const hasLoadedRef = useRef(false);
+  // Collapses `organization`'s own focus-driven reference change (which
+  // already changes `runFetch`'s identity, see its deps below, and so
+  // re-fires the mount effect) and the explicit focus/visibilitychange
+  // listener below firing together into a single real request — same
+  // convention as users-screen.tsx's own `lastRunAtRef`.
+  const lastRunAtRef = useRef(0);
 
   const runFetch = useCallback(() => {
     if (!organization) return;
+    const now = Date.now();
+    if (now - lastRunAtRef.current < 300) return;
+    lastRunAtRef.current = now;
     const requestId = ++requestIdRef.current;
+    if (!hasLoadedRef.current) setLoadState("loading");
     // Org-wide "all projects" mode (no slug) loads every project's tickets
     // via the same real, RLS-scoped org-wide loader the Dashboards/Reports
     // already use — never a second/parallel query.
@@ -212,12 +310,14 @@ export function TicketsScreen({ slug, projectName }: { slug?: string; projectNam
     result$.then((result) => {
       if (requestIdRef.current !== requestId) return;
       if (result.status === "ready") {
+        hasLoadedRef.current = true;
         setTicketList(result.tickets);
         setLoadState("ready");
       } else if (result.status === "not-found") {
+        hasLoadedRef.current = true;
         setTicketList([]);
         setLoadState("ready");
-      } else {
+      } else if (!hasLoadedRef.current) {
         setLoadErrorMessage(result.message);
         setLoadState("error");
       }
@@ -228,6 +328,16 @@ export function TicketsScreen({ slug, projectName }: { slug?: string; projectNam
     if (isDevFallback) return; // handled synchronously above — no fetch needed
     runFetch();
   }, [isDevFallback, runFetch]);
+
+  // Real refresh on window focus regain and tab-visibility regain — filters,
+  // search, selected view, and navigation/session state below are all
+  // independent React state untouched by runFetch, so they survive this
+  // refresh unchanged; only the fetched ticketList (and everything derived
+  // from it — filteredTickets, the Tickets/Estimated/Blocked counters, and
+  // every view's own columns/counts) is refreshed. runFetch itself already
+  // no-ops without a real `organization` (dev fallback), so no extra guard
+  // is needed here.
+  useRefreshOnFocusAndVisibility(runFetch);
 
   useEffect(() => {
     if (isDevFallback || !organization) return; // dev fallback: no mock members either
@@ -599,11 +709,7 @@ export function TicketsScreen({ slug, projectName }: { slug?: string; projectNam
   };
 
   if (loadState === "loading") {
-    return (
-      <div className="h-full flex items-center justify-center text-sm text-slate-400 dark:text-zinc-500">
-        Loading tickets…
-      </div>
-    );
+    return <TicketsScreenSkeleton showNewTicketButton={canCreateTicket} />;
   }
 
   if (loadState === "error") {
