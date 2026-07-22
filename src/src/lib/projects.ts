@@ -38,6 +38,11 @@ export type CreateProjectResult =
 // Sidebar/Projects-list ProjectSummary shape deliberately omits (it only
 // ever displays the resolved name/avatar, never the id).
 export interface ProjectDetail extends ProjectSummary {
+  /** Real projects.id — Project Settings' own GitHub Repository Integration
+   *  Server Actions/API routes need the real id, never resolved by slug/
+   *  name/position. ProjectSummary itself deliberately omits this (nothing
+   *  outside Project Settings needs it). */
+  id: string;
   ownerProfileId: string | null;
   /** Real projects.created_at, "Mar 3, 2026" — Project Overview header's "Started ..." line only. */
   createdAt: string;
@@ -45,9 +50,9 @@ export interface ProjectDetail extends ProjectSummary {
   createdAtISO: string;
   /** Same value as ProjectSummary.targetDate, raw ISO (`yyyy-mm-dd`) or null — Project Settings' own `<input type="date">` needs this instead of the "Jul 16"-formatted display string. */
   targetDateISO: string | null;
-  /** projects.repository_provider — Project Settings' own Repository Integration section only. */
-  repositoryProvider: RepositoryProvider;
-  /** projects.repository_url, or null when unset (always null when repositoryProvider is "none"). */
+  /** projects.repository_provider — Project Settings' own Repository Integration section only. null means "None"/not configured, never a separate "none" value. */
+  repositoryProvider: RepositoryProvider | null;
+  /** projects.repository_url — always null when repositoryProvider is null (enforced by a DB constraint, not just application code). */
   repositoryUrl: string | null;
 }
 
@@ -109,16 +114,54 @@ interface ProjectRow {
   default_hourly_rate: string | null;
   owner_profile_id: string | null;
   target_date: string | null;
-  repository_provider: string;
+  repository_provider: string | null;
   repository_url: string | null;
   updated_at: string;
   created_at: string;
 }
 
-// Project Settings → Repository Integration. No OAuth/sync/webhooks/commit
-// reads — just which provider (if any) this project links to, and its URL.
-export type RepositoryProvider = "none" | "github" | "gitlab";
-const REPOSITORY_PROVIDER_VALUES: RepositoryProvider[] = ["none", "github", "gitlab"];
+// ── Repository Integration (Project Settings) ───────────────────────────────
+// No OAuth/sync/webhooks/commit reads/PRs/branches/issue import — just which
+// provider (if any) this project links to, and its URL. `null` is "None";
+// there is no separate "none" string value (see
+// 20260819000000_make_project_repository_provider_nullable.sql).
+export type RepositoryProvider = "github" | "gitlab";
+const REPOSITORY_PROVIDER_VALUES: RepositoryProvider[] = ["github", "gitlab"];
+
+// Host anchored exactly to avoid lookalike domains (github.fake.com,
+// notgithub.com, etc.) — the literal "github.com"/"gitlab.com" must appear
+// immediately after the scheme, never as a suffix of a longer host.
+// Exactly two path segments for GitHub (owner/repository); GitLab allows
+// two or more (group/project, or group/subgroup(/subgroup...)/project).
+// A single optional trailing slash is allowed; ".git" is never required or
+// stripped — it's just more `[\w.-]+` characters in the last segment.
+const GITHUB_REPO_URL_RE = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/?$/;
+const GITLAB_REPO_URL_RE = /^https:\/\/gitlab\.com\/[\w.-]+(?:\/[\w.-]+)+\/?$/;
+
+// Pure — never calls out to GitHub/GitLab, only checks shape. Shared by the
+// UI (pre-Save validation) and updateProjectSettings below (the real write
+// path's own backend-side check), so the two can never drift apart.
+export function validateRepositoryUrl(provider: RepositoryProvider | null, url: string): string | null {
+  if (provider === null) return null;
+  const trimmed = url.trim();
+  if (!trimmed) return "Repository URL is required.";
+  if (provider === "github" && !GITHUB_REPO_URL_RE.test(trimmed)) {
+    return "Enter a valid GitHub repository URL, e.g. https://github.com/owner/repository";
+  }
+  if (provider === "gitlab" && !GITLAB_REPO_URL_RE.test(trimmed)) {
+    return "Enter a valid GitLab repository URL, e.g. https://gitlab.com/group/project";
+  }
+  return null;
+}
+
+// Trims, then strips exactly one trailing "/" if present — never touches
+// ".git" or anything else. Applied once, at the real write path, so every
+// caller's persisted value is normalized the same way regardless of what
+// was typed.
+function normalizeRepositoryUrl(url: string): string {
+  const trimmed = url.trim();
+  return trimmed.endsWith("/") ? trimmed.slice(0, -1) : trimmed;
+}
 
 interface OwnerProfileRow {
   id: string;
@@ -500,14 +543,18 @@ export async function loadProjectDetail(organizationId: string, slug: string): P
     status: "ready",
     project: {
       ...rowToProjectSummary(row, ownerRow),
+      id: row.id,
       ownerProfileId: row.owner_profile_id,
       createdAt: formatCreatedAt(row.created_at),
       createdAtISO: row.created_at,
       targetDateISO: row.target_date,
-      repositoryProvider: REPOSITORY_PROVIDER_VALUES.includes(row.repository_provider as RepositoryProvider)
-        ? (row.repository_provider as RepositoryProvider)
-        : "none",
-      repositoryUrl: row.repository_url,
+      repositoryProvider:
+        row.repository_provider && REPOSITORY_PROVIDER_VALUES.includes(row.repository_provider as RepositoryProvider)
+          ? (row.repository_provider as RepositoryProvider)
+          : null,
+      // A provider-less row's URL is always null anyway (DB constraint),
+      // but this never trusts a stale/malformed row to display one.
+      repositoryUrl: row.repository_provider ? row.repository_url : null,
     },
   };
 }
@@ -749,8 +796,8 @@ export interface ProjectSettingsUpdate {
   ownerProfileId?: string | null;
   /** Raw ISO `yyyy-mm-dd`, or null to clear — writes projects.target_date directly, the same real column Project Overview/the Project Lead Dashboard already read. */
   targetDate?: string | null;
-  repositoryProvider?: RepositoryProvider;
-  /** Ignored (always written as null) when repositoryProvider is "none" — see updateProjectSettings. */
+  /** null clears the integration entirely ("None") — repositoryUrl is then ignored and always written as null. */
+  repositoryProvider?: RepositoryProvider | null;
   repositoryUrl?: string | null;
 }
 
@@ -777,11 +824,25 @@ export async function updateProjectSettings(
   if (updates.defaultHourlyRate !== undefined) payload.default_hourly_rate = updates.defaultHourlyRate;
   if (updates.ownerProfileId !== undefined) payload.owner_profile_id = updates.ownerProfileId;
   if (updates.targetDate !== undefined) payload.target_date = updates.targetDate;
+
   if (updates.repositoryProvider !== undefined) {
-    payload.repository_provider = updates.repositoryProvider;
-    // "None" never leaves a stale URL behind — always cleared together,
-    // regardless of what updates.repositoryUrl itself is.
-    payload.repository_url = updates.repositoryProvider === "none" ? null : (updates.repositoryUrl ?? null);
+    if (updates.repositoryProvider === null) {
+      // "None" — provider and URL are always cleared together, regardless
+      // of what updates.repositoryUrl itself is.
+      payload.repository_provider = null;
+      payload.repository_url = null;
+    } else {
+      // Backend-side safety net behind the UI's own pre-Save check — this
+      // is the one real write path Project Settings uses, so a direct call
+      // (bypassing the UI) can never persist a malformed/missing URL either.
+      const rawUrl = updates.repositoryUrl ?? "";
+      const validationError = validateRepositoryUrl(updates.repositoryProvider, rawUrl);
+      if (validationError) {
+        return { status: "error", message: validationError };
+      }
+      payload.repository_provider = updates.repositoryProvider;
+      payload.repository_url = normalizeRepositoryUrl(rawUrl);
+    }
   } else if (updates.repositoryUrl !== undefined) {
     payload.repository_url = updates.repositoryUrl;
   }

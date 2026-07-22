@@ -269,30 +269,33 @@ However, simplicity must remain the defining characteristic of the platform.
 
 Most of the application is now connected to a live Supabase project:
 Auth/Profile, Projects (Sidebar, `/projects`, Project Settings — including
-an editable Target Date), Tickets (all five views, New Ticket, full Ticket
-Detail, Related Tickets, Attachments, Time Tracking, Comments, Activity
-Log), ticket-assignment restriction to active project members, Project →
-Team, Project Notes, the Admin/Project Lead/Member Dashboards (including
-their project scope selectors, and the Project Lead Dashboard's real,
-independently clickable Current Delivery/Attention Required KPI cards),
-Reports — both the Admin's company-wide view and the Project Lead's own
-scoped view (Delivery + Team, including its own clickable KPI band),
-Project Overview (all three roles), per-project Reports (all roles), Time
-Tracking (all three roles), My Work (Member, including its own clickable
-KPI), Users, and global Search are all real.
+an editable Target Date and a Repository Integration section with a real
+GitHub OAuth connection), Tickets (all five views, New Ticket, full Ticket
+Detail — including a real Development section showing GitHub
+branches/commits/pull requests related to a ticket, and a real loading
+skeleton in place of the old "Loading ticket…" text — Related Tickets,
+Attachments, Time Tracking, Comments, Activity Log), ticket-assignment
+restriction to active project members, Project → Team, Project Notes, the
+Admin/Project Lead/Member Dashboards (including their project scope
+selectors, and the Project Lead Dashboard's real, independently clickable
+Current Delivery/Attention Required KPI cards), Reports — both the
+Admin's company-wide view and the Project Lead's own scoped view
+(Delivery + Team, including its own clickable KPI band), Project Overview
+(all three roles), per-project Reports (all roles), Time Tracking (all
+three roles), My Work (Member, including its own clickable KPI), Users,
+global Search, and a global in-app Notifications system (header bell +
+dropdown + `/notifications` page) are all real.
 
 Auth/Profile through company-wide Reports (Admin) are confirmed working
 end-to-end against a live Supabase project. Everything from the Admin
-Project Overview onward in the list above (per-project Reports, Time
-Tracking, the Project Lead's/Member's own Project Overview, the Dashboard
-scope selectors and KPI click-throughs, Project Settings' Target Date
-field, My Work, ticket-assignment restriction, Member's "My Projects", and
-Search) is implemented and passes `tsc`/`eslint`/`next build`, but has not
-yet been clicked through in a live browser — treat it as "should work, not
-yet verified."
+Project Overview onward in the list above — including Notifications,
+Repository Integration/GitHub OAuth, Ticket Detail → Development, and its
+loading skeleton — is implemented and passes `tsc`/`eslint`/`next build`,
+but has not yet been clicked through in a live browser — treat it as
+"should work, not yet verified."
 
-Only the rest of Settings (`/settings/*`) still runs entirely on mock
-data.
+Only the rest of Settings (`/settings/*`, i.e. Danger Zone) still runs
+entirely on mock data.
 
 **For the authoritative, feature-by-feature breakdown — every Server
 Action, migration, and real bug fixed along the way, and the exact

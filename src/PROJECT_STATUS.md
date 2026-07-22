@@ -1,4 +1,4 @@
-> Last Updated: July 21, 2026
+> Last Updated: July 22, 2026
 
 ---
 
@@ -45,6 +45,16 @@ Most recently, Settings gained, then immediately lost, a **Time Tracking** secti
 Most recently, JIRITA gained a single, real, global **in-app Notifications system** — the header bell (every authenticated page, with a real unread-count badge), its 5-most-recent dropdown preview, and a full paginated `/notifications` page — backed by a new `notifications` table and one new data layer, `lib/notifications.ts`, with creation routed through a service-role Server Action (`create-notification-action.ts`) rather than a direct client insert. No email, push, desktop notifications, cron, queues, watchers, configurable preferences, or Supabase Realtime — a plain table refreshed on demand (load, focus/tab-visibility regain, after marking read). Four real events notify, each wired into the one real write path that operation already had, after it succeeds: ticket assignment and status changes (`updateTicket`), a comment on a ticket assigned to someone else (`createTicketComment`), and being added to a project (`addProjectMember`) — never a self-notification, never a fabricated mention (this schema has no structured `@mention` storage, so that event type is deliberately left uncreated rather than guessed by name). Settings → Notifications (the old mock Email/Desktop/Weekly-Digest toggles section) was retired outright in the same pass — there are no configurable notification preferences in this app at all — following the exact same "falls through to the standard 'Section not found.' branch" precedent Settings → Time Tracking/Projects already established. See Architecture Status → Removed (Settings → Notifications) for the full detail, including the RLS/authorization model.
 
 Most recently, Settings → Integrations (the mock GitHub/Slack/Google Calendar/Jira Import section) was retired outright, and repository linking was rebuilt as a **per-project** concern instead: `/projects/[slug]/settings` gained a new **Repository Integration** section (Repository Provider — None/GitHub/GitLab — and a Repository URL, format-validated only, never connected to/synced/OAuth'd) backed by two new `projects` columns (`repository_provider`, a real Postgres enum matching the `status`/`priority`/`health`/`category` convention, and `repository_url`). No OAuth, sync, commit reads, or webhooks exist — this is intentionally just the persisted configuration, ahead of a real GitHub/GitLab integration. See Architecture Status → Removed (Settings → Integrations) for the full detail.
+
+Most recently, that Repository Integration data model was corrected: `repository_provider` is now real-`null` (not a separate `'none'` string) when a project has no repository configured, enforced by two new `CHECK` constraints (provider can only be `null`/`github`/`gitlab`; `repository_url` must be null exactly when provider is null, never one without the other) added by a new, additive migration — nothing was reset or dropped. The GitHub/GitLab URL format validation and the trailing-slash normalization applied before saving both moved into shared, pure, exported functions in `lib/projects.ts` (`validateRepositoryUrl`/`normalizeRepositoryUrl`), so the UI's pre-Save check and `updateProjectSettings`'s own backend-side check can never drift into two different rules. See Architecture Status → Removed (Settings → Integrations) → "Data model corrected, one pass later" for the full detail.
+
+Most recently, Repository Integration gained a **real GitHub OAuth connection** — Project Settings' "Connect GitHub" now runs an actual OAuth 2.0 + PKCE flow (`GET /api/integrations/github/connect` → github.com → `GET /api/integrations/github/callback`), verifies the authorized account can really read the exact configured repository (`GET /repos/{owner}/{repo}`, requiring `permissions.pull === true` when GitHub returns that field), and stores the resulting access token AES-256-GCM-encrypted in a new table, `project_repository_connections` (never in `projects` itself, and never in plain text — see `lib/server/github-token-crypto.ts`). `repository_provider`/`repository_url` still mean exactly what they meant before this pass (the plain configured link); this new table means "a verified, currently-working authorization for that link," and the UI now clearly separates the two: **Repository configured** (URL saved, GitHub not yet connected, or a plain GitLab link — GitLab has no OAuth in this pass), **GitHub connected** (a real, `last_verified_at`-fresh connection — "Connected as @username" + the repo's real full name), and **Connection expired** (the saved token failed a re-check — `repository_provider`/`repository_url` are never touched, only "Reconnect GitHub" is offered). Re-verification is throttled to once per 15 minutes per connection (`loadGitHubConnectionStatusAction`, with an in-process dedupe map so a focus-regain refresh and an initial load landing at the same moment share one real GitHub request instead of firing two) — never polled, never checked on every render. Changing Provider or URL on Save (including to "None") deletes any existing GitHub connection outright via a new `AFTER UPDATE` trigger on `projects` (`invalidate_github_repository_connection`, `security definer` so it fires regardless of the calling role's own — intentionally absent — grants on the connections table), so a stale token can never be silently reused against a different repository; Disconnect (`disconnectGitHubProjectConnectionAction`) only ever removes the local row, never GitHub's own OAuth App authorization. Authorization for every new server-side entry point (both API routes, both new Server Actions) mirrors `projects_update`'s own existing RLS exactly (`is_org_admin_or_lead` — Admin or Project Lead, re-verified fresh server-side every time, never trusted from a cookie/client claim) — no new permission model was introduced. See Architecture Status → "GitHub OAuth (Repository Integration)" for the full detail, including a real architecture gap this pass had to work around (this app's Supabase session lives in browser `localStorage`, not a cookie, so a plain top-level navigation to a Route Handler otherwise carries no proof of identity) and the naming mismatch between this feature's own spec and this environment's real `.env.local` (`GITHUB_CLIENT_ID`/`GITHUB_CLIENT_SECRET`, not `GITHUB_OAUTH_CLIENT_ID`/`_SECRET`).
+
+Most recently, Ticket Detail gained a real **Development** section — branches, commits, and pull requests from the project's connected GitHub repository, related to that one ticket by its own real ticket code only (e.g. "JIR-8" matched case-insensitively against branch names, commit messages, and PR title/body/head branch — never the ticket's own title or any other ambiguous text). Read-only: nothing here can create a branch/PR, comment, merge, or otherwise write back to GitHub. The section only exists when there's something real to show — no connection, an expired one, a GitHub error, or simply no matches all render nothing at all (no CTA, no empty state, no technical error), and results are capped/cached (5 branches, 10 commits, 10 PRs; a 5-minute server-side cache) so it never hammers GitHub. See Architecture Status → "Ticket Detail → Development (real GitHub, read-only)" for the full detail.
+
+After that, Development went through a short series of fixes and polish passes. A real bug was found and fixed: commits on an unmerged feature branch never appeared, because GitHub's own `/commits` endpoint without a `sha` param only returns the default branch's history — commits are now fetched per related branch (capped at 5) plus the real default branch, deduped by full SHA, via `Promise.allSettled` so one deleted/renamed ref can't fail the rest. A separate audit into a missing open Pull Request found the filter logic itself was already correct; the most likely cause was the bundled 5-minute cache serving a snapshot from before the PR existed — which motivated a real, manual **Refresh** action (bypasses that one cache entry on demand, preserves the last good data on a transient failure, never a full-page reload). Two visual polish passes followed (group headers with icon/name/count, lighter full-row-clickable rows, a real pluralized header counter, a discreet GitHub mark next to the section title), and one real UX bug was corrected along the way: the merge-commit-message fallback now leaves a commit's original GitHub message untouched when no matching PR is found, instead of substituting a fabricated "Merged Pull Request #N" label.
+
+Most recently, Ticket Detail's plain "Loading ticket…" text was replaced with a real, full-fidelity `TicketDetailSkeleton` — shown for both the initial page load and the already-existing automatic refresh on focus/tab-visibility regain (neither trigger changed; only what renders during that state did). It mirrors the real header/Description/Attachments/Development/Time Tracking/Comments/Activity/sidebar layout exactly (same spacing rhythm as `CollapsibleSection`/`SidebarField`, so nothing shifts once real data lands), reuses the existing `SkeletonBlock` primitive rather than a new one, keeps `BackToTicketsButton` real so navigation is never blocked, and shows only a generic placeholder for Development — the real, GitHub-backed section never mounts while the skeleton is showing. See Architecture Status → "Ticket Detail → loading skeleton" for the full detail.
 
 ---
 
@@ -135,7 +145,7 @@ Route: `/projects/[slug]/settings`, Admin/Project Lead only. Previously a fully 
 - A single **Save Changes** button (didn't exist before) persists only the fields this screen manages; the breadcrumb (`ProjectSettingsBreadcrumb`) reads the live project name from the same shared provider Sidebar/`/projects` use, so a rename shows up there immediately too
 - **+ Add new client** (`add-client-modal.tsx`): minimal name-only creation, backed by a new `clients` table (see Architecture Status) — created immediately and selected in the form; persisted to the project on the next Save like any other field. Basic per-organization duplicate names are rejected.
 - Danger Zone's Archive/Restore reuses `archive-project-modal.tsx`/`restoreProject` exactly as on the Projects list — no separate implementation
-- **New: Repository Integration** — Repository Provider (`repository_provider`: `none`/`github`/`gitlab`, a real Postgres enum on `projects`, same convention as `status`/`priority`/`health`/`category`) and Repository URL (`repository_url`, hidden entirely when Provider is "None", required and format-validated — `https://github.com/owner/repository` / `https://gitlab.com/group/project` — otherwise, client-side only, never connected to). No OAuth/sync/commit-reads/webhooks/Connect-Disconnect-Test-Connection buttons exist; this is deliberately just the persisted configuration. A small status line reads the real, persisted `project.repositoryProvider`/`repositoryUrl` ("Not connected" / "GitHub connected" / "GitLab connected"), with an "Open Repository" link (new tab) shown only once a real URL is saved. Replaces the old org-wide Settings → Integrations mock section outright — see Architecture Status → Removed (Settings → Integrations).
+- **New: Repository Integration** — Repository Provider (`repository_provider`, real and nullable on `projects`: `null` means "None", `github`/`gitlab` the only other storable values, two `CHECK` constraints enforce both that and its pairing with `repository_url`) and Repository URL (`repository_url`, hidden entirely when Provider is "None", required and format-validated — `https://github.com/owner/repository` (exactly two segments, host anchored) / `https://gitlab.com/group/project` (two or more segments — subgroups allowed) — via one shared, pure `validateRepositoryUrl` (`lib/projects.ts`) called both client-side and inside `updateProjectSettings` itself, never connected to/synced/OAuth'd). No OAuth/sync/commit-reads/webhooks/Connect-Disconnect-Test-Connection buttons exist; this is deliberately just the persisted configuration. A small status line reads the real, persisted `project.repositoryProvider`/`repositoryUrl` ("Not connected" / "GitHub connected" / "GitLab connected"), with an "Open Repository" link (new tab) shown only once a real URL is saved. Replaces the old org-wide Settings → Integrations mock section outright — see Architecture Status → Removed (Settings → Integrations).
 - **Removed**: General's "Project Lead" picker (and the `loadOrganizationMembers` fetch that only existed to populate it) — it read/wrote the older `projects.owner_profile_id`, which is not the same field as Team's real `project_memberships.project_role` (see Team below). Project Lead is now set exclusively via Team's "Make Project Lead" action. **Resolved**: the `/projects` list's own Lead column/filter has since been reconciled onto `project_memberships.project_role` too (see the new subsection below) — `ProjectSummary.owner`/`owner_profile_id` no longer has any Lead-column reader anywhere in the app (Member's "My Projects" was already on `project_role`; see Architecture Status → Projects).
 
 #### Health, Progress, Ticket Counters & Tab-Regain Refresh (real, Admin/Project Lead) — `projects-list-screen.tsx`
@@ -650,7 +660,8 @@ Milestones, Versions, and Components were evaluated and explicitly decided again
 - Comments (editable)
 - Mentions
 - Real-time Activity Timeline
-- Notifications
+
+A real, global in-app Notifications system (header bell + dropdown + `/notifications` page) has since shipped — event-driven (ticket assignment/status change, comments, project membership), refreshed on demand rather than via Supabase Realtime — so it's no longer merely planned; see Architecture Status → Removed (Settings → Notifications) for the full detail. Real-time delivery and Mentions remain unimplemented.
 
 ## Reporting
 
@@ -668,7 +679,7 @@ Milestones, Versions, and Components were evaluated and explicitly decided again
 
 # Architecture Status
 
-Current architecture follows a frontend-first approach. Nearly every screen is now real — Auth/Profile, Projects (Sidebar/`/projects`/Settings/Member's "My Projects"), Tickets, Team, Project Notes, the Admin/Project Lead/Member Dashboards (including their project scope selectors), company-wide Reports (Admin role), Project Overview (all three roles), per-project Reports, Time Tracking (Admin/Member/Project Lead), My Work (Member), ticket-assignment restriction, Users, and global Search. Only the Project Lead's own scoped Reports view and the rest of Settings (`/settings/*`) remain mock. Auth/Profile through company-wide Reports (Admin) are confirmed live; everything from the Admin Project Overview onward in the list above is implemented and type/build-clean but not yet clicked through in a live browser — see the detailed breakdown below.
+Current architecture follows a frontend-first approach. Nearly every screen is now real — Auth/Profile, Projects (Sidebar/`/projects`/Settings, including Repository Integration + real GitHub OAuth, and Member's "My Projects"), Tickets (including Ticket Detail's real Development section and its real loading skeleton), Team, Project Notes, the Admin/Project Lead/Member Dashboards (including their project scope selectors), company-wide Reports (Admin role), Project Overview (all three roles), per-project Reports, Time Tracking (Admin/Member/Project Lead), My Work (Member), ticket-assignment restriction, Users, global Search, and a global in-app Notifications system. Only the rest of Settings (`/settings/*`, i.e. Danger Zone) remains mock. Auth/Profile through company-wide Reports (Admin) are confirmed live; everything from the Admin Project Overview onward in the list above is implemented and type/build-clean but not yet clicked through in a live browser — see the detailed breakdown below.
 
 Current stack:
 
@@ -2224,6 +2235,486 @@ outside Project Settings needs it yet. Implemented and type/build-clean
 (`tsc`/`eslint`/`next build` all pass) — same "should work, not yet
 verified live" status as everything else in this list.
 
+**Data model corrected, one pass later**: the first pass above made
+`repository_provider` a `not null` enum defaulting to `'none'` — a real
+follow-up spec pass replaced that with the intended model, `null` meaning
+"None" (there is no separate `'none'` value written or read anywhere
+anymore), via a new additive migration,
+`20260819000000_make_project_repository_provider_nullable.sql` (drops the
+column's `not null`/`default`, migrates any existing `'none'` rows to
+`null`, and adds two real `CHECK` constraints: `repository_provider` can
+only ever be `null`/`'github'`/`'gitlab'` — `'none'` stays a defined enum
+label since Postgres can't drop one in place, but the `CHECK` keeps it from
+ever being stored again — and `repository_url` must be `null` exactly when
+`repository_provider` is `null`, non-null otherwise, never one without the
+other). `RepositoryProvider` (`lib/projects.ts`) is now `"github" |
+"gitlab"`, and every real reader/writer (`ProjectDetail.repositoryProvider`,
+`ProjectSettingsUpdate.repositoryProvider`, `loadProjectDetail`,
+`updateProjectSettings`) uses `RepositoryProvider | null` instead. The
+format-validation regexes (GitHub: exactly `owner/repository`, host
+anchored to `github.com` so a lookalike like `github.fake.com` can't pass;
+GitLab: `group/project` with unlimited subgroup nesting,
+`group/subgroup/.../project`, host anchored to `gitlab.com`) moved into a
+single pure, exported `validateRepositoryUrl(provider, url)` in
+`lib/projects.ts` — `project-settings-screen.tsx`'s pre-Save check and
+`updateProjectSettings`'s own backend-side check (a real safety net behind
+the UI, so a direct call bypassing it can never persist a malformed or
+missing URL either) both call the same one implementation, never two that
+could drift. A new `normalizeRepositoryUrl` (also `lib/projects.ts`,
+applied only inside `updateProjectSettings`, once, regardless of caller)
+trims and strips exactly one trailing `/` before persisting — `.git`
+suffixes are never required or stripped. The Select's "None" option is
+represented by an empty-string sentinel in the DOM value space only
+(native `<select>` can't hold `null`), translated to real `null` the
+instant it's chosen — which also clears the local URL draft immediately,
+not just at Save. Real authorization was already in place and needed no
+change: `projects_update`'s RLS (`is_org_admin_or_lead(organization_id)`,
+the same policy every other Project Settings field already writes
+through) evaluates against the row's own real `organization_id`, never a
+client-claimed one, so a forged `organizationId` argument can neither
+target another organization's project nor grant a caller a role they don't
+really have.
+
+## GitHub OAuth (Repository Integration)
+
+Real, working OAuth 2.0 + PKCE connection between one project's Repository
+Integration and the real GitHub repository its `repository_url` points at
+— GitLab has no OAuth in this pass (`GitLab: mantener solo "Repository
+configured"` per this feature's own spec), and nothing this app writes
+back to GitHub (no webhooks, commits, PRs, issues, branches, deployments,
+sync, or import).
+
+**New table, `project_repository_connections`** (migration
+`20260821000000_add_project_repository_connections.sql`) — separate from
+`projects.repository_provider`/`repository_url`, which are **untouched by
+this pass** and still mean exactly what they meant before it (the plain
+configured link). This table means something different: a *verified*
+authorization proving real read access to that same repository. One row
+per project (`unique(project_id, provider)`, `provider` constrained to
+`'github'` only), storing the access token split across three columns
+(`access_token_ciphertext`/`_iv`/`_auth_tag` — AES-256-GCM output, never a
+single packed blob) plus safe display metadata (`provider_username`,
+`repository_full_name`, `repository_html_url`, `repository_default_branch`,
+`repository_is_private`, `connected_by_profile_id`, `connected_at`,
+`last_verified_at`). RLS is enabled with a real `SELECT` policy mirroring
+`is_org_admin_or_lead` (defense in depth / floor for any future direct
+read), but **no `authenticated` grant of any kind exists on this table** —
+every real read or write goes through a service-role Server Action, so a
+client literally cannot query this table directly, which is what makes
+"loaders never return the encrypted columns" trivially true rather than
+something to keep independently correct at the column level. A new `AFTER
+UPDATE OF repository_provider, repository_url` trigger on `projects`
+(`invalidate_github_repository_connection`, `security definer`) deletes
+any matching connection row the instant either field changes on Save
+(including a change to "None") — this fires regardless of the calling
+role's own (intentionally absent) grants on the connections table, and
+means a saved GitHub authorization can never be silently reused against a
+different repository than the one it was actually verified against.
+
+**`lib/server/github-token-crypto.ts`** — the one place a token is ever
+encrypted or decrypted. AES-256-GCM via `node:crypto`, a random 96-bit IV
+per encryption (never reused), and `GITHUB_TOKEN_ENCRYPTION_KEY` decoded
+from base64 and validated to be exactly 32 bytes before use (a wrong-length
+key throws immediately rather than producing a subtly-broken cipher).
+Throws at import time if it's ever evaluated with `window` defined — this
+repo adds no new dependencies, so there's no `server-only` package to
+enforce that at build time; this is the equivalent runtime backstop. A
+decrypted token is never assigned to anything a Server Action returns, is
+never logged, and only every exists for the duration of one outgoing
+`fetch` to the GitHub API.
+
+**`lib/server/github-repository-connection.ts`** — shared, non-"use
+server" helpers used by both Route Handlers and the Server Actions below
+(caller/admin Supabase client factories, `isOrgAdminOrLead` — a direct
+mirror of `projects_update`'s own RLS, queried service-role-side so it
+can't be spoofed by a client-controlled organization id — GitHub URL
+parsing/validation, GitHub API headers/status-code mapping, and the OAuth
+flow's own cookie names/options).
+
+**`GET /api/integrations/github/connect?projectId=<real id>`** — starts
+the flow. A real architecture gap had to be worked around here: this app's
+Supabase session lives in the browser's own `localStorage` (see
+`lib/supabase-client.ts`), not a cookie, so a plain top-level GET
+navigation to a Route Handler carries no proof of identity on its own
+(unlike the Server Actions elsewhere in this app, which receive an
+explicit `accessToken` argument via Next.js's own RPC transport — not
+possible for a route reached by `<a>`/`window.location.href`). The fix:
+`project-settings-screen.tsx`'s "Connect GitHub"/"Reconnect GitHub" button
+bridges its own already-verified session token into a short-lived (30s),
+single-purpose, path-scoped (`/api/integrations/github` only) cookie
+(`jirita_gh_bridge`) immediately before navigating — this route reads it
+once, verifies it exactly like every other Server Action already does
+(`caller.auth.getUser(token)`), and clears it right away. This is still a
+normal top-level navigation (`window.location.href`, never `window.open`)
+— no popup, and the actual OAuth logic (state/PKCE generation, the
+GitHub redirect URL itself) is all constructed server-side, never in
+client code. Once authenticated, the route re-derives the real project row
+by id (never trusts a client-supplied slug/organization id), checks
+`is_org_admin_or_lead`, confirms `repository_provider === "github"` with a
+real saved URL, generates a cryptographically random `state` and PKCE
+`code_verifier`/`code_challenge` (S256), stores them (plus the project id,
+organization id, and the caller's own profile id — needed again at
+callback time, since GitHub's own redirect back is a fresh, unauthenticated
+navigation with no bridge cookie available) in httpOnly, `SameSite=Lax`,
+10-minute cookies, and redirects to `github.com/login/oauth/authorize`
+with `scope=repo` and `allow_signup=false`.
+
+**`GET /api/integrations/github/callback`** — re-validates everything
+again from scratch rather than trusting the connect-time cookies blindly:
+exact `state` match (aborts and clears cookies without exchanging the code
+on any mismatch), a fresh `is_org_admin_or_lead` check, and that
+`repository_provider`/`repository_url` are still exactly what they were at
+connect time. Exchanges the code server-side
+(`client_id`/`client_secret`/`code`/`redirect_uri`/`code_verifier` against
+`github.com/login/oauth/access_token`, `client_secret` never leaving the
+server), verifies the account via `GET /user`, then verifies **real read
+access to the exact configured repository** via `GET /repos/{owner}
+/{repo}` (parsed from `repository_url`, `.git`/trailing-slash stripped
+only for the API path, never for what's stored) — confirming the
+returned `full_name` case-insensitively matches and, when GitHub returns a
+`permissions` object, that `permissions.pull === true`. `401`/`403`/`404`
+map to distinct, safe reason codes; nothing is saved if any check fails.
+On success, the token is encrypted and the connection row upserted
+(`onConflict: project_id,provider`). Every redirect back to Project
+Settings — success or failure — carries only a small, closed-set
+`?integration=connected` or `?integration=error&reason=<code>` indicator,
+never a GitHub response body, code, or token; the return path itself is
+always computed server-side from the real project's own slug, never
+accepted from the client or GitHub, so there's no open-redirect surface.
+
+**Status/UX** — `loadGitHubConnectionStatusAction` is the only way the UI
+ever learns the real state: `not-connected` (no row), `connected` (a row
+whose `last_verified_at` is fresh — under 15 minutes old — or that just
+re-verified successfully; returns `username`/`repositoryFullName`/
+`repositoryHtmlUrl`, never token/scope data), or `needs-reconnect` (the
+stored token failed a live re-check — `repository_provider`/
+`repository_url` are left untouched, only the UI's own "Connect
+GitHub"/"Reconnect GitHub" is affected). Re-verification calls
+`GET /repos/{full_name}` with the decrypted token and is deduped
+per-connection via an in-process `Map` of in-flight promises, so a
+focus-regain refresh landing at the same moment as an initial load shares
+one real GitHub request rather than firing two — there is no polling
+anywhere in this feature. `project-settings-screen.tsx` only ever fetches
+this when the project's real, persisted `repositoryProvider` is
+`"github"`, re-checks when the project identity/provider/**url** changes
+(a same-provider URL edit still invalidates the old connection via the DB
+trigger above, so the URL has to be a dependency too, not just the
+provider) or on window-focus/tab-visibility regain
+(`useRefreshOnFocusAndVisibility`, the same shared hook the Member Profile
+Modal/Users list already use), and shows a one-time `?integration=`
+banner that's stripped from the URL immediately after being read so a
+refresh/back-navigation can never re-show a stale result.
+**Disconnect** (`disconnectGitHubProjectConnectionAction`) re-verifies
+`is_org_admin_or_lead` fresh and only ever deletes the local
+`project_repository_connections` row — GitHub's own OAuth App
+authorization is never revoked (the user can do that themselves from
+github.com/settings/applications).
+
+**Env var naming note**: this feature's own request named the client
+credentials `GITHUB_OAUTH_CLIENT_ID`/`GITHUB_OAUTH_CLIENT_SECRET`, but
+this environment's real `.env.local` already has them as
+`GITHUB_CLIENT_ID`/`GITHUB_CLIENT_SECRET` (the callback URL and
+encryption key names matched exactly:
+`GITHUB_OAUTH_CALLBACK_URL`/`GITHUB_TOKEN_ENCRYPTION_KEY`). The code reads
+the names that are actually set (`GITHUB_CLIENT_ID`/`GITHUB_CLIENT_SECRET`)
+— `.env.local` was not modified, per this feature's own explicit
+instruction, and no value/secret was ever printed or logged while
+confirming this.
+
+Implemented and type/build-clean (`tsc`/`eslint`/`next build` all pass).
+**Not interactively verified against real github.com** in this
+environment (no live GitHub OAuth App credentials/browser session
+available here) — same "should work, not yet verified live" status as
+every other backend feature in this list, stated plainly rather than
+implied otherwise.
+
+**Stability/security hardening, one pass later**: two real problems
+surfaced from dev logs were fixed without changing any UI or the OAuth
+flow's own functional behavior. First, the status-check `useEffect` in
+`project-settings-screen.tsx` had grown a dependency array whose length
+changed between an earlier edit and a later one within the same dev
+session (`[readyProject?.id, readyProject?.repositoryProvider]` →
+`...repositoryUrl]` added afterward) — harmless after a full reload, but
+exactly the shape of change that trips React's "size changed between
+renders" check under Fast Refresh, and worth hardening against for good.
+The effect's dependency array is now a fixed, statically-written 4-tuple
+(`[readyProject?.id, readyProject?.repositoryProvider,
+readyProject?.repositoryUrl, refreshGitHubStatus]`) — same length and
+order always, no spread/filter/ternary — and the effect body was reworked
+to reference only `readyProject?.repositoryProvider` (already a
+dependency), never the bare `readyProject` object, so `refreshGitHubStatus`
+could be added as a real, non-suppressed dependency (its own identity only
+changes exactly when `readyProject`/`isDevFallback`/`organization` do, so
+this adds no spurious re-runs). Second, and more seriously: the Supabase
+JWT was being passed as a plain, serializable `accessToken` argument to
+`loadGitHubConnectionStatusAction`/`disconnectGitHubProjectConnectionAction`
+— visible in Next.js's own dev-time Server Action logging/network
+payloads, i.e. a real token-exposure bug, not just a lint nitpick. Both
+actions' signatures dropped `accessToken` entirely (now just
+`{ projectId }`) and instead call a new `consumeBridgeSessionToken()`
+(`lib/server/github-repository-connection.ts`) that reads the same
+short-lived cookie mechanism `/connect`'s own bridge already uses — a
+deliberate reuse rather than a second authentication strategy — via
+`next/headers`'s `cookies()`, and clears it immediately, whether or not it
+was present. That cookie's path had to widen from
+`/api/integrations/github` (fine for a plain navigation to `/connect`) to
+`/` — a Server Action call originates from whatever page path the caller
+is on (e.g. `/projects/[slug]/settings`), which a narrower-scoped cookie
+would never reach — so the bridge cookie's own clearing logic in both
+Route Handlers was split out from the other five OAuth-flow cookies
+(state/verifier/projectId/organizationId/profileId, which correctly stay
+scoped to `/api/integrations/github`, only ever read by `/callback`). The
+token itself still never appears in a log, a Server Action argument, a
+response, a query param, or persisted React state — confirmed by a repo-
+wide grep of every file in this feature, not just asserted.
+
+## Ticket Detail → Development (real GitHub, read-only)
+
+Ticket Detail (`ticket-detail-screen.tsx`) gained a real **Development**
+section — branches, commits, and pull requests related to one ticket by
+its own real ticket code (e.g. "JIR-8") only, never by title, author name,
+or any other ambiguous text. This replaces (by name only — nothing else
+was reused) the old fully-mock "Development" module removed earlier in
+this app's history for having no real integration to back it; that
+removal's own reasoning is now resolved by the real GitHub OAuth
+connection built in the previous pass.
+
+**`lib/server/ticket-development-actions.ts`** (new Server Action,
+`loadTicketDevelopmentActivityAction`) is the only place this data is
+read. Same session-bridge pattern as the GitHub OAuth Server Actions (the
+JWT is never one of this action's own arguments — Next.js's dev-time
+Server Action logging would expose it — so `ticket-detail-screen.tsx`
+bridges its own already-verified session into the same short-lived cookie
+`project-settings-screen.tsx`'s own `bridgeGithubSession()` established,
+duplicated locally here as `bridgeGithubSessionForDevelopment()` rather
+than a shared client module). Authorization reuses real RLS rather than a
+second permission model: the project and ticket are both looked up with
+the *caller's own* Supabase client (anon key + their bearer token), so
+`projects_select`/`tickets_select`'s existing `can_view_project` policy
+decides what's visible — a row only ever comes back for a project/ticket
+this profile can genuinely view, and a ticket code is never trusted
+blindly (it's parsed the same "`<project_code>-<number>`" way
+`lib/tickets.ts`'s own `loadTicketByCode` does, then confirmed against a
+real `tickets` row in that exact project). Only once that's confirmed does
+anything escalate to the service-role client, and only to read
+`project_repository_connections` (no `authenticated` grant exists on it at
+all) and decrypt its token via the existing `decryptGitHubToken` — neither
+the OAuth migration, the crypto helper, nor Project Settings' own
+Repository Integration section were modified to build this.
+
+**Read-only GitHub queries**, exactly one request per type
+(`GET /repos/{owner}/{repo}/branches`, `/commits`, `/pulls?state=all`, each
+`per_page=100`, fetched in parallel) — never one request per result.
+Matching is case-insensitive substring matching against the ticket code
+only: branch **name**, commit **message**, PR **title**/**body**/**head
+branch** — nothing else. Results are capped (5 branches, 10 commits, 10
+PRs) and sorted (branches alphabetically, commits/PRs by date descending)
+after filtering. A 5-minute, server-process-local cache keyed by
+`projectId:ticketCode` (plus an in-flight-request dedupe map, same
+convention as the OAuth status check) means a focus-regain refresh or a
+second render within that window never re-calls GitHub — no polling, no
+Realtime, nothing persisted to Supabase (commits/PRs/branches are never
+stored, only read live and cached in memory).
+
+**The section either shows real data or doesn't exist at all** — there is
+no "connect GitHub" CTA inside a ticket (that stays exclusively in Project
+Settings), no "No development activity" empty state, and no visible error
+banner for an expired connection or a GitHub 401/403/404: every one of
+those cases collapses into the same `{ status: "hidden" }` result, and the
+component renders nothing (not even the section header) once that's known
+— a brief scoped skeleton (reusing the existing `SkeletonBlock` primitive,
+inside the section only, never blocking the rest of the page) shows only
+while that determination is still in flight. GitLab projects never show
+this section at all in this pass (no OAuth exists for GitLab). The DTO
+returned to the client is a small, explicit, hand-picked shape per item
+(e.g. a commit's short SHA/message/author/avatar/date/URL) — never a
+GitHub access token, the connection's ciphertext/IV/auth tag, OAuth
+scopes, or a raw GitHub API response.
+
+Visually, `Development` reuses the exact same `CollapsibleSection`
+wrapper/heading style every other Ticket Detail body section (Attachments,
+Time Tracking, Comments, Activity) already uses, positioned between
+Attachments and Time Tracking per this feature's own spec; every row is a
+single `target="_blank" rel="noopener noreferrer"` link out to the real
+GitHub page — no create-branch/create-PR/comment/merge/status-change
+affordance exists anywhere in it. Ticket Preview, Board, Reports, Activity
+Log, Notifications, and Project Overview were all deliberately left
+untouched — this is Ticket Detail only. Implemented and type/build-clean
+(`tsc`/`eslint`/`next build` all pass) — same "should work, not yet
+verified live" status as the GitHub OAuth connection itself; not
+interactively verified against a real connected repository in this
+environment.
+
+**Visual polish, one pass later** (presentation only — no change to the
+loading logic, the OAuth connection, GitHub queries, matching, caching,
+limits, sort order, DTOs, links, the skeleton, or the show/hide
+conditions, and `lib/server/ticket-development-actions.ts` was not
+touched at all): each of the three groups (Branches/Commits/Pull
+Requests) now shows its own small icon, name, and real count in
+parentheses (e.g. "Branches (1)") and is only rendered at all when it
+actually has items — `CollapsibleSection`'s own existing `· N items`
+header badge is unchanged and is still the only overall total, never
+duplicated per group. Rows lost their bordered/filled-card look in favor
+of a plain, compact hover row (no per-item boxes, no heavy borders, no
+large icons) — a git-branch/commit/pull-request icon set small enough to
+sit next to each group's own label, reused on branch rows themselves too.
+Commit and pull-request rows now follow an explicit two-line hierarchy
+(SHA/`#number` + message/title on the first line, avatar + author +
+relative date — plus, new, the PR's own head branch when present — on the
+second), and a branch name that doesn't fit no longer gets cut off with an
+ellipsis (`break-all` instead of `truncate`, matching the requirement that
+a long branch name may wrap across lines rather than lose information).
+Every row keeps a visible focus ring for keyboard navigation, decorative
+icons and avatars are `aria-hidden`/empty-`alt` (the adjacent visible text
+already says the same thing), and each row also carries an explicit
+`aria-label` describing its real destination. Collapse/expand behavior is
+unchanged — collapsing `Development` still hides every group at once,
+there is no independent per-group collapse. PR state colors were already
+drawn from the app's existing palette (emerald/slate/brand/red, the same
+badge convention used elsewhere) and Merged already took priority over
+Closed in `ticket-development-actions.ts`'s own `pullRequestDisplayState`
+before this pass — neither needed to change.
+
+**Real bug fixed, one pass later: commits on unmerged feature branches
+were never found.** `GET /repos/{owner}/{repo}/commits` with no `sha`
+parameter only ever returns the *default* branch's own history — a real
+commit whose message contained the ticket code (e.g. "JIR-8") but that
+only existed on an unmerged branch like `test/JIR-8-github-integration`
+was silently invisible, even though that same branch already correctly
+showed up in the Branches group. `ticket-development-actions.ts` now
+queries commits **per related branch** (`?sha={branchName}`, the exact
+same already-capped-at-5 branch list the Branches group displays — never
+a second, larger set) plus one additional query against the connection's
+own real `repository_default_branch` (read from
+`project_repository_connections`, never `"main"`/`"master"` assumed; if
+it's unset, that one query is simply skipped, related-branch commits
+still load), so a commit that's only ever existed on a feature branch —
+and one that's since been merged to the default branch — are both found.
+Every one of those parallel per-ref requests (`Promise.allSettled`, not
+`Promise.all`) is independently fault-tolerant: a branch deleted between
+the branches listing and this query (or any other single-ref failure)
+only drops that one ref's commits — it never hides Branches/Pull Requests
+or results already found from the other refs, matching this feature's own
+"no technical error inside a ticket" rule. Results are deduped by the
+commit's **full SHA** (never the short display SHA) before the existing
+sort-by-date-descending/cap-at-10 logic runs, so a commit that shows up on
+both its feature branch and, once merged, the default branch is still
+shown exactly once. The matching rule itself didn't change (ticket code
+only, case-insensitive, against `commit.message`), the 5-minute cache
+key is still `projectId:ticketCode` unchanged, and the DTO/UI were not
+touched — this was purely a server-side data-completeness fix.
+
+**Manual "Refresh," one pass later** — Development's header gained a
+discrete `Refresh` action (next to the collapse chevron, same
+`headerAction` slot/visual convention Attachments' "Upload Files" and
+Time Tracking's "Log Time" buttons already use) so a newly created
+branch/commit/PR doesn't have to wait out the existing 5-minute cache.
+`loadTicketDevelopmentActivityAction` gained one new, optional
+`forceRefresh` boolean (`lib/server/ticket-development-actions.ts`) that
+skips *only* the cache-read for that exact `projectId:ticketCode` key —
+the key itself is still always rebuilt server-side from the same real,
+already-validated `projectId`/`ticketCode` this action already used, so
+the client can never force-refresh an arbitrary key, and every
+authorization check (session/organization/project+ticket access/GitHub
+connection) still runs in full on every forced call, exactly as on a
+normal one. No polling, no Supabase Realtime, no webhooks, no periodic
+auto-refresh, and the 5-minute TTL/matching/OAuth flow are all otherwise
+unchanged. A forced check that comes back `hidden` (a transient GitHub
+hiccup) never overwrites an already-good cached `ready` snapshot for that
+key (`computeTicketDevelopmentActivity`'s own new check) — Refresh can
+only ever replace good data with *fresher* good data, never blank it out
+over one failed attempt; the button itself keeps existing Branches/
+Commits/Pull Requests on screen for the whole round trip (React state
+isn't touched until the new result actually arrives) and only shows a
+disabled state with the existing `animate-spin` convention (already used
+elsewhere in this same file) on its own small icon — never a full-section
+skeleton replacing real data, and never a technical error if the refresh
+itself fails. A ticket/project navigation while a refresh was still in
+flight resets the button's own disabled state so it can never get stuck.
+
+**Closing quality pass, one pass later** (presentation/readability only —
+no OAuth, cache TTL/matching, encryption, Project Settings, or migration
+changes, and `ticket-development-actions.ts` was not touched at all):
+
+- **Merge commits read as text again.** GitHub's own auto-generated merge
+  commit message ("Merge pull request #1 from owner/branch") is now shown
+  as "Merged "&lt;PR title&gt;"" when that PR's title is already available
+  from the *same* Development load (a `Map` built from the already-fetched
+  `pullRequests`, never a second GitHub request). **Corrected, one pass
+  later**: if no matching PR is found, the original GitHub message is left
+  exactly as-is — the earlier "Merged Pull Request #N" placeholder text was
+  removed, since fabricating a stand-in label wasn't actually asked for.
+  Purely a display transform either way — the real commit message, SHA,
+  and URL are all untouched; a normal (non-merge) commit message renders
+  exactly as before.
+- **The Merged/Open/Draft/Closed badge now reuses `StatusBadge`'s own
+  pill shape** (`ticket-ui.tsx` — `inline-flex items-center px-2 py-0.5
+  rounded-md text-[11px] font-semibold`) instead of a bespoke one, with
+  `uppercase tracking-wide` kept on top so the on-screen text still reads
+  "MERGED"/"OPEN"/etc. exactly as before.
+- **The header counter is a real, pluralized summary** — "· 1 Branch · 3
+  Commits · 1 PR" (correct singular/plural per category, a category with
+  zero items simply omitted) instead of "· 5 items", still rendered in
+  `CollapsibleSection`'s existing single-line badge slot next to the
+  title — same header height as before, always visible whether collapsed
+  or not.
+- **A discreet GitHub mark** now sits directly before the "Development"
+  title text (`CollapsibleSection`'s `title` prop was widened from
+  `string` to `ReactNode` to allow this — a zero-behavior-change type
+  broadening; the other four sections that use it, Attachments/Time
+  Tracking/Comments/Activity, all still pass a plain string and render
+  identically). No asset was downloaded — it's one more small inline SVG,
+  matching the exact size/neutral color already used for Development's own
+  branch/commit/PR icons.
+- **Spacing between the three groups was tightened slightly**
+  (`space-y-4` → `space-y-3`) for a more compact block; row content,
+  padding, and the full-row single-`<a>` click target (already covering
+  the entire row, not just the visible text, for Branches/Commits/Pull
+  Requests alike) were confirmed unchanged. The short SHA display (never
+  the full SHA — the DTO doesn't even expose one) was likewise confirmed
+  unchanged, already consistent.
+
+## Ticket Detail → loading skeleton
+
+Replaced the plain "Loading ticket…" text state with a real,
+full-fidelity `TicketDetailSkeleton` (`ticket-detail-screen.tsx`, defined
+just above `TicketDetailScreen`), shown for both the initial page load and
+the already-existing automatic refresh on focus/tab-visibility regain —
+neither trigger changed; only what gets rendered while `loadState ===
+"loading"` did.
+
+- Mirrors the real layout exactly, using the same outer shell
+  (`max-w-5xl mx-auto px-6 sm:px-10 py-10`), the same
+  `article`/`aside` two-column split (`flex gap-12 items-start`,
+  `w-56 flex-shrink-0 sticky top-8`), `CollapsibleSection`'s own
+  `mt-10 pt-8 border-t` rhythm for each main-column placeholder
+  (Description, Attachments, Development, Time Tracking, Comments,
+  Activity, in that order), and `SidebarField`'s own `py-3.5 border-b
+  ... last:border-0` rhythm for each of the eight sidebar rows (Status,
+  Assignee, Type, Priority, Estimated, Due Date, Labels, Related
+  Tickets) — so there's no layout shift once the real ticket mounts.
+- Reuses the existing `SkeletonBlock` primitive (`dashboard-shared.tsx`)
+  throughout; no second skeleton primitive/library was introduced, and
+  `SkeletonBlock` itself was not modified.
+- `BackToTicketsButton` is kept real (not a placeholder) — it's cheap and
+  data-independent, and global navigation is never blocked while a
+  ticket is loading.
+- Development gets only a generic, compact placeholder (two plain
+  skeleton rows) — the real `DevelopmentSection` (and its own GitHub
+  fetch) is never mounted while this skeleton is showing, since it's
+  nested inside the same `loadState === "loading"` early return as
+  before.
+- Root container carries `aria-busy="true"`; every placeholder is a
+  plain, non-interactive `<div>` (no tabbable elements besides the real
+  `BackToTicketsButton`).
+- No new listeners, timers, or artificial delays were added —
+  `runFetchTicket` and its `useEffect` (including the existing
+  `organization`-reference-change trigger that already re-fires this on
+  focus regain) are untouched.
+- Scope: only `ticket-detail-screen.tsx` was touched. No change to
+  `ticket-development-actions.ts`, GitHub OAuth, Project Settings, or
+  any migration.
+
 ## Still mock
 
 - The rest of Settings (`/settings/*` — Danger Zone) still reads from
@@ -2426,8 +2917,7 @@ Planned future work:
 - Backend integration for the rest of Settings (everything else, including the Project Lead's own scoped Reports and Time Tracking views, is done — see Architecture Status; schema for Settings is designed in `docs/SUPABASE_MVP_SCHEMA.md` and applied via the migrations in `supabase/migrations/`, just not queried by the UI yet)
 - API layer
 - Real drag & drop (Kanban)
-- Real-time updates
-- Notifications
+- Real-time updates (including Supabase Realtime delivery for the now-real Notifications system, currently refresh-on-demand only)
 - File uploads
 - Unfuddle data import (spec complete — see `docs/UNFUDDLE_IMPORT_SPECIFICATION.md`; importer not yet built)
 

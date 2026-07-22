@@ -2,14 +2,22 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { CLIENT_NAMES } from "@/lib/mock-projects";
 import type { ProjectCategory, ProjectStatus } from "@/lib/mock-projects";
 import { statusMeta, ProjectCategoryBadge } from "@/components/status-badge";
 import { SettingGroup, SettingRow, TextField, NumberField, SelectField } from "@/components/settings-ui";
 import { useCurrentUser } from "@/components/current-user-provider";
 import { useOrganizationProjects } from "@/components/organization-projects-provider";
-import { loadProjectDetail, loadOrganizationClients, createOrganizationClient } from "@/lib/projects";
+import { useRefreshOnFocusAndVisibility } from "@/components/member-profile-modal";
+import { loadProjectDetail, loadOrganizationClients, createOrganizationClient, validateRepositoryUrl } from "@/lib/projects";
 import type { ProjectDetail, EditableProjectStatus, Client, RepositoryProvider } from "@/lib/projects";
+import { getSupabaseBrowserClient } from "@/lib/supabase-client";
+import {
+  loadGitHubConnectionStatusAction,
+  disconnectGitHubProjectConnectionAction,
+  type GitHubConnectionStatus,
+} from "@/lib/server/github-repository-connection-actions";
 import { ArchiveProjectModal } from "@/components/archive-project-modal";
 import { AddClientModal } from "@/components/add-client-modal";
 
@@ -83,31 +91,87 @@ const ADD_NEW_CLIENT = "__add_new_client__";
 
 // ── Repository Integration ──────────────────────────────────────────────────
 // No OAuth, no sync, no commit reads, no webhooks — just which provider (if
-// any) this project links to, and its URL. See lib/projects.ts's
-// RepositoryProvider/updateProjectSettings for the persisted side.
-const REPOSITORY_PROVIDER_OPTIONS: { value: RepositoryProvider; label: string }[] = [
-  { value: "none", label: "None" },
+// any) this project links to, and its URL. validateRepositoryUrl is the
+// same pure function lib/projects.ts's updateProjectSettings validates
+// with server-side — one implementation, never two that could drift.
+//
+// Native <select> options must be strings, but RepositoryProvider is
+// `"github" | "gitlab" | null` — "" is the sentinel for null/"None" here,
+// same convention the Client field's "Select a client" option already uses
+// two fields down.
+const REPOSITORY_PROVIDER_OPTIONS: { value: string; label: string }[] = [
+  { value: "", label: "None" },
   { value: "github", label: "GitHub" },
   { value: "gitlab", label: "GitLab" },
 ];
 
-const GITHUB_REPO_URL_RE = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/?$/;
-const GITLAB_REPO_URL_RE = /^https:\/\/gitlab\.com\/[\w.-]+\/[\w.-]+\/?$/;
-
-// Format-only — never connects, never calls an API. Provider = "none" has
-// nothing to validate (Repository URL is hidden entirely in that case).
-function validateRepositoryUrl(provider: RepositoryProvider, url: string): string | null {
-  if (provider === "none") return null;
-  const trimmed = url.trim();
-  if (!trimmed) return "Repository URL is required.";
-  if (provider === "github" && !GITHUB_REPO_URL_RE.test(trimmed)) {
-    return "Enter a valid GitHub repository URL, e.g. https://github.com/owner/repository";
-  }
-  if (provider === "gitlab" && !GITLAB_REPO_URL_RE.test(trimmed)) {
-    return "Enter a valid GitLab repository URL, e.g. https://gitlab.com/group/project";
-  }
-  return null;
+function repositoryProviderFromSelectValue(value: string): RepositoryProvider | null {
+  return value === "github" || value === "gitlab" ? value : null;
 }
+
+// ── GitHub OAuth session bridge ─────────────────────────────────────────────
+// This app's Supabase session lives in the browser's own localStorage (see
+// lib/supabase-client.ts), not a cookie — so neither a plain top-level
+// navigation to a Route Handler nor a Server Action call (whose own
+// arguments are visible in Next.js's dev-time Server Action logging/network
+// payloads — the access token must never be one of them) carries proof of
+// identity on its own. This bridges the already-verified session token into
+// a short-lived (30s) cookie right before each such call; the server side
+// (consumeBridgeSessionToken() in lib/server/github-repository-connection.ts)
+// reads it once and clears it immediately. One mechanism, reused by Connect/
+// Reconnect's navigation and by the status/Disconnect Server Actions below
+// — never a second authentication strategy. Name must match
+// OAUTH_COOKIE_NAMES.bridge exactly; path is "/" (not scoped to
+// /api/integrations/github) since a Server Action call originates from
+// whatever page path the caller is currently on, not that route.
+async function bridgeGithubSession(): Promise<boolean> {
+  const supabase = getSupabaseBrowserClient();
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  if (!session) return false; // no real session to bridge — nothing to do
+
+  const isSecureContext = window.location.protocol === "https:";
+  document.cookie = [
+    `jirita_gh_bridge=${encodeURIComponent(session.access_token)}`,
+    "Path=/",
+    "Max-Age=30",
+    "SameSite=Lax",
+    isSecureContext ? "Secure" : "",
+  ]
+    .filter(Boolean)
+    .join("; ");
+  return true;
+}
+
+// Never a popup, never window.open — window.location.href is a normal
+// top-level navigation. The actual OAuth logic (state/PKCE/redirect
+// construction) is never started here; it all happens server-side in
+// /api/integrations/github/connect once it verifies the bridged session.
+async function startGithubConnect(projectId: string): Promise<void> {
+  const bridged = await bridgeGithubSession();
+  if (!bridged) return;
+  window.location.href = `/api/integrations/github/connect?projectId=${encodeURIComponent(projectId)}`;
+}
+
+// Safe, short copy for the small set of reason codes the connect/callback
+// routes can redirect back with — never the raw GitHub error/response body.
+const GITHUB_INTEGRATION_ERROR_MESSAGES: Record<string, string> = {
+  not_authorized: "You don't have permission to connect GitHub for this project.",
+  not_found: "Project not found.",
+  not_configured: "GitHub integration isn't configured on this server.",
+  session_expired: "Your session expired before the connection could complete. Please try again.",
+  provider_mismatch: "Repository Provider must be GitHub with a valid saved URL before connecting.",
+  state_mismatch: "The connection request couldn't be verified. Please try again.",
+  cancelled: "GitHub authorization was cancelled.",
+  invalid_authorization: "GitHub rejected the authorization. Please try again.",
+  forbidden: "GitHub access is restricted for this account or repository.",
+  repo_not_found: "The configured repository couldn't be found or isn't accessible.",
+  repo_mismatch: "The authorized GitHub account doesn't have access to the configured repository.",
+  insufficient_scope: "The GitHub authorization doesn't grant read access to this repository.",
+  network_error: "Couldn't reach GitHub. Please try again.",
+  github_error: "GitHub returned an unexpected error. Please try again.",
+};
 
 // Dev-only fallback roster (no real organization to query `clients` from)
 // — seeded from the same placeholder names the Client selector always used
@@ -128,6 +192,8 @@ function toDetail(project: ProjectDetail | null): DetailState {
 export function ProjectSettingsScreen({ slug }: { slug: string }) {
   const { organization, isDevFallback } = useCurrentUser();
   const { projects: sharedProjects, updateProjectSettings, restoreProject } = useOrganizationProjects();
+  const router = useRouter();
+  const searchParams = useSearchParams();
 
   // Dev-only fallback: derived synchronously from the already-reactive mock
   // list (no fetch involved) — never reached once a real organization
@@ -139,11 +205,16 @@ export function ProjectSettingsScreen({ slug }: { slug: string }) {
         return mock
           ? {
               ...mock,
+              // Dev fallback never calls a real Server Action/API route (no
+              // real organization to authorize against), so this never
+              // needs to resolve to an actual projects.id row — only used
+              // as a stable, non-empty placeholder.
+              id: `dev-${mock.slug}`,
               ownerProfileId: null,
               createdAt: "—",
               createdAtISO: new Date(0).toISOString(),
               targetDateISO: null,
-              repositoryProvider: "none",
+              repositoryProvider: null,
               repositoryUrl: null,
             }
           : null;
@@ -167,10 +238,20 @@ export function ProjectSettingsScreen({ slug }: { slug: string }) {
   // string when unset, same "no value" convention as Description/Client
   // above.
   const [targetDate, setTargetDate] = useState(initialDevProject?.targetDateISO ?? "");
-  const [repositoryProvider, setRepositoryProvider] = useState<RepositoryProvider>(
-    initialDevProject?.repositoryProvider ?? "none"
+  const [repositoryProvider, setRepositoryProvider] = useState<RepositoryProvider | null>(
+    initialDevProject?.repositoryProvider ?? null
   );
   const [repositoryUrl, setRepositoryUrl] = useState(initialDevProject?.repositoryUrl ?? "");
+
+  // Real GitHub OAuth connection status — "loading" only while the very
+  // first check for this project is in flight; never shown as "connected"
+  // from stale local data (see refreshGithubStatus below, which always
+  // re-derives from the real Server Action result). Only ever fetched when
+  // repositoryProvider is actually "github" — GitLab has no OAuth in this
+  // feature at all.
+  const [githubStatus, setGithubStatus] = useState<GitHubConnectionStatus | "loading">("loading");
+  const [disconnectingGithub, setDisconnectingGithub] = useState(false);
+  const githubStatusRequestIdRef = useRef(0);
 
   const [showArchiveModal, setShowArchiveModal] = useState(false);
   const [showAddClientModal, setShowAddClientModal] = useState(false);
@@ -178,6 +259,19 @@ export function ProjectSettingsScreen({ slug }: { slug: string }) {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+
+  // The connect/callback API routes redirect back with ?integration=
+  // connected|error&reason=... — a transient banner only, cleared from the
+  // URL right after being read so a refresh/back-navigation never re-shows
+  // a stale result.
+  const integrationResult = searchParams.get("integration");
+  const integrationErrorReason = searchParams.get("reason");
+
+  useEffect(() => {
+    if (!integrationResult) return;
+    router.replace(`/projects/${slug}/settings`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: only strip the query params once, on whichever render first sees them; re-running on every router/slug identity change would fight the very replace() this effect performs
+  }, [integrationResult]);
 
   const requestIdRef = useRef(0);
 
@@ -236,12 +330,13 @@ export function ProjectSettingsScreen({ slug }: { slug: string }) {
       if (mock) {
         const updated: ProjectDetail = {
           ...mock,
+          id: `dev-${mock.slug}`,
           ownerProfileId: null,
           createdAt: "—",
           createdAtISO: new Date(0).toISOString(),
           targetDateISO: targetDate || null,
           repositoryProvider,
-          repositoryUrl: repositoryProvider === "none" ? null : repositoryUrl.trim() || null,
+          repositoryUrl: repositoryProvider === null ? null : repositoryUrl.trim() || null,
         };
         setDetail({ status: "ready", project: updated });
         applyProject(updated);
@@ -250,6 +345,73 @@ export function ProjectSettingsScreen({ slug }: { slug: string }) {
     }
     runFetch();
   }, [isDevFallback, sharedProjects, slug, runFetch, applyProject, targetDate, repositoryProvider, repositoryUrl]);
+
+  // Plain const, not a hook — safe to read before the early-return checks
+  // below, so refreshGithubStatus/the effects that follow can depend on the
+  // real, loaded project without ever calling a hook conditionally.
+  const readyProject = detail.status === "ready" ? detail.project : null;
+
+  // Real GitHub connection check — only ever runs when this project's
+  // persisted provider is actually "github" (GitLab has no OAuth here).
+  // loadGitHubConnectionStatusAction itself enforces the "15 minutes"
+  // cache/dedup rule server-side, so calling this on mount/focus-regain is
+  // safe and never turns into polling.
+  const refreshGithubStatus = useCallback(() => {
+    if (isDevFallback || !organization || !readyProject || readyProject.repositoryProvider !== "github") {
+      setGithubStatus({ state: "not-connected" });
+      return;
+    }
+    const projectId = readyProject.id;
+    const requestId = ++githubStatusRequestIdRef.current;
+    // Bridges the session into a short-lived cookie instead of passing the
+    // access token as a Server Action argument (see bridgeGithubSession's
+    // own comment above) — the token is never part of a serializable
+    // argument, response, log, or persisted React state.
+    bridgeGithubSession().then((bridged) => {
+      if (!bridged || githubStatusRequestIdRef.current !== requestId) return;
+      loadGitHubConnectionStatusAction({ projectId }).then((result) => {
+        if (githubStatusRequestIdRef.current !== requestId) return;
+        setGithubStatus(result);
+      });
+    });
+  }, [isDevFallback, organization, readyProject]);
+
+  // Real check whenever the project itself, its provider, or its URL
+  // actually changes — never on every render, never polling. The URL has
+  // to be a dependency too: keeping Provider on "github" but changing the
+  // URL still invalidates the old connection (the DB trigger in
+  // 20260821000000_add_project_repository_connections.sql deletes it), so
+  // a same-provider URL edit has to re-check just as much as a provider
+  // change does — the persisted repositoryProvider alone wouldn't catch it.
+  //
+  // The dependency array is a fixed, statically-written 4-tuple — same
+  // length and order on every render, never a spread/filter/ternary that
+  // could add or remove an entry (React requires the array's size to stay
+  // identical across renders; letting it vary is what previously triggered
+  // "The final argument passed to useEffect changed size between renders").
+  // refreshGithubStatus is included for real, not suppressed — its own
+  // identity already only changes when readyProject (or isDevFallback/
+  // organization) does, so including it here doesn't add any spurious
+  // re-runs beyond what those already-necessary dependencies cause.
+  useEffect(() => {
+    // Reads only readyProject?.repositoryProvider (already a dependency
+    // below), never the bare readyProject object itself — undefined !==
+    // "github" is true, so a null project still correctly falls into this
+    // branch without a separate !readyProject check.
+    if (readyProject?.repositoryProvider !== "github") {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: resets to the real baseline whenever this effect's own dependencies say the project genuinely isn't (or is no longer) github-connected — the same "reset triggered by a real dependency change" pattern this file's other effects already use
+      setGithubStatus({ state: "not-connected" });
+      return;
+    }
+    setGithubStatus("loading");
+    refreshGithubStatus();
+  }, [readyProject?.id, readyProject?.repositoryProvider, readyProject?.repositoryUrl, refreshGithubStatus]);
+
+  // Real refresh on window focus / tab-visibility regain — same shared
+  // hook the Member Profile Modal/Users list already use. The 15-minute
+  // cache lives inside the Server Action itself, so this can never turn
+  // into polling or hammer GitHub on every tab switch.
+  useRefreshOnFocusAndVisibility(refreshGithubStatus);
 
   if (detail.status === "loading") {
     return (
@@ -298,7 +460,7 @@ export function ProjectSettingsScreen({ slug }: { slug: string }) {
       category,
       targetDate: targetDate || null,
       repositoryProvider,
-      repositoryUrl: repositoryProvider === "none" ? null : repositoryUrl.trim(),
+      repositoryUrl: repositoryProvider === null ? null : repositoryUrl.trim(),
       ...(isClient ? { client: client || null, defaultHourlyRate: billingRate } : {}),
     });
 
@@ -317,6 +479,29 @@ export function ProjectSettingsScreen({ slug }: { slug: string }) {
     await restoreProject(project.slug);
     setRestoring(false);
     refreshAfterSave();
+  }
+
+  // Removes only the local OAuth connection (project_repository_connections)
+  // — repository_provider/repository_url are untouched, and GitHub's own
+  // OAuth App authorization is never revoked. Disabled while in flight to
+  // avoid a duplicate submit.
+  async function handleDisconnectGithub() {
+    if (disconnectingGithub || isDevFallback) return;
+    setDisconnectingGithub(true);
+    // Same session bridge as Connect/status — never the access token as a
+    // Server Action argument.
+    const bridged = await bridgeGithubSession();
+    if (!bridged) {
+      setDisconnectingGithub(false);
+      return;
+    }
+    const result = await disconnectGitHubProjectConnectionAction({ projectId: project.id });
+    setDisconnectingGithub(false);
+    if (result.status === "error") {
+      setSaveError(result.message);
+      return;
+    }
+    setGithubStatus({ state: "not-connected" });
   }
 
   // Creates the client immediately in Supabase (or, in dev fallback, a
@@ -453,12 +638,19 @@ export function ProjectSettingsScreen({ slug }: { slug: string }) {
         <SettingGroup title="Repository Integration">
           <SettingRow label="Repository Provider">
             <SelectField
-              value={repositoryProvider}
-              onChange={(next) => setRepositoryProvider(next as RepositoryProvider)}
+              value={repositoryProvider ?? ""}
+              onChange={(next) => {
+                const provider = repositoryProviderFromSelectValue(next);
+                setRepositoryProvider(provider);
+                // Selecting None clears the local URL draft immediately,
+                // not just at Save — it never lingers hidden behind the
+                // Select once the field it belongs to disappears.
+                if (provider === null) setRepositoryUrl("");
+              }}
               options={REPOSITORY_PROVIDER_OPTIONS}
             />
           </SettingRow>
-          {repositoryProvider !== "none" && (
+          {repositoryProvider !== null && (
             <SettingRow
               label="Repository URL"
               hint={
@@ -471,30 +663,139 @@ export function ProjectSettingsScreen({ slug }: { slug: string }) {
             </SettingRow>
           )}
 
-          <div className="py-3.5 flex items-center justify-between gap-4">
-            <div className="flex items-center gap-1.5">
-              <span
-                className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
-                  project.repositoryProvider !== "none" ? "bg-emerald-500" : "bg-slate-300 dark:bg-zinc-600"
-                }`}
-              />
-              <p className="text-[12px] font-semibold text-slate-600 dark:text-zinc-400">
-                {project.repositoryProvider === "none"
-                  ? "Not connected"
-                  : `${project.repositoryProvider === "github" ? "GitHub" : "GitLab"} connected`}
-              </p>
+          {integrationResult && (
+            <div
+              className={`mb-3.5 mt-1 text-[12px] font-medium rounded-lg px-3 py-2 ${
+                integrationResult === "connected"
+                  ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400"
+                  : "bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-400"
+              }`}
+            >
+              {integrationResult === "connected"
+                ? "GitHub connected successfully."
+                : GITHUB_INTEGRATION_ERROR_MESSAGES[integrationErrorReason ?? ""] ??
+                  "Something went wrong connecting GitHub."}
             </div>
-            {project.repositoryProvider !== "none" && project.repositoryUrl && (
-              <a
-                href={project.repositoryUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex-shrink-0 text-[13px] font-medium text-brand-600 dark:text-brand-400 border border-brand-200 dark:border-brand-500/30 px-3 py-1.5 rounded-lg hover:bg-brand-50 dark:hover:bg-brand-500/5 transition-colors"
-              >
-                Open Repository
-              </a>
-            )}
-          </div>
+          )}
+
+          {/* Not connected at all — the "Not connected" baseline for None,
+              and for a provider that's configured but never checked
+              (GitLab, which has no OAuth here at all). */}
+          {project.repositoryProvider === null && (
+            <div className="py-3.5 flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full flex-shrink-0 bg-slate-300 dark:bg-zinc-600" />
+              <p className="text-[12px] font-semibold text-slate-600 dark:text-zinc-400">Not connected</p>
+            </div>
+          )}
+
+          {/* GitLab: link-only, on purpose — no OAuth exists for GitLab in
+              this feature, so it can never claim to be "connected". */}
+          {project.repositoryProvider === "gitlab" && (
+            <div className="py-3.5 flex items-center justify-between gap-4">
+              <div className="flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full flex-shrink-0 bg-emerald-500" />
+                <p className="text-[12px] font-semibold text-slate-600 dark:text-zinc-400">Repository configured</p>
+              </div>
+              {project.repositoryUrl && (
+                <a
+                  href={project.repositoryUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex-shrink-0 text-[13px] font-medium text-brand-600 dark:text-brand-400 border border-brand-200 dark:border-brand-500/30 px-3 py-1.5 rounded-lg hover:bg-brand-50 dark:hover:bg-brand-500/5 transition-colors"
+                >
+                  Open Repository
+                </a>
+              )}
+            </div>
+          )}
+
+          {/* GitHub: real OAuth status — never inferred from provider+URL
+              alone. Only a verified project_repository_connections row
+              (via loadGitHubConnectionStatusAction) ever shows "GitHub
+              connected". */}
+          {project.repositoryProvider === "github" && (
+            <div className="py-3.5">
+              {githubStatus === "loading" && (
+                <p className="text-[12px] text-slate-400 dark:text-zinc-500">Checking GitHub connection…</p>
+              )}
+
+              {githubStatus !== "loading" && githubStatus.state === "connected" && (
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full flex-shrink-0 bg-emerald-500" />
+                      <p className="text-[12px] font-semibold text-slate-600 dark:text-zinc-400">GitHub connected</p>
+                    </div>
+                    <p className="text-[11px] text-slate-400 dark:text-zinc-600 mt-0.5">
+                      Connected as @{githubStatus.username} · {githubStatus.repositoryFullName}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <a
+                      href={githubStatus.repositoryHtmlUrl ?? project.repositoryUrl ?? undefined}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[13px] font-medium text-brand-600 dark:text-brand-400 border border-brand-200 dark:border-brand-500/30 px-3 py-1.5 rounded-lg hover:bg-brand-50 dark:hover:bg-brand-500/5 transition-colors"
+                    >
+                      Open Repository
+                    </a>
+                    <button
+                      type="button"
+                      onClick={handleDisconnectGithub}
+                      disabled={disconnectingGithub}
+                      className="text-[13px] font-medium text-slate-500 dark:text-zinc-400 border border-slate-200 dark:border-zinc-700 px-3 py-1.5 rounded-lg hover:bg-slate-50 dark:hover:bg-zinc-800/50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                    >
+                      {disconnectingGithub ? "Disconnecting…" : "Disconnect"}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {githubStatus !== "loading" && githubStatus.state === "needs-reconnect" && (
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full flex-shrink-0 bg-amber-500" />
+                    <p className="text-[12px] font-semibold text-slate-600 dark:text-zinc-400">Connection expired</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => startGithubConnect(project.id)}
+                    className="flex-shrink-0 text-[13px] font-medium text-white bg-brand-600 hover:bg-brand-700 px-3 py-1.5 rounded-lg shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-500 dark:hover:bg-brand-600"
+                  >
+                    Reconnect GitHub
+                  </button>
+                </div>
+              )}
+
+              {githubStatus !== "loading" && (githubStatus.state === "not-connected" || githubStatus.state === "error") && (
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full flex-shrink-0 bg-slate-300 dark:bg-zinc-600" />
+                    <p className="text-[12px] font-semibold text-slate-600 dark:text-zinc-400">Repository configured</p>
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => startGithubConnect(project.id)}
+                      className="text-[13px] font-medium text-white bg-brand-600 hover:bg-brand-700 px-3 py-1.5 rounded-lg shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-500 dark:hover:bg-brand-600"
+                    >
+                      Connect GitHub
+                    </button>
+                    {project.repositoryUrl && (
+                      <a
+                        href={project.repositoryUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-[13px] font-medium text-brand-600 dark:text-brand-400 border border-brand-200 dark:border-brand-500/30 px-3 py-1.5 rounded-lg hover:bg-brand-50 dark:hover:bg-brand-500/5 transition-colors"
+                      >
+                        Open Repository
+                      </a>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </SettingGroup>
 
         <div className="flex items-center gap-3 mt-2 mb-6">
