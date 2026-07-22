@@ -47,6 +47,7 @@ import {
   loadTicketRelations,
   createTicketRelation,
   deleteTicketRelation,
+  formatRelativeTime,
   type TicketComment,
   type TicketActivityEvent,
   type UpdateTicketInput,
@@ -56,11 +57,18 @@ import {
   type RelatedTicket,
   type TicketRelationKind,
 } from "@/lib/tickets";
-import { loadProjectTeam, type OrgMember } from "@/lib/projects";
+import { loadProjectTeam, loadProjectDetail, type OrgMember } from "@/lib/projects";
 import { FALLBACK_AVATAR } from "@/lib/current-user";
 import { MemberTrigger } from "@/components/member-profile";
 import { useCurrentUser } from "@/components/current-user-provider";
 import { useOrganizationProjects } from "@/components/organization-projects-provider";
+import { getSupabaseBrowserClient } from "@/lib/supabase-client";
+import { SkeletonBlock } from "@/components/dashboard-shared";
+import {
+  loadTicketDevelopmentActivityAction,
+  type TicketDevelopmentResult,
+  type DevelopmentPullRequestState,
+} from "@/lib/server/ticket-development-actions";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -1062,7 +1070,10 @@ function CollapsibleSection({
   forceOpenSignal,
   children,
 }: {
-  title: string;
+  // ReactNode (not just string) so Development can prefix its own title
+  // with a small icon — every existing caller keeps passing a plain
+  // string, which renders exactly as it always has.
+  title: ReactNode;
   badge?: string;
   headerAction?: ReactNode;
   defaultOpen?: boolean;
@@ -1871,10 +1882,437 @@ function AttachmentsSection({
   );
 }
 
-// No real GitHub/Development integration exists (see "No implementar:
-// GitHub integration") — the Development section (Pull Requests, Branches,
-// Recent Commits) is removed entirely rather than shown empty, since there
-// is no "connect a real integration" affordance to fall back to either.
+// ── Development (real GitHub, read-only) ────────────────────────────────────
+// Real branches/commits/pull requests related to this ticket by its own
+// real code (e.g. "JIR-8") — never by title, author name, or any other
+// ambiguous text. See lib/server/ticket-development-actions.ts for the
+// actual query/matching/cache logic. Only ever shown once that Server
+// Action confirms the project's real, persisted repository_provider is
+// "github", a verified OAuth connection exists, and at least one real
+// match was found — every other case (no connection, needs-reconnect,
+// GitHub error, no matches, no access) renders nothing at all: no CTA, no
+// empty state, no technical error inside the ticket. Project Settings'
+// own Repository Integration section remains the only place the
+// connection itself is configured/connected/disconnected — this is
+// read-only display, nothing here can create a branch/PR, comment, merge,
+// or otherwise write back to GitHub.
+
+const PR_STATE_LABEL: Record<DevelopmentPullRequestState, string> = {
+  open: "Open",
+  draft: "Draft",
+  merged: "Merged",
+  closed: "Closed",
+};
+
+// Same pill shape as StatusBadge (ticket-ui.tsx) — inline-flex, px-2 py-0.5,
+// rounded-md, text-[11px] font-semibold — reused rather than a new badge
+// design; only uppercase/tracking-wide is added on top, to keep the actual
+// on-screen text as "MERGED"/"OPEN"/etc.
+const PR_STATE_BADGE_CLASS: Record<DevelopmentPullRequestState, string> = {
+  open: "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400",
+  draft: "bg-slate-100 text-slate-500 dark:bg-zinc-800 dark:text-zinc-400",
+  merged: "bg-brand-50 text-brand-700 dark:bg-brand-500/10 dark:text-brand-400",
+  closed: "bg-red-50 text-red-600 dark:bg-red-500/10 dark:text-red-400",
+};
+
+// Light — a hover tint and a visible focus ring, never a bordered/filled
+// card per row (this is a compact, scannable list, not a set of tiles).
+const DEVELOPMENT_ROW_CLASS =
+  "flex items-center gap-2.5 px-2 py-1.5 rounded-md transition-colors hover:bg-slate-50 dark:hover:bg-zinc-800/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-500/50";
+
+// Small, coherent icon set for the three group headers — plain outline
+// strokes matching every other icon already used in this file (e.g. the
+// chevron in CollapsibleSection), never a colorful/branded glyph. Purely
+// decorative (the adjacent text already names the group), so aria-hidden.
+function DevelopmentBranchIcon({ className }: { className: string }) {
+  return (
+    <svg className={className} fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M6 3v12M18 9a3 3 0 100-6 3 3 0 000 6zm0 0a9 9 0 01-9 9M6 21a3 3 0 100-6 3 3 0 000 6z" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function DevelopmentCommitIcon({ className }: { className: string }) {
+  return (
+    <svg className={className} fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="12" r="3" />
+      <path d="M3 12h6M15 12h6" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function DevelopmentPullRequestIcon({ className }: { className: string }) {
+  return (
+    <svg className={className} fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="6" cy="6" r="2" />
+      <circle cx="6" cy="18" r="2" />
+      <circle cx="18" cy="6" r="2" />
+      <path d="M6 8v8M18 8a6 6 0 01-6 6h-2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+// Discreet GitHub mark next to the section title — same small size/neutral
+// color as the rest of Development's own icon set (branch/commit/PR
+// above), never a colorful/branded rendering. Inline SVG, no asset
+// download; no other GitHub glyph exists elsewhere in the live codebase to
+// import instead (the old Settings → Integrations mock section, the only
+// prior place one existed, was removed outright in an earlier pass).
+function DevelopmentGithubIcon({ className }: { className: string }) {
+  return (
+    <svg className={className} fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 0C5.373 0 0 5.373 0 12c0 5.303 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.727-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.117 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576C20.565 21.796 24 17.3 24 12c0-6.627-5.373-12-12-12z" />
+    </svg>
+  );
+}
+
+// GitHub's own auto-generated merge commit message ("Merge pull request #1
+// from owner/branch") is meaningless noise in a compact list — shown here
+// as "Merged "<PR title>"" when that PR's title is already available from
+// this same Development load (a Map built from the already-fetched
+// pullRequests, never a second GitHub request just to look it up). If no
+// matching PR is found, the original message is left exactly as GitHub
+// wrote it — never a fabricated "Merged Pull Request #N" stand-in. Purely
+// a display transform either way: the real commit message/SHA/URL are
+// never altered, only what's rendered.
+const MERGE_COMMIT_RE = /^Merge pull request #(\d+) from \S+/;
+
+function developmentCommitDisplayMessage(rawMessage: string, prTitleByNumber: Map<number, string>): string {
+  const message = firstLine(rawMessage);
+  const match = message.match(MERGE_COMMIT_RE);
+  if (!match) return message;
+  const prNumber = Number(match[1]);
+  const title = prTitleByNumber.get(prNumber);
+  return title ? `Merged "${title}"` : message;
+}
+
+// "1 Branch · 3 Commits · 1 PR" — real counts only, correct singular/
+// plural, categories with zero items simply omitted. Stays on the same
+// single line as the "Development" title (CollapsibleSection's existing
+// badge slot, always visible whether collapsed or not), never a second
+// line that would grow the header's own height.
+function developmentSummaryBadge(branchCount: number, commitCount: number, pullRequestCount: number): string | undefined {
+  const parts = [
+    branchCount > 0 ? `${branchCount} ${branchCount === 1 ? "Branch" : "Branches"}` : null,
+    commitCount > 0 ? `${commitCount} ${commitCount === 1 ? "Commit" : "Commits"}` : null,
+    pullRequestCount > 0 ? `${pullRequestCount} ${pullRequestCount === 1 ? "PR" : "PRs"}` : null,
+  ].filter((part): part is string => part !== null);
+  return parts.length > 0 ? `· ${parts.join(" · ")}` : undefined;
+}
+
+// Same title shown whether the section is still loading or ready — never
+// changes the visible text "Development", just prefixes the discreet
+// GitHub mark next to it.
+const DEVELOPMENT_TITLE = (
+  <span className="inline-flex items-center gap-1.5">
+    <DevelopmentGithubIcon className="w-3.5 h-3.5 text-slate-400 dark:text-zinc-500" />
+    Development
+  </span>
+);
+
+// One group header shape shared by Branches/Commits/Pull Requests — icon +
+// name + real count in parentheses (e.g. "Branches (1)"), never a second,
+// redundant total alongside CollapsibleSection's own existing header badge.
+function developmentGroupHeader(icon: ReactNode, text: string, count: number) {
+  return (
+    <div className="flex items-center gap-1.5 mb-1">
+      {icon}
+      <p className="text-[11px] font-semibold text-slate-500 dark:text-zinc-400">
+        {text} <span className="font-normal text-slate-400 dark:text-zinc-600">({count})</span>
+      </p>
+    </div>
+  );
+}
+
+// First line only — a multi-line commit message shouldn't blow up a single
+// compact row; the rest is still one click away on GitHub itself.
+function firstLine(message: string): string {
+  return message.split("\n")[0] || message;
+}
+
+// Same session-bridge mechanism project-settings-screen.tsx's own
+// bridgeGithubSession() already established for the exact same reason: a
+// Server Action's own arguments are visible in Next.js's dev-time Server
+// Action logging, so the Supabase JWT must never be one of them. Reused
+// here (same cookie name/path/lifetime) rather than a second
+// authentication strategy; duplicated locally rather than extracted into a
+// new shared client module, matching this app's existing convention of
+// keeping each screen's own small helpers local.
+async function bridgeGithubSessionForDevelopment(): Promise<boolean> {
+  const supabase = getSupabaseBrowserClient();
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  if (!session) return false;
+
+  const isSecureContext = window.location.protocol === "https:";
+  document.cookie = [
+    `jirita_gh_bridge=${encodeURIComponent(session.access_token)}`,
+    "Path=/",
+    "Max-Age=30",
+    "SameSite=Lax",
+    isSecureContext ? "Secure" : "",
+  ]
+    .filter(Boolean)
+    .join("; ");
+  return true;
+}
+
+type DevelopmentState = "loading" | TicketDevelopmentResult;
+
+function DevelopmentSection({ slug, ticketCode }: { slug: string; ticketCode: string }) {
+  const { organization, isDevFallback } = useCurrentUser();
+  const [state, setState] = useState<DevelopmentState>("loading");
+  const [refreshing, setRefreshing] = useState(false);
+  const requestIdRef = useRef(0);
+  // The real project id resolved by the effect below — handleRefresh needs
+  // it too, but reads it from this ref rather than re-running
+  // loadProjectDetail itself, since nothing about the project identity
+  // changes between an automatic check and a manual Refresh.
+  const projectIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    // A ticket/project navigation always supersedes any refresh that was
+    // still in flight for the previous one — never leave the button stuck
+    // disabled for a project/ticket this effect has already moved on from.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: resets whenever this effect's own dependencies (ticket/project identity) genuinely change, same pattern used elsewhere in this app
+    setRefreshing(false);
+
+    // Dev fallback never has a real organization/project to resolve a
+    // GitHub connection against — no mock Development data is ever shown.
+    if (isDevFallback || !organization) {
+      projectIdRef.current = null;
+      setState({ status: "hidden" });
+      return;
+    }
+
+    const requestId = ++requestIdRef.current;
+    setState("loading");
+
+    // Real projects.id is required by the Server Action below (never
+    // resolved by slug/name/position) — loadProjectDetail is the same
+    // already-real loader Project Settings itself uses, reused here rather
+    // than a second project-lookup implementation.
+    loadProjectDetail(organization.id, slug).then((projectResult) => {
+      if (requestIdRef.current !== requestId) return;
+
+      if (projectResult.status !== "ready" || projectResult.project.repositoryProvider !== "github") {
+        // No GitHub provider configured at all (None or GitLab) — never a
+        // CTA to connect one here; that only ever lives in Project Settings.
+        projectIdRef.current = null;
+        setState({ status: "hidden" });
+        return;
+      }
+
+      const projectId = projectResult.project.id;
+      projectIdRef.current = projectId;
+      bridgeGithubSessionForDevelopment().then((bridged) => {
+        if (requestIdRef.current !== requestId) return;
+        if (!bridged) {
+          setState({ status: "hidden" });
+          return;
+        }
+        loadTicketDevelopmentActivityAction({ projectId, ticketCode }).then((result) => {
+          if (requestIdRef.current !== requestId) return;
+          setState(result);
+        });
+      });
+    });
+    // Re-checks whenever the ticket/project identity changes, and also on
+    // window-focus/tab-visibility regain (current-user-provider.tsx's own
+    // existing mechanism hands back a new `organization` reference then,
+    // the same trigger several other real screens already piggyback on) —
+    // never polling. The Server Action's own 5-minute cache means a regain
+    // this soon after the last real check is just a fast cache hit, not a
+    // fresh GitHub call.
+  }, [isDevFallback, organization, slug, ticketCode]);
+
+  // Manual "Refresh" — the only way to see new branches/commits/PRs before
+  // the 5-minute cache naturally expires, without polling or reloading the
+  // page. forceRefresh only ever touches this exact project+ticket's own
+  // cache entry (rebuilt server-side, never a client-supplied key) and
+  // never invalidates the OAuth connection, other tickets, or other
+  // projects. Existing data stays on screen for the whole round trip —
+  // state is only ever replaced once the new result actually arrives, and
+  // the Server Action itself keeps a still-good previous snapshot in place
+  // if this particular check comes back empty (see
+  // computeTicketDevelopmentActivity in ticket-development-actions.ts), so
+  // a transient GitHub error here can't blank out data that was already
+  // correctly on screen.
+  async function handleRefresh() {
+    if (refreshing || !projectIdRef.current) return;
+    const projectId = projectIdRef.current;
+    const requestId = ++requestIdRef.current;
+    setRefreshing(true);
+
+    const bridged = await bridgeGithubSessionForDevelopment();
+    if (requestIdRef.current !== requestId) return; // superseded meanwhile — a newer check already owns refreshing/state
+
+    if (!bridged) {
+      setRefreshing(false);
+      return; // no session to bridge — keep whatever is currently shown, let the user try again
+    }
+
+    const result = await loadTicketDevelopmentActivityAction({ projectId, ticketCode, forceRefresh: true });
+    if (requestIdRef.current !== requestId) return;
+    setRefreshing(false);
+    setState(result);
+  }
+
+  if (state === "loading") {
+    return (
+      <CollapsibleSection title={DEVELOPMENT_TITLE}>
+        <div className="space-y-2">
+          <SkeletonBlock className="h-9 w-full rounded-lg" />
+          <SkeletonBlock className="h-9 w-full rounded-lg" />
+        </div>
+      </CollapsibleSection>
+    );
+  }
+
+  if (state.status === "hidden") return null;
+
+  const { branches, commits, pullRequests } = state;
+  // PR titles already loaded in this same Development fetch — reused to
+  // make a GitHub merge commit's own auto-generated message readable,
+  // never a second GitHub request just to look one up.
+  const prTitleByNumber = new Map(pullRequests.map((pr) => [pr.number, pr.title]));
+
+  return (
+    <CollapsibleSection
+      title={DEVELOPMENT_TITLE}
+      badge={developmentSummaryBadge(branches.length, commits.length, pullRequests.length)}
+      headerAction={
+        <button
+          type="button"
+          onClick={handleRefresh}
+          disabled={refreshing}
+          className="flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-md bg-slate-100 dark:bg-zinc-800 text-slate-600 dark:text-zinc-300 hover:bg-slate-200 dark:hover:bg-zinc-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+        >
+          <svg
+            className={`w-3 h-3 ${refreshing ? "animate-spin" : ""}`}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+          >
+            <path
+              d="M4 4v5h5M20 20v-5h-5M4.5 9a8 8 0 0114.5-3M19.5 15a8 8 0 01-14.5 3"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+          Refresh
+        </button>
+      }
+    >
+      <div className="space-y-3">
+        {branches.length > 0 && (
+          <div>
+            {developmentGroupHeader(<DevelopmentBranchIcon className="w-3.5 h-3.5 text-slate-400 dark:text-zinc-500" />, "Branches", branches.length)}
+            <ul>
+              {branches.map((branch) => (
+                <li key={branch.name}>
+                  <a
+                    href={branch.htmlUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label={`Open branch ${branch.name} on GitHub`}
+                    className={DEVELOPMENT_ROW_CLASS}
+                  >
+                    <DevelopmentBranchIcon className="w-3.5 h-3.5 text-slate-400 dark:text-zinc-500 flex-shrink-0" />
+                    <span className="text-[13px] font-mono text-slate-700 dark:text-zinc-300 break-all">{branch.name}</span>
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {commits.length > 0 && (
+          <div>
+            {developmentGroupHeader(<DevelopmentCommitIcon className="w-3.5 h-3.5 text-slate-400 dark:text-zinc-500" />, "Commits", commits.length)}
+            <ul>
+              {commits.map((commit) => {
+                const displayMessage = developmentCommitDisplayMessage(commit.message, prTitleByNumber);
+                return (
+                <li key={commit.htmlUrl}>
+                  <a
+                    href={commit.htmlUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label={`Open commit ${commit.shaShort} on GitHub: ${displayMessage}`}
+                    className={DEVELOPMENT_ROW_CLASS}
+                  >
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[13px] text-slate-700 dark:text-zinc-300 truncate">
+                        <span className="font-mono text-slate-400 dark:text-zinc-500 mr-1.5">{commit.shaShort}</span>
+                        {displayMessage}
+                      </p>
+                      <p className="text-[11px] text-slate-400 dark:text-zinc-600 mt-0.5 flex items-center gap-1.5 flex-wrap">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={commit.authorAvatar ?? FALLBACK_AVATAR} alt="" className="w-3.5 h-3.5 rounded-full flex-shrink-0" />
+                        <span className="truncate">{commit.authorName}</span>
+                        <span aria-hidden="true">·</span>
+                        <span className="flex-shrink-0">{formatRelativeTime(commit.authoredAt)}</span>
+                      </p>
+                    </div>
+                  </a>
+                </li>
+                );
+              })}
+            </ul>
+          </div>
+        )}
+
+        {pullRequests.length > 0 && (
+          <div>
+            {developmentGroupHeader(<DevelopmentPullRequestIcon className="w-3.5 h-3.5 text-slate-400 dark:text-zinc-500" />, "Pull Requests", pullRequests.length)}
+            <ul>
+              {pullRequests.map((pr) => (
+                <li key={pr.number}>
+                  <a
+                    href={pr.htmlUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label={`Open pull request #${pr.number} on GitHub: ${pr.title}, ${PR_STATE_LABEL[pr.state]}`}
+                    className={DEVELOPMENT_ROW_CLASS}
+                  >
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[13px] text-slate-700 dark:text-zinc-300 truncate">
+                        <span className="font-mono text-slate-400 dark:text-zinc-500 mr-1.5">#{pr.number}</span>
+                        {pr.title}
+                      </p>
+                      <p className="text-[11px] text-slate-400 dark:text-zinc-600 mt-0.5 flex items-center gap-1.5 flex-wrap">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={pr.authorAvatar ?? FALLBACK_AVATAR} alt="" className="w-3.5 h-3.5 rounded-full flex-shrink-0" />
+                        <span className="truncate">{pr.authorName}</span>
+                        <span aria-hidden="true">·</span>
+                        <span className="flex-shrink-0">{formatRelativeTime(pr.updatedAt)}</span>
+                        {pr.headBranch && (
+                          <>
+                            <span aria-hidden="true">·</span>
+                            <span className="font-mono truncate">{pr.headBranch}</span>
+                          </>
+                        )}
+                      </p>
+                    </div>
+                    <span
+                      className={`inline-flex items-center flex-shrink-0 px-2 py-0.5 rounded-md text-[11px] font-semibold uppercase tracking-wide ${PR_STATE_BADGE_CLASS[pr.state]}`}
+                    >
+                      {PR_STATE_LABEL[pr.state]}
+                    </span>
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+    </CollapsibleSection>
+  );
+}
 
 // ── Time Tracking ─────────────────────────────────────────────────────────────
 
@@ -2448,6 +2886,129 @@ export function TicketDetailBreadcrumb({ slug, ticketCode }: { slug: string; tic
   );
 }
 
+// ── Loading skeleton ─────────────────────────────────────────────────────────
+// Shown for the initial load and for the automatic refresh already
+// triggered on focus/tab-visibility regain (runFetchTicket's own
+// setLoadState("loading"), unchanged — this only replaces what was
+// rendered for that state, a plain "Loading ticket…" text, with a real,
+// full-fidelity skeleton). Mirrors the actual layout below exactly
+// (max-w-5xl/px-6 sm:px-10 py-10 outer shell, the article/aside flex-gap-12
+// two-column split, CollapsibleSection's own mt-10 pt-8 border-t rhythm,
+// and SidebarField's own py-3.5 border-b rows) so nothing shifts once the
+// real content mounts. Development gets only a light, generic placeholder
+// here — DevelopmentSection itself is never mounted while this is showing,
+// so it can't run its own GitHub check during a plain ticket-detail load.
+
+function TicketDetailSkeletonSection({ titleWidth, children }: { titleWidth: string; children: ReactNode }) {
+  return (
+    <div className="mt-10 pt-8 border-t border-slate-100 dark:border-zinc-800">
+      <SkeletonBlock className={`h-3 ${titleWidth} rounded mb-4`} />
+      <div className="space-y-2">{children}</div>
+    </div>
+  );
+}
+
+const SIDEBAR_SKELETON_FIELDS = ["Status", "Assignee", "Type", "Priority", "Estimated", "Due Date", "Labels", "Related Tickets"];
+
+function TicketDetailSkeleton() {
+  return (
+    <div className="min-h-full bg-white dark:bg-zinc-950" aria-busy="true">
+      <div className="max-w-5xl mx-auto px-6 sm:px-10 py-10">
+        <div className="mb-8">
+          {/* Real, already-functional navigation — never blocked while the
+              ticket itself is loading. */}
+          <BackToTicketsButton />
+        </div>
+
+        <div className="flex gap-12 items-start">
+          {/* ── Main content ─────────────────────────────────────────────── */}
+          <article className="flex-1 min-w-0">
+            {/* Header: ticket code + status, title, updated/due date, Estimated/Logged/Remaining */}
+            <header>
+              <div className="flex items-center gap-2.5 mb-3">
+                <SkeletonBlock className="h-4 w-16 rounded" />
+                <SkeletonBlock className="h-5 w-20 rounded-md" />
+              </div>
+              <SkeletonBlock className="h-7 w-3/4 rounded" />
+              <SkeletonBlock className="h-3 w-40 rounded mt-3" />
+              <div className="mt-3 flex items-center gap-3.5 flex-wrap">
+                <SkeletonBlock className="h-3 w-24 rounded" />
+                <SkeletonBlock className="h-3 w-24 rounded" />
+                <SkeletonBlock className="h-3 w-24 rounded" />
+              </div>
+            </header>
+
+            {/* Description */}
+            <TicketDetailSkeletonSection titleWidth="w-24">
+              <SkeletonBlock className="h-3.5 w-full rounded" />
+              <SkeletonBlock className="h-3.5 w-5/6 rounded" />
+              <SkeletonBlock className="h-3.5 w-2/3 rounded" />
+            </TicketDetailSkeletonSection>
+
+            {/* Attachments */}
+            <TicketDetailSkeletonSection titleWidth="w-28">
+              <SkeletonBlock className="h-9 w-full rounded-lg" />
+            </TicketDetailSkeletonSection>
+
+            {/* Development — a light generic placeholder only; the real
+                DevelopmentSection (and its own GitHub check) never mounts
+                during this whole-ticket skeleton. */}
+            <TicketDetailSkeletonSection titleWidth="w-28">
+              <SkeletonBlock className="h-9 w-full rounded-lg" />
+              <SkeletonBlock className="h-9 w-full rounded-lg" />
+            </TicketDetailSkeletonSection>
+
+            {/* Time Tracking */}
+            <TicketDetailSkeletonSection titleWidth="w-32">
+              <SkeletonBlock className="h-9 w-full rounded-lg" />
+            </TicketDetailSkeletonSection>
+
+            {/* Comments */}
+            <TicketDetailSkeletonSection titleWidth="w-24">
+              <div className="flex items-start gap-3">
+                <SkeletonBlock className="w-7 h-7 rounded-full flex-shrink-0" />
+                <div className="flex-1 space-y-2">
+                  <SkeletonBlock className="h-3 w-32 rounded" />
+                  <SkeletonBlock className="h-12 w-full rounded-xl" />
+                </div>
+              </div>
+            </TicketDetailSkeletonSection>
+
+            {/* Activity — a compact, representative number of rows, never a
+                long simulated list. */}
+            <TicketDetailSkeletonSection titleWidth="w-20">
+              {[0, 1, 2].map((i) => (
+                <div key={i} className="flex gap-3.5">
+                  <SkeletonBlock className="w-2 h-2 rounded-full mt-1.5 flex-shrink-0" />
+                  <div className="flex-1 min-w-0 pb-2 space-y-1.5">
+                    <SkeletonBlock className="h-3 w-3/4 rounded" />
+                    <SkeletonBlock className="h-2.5 w-20 rounded" />
+                  </div>
+                </div>
+              ))}
+            </TicketDetailSkeletonSection>
+          </article>
+
+          {/* ── Metadata sidebar ─────────────────────────────────────────── */}
+          <aside className="w-56 flex-shrink-0 sticky top-8">
+            {SIDEBAR_SKELETON_FIELDS.map((label, i) => (
+              <div
+                key={label}
+                className={`py-3.5 border-b border-slate-100 dark:border-zinc-800/70 ${
+                  i === SIDEBAR_SKELETON_FIELDS.length - 1 ? "last:border-0" : ""
+                }`}
+              >
+                <SkeletonBlock className="h-2.5 w-16 rounded mb-1.5" />
+                <SkeletonBlock className="h-4 w-24 rounded" />
+              </div>
+            ))}
+          </aside>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Main export ───────────────────────────────────────────────────────────────
 
 export function TicketDetailScreen({
@@ -2546,11 +3107,7 @@ export function TicketDetailScreen({
   }, [addingComment]);
 
   if (loadState === "loading") {
-    return (
-      <div className="h-full flex items-center justify-center text-sm text-slate-400 dark:text-zinc-500">
-        Loading ticket…
-      </div>
-    );
+    return <TicketDetailSkeleton />;
   }
 
   if (loadState === "error") {
@@ -2799,6 +3356,8 @@ export function TicketDetailScreen({
             )}
 
             <AttachmentsSection ticketId={ticket.id} isDevFallback={isDevFallback} onUploaded={refreshActivity} onError={showError} />
+
+            <DevelopmentSection slug={slug} ticketCode={ticketCode} />
 
             <TimeTrackingSection
               ticketId={ticket.id}
