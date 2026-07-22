@@ -56,6 +56,8 @@ After that, Development went through a short series of fixes and polish passes. 
 
 Most recently, Ticket Detail's plain "Loading ticket…" text was replaced with a real, full-fidelity `TicketDetailSkeleton` — shown for both the initial page load and the already-existing automatic refresh on focus/tab-visibility regain (neither trigger changed; only what renders during that state did). It mirrors the real header/Description/Attachments/Development/Time Tracking/Comments/Activity/sidebar layout exactly (same spacing rhythm as `CollapsibleSection`/`SidebarField`, so nothing shifts once real data lands), reuses the existing `SkeletonBlock` primitive rather than a new one, keeps `BackToTicketsButton` real so navigation is never blocked, and shows only a generic placeholder for Development — the real, GitHub-backed section never mounts while the skeleton is showing. See Architecture Status → "Ticket Detail → loading skeleton" for the full detail.
 
+Most recently, the workspace-wide **Settings** screen (General, Danger Zone) was retired outright, by explicit product decision: JIRITA runs as a single-tenant solution, so workspace-level configuration (Workspace Name, Active Days, Default Role, Default Capacity) is no longer meant to be Admin-editable through the UI. "Settings" no longer appears in the sidebar for any role, and `/settings`/`/settings/[section]` (every subroute) now just redirect to the Dashboard instead of rendering the old screen. No Supabase table, column, or migration changed — the current real values (Techtivo / Monday–Friday / Member / 40h/week) remain exactly as configured, and every existing consumer of them (Invite User's defaults, Time Tracking's expected-hours calculation) keeps reading the same columns unchanged. Project Settings — a distinct, per-project screen — is completely unaffected. See Architecture Status → "Removed (Settings → General & Danger Zone)" for the full detail.
+
 ---
 
 # Repository Structure
@@ -504,9 +506,11 @@ No new database tables or columns were needed — pure application-layer query/r
 
 ### Settings
 
-Completed.
+**Since removed, one pass later**: the whole workspace-wide Settings screen described below (General, Danger Zone) was retired outright — JIRITA is single-tenant, so this configuration isn't meant to be Admin-editable through the UI. `/settings` and `/settings/[section]` now just redirect to the Dashboard; "Settings" no longer appears in the sidebar for any role. See Architecture Status → "Removed (Settings → General & Danger Zone)" for the current, authoritative state. The rest of this entry is kept as a historical record of what was built and later removed.
 
-Routes: `/settings` (redirects to `/settings/general`) and `/settings/[section]` — now down to 2 real sections (General, Danger Zone) after Projects/Time Tracking/Notifications/Integrations were each retired outright rather than left mock (see the four "Removed" entries below).
+Completed (at the time; see note above for current state).
+
+Routes (historical): `/settings` (redirected to `/settings/general`) and `/settings/[section]` — down to 2 real sections (General, Danger Zone) after Projects/Time Tracking/Notifications/Integrations were each retired outright rather than left mock (see the four "Removed" entries below).
 
 Sections:
 
@@ -639,7 +643,7 @@ The natural next mock-to-real seams:
 - **Resolved**: the Project Lead's own scoped Reports view (`project-lead-reports-screen.tsx`) is now real too, both its Delivery and Team tabs, scoped to exactly this profile's led projects and reusing Admin Reports' own health/progress calculations rather than a second implementation (see Reports → Project Lead)
 - **Resolved**: the Project Lead's own scoped Time Tracking view (`project-lead-time-tracking-screen.tsx`) is now real too, scoped to exactly this profile's led projects and reusing the Admin/Member `time-tracking-screen.tsx`'s own real calculations/loaders rather than a second implementation (see Hours & Time Tracking → Project Lead)
 - **Resolved**: `member-projects-screen.tsx` ("My Projects") is now real — no longer reads `MEMBER_WORK`, and now surfaces a project's lead via Team's real `project_memberships.project_role` (via `loadProjectTeam`), not `ProjectSummary.owner`/`owner_profile_id` (see Architecture Status → Projects)
-- The rest of Settings (`/settings/*`) — still visual-only, no state persists
+- **Resolved, differently than planned**: the workspace-wide Settings screen (`/settings/*`) was retired outright rather than made real — JIRITA is single-tenant, so that configuration isn't meant to be Admin-editable through the UI (see Architecture Status → Removed (Settings → General & Danger Zone))
 
 See Architecture Status.
 
@@ -679,7 +683,7 @@ A real, global in-app Notifications system (header bell + dropdown + `/notificat
 
 # Architecture Status
 
-Current architecture follows a frontend-first approach. Nearly every screen is now real — Auth/Profile, Projects (Sidebar/`/projects`/Settings, including Repository Integration + real GitHub OAuth, and Member's "My Projects"), Tickets (including Ticket Detail's real Development section and its real loading skeleton), Team, Project Notes, the Admin/Project Lead/Member Dashboards (including their project scope selectors), company-wide Reports (Admin role), Project Overview (all three roles), per-project Reports, Time Tracking (Admin/Member/Project Lead), My Work (Member), ticket-assignment restriction, Users, global Search, and a global in-app Notifications system. Only the rest of Settings (`/settings/*`, i.e. Danger Zone) remains mock. Auth/Profile through company-wide Reports (Admin) are confirmed live; everything from the Admin Project Overview onward in the list above is implemented and type/build-clean but not yet clicked through in a live browser — see the detailed breakdown below.
+Current architecture follows a frontend-first approach. Nearly every screen is now real — Auth/Profile, Projects (Sidebar/`/projects`/per-project Settings, including Repository Integration + real GitHub OAuth, and Member's "My Projects"), Tickets (including Ticket Detail's real Development section and its real loading skeleton), Team, Project Notes, the Admin/Project Lead/Member Dashboards (including their project scope selectors), company-wide Reports (Admin role), Project Overview (all three roles), per-project Reports, Time Tracking (Admin/Member/Project Lead), My Work (Member), ticket-assignment restriction, Users, global Search, and a global in-app Notifications system. The workspace-wide Settings screen (`/settings/*` — General, Danger Zone) was retired outright rather than left mock: JIRITA is single-tenant, so those settings aren't meant to be Admin-editable through the UI; `/settings` and every subroute now just redirect to the Dashboard, and per-project Settings is unaffected. Auth/Profile through company-wide Reports (Admin) are confirmed live; everything from the Admin Project Overview onward in the list above is implemented and type/build-clean but not yet clicked through in a live browser — see the detailed breakdown below.
 
 Current stack:
 
@@ -1903,68 +1907,50 @@ navigation. No new migrations.
   popover from anywhere in the app; `ArrowDown`/`ArrowUp` walk the results
   as one continuous list; `Enter` selects; `Escape` closes.
 
-## Confirmed working (Settings → General — Workspace Name, Active Days, Default Role, Default Capacity)
+## Removed (Settings → General & Danger Zone) — the whole workspace-wide Settings screen retired outright (single-tenant)
 
-**Implemented and build/type-checked, not yet confirmed against a live
-Supabase project or in a browser.** Route: `/settings/general`, reached via
-`settings-section-screen.tsx`'s `GeneralContent()`. Logo, Timezone, and
-Language were removed outright — not disabled, not placeholders, no row
-renders for them at all — since none had a real schema, a real consumer
-anywhere else in the app, or an MVP-scope justification (see the audit this
-whole pass was based on). The rest of Settings (Projects/Time
-Tracking/Notifications/Integrations/Danger Zone) is untouched, still mock.
+The entire workspace-wide Settings screen — General (Workspace Name,
+Active Days, Default Role, Default Capacity) and Danger Zone (Archive/
+Delete Workspace, always visual-only) — was retired outright, by explicit
+product decision: JIRITA runs as a **single-tenant** solution, so
+workspace-level configuration is not meant to be Admin-editable through
+the UI. This is the same "retire outright, don't leave it mock" precedent
+already used for Settings → Projects/Time Tracking/Notifications/
+Integrations, extended here to the two sections that were left (General,
+Danger Zone) — Settings now has no sections at all.
 
-- Reads real `organizations.name`/`default_role`/`default_weekly_capacity`/
-  `active_days` via `useCurrentUser().organization` (`lib/membership.ts`'s
-  `loadMembership`, extended to select/expose the three new columns
-  alongside the pre-existing `name`).
-- A locally-controlled `draft` (name/defaultRole/defaultWeeklyCapacity/
-  activeDays) is seeded from `organization` and only ever re-synced from a
-  fresh `organization` reference while there are no unsaved local edits
-  (`isDirty`) — a background refresh (tab-regain focus, route change; both
-  already handled by `CurrentUserProvider`'s existing mechanisms, no new
-  listener added) can never silently overwrite an in-progress edit, and a
-  failed save leaves every edited value exactly as typed.
-- **Active Days** reuses the existing day-picker buttons (now real toggles,
-  ISO weekday numbers 1–7) instead of the old fixed Mon–Fri highlight;
-  **Default Role** reuses `SelectField` with the three real `Role` values
-  (`ROLE_LABELS`); **Default Capacity** reuses `NumberField`; **Workspace
-  Name** reuses `TextField` — no new visual controls added to
-  `settings-ui.tsx`.
-- **Save**: a "Save Changes" button following the exact same
-  button/"Saving…"/"Changes saved" checkmark/inline red error pattern as
-  Project Settings' own save button (the closest existing precedent) —
-  disabled while there are no unsaved changes, while a save is in flight,
-  or for a non-Admin (defense-in-depth alongside the Server Action's own
-  admin check below). Client-side validation (name non-empty, at least one
-  active day, capacity > 0) runs before any network call, surfaced through
-  the same error text. On success, calls the existing `retry()` from
-  `useCurrentUser()` to refresh the real organization context — no new
-  loader/context method needed for that.
-- Write path: a new Server Action, `updateOrganizationSettingsAction`
-  (`lib/server/update-organization-settings-action.ts`), called directly
-  from `GeneralContent()` (session obtained via
-  `getSupabaseBrowserClient().auth.getSession()`, same as every other
-  Server-Action-backed screen) — re-validates every field server-side, then
-  verifies the caller is an active org admin of *exactly* the organization
-  being updated before escalating to the service-role client for the write
-  (`organizations` has no `UPDATE` grant for `authenticated`, same gap as
-  `organization_memberships`; see `edit-user-action.ts` for the identical
-  pattern). A non-admin's save attempt is rejected here regardless of what
-  the UI does.
-- Schema: `organizations` gained `default_role` (reuses the existing
-  `org_role` enum), `default_weekly_capacity` (`numeric`, `> 0`), and
-  `active_days` (`smallint[]`, validated by a new `is_valid_active_days`
-  Postgres function — non-empty, no duplicates, 1–7 only), all backfilled
-  to `MEMBER` / `40` / Monday–Friday for every existing organization via
-  column defaults, plus an admin-only `organizations_update` RLS policy —
-  `20260815000000_add_organization_settings_defaults.sql`.
-- Skeleton: `GeneralSkeleton()` mirrors the real title/group/row/input
-  structure (title/group labels are static UI text, not organization data,
-  so they render immediately; only the still-loading values are
-  placeholders) — shown whenever `organization`/`draft` isn't resolved yet,
-  never a generic "Loading…" text and never the old hardcoded values.
-- **Now consumed by** (a later, separate pass):
+- **Navigation**: "Settings" was removed from `nav-config.ts`'s
+  `MainNavKey`/`MAIN_NAV_BY_ROLE` (it was only ever in the Admin array) and
+  from the sidebar's `NAV_LINK`/`EXPLICIT_NAV_PAGES` (`sidebar.tsx`) — no
+  role sees a Settings link anymore.
+- **Routes**: `/settings` and `/settings/[section]` (every subroute,
+  including `/settings/general`/`/settings/danger-zone`) now do nothing but
+  `redirect("/dashboard")` — the old `SettingsSectionScreen`/
+  `SettingsBreadcrumb` render, `generateStaticParams`, and per-section
+  metadata are gone. Typing any of these URLs directly lands on the
+  Dashboard, same as before login-gating would have applied.
+- **Components deleted outright** (no longer reachable from anywhere):
+  `settings-screen.tsx` (`SETTINGS_SECTIONS`/`DANGER_SECTION`/the unused
+  `SettingsScreen` landing component) and `settings-section-screen.tsx`
+  (`GeneralContent`/`DangerZoneContent`/`SettingsNav`). `settings-ui.tsx`
+  (`SettingGroup`/`SettingRow`/`TextField`/`NumberField`/`SelectField`) was
+  **kept** — it's shared with Project Settings and the Profile page, both
+  unaffected by this change.
+- **Nothing in Supabase changed**: no table, column, or migration was
+  touched or dropped. `organizations.name`/`default_role`/
+  `default_weekly_capacity`/`active_days` (from
+  `20260815000000_add_organization_settings_defaults.sql`) still exist with
+  their current real values for this workspace — Techtivo / Member / 40h /
+  Monday–Friday — and every existing consumer of them keeps reading the
+  exact same columns, unchanged (see "Still consumed by" below). The write
+  path, `updateOrganizationSettingsAction`
+  (`lib/server/update-organization-settings-action.ts`), was left in place
+  rather than deleted — it's simply unreachable now that no UI calls it.
+- **Project Settings is completely unaffected** — it's a distinct,
+  per-project screen (`project-settings-screen.tsx`) that never depended on
+  the workspace-wide Settings screen for anything besides sharing
+  `settings-ui.tsx`'s form primitives.
+- **Still consumed by** (unchanged by this pass):
   - **Invite User** (`invite-user-modal.tsx`) — a brand-new invite (no
     `editingUser`) now seeds Role/Weekly Capacity from
     `organization.defaultRole`/`defaultWeeklyCapacity` instead of a fixed
@@ -2717,29 +2703,31 @@ neither trigger changed; only what gets rendered while `loadState ===
 
 ## Still mock
 
-- The rest of Settings (`/settings/*` — Danger Zone) still reads from
-  `src/lib/mock-*.ts`.
-  **Resolved**: General is no longer part of this list — see Confirmed
-  working → Settings → General for the real Workspace Name/Active
-  Days/Default Role/Default Capacity (and why Logo/Timezone/Language were
-  removed instead of left mock). Time Tracking and Projects were both
-  retired outright rather than left mock — see Removed → Settings → Time
-  Tracking (estimate visibility/requirement and time rounding are now
-  fixed product behavior, not a setting) and Removed → Settings → Projects.
-  Notifications and Integrations were retired outright too — Notifications
-  replaced by a real global system (see Removed → Settings →
-  Notifications), Integrations replaced by Project Settings' own real
-  Repository Integration section (see Removed → Settings → Integrations).
+- **Resolved, differently than planned**: the workspace-wide Settings screen
+  (`/settings/*` — General, Danger Zone) is no longer on this list, but not
+  because it was made real — it was retired outright, since JIRITA is
+  single-tenant and this configuration isn't meant to be Admin-editable
+  through the UI. See Removed → Settings → General & Danger Zone. Time
+  Tracking and Projects were both retired outright before it, for
+  unrelated reasons — see Removed → Settings → Time Tracking (estimate
+  visibility/requirement and time rounding are now fixed product behavior,
+  not a setting) and Removed → Settings → Projects. Notifications and
+  Integrations were retired outright too — Notifications replaced by a
+  real global system (see Removed → Settings → Notifications),
+  Integrations replaced by Project Settings' own real Repository
+  Integration section (see Removed → Settings → Integrations).
   Also **resolved**:
   `src/components/project-lead-reports-screen.tsx` (the
   Project Lead role's own Reports view) no longer reads
   `PROJECT_TICKETS`/`RECENT_ACTIVITY`/`MY_PROJECT_NAMES` or any other
   mock data — see Confirmed working → Reports → Project Lead.
 - **Resolved**: Invite User's Default Role/Weekly Capacity prefill and Time
-  Tracking's expected-hours/Hours Missing calculations now read the real
+  Tracking's expected-hours/Hours Missing calculations read the real
   `organizations.default_role`/`default_weekly_capacity`/`active_days`
-  Settings → General writes — see Confirmed working → Settings → General →
-  "Now consumed by" for the full breakdown.
+  columns — still unchanged by the Settings screen's removal, since that
+  data was never dropped, only the UI that used to write it. See Removed →
+  Settings → General & Danger Zone → "Still consumed by" for the full
+  breakdown.
 - Within Tickets/Ticket Detail specifically, still mock/unimplemented on
   purpose: New Ticket's "More Options" fields (Type/Status/Priority/
   Labels/Due Date always write fixed defaults); editing or deleting a
@@ -2808,11 +2796,7 @@ Current working routes:
 - `/time-tracking` — role-specific (Admin/Member Billing/Finance view real end-to-end / Project Lead delivery-focused view now real too, scoped to led projects / Member: no sidebar link, folded into My Work instead)
 - `/users` — Admin only (workspace-wide user account management, replaces the old `/settings/people`)
 - `/activity` — dedicated, server-side-paginated, org-wide Activity History page (new), the org-wide sibling of `/projects/[slug]/activity`; not on the Sidebar's main nav, reached only via the Dashboard's "View all activity →" action, same "link-only" precedent as `/projects/[slug]/team/[userId]/work-history`
-- `/settings` → redirects to `/settings/general`
-- `/settings/general`
-- `/settings/notifications`
-- `/settings/integrations`
-- `/settings/danger-zone`
+- `/settings` and `/settings/[section]` (every subroute) → redirect to `/dashboard`; the workspace-wide Settings screen was retired outright (single-tenant — see Architecture Status → Removed (Settings → General & Danger Zone)), not on the Sidebar for any role
 
 ---
 
@@ -2889,8 +2873,7 @@ Current known items:
 - **Resolved for rename/delete**: Ticket Attachment rename and delete are now real and persisted (Storage + metadata row). "Replace File" was removed from the menu entirely rather than left as a mock stub. Editing or deleting a *Comment* is still local-only — not persisted to Supabase.
 - Milestone and Story Points fields on Ticket Detail's sidebar are dead code — defined in `ticket-detail-screen.tsx` but never rendered.
 - **Resolved for all three roles**: Admin, Project Lead, and Member Project Overview all now create/view real tickets against the same real Tickets data — see Architecture Status → Project Overview.
-- `settings-screen.tsx` (`SettingsScreen` hub component) is retained but no longer rendered — `/settings` redirects directly to `/settings/general`.
-- Org-wide Settings (`/settings/*`) toggles and fields are visual only; no state persists between page loads. **Exceptions**: Project Settings (`/projects/[slug]/settings`, see Current Sprint → Completed → Project Settings) and, since then, Settings → General's Workspace Name/Active Days/Default Role/Default Capacity (see Confirmed working → Settings → General) are both real and persist.
+- **Resolved, differently than planned**: `settings-screen.tsx` and `settings-section-screen.tsx` are no longer just unrendered — they were deleted outright, along with the workspace-wide Settings screen itself (`/settings`/`/settings/[section]` now just redirect to `/dashboard`). JIRITA is single-tenant, so that configuration isn't meant to be Admin-editable through the UI — see Architecture Status → Removed (Settings → General & Danger Zone). Project Settings (`/projects/[slug]/settings`) is unaffected and remains real.
 - Role now comes from a real `organization_membership` when one exists; `current-user.ts`'s mock identities are a dev-only fallback (never in production) rather than the only source of truth. **Resolved**: the `RoleSwitcher` is now gated behind `isDevFallback` (only renders, with a visible "Dev fallback" badge, when there's no real membership) instead of always showing. No real server-side permission enforcement is wired into the UI yet for projects/tickets/etc. — the RLS policies in `supabase/migrations/20260708000000_mvp_schema.sql` are applied and enforce tenant isolation at the DB layer, but the UI doesn't call any of those tables yet.
 - **Resolved**: Note "Duplicate" and "Delete" menu actions in `NoteDetailModal` are now real (`duplicateNote`/`deleteNote`), no longer visual stubs — see Current Sprint → Completed → Project Notes.
 - In dev fallback only (no real organization membership — never in production): the Projects list no longer filters by the old `LEAD_PROJECT_SLUGS` array (removed since real data is scoped by RLS instead), so a Project Lead testing without a seeded Supabase project now sees the full mock projects list rather than just their 3 owned slugs, while the summary cells (Blocked Tickets, Due This Week, Team Members Over Capacity) still compute against the `LEAD_PROJECT_SLUGS`-scoped team aggregation — a minor mismatch specific to unauthenticated/dev-fallback local testing, not the real-org path.
@@ -2916,7 +2899,7 @@ Current known items:
 Planned future work:
 
 - Live verification (click through each in a browser against a real Supabase project) of Users, the **Admin** Project Overview (including its new Project Activity history page), per-project Reports, Time Tracking (Admin/Member/Project Lead), the Dashboard's org-wide Activity History page, the Project Lead's and Member's own Project Overview, all three Dashboards' project scope selectors, My Work (Member, including its own KPI click-through and skeleton loader), ticket-assignment restriction, Member's own `/projects` ("My Projects"), global Search, the Project Lead's own scoped Reports (Delivery + Team, including its KPI click-throughs), the `/projects` list's Project Lead KPI band, the Reports/Time Tracking Member Profile Modal trigger fixes, and the new fixed Time Tracking rules (estimate required before In Progress/In Review/Done in `updateTicket`, 15-minute always-round-up in `logTicketTime`) — the immediate next step, ahead of any new backend seam
-- Backend integration for the rest of Settings (everything else, including the Project Lead's own scoped Reports and Time Tracking views, is done — see Architecture Status; schema for Settings is designed in `docs/SUPABASE_MVP_SCHEMA.md` and applied via the migrations in `supabase/migrations/`, just not queried by the UI yet)
+- **No longer applicable**: this used to track backend integration for "the rest of Settings," but the workspace-wide Settings screen was retired outright instead — JIRITA is single-tenant, so that configuration isn't meant to be Admin-editable through the UI (see Architecture Status → Removed (Settings → General & Danger Zone)). Every other screen this line used to cover (the Project Lead's own scoped Reports and Time Tracking views) is done — see Architecture Status.
 - API layer
 - Real drag & drop (Kanban)
 - Real-time updates (including Supabase Realtime delivery for the now-real Notifications system, currently refresh-on-demand only)

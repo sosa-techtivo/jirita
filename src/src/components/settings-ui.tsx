@@ -1,8 +1,9 @@
 import type { ChangeEvent, ReactNode } from "react";
 
-// Shared primitives for settings-style forms — originally local to
-// settings-section-screen.tsx, extracted so project-settings-screen.tsx can
-// reuse the same visual language without duplicating it.
+// Shared primitives for settings-style forms — originally local to the
+// (since-retired) workspace-wide Settings screen, extracted so
+// project-settings-screen.tsx and profile-screen.tsx can reuse the same
+// visual language without duplicating it.
 
 // `options` + `onChange` turn this into a real functional <select> (styled
 // to look identical to the display-only button below) — every call site

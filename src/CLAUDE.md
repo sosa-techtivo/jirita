@@ -302,8 +302,11 @@ loading skeleton — is implemented and passes `tsc`/`eslint`/`next build`,
 but has not yet been clicked through in a live browser — treat it as
 "should work, not yet verified."
 
-Only the rest of Settings (`/settings/*`, i.e. Danger Zone) still runs
-entirely on mock data.
+The workspace-wide Settings screen (`/settings/*`) was retired outright —
+JIRITA is single-tenant, so that configuration isn't meant to be
+Admin-editable through the UI. "Settings" no longer appears in the
+sidebar; `/settings` and every subroute now just redirect to the
+Dashboard. Project Settings is unaffected.
 
 **For the authoritative, feature-by-feature breakdown — every Server
 Action, migration, and real bug fixed along the way, and the exact

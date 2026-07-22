@@ -1,8 +1,13 @@
 "use server";
 
-// Server Action for Settings → General's functional fields (Workspace Name,
-// Default Role, Default Weekly Capacity, Active Days) — see
-// settings-section-screen.tsx's GeneralContent.
+// Server Action for the workspace-wide Settings → General fields
+// (Workspace Name, Default Role, Default Weekly Capacity, Active Days).
+// The screen that called this (settings-section-screen.tsx) was retired
+// outright — JIRITA remains single-tenant, so these are no longer
+// user-configurable (see PROJECT_STATUS.md). Left in place, unreachable
+// from the UI: the `organizations` columns it wrote are still read
+// elsewhere in the app (capacity/reporting calculations), and no schema
+// was changed.
 //
 // Previously also backed a since-removed Settings → Time Tracking section
 // (Show Estimated Hours on Tickets, Require Estimation on New Tickets,
