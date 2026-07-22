@@ -4,47 +4,6 @@ import type { ChangeEvent, ReactNode } from "react";
 // settings-section-screen.tsx, extracted so project-settings-screen.tsx can
 // reuse the same visual language without duplicating it.
 
-// `onChange` turns this into a real functional switch (identical markup/
-// styling to the display-only version below, just wrapped in a `<button>`)
-// — every existing call site that doesn't pass it (Notifications,
-// Integrations, etc.) keeps the original display-only rendering unchanged,
-// same "controlled only when asked for" precedent SelectField/TextField/
-// NumberField already established in this file.
-export function Toggle({
-  on = true,
-  onChange,
-  disabled = false,
-}: {
-  on?: boolean;
-  onChange?: (next: boolean) => void;
-  disabled?: boolean;
-}) {
-  const track = (
-    <div
-      className={`relative w-9 h-5 rounded-full flex-shrink-0 transition-colors ${
-        on ? "bg-brand-500" : "bg-slate-200 dark:bg-zinc-700"
-      } ${disabled ? "opacity-60" : ""}`}
-    >
-      <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow-sm transition-transform ${on ? "translate-x-4" : "translate-x-0.5"}`} />
-    </div>
-  );
-
-  if (!onChange) return track;
-
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={on}
-      disabled={disabled}
-      onClick={() => onChange(!on)}
-      className="disabled:cursor-not-allowed"
-    >
-      {track}
-    </button>
-  );
-}
-
 // `options` + `onChange` turn this into a real functional <select> (styled
 // to look identical to the display-only button below) — every call site
 // that doesn't pass them keeps the original static/visual-only rendering

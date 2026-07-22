@@ -22,6 +22,7 @@
 import { getSupabaseBrowserClient } from "./supabase-client";
 import { resolveAvatarUrl } from "./membership";
 import { FALLBACK_AVATAR } from "./current-user";
+import { createNotification } from "./notifications";
 import type { ClientName, ProjectCategory, ProjectHealth, ProjectStatus, ProjectSummary } from "./mock-projects";
 
 export type ProjectsResult =
@@ -44,6 +45,10 @@ export interface ProjectDetail extends ProjectSummary {
   createdAtISO: string;
   /** Same value as ProjectSummary.targetDate, raw ISO (`yyyy-mm-dd`) or null — Project Settings' own `<input type="date">` needs this instead of the "Jul 16"-formatted display string. */
   targetDateISO: string | null;
+  /** projects.repository_provider — Project Settings' own Repository Integration section only. */
+  repositoryProvider: RepositoryProvider;
+  /** projects.repository_url, or null when unset (always null when repositoryProvider is "none"). */
+  repositoryUrl: string | null;
 }
 
 export type ProjectDetailResult =
@@ -104,9 +109,16 @@ interface ProjectRow {
   default_hourly_rate: string | null;
   owner_profile_id: string | null;
   target_date: string | null;
+  repository_provider: string;
+  repository_url: string | null;
   updated_at: string;
   created_at: string;
 }
+
+// Project Settings → Repository Integration. No OAuth/sync/webhooks/commit
+// reads — just which provider (if any) this project links to, and its URL.
+export type RepositoryProvider = "none" | "github" | "gitlab";
+const REPOSITORY_PROVIDER_VALUES: RepositoryProvider[] = ["none", "github", "gitlab"];
 
 interface OwnerProfileRow {
   id: string;
@@ -117,7 +129,7 @@ interface OwnerProfileRow {
 }
 
 const PROJECT_COLUMNS =
-  "id, slug, name, short_name, project_code, description, status, health, category, client_name, default_hourly_rate, owner_profile_id, target_date, updated_at, created_at";
+  "id, slug, name, short_name, project_code, description, status, health, category, client_name, default_hourly_rate, owner_profile_id, target_date, repository_provider, repository_url, updated_at, created_at";
 
 // Kebab-cases a project name into a URL-safe slug (routes are
 // /projects/[slug]). Falls back to a timestamp if the name has no
@@ -492,6 +504,10 @@ export async function loadProjectDetail(organizationId: string, slug: string): P
       createdAt: formatCreatedAt(row.created_at),
       createdAtISO: row.created_at,
       targetDateISO: row.target_date,
+      repositoryProvider: REPOSITORY_PROVIDER_VALUES.includes(row.repository_provider as RepositoryProvider)
+        ? (row.repository_provider as RepositoryProvider)
+        : "none",
+      repositoryUrl: row.repository_url,
     },
   };
 }
@@ -733,6 +749,9 @@ export interface ProjectSettingsUpdate {
   ownerProfileId?: string | null;
   /** Raw ISO `yyyy-mm-dd`, or null to clear — writes projects.target_date directly, the same real column Project Overview/the Project Lead Dashboard already read. */
   targetDate?: string | null;
+  repositoryProvider?: RepositoryProvider;
+  /** Ignored (always written as null) when repositoryProvider is "none" — see updateProjectSettings. */
+  repositoryUrl?: string | null;
 }
 
 // Settings-only write: only the keys present on `updates` are sent to
@@ -758,6 +777,14 @@ export async function updateProjectSettings(
   if (updates.defaultHourlyRate !== undefined) payload.default_hourly_rate = updates.defaultHourlyRate;
   if (updates.ownerProfileId !== undefined) payload.owner_profile_id = updates.ownerProfileId;
   if (updates.targetDate !== undefined) payload.target_date = updates.targetDate;
+  if (updates.repositoryProvider !== undefined) {
+    payload.repository_provider = updates.repositoryProvider;
+    // "None" never leaves a stale URL behind — always cleared together,
+    // regardless of what updates.repositoryUrl itself is.
+    payload.repository_url = updates.repositoryProvider === "none" ? null : (updates.repositoryUrl ?? null);
+  } else if (updates.repositoryUrl !== undefined) {
+    payload.repository_url = updates.repositoryUrl;
+  }
 
   const { data, error } = await supabase
     .from("projects")
@@ -1023,10 +1050,10 @@ export async function addProjectMember(
 
   const { data: projectRow, error: projectError } = await supabase
     .from("projects")
-    .select("id")
+    .select("id, name")
     .eq("organization_id", organizationId)
     .eq("slug", slug)
-    .maybeSingle<{ id: string }>();
+    .maybeSingle<{ id: string; name: string }>();
 
   if (projectError) {
     logDev("project id lookup failed", projectError);
@@ -1041,12 +1068,58 @@ export async function addProjectMember(
   if (error) {
     logDev("project_memberships insert failed", error);
     // 23505 = unique_violation on (project_id, profile_id) — already a
-    // member (e.g. auto-added by a contribution) is not a real failure.
+    // member (e.g. auto-added by a contribution) is not a real failure, and
+    // — since nothing was actually newly added — never notifies either.
     if (error.code === "23505") return { status: "success" };
     return { status: "error", message: error.message };
   }
 
+  // Fire-and-forget: never delays or can fail the already-successful add
+  // above. createNotification's own actor===recipient guard covers a
+  // member adding themselves to a project, if that flow is ever possible.
+  void notifyProjectMemberAdded(supabase, organizationId, projectRow.id, projectRow.name, profileId).catch((err) => {
+    logDev("project member added notification failed", err);
+  });
+
   return { status: "success" };
+}
+
+// The one place "added to project" text is composed, so Team's "+ Add
+// Member" and the Project Lead Dashboard's own add-member action (both real
+// callers of addProjectMember) share it rather than duplicating this
+// lookup. Never fires for the auto-membership-on-contribution DB trigger,
+// which doesn't go through this JS function at all — only a real, explicit
+// add does.
+async function notifyProjectMemberAdded(
+  supabase: ReturnType<typeof getSupabaseBrowserClient>,
+  organizationId: string,
+  projectId: string,
+  projectName: string,
+  recipientProfileId: string
+): Promise<void> {
+  const {
+    data: { user: authUser },
+  } = await supabase.auth.getUser();
+  const actorProfileId = authUser?.id ?? null;
+
+  let actorName = "Someone";
+  if (actorProfileId) {
+    const { data: actorRow } = await supabase
+      .from("profiles")
+      .select("first_name, last_name")
+      .eq("id", actorProfileId)
+      .maybeSingle<{ first_name: string | null; last_name: string | null }>();
+    actorName = actorRow ? [actorRow.first_name, actorRow.last_name].filter(Boolean).join(" ") || "Unnamed" : "Someone";
+  }
+
+  await createNotification({
+    organizationId,
+    recipientProfileId,
+    actorProfileId,
+    type: "project_member_added",
+    title: `${actorName} added you to ${projectName}`,
+    projectId,
+  });
 }
 
 // Wired from member-profile-modal.tsx's MemberMenu "Make Project Lead"

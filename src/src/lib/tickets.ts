@@ -18,6 +18,7 @@ import type { Ticket, TicketPriority, TicketStatus, TicketType } from "./mock-ti
 import { loadOrganizationProjects } from "./projects";
 import type { ProjectStatus } from "./mock-projects";
 import { roundLoggedMinutesUp } from "./time-rounding";
+import { createNotification } from "./notifications";
 
 export type TicketsResult =
   | { status: "ready"; tickets: Ticket[] }
@@ -85,6 +86,7 @@ interface ProjectLookupRow {
 
 interface TicketRow {
   id: string;
+  project_id: string;
   ticket_number: number;
   title: string;
   description: string | null;
@@ -118,7 +120,7 @@ interface AssigneeProfileRow {
 }
 
 const TICKET_COLUMNS =
-  "id, ticket_number, title, description, status, priority, type, assignee_profile_id, milestone, labels, acceptance_criteria, acceptance_criteria_done, story_points, hours, due_date, updated_at, created_by, created_at";
+  "id, project_id, ticket_number, title, description, status, priority, type, assignee_profile_id, milestone, labels, acceptance_criteria, acceptance_criteria_done, story_points, hours, due_date, updated_at, created_by, created_at";
 
 // Mirrors formatTargetDate in lib/projects.ts exactly ("MMM D", no year) —
 // every date-parsing helper across the ticket views (Calendar/Timeline/
@@ -513,27 +515,34 @@ export async function updateTicket(
     }
   }
 
+  // Real "before" snapshot of the fields a notification could care about —
+  // needed both for the existing assignee-membership check below and to
+  // detect a genuine assignee/status change afterwards (never notify when
+  // nothing actually changed). Only fetched when one of those two fields is
+  // part of this edit.
+  let beforeRow: { project_id: string; status: string; assignee_profile_id: string | null } | undefined;
+  if (input.status !== undefined || input.assigneeProfileId !== undefined) {
+    const { data: existingRow, error: beforeError } = await supabase
+      .from("tickets")
+      .select("project_id, status, assignee_profile_id")
+      .eq("id", ticketId)
+      .maybeSingle<{ project_id: string; status: string; assignee_profile_id: string | null }>();
+    if (beforeError) {
+      logDev("ticket lookup before update failed", beforeError);
+      return { status: "error", message: beforeError.message };
+    }
+    if (!existingRow) return { status: "error", message: "Ticket not found." };
+    beforeRow = existingRow;
+  }
+
   // Same real-membership validation createTicket applies — reject setting
   // (not clearing) an assignee who isn't an active member of this ticket's
-  // project. Looked up by ticketId directly since updateTicket isn't given
-  // an organizationId to resolve the project from slug the way createTicket
-  // does. Never auto-adds the assignee to the project.
-  if (input.assigneeProfileId) {
-    const { data: ticketRow, error: ticketLookupError } = await supabase
-      .from("tickets")
-      .select("project_id")
-      .eq("id", ticketId)
-      .maybeSingle<{ project_id: string }>();
-    if (ticketLookupError) {
-      logDev("ticket project lookup for assignee validation failed", ticketLookupError);
-      return { status: "error", message: ticketLookupError.message };
-    }
-    if (!ticketRow) return { status: "error", message: "Ticket not found." };
-
+  // project. Never auto-adds the assignee to the project.
+  if (input.assigneeProfileId && beforeRow) {
     const { data: membershipRow, error: membershipError } = await supabase
       .from("project_memberships")
       .select("id")
-      .eq("project_id", ticketRow.project_id)
+      .eq("project_id", beforeRow.project_id)
       .eq("profile_id", input.assigneeProfileId)
       .maybeSingle<{ id: string }>();
     if (membershipError) {
@@ -583,7 +592,88 @@ export async function updateTicket(
     }
   }
 
+  // Fire-and-forget: never delays or can fail the already-successful update
+  // above. Only reassignment (to a real, different profile) and a genuine
+  // status change ever notify — see notifyTicketChange below for exactly
+  // what's excluded (priority/due date/labels/description/estimate/etc, per
+  // this feature's own scope).
+  if (beforeRow) {
+    void notifyTicketChange(supabase, beforeRow, row, input).catch((err) => {
+      logDev("ticket change notification failed", err);
+    });
+  }
+
   return { status: "success", ticket: rowToTicket(row, slug, assigneeRow) };
+}
+
+// Real actor + project/ticket text for the two ticket-update notification
+// types (ticket_assigned, ticket_status_changed) — the one place either is
+// ever composed, so Ticket Detail's inline edits and the Ticket Preview
+// panel (updateTicket's only two callers) can never diverge or duplicate
+// this logic themselves.
+async function notifyTicketChange(
+  supabase: ReturnType<typeof getSupabaseBrowserClient>,
+  beforeRow: { project_id: string; status: string; assignee_profile_id: string | null },
+  row: TicketRow,
+  input: UpdateTicketInput
+): Promise<void> {
+  const assigneeChanged =
+    input.assigneeProfileId !== undefined &&
+    row.assignee_profile_id !== null &&
+    row.assignee_profile_id !== beforeRow.assignee_profile_id;
+  const statusChanged = input.status !== undefined && beforeRow.status !== row.status;
+
+  if (!assigneeChanged && !statusChanged) return;
+
+  const {
+    data: { user: authUser },
+  } = await supabase.auth.getUser();
+  const actorProfileId = authUser?.id ?? null;
+
+  const { data: projectRow, error: projectLookupError } = await supabase
+    .from("projects")
+    .select("id, organization_id, project_code")
+    .eq("id", row.project_id)
+    .maybeSingle<{ id: string; organization_id: string; project_code: string }>();
+
+  if (projectLookupError || !projectRow) {
+    logDev("project lookup for ticket notification failed", projectLookupError);
+    return;
+  }
+
+  const ticketCode = `${projectRow.project_code}-${row.ticket_number}`;
+
+  let actorName = "Someone";
+  if (actorProfileId) {
+    const actorsById = await loadProfilesByIds(supabase, [actorProfileId]);
+    actorName = resolveProfileName(actorsById.get(actorProfileId)) ?? "Someone";
+  }
+
+  if (assigneeChanged && row.assignee_profile_id) {
+    await createNotification({
+      organizationId: projectRow.organization_id,
+      recipientProfileId: row.assignee_profile_id,
+      actorProfileId,
+      type: "ticket_assigned",
+      title: `${actorName} assigned you to ${ticketCode}`,
+      message: row.title,
+      projectId: projectRow.id,
+      ticketId: row.id,
+    });
+  }
+
+  if (statusChanged && row.assignee_profile_id) {
+    await createNotification({
+      organizationId: projectRow.organization_id,
+      recipientProfileId: row.assignee_profile_id,
+      actorProfileId,
+      type: "ticket_status_changed",
+      title: `${actorName} moved ${ticketCode} from ${activityStatusLabel(beforeRow.status)} to ${activityStatusLabel(row.status)}`,
+      message: row.title,
+      projectId: projectRow.id,
+      ticketId: row.id,
+    });
+  }
 }
 
 // ── Labels catalog (Ticket Detail's Labels selector "+ Create") ────────────────
@@ -912,6 +1002,18 @@ export async function createTicketComment(ticketId: string, body: string): Promi
     }
   }
 
+  // Fire-and-forget: never delays or can fail the already-successful post
+  // above. Only notifies when this ticket is currently assigned to someone
+  // other than the comment's own author — the central actor===recipient
+  // guard in createNotification would skip a self-comment anyway, but the
+  // explicit check here also avoids the extra lookups when there's no
+  // assignee at all to notify.
+  if (row.author_profile_id) {
+    void notifyTicketComment(supabase, ticketId, row.author_profile_id, trimmed, authorRow).catch((err) => {
+      logDev("ticket comment notification failed", err);
+    });
+  }
+
   return {
     status: "success",
     comment: {
@@ -922,6 +1024,54 @@ export async function createTicketComment(ticketId: string, body: string): Promi
       text: row.body,
     },
   };
+}
+
+// Notifies the ticket's current assignee that someone commented — the one
+// place this is composed, so every real caller of createTicketComment
+// shares it rather than duplicating the lookup/text. Mentions are
+// deliberately not handled here: comments are plain, unparsed text with no
+// structured @mention storage anywhere in this schema, so resolving one by
+// name would mean guessing — out of scope per this feature's own rule
+// against ambiguous name-based resolution (comment_mention stays a real,
+// allowed notification `type` for when a real mention mechanism exists).
+async function notifyTicketComment(
+  supabase: ReturnType<typeof getSupabaseBrowserClient>,
+  ticketId: string,
+  authorProfileId: string,
+  commentBody: string,
+  authorRow: AssigneeProfileRow | undefined
+): Promise<void> {
+  const { data: ticketRow, error: ticketError } = await supabase
+    .from("tickets")
+    .select("assignee_profile_id, project_id, ticket_number")
+    .eq("id", ticketId)
+    .maybeSingle<{ assignee_profile_id: string | null; project_id: string; ticket_number: number }>();
+
+  if (ticketError || !ticketRow || !ticketRow.assignee_profile_id || ticketRow.assignee_profile_id === authorProfileId) {
+    return;
+  }
+
+  const { data: projectRow, error: projectError } = await supabase
+    .from("projects")
+    .select("id, organization_id, project_code")
+    .eq("id", ticketRow.project_id)
+    .maybeSingle<{ id: string; organization_id: string; project_code: string }>();
+
+  if (projectError || !projectRow) return;
+
+  const ticketCode = `${projectRow.project_code}-${ticketRow.ticket_number}`;
+  const authorName = resolveProfileName(authorRow) ?? "Someone";
+
+  await createNotification({
+    organizationId: projectRow.organization_id,
+    recipientProfileId: ticketRow.assignee_profile_id,
+    actorProfileId: authorProfileId,
+    type: "ticket_comment",
+    title: `${authorName} commented on ${ticketCode}`,
+    message: commentBody.length > 300 ? `${commentBody.slice(0, 300)}…` : commentBody,
+    projectId: projectRow.id,
+    ticketId,
+  });
 }
 
 // Newest first. Every real action (create, field edits, labels, acceptance

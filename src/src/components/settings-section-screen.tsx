@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { SETTINGS_SECTIONS, DANGER_SECTION } from "./settings-screen";
 import { useCurrentUser } from "@/components/current-user-provider";
-import { Toggle, SelectField, TextField, NumberField, SettingRow, SettingGroup } from "@/components/settings-ui";
+import { SelectField, TextField, NumberField, SettingRow, SettingGroup } from "@/components/settings-ui";
 import { SkeletonBlock } from "@/components/dashboard-shared";
 import { ROLE_LABELS, type Role } from "@/lib/current-user";
 import type { Organization } from "@/lib/membership";
@@ -276,107 +276,6 @@ function GeneralContent() {
   );
 }
 
-function NotificationsContent() {
-  return (
-    <>
-      <SettingGroup title="Email Notifications">
-        <SettingRow label="Ticket assigned to you">
-          <Toggle on />
-        </SettingRow>
-        <SettingRow label="Mentioned in a comment">
-          <Toggle on />
-        </SettingRow>
-        <SettingRow label="Ticket status changes" hint="Only for tickets you're watching">
-          <Toggle on={false} />
-        </SettingRow>
-        <SettingRow label="Weekly digest">
-          <Toggle on />
-        </SettingRow>
-      </SettingGroup>
-
-      <SettingGroup title="Desktop Notifications">
-        <SettingRow label="Enable desktop notifications">
-          <Toggle on />
-        </SettingRow>
-        <SettingRow label="Mentions only" hint="Suppress all non-mention desktop alerts">
-          <Toggle on={false} />
-        </SettingRow>
-      </SettingGroup>
-
-      <SettingGroup title="Weekly Digest">
-        <SettingRow label="Send on">
-          <SelectField value="Friday" />
-        </SettingRow>
-        <SettingRow label="Delivery time">
-          <SelectField value="9:00 AM" />
-        </SettingRow>
-      </SettingGroup>
-    </>
-  );
-}
-
-function IntegrationsContent() {
-  return (
-    <>
-      <SettingGroup title="Connected">
-        <div className="py-3">
-          <div className="flex items-start justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-slate-900 dark:bg-white flex items-center justify-center flex-shrink-0">
-                <svg className="w-5 h-5 text-white dark:text-slate-900" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" />
-                </svg>
-              </div>
-              <div>
-                <p className="text-[13px] font-semibold text-slate-900 dark:text-zinc-100">GitHub</p>
-                <p className="text-[11px] text-slate-400 dark:text-zinc-500 mt-0.5">3 repositories connected</p>
-                <div className="flex flex-wrap gap-1 mt-1.5">
-                  {["Techtivo/mobile-app", "Techtivo/api-gateway", "Techtivo/design-system"].map((r) => (
-                    <span key={r} className="text-[10px] font-medium bg-slate-100 dark:bg-zinc-800 text-slate-500 dark:text-zinc-500 px-1.5 py-0.5 rounded">{r}</span>
-                  ))}
-                </div>
-              </div>
-            </div>
-            <div className="flex items-center gap-2 flex-shrink-0">
-              <span className="flex items-center gap-1 text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">
-                <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                </svg>
-                Connected
-              </span>
-              <button className="text-[12px] text-slate-400 dark:text-zinc-600 hover:text-red-500 dark:hover:text-red-400">Disconnect</button>
-            </div>
-          </div>
-        </div>
-      </SettingGroup>
-
-      <SettingGroup title="Available">
-        {[
-          { name: "Slack",           hint: "Post updates to channels",         soon: false },
-          { name: "Google Calendar", hint: "Sync due dates to your calendar",  soon: false },
-          { name: "Jira Import",     hint: "One-time migration from Jira",     soon: true  },
-        ].map((item) => (
-          <div key={item.name} className="flex items-center justify-between gap-4 py-3.5 border-b border-slate-100 dark:border-zinc-800/70 last:border-0">
-            <div>
-              <p className="text-[13px] font-medium text-slate-800 dark:text-zinc-200">{item.name}</p>
-              <p className="text-[11px] text-slate-400 dark:text-zinc-500 mt-0.5">{item.hint}</p>
-            </div>
-            {item.soon ? (
-              <span className="text-[11px] font-semibold bg-slate-100 dark:bg-zinc-800 text-slate-400 dark:text-zinc-600 px-2.5 py-1 rounded-full">
-                Coming soon
-              </span>
-            ) : (
-              <button className="text-[13px] font-medium text-brand-600 dark:text-brand-400 border border-brand-200 dark:border-brand-500/30 px-3 py-1.5 rounded-lg hover:bg-brand-50 dark:hover:bg-brand-500/5 transition-colors">
-                Connect
-              </button>
-            )}
-          </div>
-        ))}
-      </SettingGroup>
-    </>
-  );
-}
-
 function DangerZoneContent() {
   return (
     <>
@@ -429,8 +328,6 @@ function DangerZoneContent() {
 function SectionContent({ slug }: { slug: string }) {
   switch (slug) {
     case "general":       return <GeneralContent />;
-    case "notifications": return <NotificationsContent />;
-    case "integrations":  return <IntegrationsContent />;
     case "danger-zone":   return <DangerZoneContent />;
     default:
       return (
@@ -454,11 +351,17 @@ function sectionMeta(slug: string) {
 function SettingsNav({ active }: { active: string }) {
   const { user } = useCurrentUser();
   // Only ADMIN has the Settings nav item at all — every remaining section
-  // (General/Notifications/Integrations/Danger Zone) is admin-oriented
-  // workspace configuration, so other roles see none of them here. (Time
-  // Tracking used to be the one section non-admins could reach this way;
-  // it was removed outright — the app's real Time Tracking module lives at
-  // the unrelated /time-tracking route, untouched by this.)
+  // (General/Danger Zone) is admin-oriented workspace configuration, so
+  // other roles see none of them here. (Notifications, Time Tracking, and
+  // Integrations used to be sections non-admins could reach this way; all
+  // three were removed outright — Notifications because there are no
+  // configurable preferences in this app's notification system (see
+  // lib/notifications.ts), Time Tracking because its rules became fixed,
+  // non-configurable product behavior, and Integrations because it belongs
+  // to each project, not the whole organization — see Project Settings'
+  // own Repository Integration section. The app's real Time Tracking
+  // module lives at the unrelated /time-tracking route, untouched by any
+  // of this.)
   const sections = user.role === "ADMIN" ? ALL_SECTIONS : [];
 
   return (

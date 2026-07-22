@@ -32,3 +32,41 @@ body {
   font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
 }
 
+/* ── Notification bell attention cue ─────────────────────────────────────
+   Brief, one-shot cues for the header bell (notification-bell.tsx) when
+   unreadCount genuinely increases — never continuous, never looping.
+   Prefixed `notifications-` to avoid colliding with any other animation. */
+
+@keyframes notifications-bell-ring {
+  0%, 100% { transform: rotate(0deg); }
+  15%      { transform: rotate(12deg); }
+  30%      { transform: rotate(-10deg); }
+  45%      { transform: rotate(8deg); }
+  60%      { transform: rotate(-6deg); }
+  75%      { transform: rotate(3deg); }
+  88%      { transform: rotate(-2deg); }
+}
+
+.notifications-bell-ring {
+  transform-origin: top center;
+  animation: notifications-bell-ring 3.8s ease-in-out 1;
+}
+
+@keyframes notifications-badge-pulse {
+  0%   { transform: scale(1); }
+  30%  { transform: scale(1.25); }
+  60%  { transform: scale(0.95); }
+  100% { transform: scale(1); }
+}
+
+.notifications-badge-pulse {
+  animation: notifications-badge-pulse 0.6s ease-out 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .notifications-bell-ring,
+  .notifications-badge-pulse {
+    animation: none;
+  }
+}
+

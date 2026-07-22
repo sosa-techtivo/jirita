@@ -42,6 +42,10 @@ After that, Delivery gained its own **Period selector** (This Month/Last Month/T
 
 Most recently, Settings gained, then immediately lost, a **Time Tracking** section: a first pass made Show Estimated Hours on Tickets, Require Estimation on New Tickets, Hour Rounding, and Round Up by Default into real, Admin-configurable `organizations` columns wired into New Ticket/Ticket Detail/Ticket Preview/`logTicketTime`; a follow-up product decision then retired that section outright in favor of the same four rules as **fixed, non-configurable JIRITA behavior** instead — Estimated Hours is now always visible, estimation stays optional at ticket creation, every logged time entry rounds up to a fixed 15-minute increment (`lib/time-rounding.ts`'s `roundLoggedMinutesUp`, the one shared helper `logTicketTime` — the single real time-entry write path — applies before persisting), and a genuinely new rule was added along the way: a ticket now needs a real estimate (`hours > 0`) before it can move to In Progress, In Review, or Done, enforced once, backend-side, in `updateTicket` (the single real gateway every status change already goes through, so Ticket Detail/Ticket Preview/Board can't diverge or be bypassed) and surfaced through the same existing error-toast/rollback pattern every other inline edit already used — no new UI code. `/settings/time-tracking` no longer exists (falls through to the standard "Section not found." branch, same as `/settings/projects`); the four `organizations` columns backing the old setting were deliberately left in place, unread, for compatibility. See Architecture Status → Removed (Settings → Time Tracking) for the full before/after and exactly where each fixed rule is enforced.
 
+Most recently, JIRITA gained a single, real, global **in-app Notifications system** — the header bell (every authenticated page, with a real unread-count badge), its 5-most-recent dropdown preview, and a full paginated `/notifications` page — backed by a new `notifications` table and one new data layer, `lib/notifications.ts`, with creation routed through a service-role Server Action (`create-notification-action.ts`) rather than a direct client insert. No email, push, desktop notifications, cron, queues, watchers, configurable preferences, or Supabase Realtime — a plain table refreshed on demand (load, focus/tab-visibility regain, after marking read). Four real events notify, each wired into the one real write path that operation already had, after it succeeds: ticket assignment and status changes (`updateTicket`), a comment on a ticket assigned to someone else (`createTicketComment`), and being added to a project (`addProjectMember`) — never a self-notification, never a fabricated mention (this schema has no structured `@mention` storage, so that event type is deliberately left uncreated rather than guessed by name). Settings → Notifications (the old mock Email/Desktop/Weekly-Digest toggles section) was retired outright in the same pass — there are no configurable notification preferences in this app at all — following the exact same "falls through to the standard 'Section not found.' branch" precedent Settings → Time Tracking/Projects already established. See Architecture Status → Removed (Settings → Notifications) for the full detail, including the RLS/authorization model.
+
+Most recently, Settings → Integrations (the mock GitHub/Slack/Google Calendar/Jira Import section) was retired outright, and repository linking was rebuilt as a **per-project** concern instead: `/projects/[slug]/settings` gained a new **Repository Integration** section (Repository Provider — None/GitHub/GitLab — and a Repository URL, format-validated only, never connected to/synced/OAuth'd) backed by two new `projects` columns (`repository_provider`, a real Postgres enum matching the `status`/`priority`/`health`/`category` convention, and `repository_url`). No OAuth, sync, commit reads, or webhooks exist — this is intentionally just the persisted configuration, ahead of a real GitHub/GitLab integration. See Architecture Status → Removed (Settings → Integrations) for the full detail.
+
 ---
 
 # Repository Structure
@@ -131,6 +135,7 @@ Route: `/projects/[slug]/settings`, Admin/Project Lead only. Previously a fully 
 - A single **Save Changes** button (didn't exist before) persists only the fields this screen manages; the breadcrumb (`ProjectSettingsBreadcrumb`) reads the live project name from the same shared provider Sidebar/`/projects` use, so a rename shows up there immediately too
 - **+ Add new client** (`add-client-modal.tsx`): minimal name-only creation, backed by a new `clients` table (see Architecture Status) — created immediately and selected in the form; persisted to the project on the next Save like any other field. Basic per-organization duplicate names are rejected.
 - Danger Zone's Archive/Restore reuses `archive-project-modal.tsx`/`restoreProject` exactly as on the Projects list — no separate implementation
+- **New: Repository Integration** — Repository Provider (`repository_provider`: `none`/`github`/`gitlab`, a real Postgres enum on `projects`, same convention as `status`/`priority`/`health`/`category`) and Repository URL (`repository_url`, hidden entirely when Provider is "None", required and format-validated — `https://github.com/owner/repository` / `https://gitlab.com/group/project` — otherwise, client-side only, never connected to). No OAuth/sync/commit-reads/webhooks/Connect-Disconnect-Test-Connection buttons exist; this is deliberately just the persisted configuration. A small status line reads the real, persisted `project.repositoryProvider`/`repositoryUrl` ("Not connected" / "GitHub connected" / "GitLab connected"), with an "Open Repository" link (new tab) shown only once a real URL is saved. Replaces the old org-wide Settings → Integrations mock section outright — see Architecture Status → Removed (Settings → Integrations).
 - **Removed**: General's "Project Lead" picker (and the `loadOrganizationMembers` fetch that only existed to populate it) — it read/wrote the older `projects.owner_profile_id`, which is not the same field as Team's real `project_memberships.project_role` (see Team below). Project Lead is now set exclusively via Team's "Make Project Lead" action. **Resolved**: the `/projects` list's own Lead column/filter has since been reconciled onto `project_memberships.project_role` too (see the new subsection below) — `ProjectSummary.owner`/`owner_profile_id` no longer has any Lead-column reader anywhere in the app (Member's "My Projects" was already on `project_role`; see Architecture Status → Projects).
 
 #### Health, Progress, Ticket Counters & Tab-Regain Refresh (real, Admin/Project Lead) — `projects-list-screen.tsx`
@@ -491,15 +496,15 @@ No new database tables or columns were needed — pure application-layer query/r
 
 Completed.
 
-Routes: `/settings` (redirects to `/settings/general`) and `/settings/[section]` for 4 sections.
+Routes: `/settings` (redirects to `/settings/general`) and `/settings/[section]` — now down to 2 real sections (General, Danger Zone) after Projects/Time Tracking/Notifications/Integrations were each retired outright rather than left mock (see the four "Removed" entries below).
 
 Sections:
 
 - **General**: **now real** — Workspace Name, Active Days (day picker), Default Role, and Default Weekly Capacity read/write `organizations` directly (see Architecture Status → Settings → General for the full breakdown); Logo/Timezone/Language were removed outright (no schema, no real consumer anywhere in the app — see the audit this was based on), not just left mock
 - **Removed**: Projects (`/settings/projects` — Ticket Statuses/Priorities/Ticket Types/Labels) was retired outright, not left mock — see Architecture Status → Removed (Settings → Projects) for why. `/settings/projects` no longer appears in the nav/hub and no longer statically generates; a direct visit falls through to the same "Section not found." default `SectionContent` already renders for any unrecognized slug.
 - **Removed**: Time Tracking (`/settings/time-tracking` — Show Estimated Hours on Tickets, Require Estimation on New Tickets, Hour Rounding, Round Up by Default) was retired outright — those four rules are now fixed, non-configurable JIRITA product behavior instead of an Admin setting. See Architecture Status → Removed (Settings → Time Tracking) for the current fixed rules and exactly where each is enforced.
-- **Notifications**: Email, desktop, and digest toggles with per-channel granularity
-- **Integrations**: GitHub (connected, 3 repos), Slack and Google Calendar (Connect buttons), Jira Import (Coming Soon)
+- **Removed**: Notifications (Email, desktop, and digest toggles with per-channel granularity) was retired outright — there are no configurable notification preferences in this app; see Architecture Status → Removed (Settings → Notifications) for the real global system that replaced it.
+- **Removed**: Integrations (GitHub connected/3 repos, Slack and Google Calendar Connect buttons, Jira Import Coming Soon) was retired outright — integrations are a per-project concern, not org-wide; see Architecture Status → Removed (Settings → Integrations) for Project Settings' own real Repository Integration section.
 - **Danger Zone**: Archive Workspace (amber) and Delete Workspace (red) actions with warning messaging
 
 People (formerly a Settings section) is now the dedicated **Users** module — see below.
@@ -2084,10 +2089,145 @@ is untouched), but are deliberately unread/unwritten by any code path now
   increment is a fixed constant, not read from any `organizations` column.
   No historical `ticket_time_entries` row was touched or re-rounded.
 
+## Removed (Settings → Notifications) — replaced by a real, global Notifications system
+
+Settings → Notifications (the mock Email/Desktop/Weekly-Digest toggles
+section) was retired outright, the same way Settings → Time Tracking and
+Settings → Projects were before it — not because preferences moved
+elsewhere, but because this app has no configurable notification
+preferences at all by design. `settings-screen.tsx`'s `SETTINGS_SECTIONS`
+no longer lists it, `settings-section-screen.tsx`'s `NotificationsContent`/
+`Toggle` import/dispatch `case` are gone, and `app/settings/[section]/page.tsx`'s
+`SECTION_TITLES` no longer includes it — `/settings/notifications` falls
+through to the same "Section not found." default `SectionContent` every
+other unrecognized slug already renders (same precedent as
+`/settings/projects`/`/settings/time-tracking`), and no longer statically
+generates. General/Integrations/Danger Zone are unaffected.
+
+In its place: a real, global, in-app notification system — the header
+bell (every authenticated page), a 5-most-recent dropdown preview, and a
+full paginated `/notifications` page — backed by a brand-new `notifications`
+table (`20260817000000_add_notifications.sql`) and one new data layer,
+`lib/notifications.ts` (`createNotification`/`loadRecentNotifications`/
+`loadNotificationsPage`/`loadUnreadNotificationCount`/`markNotificationRead`/
+`markAllNotificationsRead`). No email, push, desktop notifications, cron,
+job queues, watchers, configurable preferences, or Supabase Realtime —
+purely a table read on demand (initial load, window-focus/tab-visibility
+regain, right after marking read, and immediately if a notification is
+created for the current session's own profile within the same tab) and
+written through a service-role Server Action.
+
+**Four real events create a notification** (never a fabricated/mock one),
+each wired into the one real write path that operation already had, after
+that write has actually succeeded, fire-and-forget so a notification
+failure can never revert or block it:
+- **Ticket assigned** — `updateTicket` (`lib/tickets.ts`), when
+  `assignee_profile_id` genuinely changes to a real, different profile.
+- **Comment on assigned ticket** — `createTicketComment` (`lib/tickets.ts`),
+  when the ticket's current assignee isn't the comment's own author.
+- **Ticket status changed** — `updateTicket`, when `status` genuinely
+  changes, notifying the ticket's current assignee with both the old and
+  new status's real display labels (reusing `buildActivityLabel`'s own
+  `activityStatusLabel`, never a second copy).
+- **Added to project** — `addProjectMember` (`lib/projects.ts`), only on a
+  real new `project_memberships` insert (a 23505-caught "already a
+  member" — e.g. auto-added by the contribution trigger — never notifies).
+  The auto-membership-on-contribution DB trigger itself doesn't go through
+  this JS function at all, so it never notifies either.
+
+**Mention-in-comment is deliberately not implemented.** An audit of the
+real comment system (`ticket_comments`/`createTicketComment`) found no
+structured `@mention` storage anywhere in this schema — comments are
+plain, unparsed text. Resolving a "mention" by matching a name in that text
+would mean guessing at an ambiguous string match, which this feature's own
+rules explicitly rule out. `comment_mention` still exists as a real,
+allowed `notifications.type` (checked by the table's own constraint) for
+whenever a real, structured mention mechanism is built — no code path
+creates one today.
+
+**Every write is centrally guarded, not per-call-site**: `createNotification`
+(the single real entry point every one of the four events above calls) is
+the one place that skips notifying a profile about its own action —
+self-assignment, self-comment-on-own-assigned-ticket (can't happen, but
+guarded anyway), and self-added-to-a-project all no-op here rather than
+being re-checked at each of the four call sites. `create-notification-action.ts`
+(the service-role Server Action `createNotification` calls) independently
+re-verifies, server-side: the attributed actor must be whoever is actually
+calling it (never a client-claimed id), and both the caller and the
+recipient must be real, active members of the exact organization claimed —
+so one organization's member can never notify, or fabricate a notification
+pointed at, a profile in a different organization. A referenced project/
+ticket is likewise confirmed to really belong to that same organization
+before the insert.
+
+**RLS**: `notifications` has no `INSERT`/`DELETE` grant or policy for
+`authenticated` at all — creation only ever happens through the
+service-role action above. A recipient can `SELECT` only their own rows
+(`recipient_profile_id = auth.uid()`, plus the same `is_org_member` floor
+every other table already uses), and can `UPDATE` only `read_at` on their
+own rows (a column-level `GRANT UPDATE (read_at)`, since RLS alone can't
+restrict which column). Every bandeja is personal — an Admin/Project Lead
+never automatically sees anyone else's notifications, same as every other
+role in this app.
+
+Bell click destinations reuse the app's existing stable-route convention
+(the same one global Search's own results popover already established in
+`sidebar.tsx`) rather than the Ticket Preview panel's client-only state,
+since the bell has to work from any authenticated page: a ticket
+notification goes to `/projects/{slug}/tickets/{code}`, a project-only one
+to `/projects/{slug}`, and one with neither destination just marks itself
+read in place. All of the above is implemented and type/build-clean
+(`tsc`/`eslint`/`next build` all pass) — same "should work, not yet
+verified live" status as everything else in this list.
+
+## Removed (Settings → Integrations) — replaced by Project Settings → Repository Integration
+
+Settings → Integrations (the mock "Connected: GitHub" card plus
+Slack/Google Calendar/"Coming soon" Jira Import in the "Available" list)
+was retired outright, the same way Notifications/Time Tracking/Projects
+were before it — not because it moved to another org-wide screen, but
+because integrations are a **per-project** concern, not an organization-wide
+one. `settings-screen.tsx`'s `SETTINGS_SECTIONS` no longer lists it,
+`settings-section-screen.tsx`'s `IntegrationsContent`/dispatch `case` are
+gone, and `app/settings/[section]/page.tsx`'s `SECTION_TITLES` no longer
+includes it — `/settings/integrations` falls through to the same "Section
+not found." default `SectionContent` every other unrecognized slug already
+renders (same precedent as `/settings/notifications`/`/settings/time-tracking`/
+`/settings/projects`), and no longer statically generates. General/Danger
+Zone are unaffected. `settings-ui.tsx`'s `Toggle` primitive — only ever
+used by the mock Notifications/Integrations toggles, both now gone — was
+removed outright too, having no real call site left anywhere in the app.
+
+In its place: Project Settings (`/projects/[slug]/settings`) gained a new
+**Repository Integration** section — Repository Provider (a real
+`repository_provider` enum column: `none`/`github`/`gitlab`, matching the
+same enum-column convention `status`/`priority`/`health`/`category`
+already use on `projects`, added by
+`20260818000000_add_project_repository_integration.sql`) and Repository
+URL (`repository_url`, plain text, hidden entirely when Provider is
+"None"). **No OAuth, no sync, no commit reads, no webhooks, no "Connect"/
+"Disconnect"/"Test Connection" button, and nothing ever calls out to
+GitHub/GitLab** — this is deliberately just the persisted configuration,
+format-validated client-side only (`https://github.com/owner/repository` /
+`https://gitlab.com/group/project`) before Save Changes will accept it,
+ahead of a real integration. The section's own small status line reads the
+**persisted** record (`project.repositoryProvider`/`repositoryUrl`, not
+the in-progress draft) — "Not connected" when unset, "GitHub connected" /
+"GitLab connected" otherwise — with an "Open Repository" link (opens the
+saved URL in a new tab) shown only once a real URL is saved; switching
+Provider back to "None" and saving always clears `repository_url` too, so
+a stale URL can never persist invisibly behind it. `lib/projects.ts`'s
+`ProjectDetail`/`ProjectSettingsUpdate`/`loadProjectDetail`/
+`updateProjectSettings` all gained this pair of fields; `ProjectSummary`
+(the Sidebar/`/projects` list shape) deliberately did not, since nothing
+outside Project Settings needs it yet. Implemented and type/build-clean
+(`tsc`/`eslint`/`next build` all pass) — same "should work, not yet
+verified live" status as everything else in this list.
+
 ## Still mock
 
-- The rest of Settings (`/settings/*` — Notifications, Integrations,
-  Danger Zone) still reads from `src/lib/mock-*.ts`.
+- The rest of Settings (`/settings/*` — Danger Zone) still reads from
+  `src/lib/mock-*.ts`.
   **Resolved**: General is no longer part of this list — see Confirmed
   working → Settings → General for the real Workspace Name/Active
   Days/Default Role/Default Capacity (and why Logo/Timezone/Language were
@@ -2095,6 +2235,10 @@ is untouched), but are deliberately unread/unwritten by any code path now
   retired outright rather than left mock — see Removed → Settings → Time
   Tracking (estimate visibility/requirement and time rounding are now
   fixed product behavior, not a setting) and Removed → Settings → Projects.
+  Notifications and Integrations were retired outright too — Notifications
+  replaced by a real global system (see Removed → Settings →
+  Notifications), Integrations replaced by Project Settings' own real
+  Repository Integration section (see Removed → Settings → Integrations).
   Also **resolved**:
   `src/components/project-lead-reports-screen.tsx` (the
   Project Lead role's own Reports view) no longer reads

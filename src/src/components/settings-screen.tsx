@@ -20,32 +20,6 @@ export const SETTINGS_SECTIONS = [
       </svg>
     ),
   },
-  {
-    slug:        "notifications",
-    title:       "Notifications",
-    description: "Email, desktop and digest preferences",
-    iconBg:      "bg-emerald-50 dark:bg-emerald-500/10",
-    iconColor:   "text-emerald-600 dark:text-emerald-400",
-    items:       ["Email", "Desktop", "Mentions", "Weekly digest"],
-    icon: (
-      <svg className="w-4.5 h-4.5" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
-        <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 01-3.46 0" />
-      </svg>
-    ),
-  },
-  {
-    slug:        "integrations",
-    title:       "Integrations",
-    description: "Connected tools and services",
-    iconBg:      "bg-brand-50 dark:bg-brand-500/10",
-    iconColor:   "text-brand-600 dark:text-brand-400",
-    items:       ["GitHub", "Slack", "Google Calendar", "Jira Import"],
-    icon: (
-      <svg className="w-4.5 h-4.5" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
-        <path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71" />
-      </svg>
-    ),
-  },
 ] as const;
 
 export const DANGER_SECTION = {

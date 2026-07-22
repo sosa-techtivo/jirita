@@ -9,7 +9,7 @@ import { SettingGroup, SettingRow, TextField, NumberField, SelectField } from "@
 import { useCurrentUser } from "@/components/current-user-provider";
 import { useOrganizationProjects } from "@/components/organization-projects-provider";
 import { loadProjectDetail, loadOrganizationClients, createOrganizationClient } from "@/lib/projects";
-import type { ProjectDetail, EditableProjectStatus, Client } from "@/lib/projects";
+import type { ProjectDetail, EditableProjectStatus, Client, RepositoryProvider } from "@/lib/projects";
 import { ArchiveProjectModal } from "@/components/archive-project-modal";
 import { AddClientModal } from "@/components/add-client-modal";
 
@@ -81,6 +81,34 @@ function CategoryToggle({ value, onChange }: { value: ProjectCategory; onChange:
 const EDITABLE_STATUSES: EditableProjectStatus[] = ["planning", "active", "on-hold", "completed"];
 const ADD_NEW_CLIENT = "__add_new_client__";
 
+// ── Repository Integration ──────────────────────────────────────────────────
+// No OAuth, no sync, no commit reads, no webhooks — just which provider (if
+// any) this project links to, and its URL. See lib/projects.ts's
+// RepositoryProvider/updateProjectSettings for the persisted side.
+const REPOSITORY_PROVIDER_OPTIONS: { value: RepositoryProvider; label: string }[] = [
+  { value: "none", label: "None" },
+  { value: "github", label: "GitHub" },
+  { value: "gitlab", label: "GitLab" },
+];
+
+const GITHUB_REPO_URL_RE = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/?$/;
+const GITLAB_REPO_URL_RE = /^https:\/\/gitlab\.com\/[\w.-]+\/[\w.-]+\/?$/;
+
+// Format-only — never connects, never calls an API. Provider = "none" has
+// nothing to validate (Repository URL is hidden entirely in that case).
+function validateRepositoryUrl(provider: RepositoryProvider, url: string): string | null {
+  if (provider === "none") return null;
+  const trimmed = url.trim();
+  if (!trimmed) return "Repository URL is required.";
+  if (provider === "github" && !GITHUB_REPO_URL_RE.test(trimmed)) {
+    return "Enter a valid GitHub repository URL, e.g. https://github.com/owner/repository";
+  }
+  if (provider === "gitlab" && !GITLAB_REPO_URL_RE.test(trimmed)) {
+    return "Enter a valid GitLab repository URL, e.g. https://gitlab.com/group/project";
+  }
+  return null;
+}
+
 // Dev-only fallback roster (no real organization to query `clients` from)
 // — seeded from the same placeholder names the Client selector always used
 // before this feature existed, so local dev without Supabase credentials
@@ -109,7 +137,15 @@ export function ProjectSettingsScreen({ slug }: { slug: string }) {
     ? (() => {
         const mock = sharedProjects.find((p) => p.slug === slug);
         return mock
-          ? { ...mock, ownerProfileId: null, createdAt: "—", createdAtISO: new Date(0).toISOString(), targetDateISO: null }
+          ? {
+              ...mock,
+              ownerProfileId: null,
+              createdAt: "—",
+              createdAtISO: new Date(0).toISOString(),
+              targetDateISO: null,
+              repositoryProvider: "none",
+              repositoryUrl: null,
+            }
           : null;
       })()
     : null;
@@ -131,6 +167,10 @@ export function ProjectSettingsScreen({ slug }: { slug: string }) {
   // string when unset, same "no value" convention as Description/Client
   // above.
   const [targetDate, setTargetDate] = useState(initialDevProject?.targetDateISO ?? "");
+  const [repositoryProvider, setRepositoryProvider] = useState<RepositoryProvider>(
+    initialDevProject?.repositoryProvider ?? "none"
+  );
+  const [repositoryUrl, setRepositoryUrl] = useState(initialDevProject?.repositoryUrl ?? "");
 
   const [showArchiveModal, setShowArchiveModal] = useState(false);
   const [showAddClientModal, setShowAddClientModal] = useState(false);
@@ -150,6 +190,8 @@ export function ProjectSettingsScreen({ slug }: { slug: string }) {
     setClient(project.client ?? "");
     setBillingRate(project.defaultHourlyRate ?? 0);
     setTargetDate(project.targetDateISO ?? "");
+    setRepositoryProvider(project.repositoryProvider);
+    setRepositoryUrl(project.repositoryUrl ?? "");
   }, []);
 
   // Refetches just this project — every setState lives inside its .then()
@@ -198,6 +240,8 @@ export function ProjectSettingsScreen({ slug }: { slug: string }) {
           createdAt: "—",
           createdAtISO: new Date(0).toISOString(),
           targetDateISO: targetDate || null,
+          repositoryProvider,
+          repositoryUrl: repositoryProvider === "none" ? null : repositoryUrl.trim() || null,
         };
         setDetail({ status: "ready", project: updated });
         applyProject(updated);
@@ -205,7 +249,7 @@ export function ProjectSettingsScreen({ slug }: { slug: string }) {
       return;
     }
     runFetch();
-  }, [isDevFallback, sharedProjects, slug, runFetch, applyProject, targetDate]);
+  }, [isDevFallback, sharedProjects, slug, runFetch, applyProject, targetDate, repositoryProvider, repositoryUrl]);
 
   if (detail.status === "loading") {
     return (
@@ -236,6 +280,12 @@ export function ProjectSettingsScreen({ slug }: { slug: string }) {
   const isArchived = project.status === "archived";
 
   async function handleSave() {
+    const repositoryError = validateRepositoryUrl(repositoryProvider, repositoryUrl);
+    if (repositoryError) {
+      setSaveError(repositoryError);
+      return;
+    }
+
     setSaving(true);
     setSaveError(null);
     setSaved(false);
@@ -247,6 +297,8 @@ export function ProjectSettingsScreen({ slug }: { slug: string }) {
       status: status as EditableProjectStatus,
       category,
       targetDate: targetDate || null,
+      repositoryProvider,
+      repositoryUrl: repositoryProvider === "none" ? null : repositoryUrl.trim(),
       ...(isClient ? { client: client || null, defaultHourlyRate: billingRate } : {}),
     });
 
@@ -395,6 +447,53 @@ export function ProjectSettingsScreen({ slug }: { slug: string }) {
             <p className="text-[11px] text-slate-400 dark:text-zinc-600 mt-1 max-w-md">
               Billable status is always inherited from the project — nobody chooses it per time entry.
             </p>
+          </div>
+        </SettingGroup>
+
+        <SettingGroup title="Repository Integration">
+          <SettingRow label="Repository Provider">
+            <SelectField
+              value={repositoryProvider}
+              onChange={(next) => setRepositoryProvider(next as RepositoryProvider)}
+              options={REPOSITORY_PROVIDER_OPTIONS}
+            />
+          </SettingRow>
+          {repositoryProvider !== "none" && (
+            <SettingRow
+              label="Repository URL"
+              hint={
+                repositoryProvider === "github"
+                  ? "e.g. https://github.com/company/project"
+                  : "e.g. https://gitlab.com/company/project"
+              }
+            >
+              <TextField value={repositoryUrl} onChange={setRepositoryUrl} width="w-72" />
+            </SettingRow>
+          )}
+
+          <div className="py-3.5 flex items-center justify-between gap-4">
+            <div className="flex items-center gap-1.5">
+              <span
+                className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+                  project.repositoryProvider !== "none" ? "bg-emerald-500" : "bg-slate-300 dark:bg-zinc-600"
+                }`}
+              />
+              <p className="text-[12px] font-semibold text-slate-600 dark:text-zinc-400">
+                {project.repositoryProvider === "none"
+                  ? "Not connected"
+                  : `${project.repositoryProvider === "github" ? "GitHub" : "GitLab"} connected`}
+              </p>
+            </div>
+            {project.repositoryProvider !== "none" && project.repositoryUrl && (
+              <a
+                href={project.repositoryUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex-shrink-0 text-[13px] font-medium text-brand-600 dark:text-brand-400 border border-brand-200 dark:border-brand-500/30 px-3 py-1.5 rounded-lg hover:bg-brand-50 dark:hover:bg-brand-500/5 transition-colors"
+              >
+                Open Repository
+              </a>
+            )}
           </div>
         </SettingGroup>
 
