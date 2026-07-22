@@ -5,7 +5,6 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCurrentUser } from "@/components/current-user-provider";
-import { getTeamByProjectSlug } from "@/lib/mock-team";
 import type { TeamMember } from "@/lib/mock-team";
 import { TicketPreviewPanel } from "@/components/tickets/ticket-preview-panel";
 import type { Ticket } from "@/lib/mock-tickets";
@@ -49,11 +48,10 @@ import { NewTicketModal } from "@/components/tickets/new-ticket-modal";
 // already-existing loaders reused as-is). My Active Work / Recent Activity /
 // Upcoming Deadlines / Team Capacity are all scoped to the whole selected
 // project (every member/ticket, regardless of assignee), not just the
-// signed-in Project Lead's own work. PROJECT_TICKETS / MY_ACTIVE /
-// aggregateTeam / getTeamByProjectSlug mock data are no longer read by this
-// component itself, but stay defined/exported as-is because
-// projects-list-screen.tsx and project-lead-reports-screen.tsx still import
-// them directly.
+// signed-in Project Lead's own work. PROJECT_TICKETS / MY_ACTIVE mock data
+// are no longer read by this component itself, but stay defined/exported
+// as-is because projects-list-screen.tsx and project-lead-reports-screen.tsx
+// still import them directly.
 
 // Projects this Project Lead manages, per the still-mock Reports screen —
 // kept exactly as-is (unused by this component's own Current Project
@@ -130,31 +128,6 @@ export const PROJECT_TICKETS: Record<string, Ticket[]> = {
     },
   ],
 };
-
-// Merge team rosters across projects, summing hours/capacity for anyone
-// staffed on more than one of the selected projects. No longer called by
-// this component's own (now real) Team Capacity section — kept only because
-// projects-list-screen.tsx and project-lead-reports-screen.tsx still import
-// it directly.
-export function aggregateTeam(slugs: string[]): TeamMember[] {
-  const merged = new Map<string, TeamMember>();
-  for (const slug of slugs) {
-    for (const member of getTeamByProjectSlug(slug)) {
-      const existing = merged.get(member.name);
-      if (existing) {
-        merged.set(member.name, {
-          ...existing,
-          assignedHours: existing.assignedHours + member.assignedHours,
-          weeklyCapacity: existing.weeklyCapacity + member.weeklyCapacity,
-          activeTicketIds: [...existing.activeTicketIds, ...member.activeTicketIds],
-        });
-      } else {
-        merged.set(member.name, { ...member });
-      }
-    }
-  }
-  return Array.from(merged.values());
-}
 
 // ── Sub-components ────────────────────────────────────────────────────────────
 

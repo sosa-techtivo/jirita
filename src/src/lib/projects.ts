@@ -898,7 +898,6 @@ export type ProjectTeamResult =
 
 interface TeamMembershipRow {
   profile_id: string;
-  weekly_capacity: number | null;
   project_role: string;
 }
 
@@ -935,7 +934,7 @@ export async function loadProjectTeam(organizationId: string, slug: string): Pro
 
   const { data: membershipRows, error: membershipError } = await supabase
     .from("project_memberships")
-    .select("profile_id, weekly_capacity, project_role")
+    .select("profile_id, project_role")
     .eq("project_id", projectRow.id)
     .returns<TeamMembershipRow[]>();
 
@@ -978,14 +977,13 @@ export async function loadProjectTeam(organizationId: string, slug: string): Pro
   const orgRoleLabelByProfileId = new Map(
     (orgRolesResult.data ?? []).map((row) => [row.profile_id, ORG_ROLE_LABEL[row.role] ?? row.role])
   );
-  // "+ Add Member" (addProjectMember) never sets project_memberships.weekly_capacity,
-  // so a member added that way has it null, not 0 — falling back to their real
-  // organization_memberships.weekly_capacity here (only when the project-level
-  // value is genuinely unset, never overriding an explicit 0) keeps this the
-  // same real number Users/Profile already show for them, instead of a
-  // fabricated 0h. Same fallback source ensure_project_membership already
-  // seeds new auto-added rows from.
-  const orgCapacityByProfileId = new Map((orgRolesResult.data ?? []).map((row) => [row.profile_id, row.weekly_capacity]));
+  // Weekly capacity belongs to the member, never the project — the single
+  // source of truth is always organization_memberships.weekly_capacity,
+  // never project_memberships.weekly_capacity (which may still exist in the
+  // schema for other features, but is never read for capacity/utilization
+  // here or anywhere else). Same real number Users/Profile already show for
+  // this member, regardless of how many projects they're staffed on.
+  const orgCapacityByProfileId = new Map((orgRolesResult.data ?? []).map((row) => [row.profile_id, row.weekly_capacity ?? 0]));
 
   const members: ProjectTeamMember[] = membershipRows
     .map((membership): ProjectTeamMember | null => {
@@ -997,7 +995,7 @@ export async function loadProjectTeam(organizationId: string, slug: string): Pro
         email: profile.email ?? "",
         avatar: resolveAvatarUrl(profile.avatar_url, profile.updated_at) ?? FALLBACK_AVATAR,
         title: orgRoleLabelByProfileId.get(profile.id) ?? "Member",
-        weeklyCapacity: membership.weekly_capacity ?? orgCapacityByProfileId.get(profile.id) ?? 0,
+        weeklyCapacity: orgCapacityByProfileId.get(profile.id) ?? 0,
         projectRole: membership.project_role === "lead" ? "lead" : "member",
       };
     })
@@ -1213,41 +1211,20 @@ export type MemberWeeklyCapacityResult =
   | { status: "ready"; weeklyCapacity: number }
   | { status: "error"; message: string };
 
-// A member's real weekly capacity, resolved across every project they're
-// staffed on — same fallback loadProjectTeam already uses per project
-// (project_memberships.weekly_capacity ?? organization_memberships.weekly_capacity),
-// just without a single project to scope to. In practice every
-// project_memberships row resolves to the same real number
-// (ensure_project_membership seeds a new row from the org-level value, and
-// there's no UI to diverge it per project), so the maximum across a
-// member's own rows is a safe, deterministic single value — never lower
-// than their real capacity, and exactly the org-level value when they have
-// no project memberships yet. organizationWeeklyCapacity is passed in
-// (already loaded by useCurrentUser, itself organization_memberships.weekly_capacity)
-// instead of re-querying it here.
+// A member's real weekly capacity — belongs to the member, never a project,
+// so this is (and only ever should be) organization_memberships.weekly_capacity,
+// the single org-wide source of truth (never project_memberships.weekly_capacity,
+// and never summed/multiplied across however many projects they're staffed
+// on). organizationWeeklyCapacity is passed in (already loaded by
+// useCurrentUser, itself organization_memberships.weekly_capacity) rather
+// than re-querying it here — this function stays `async`/its own query-free
+// "ready" result only for call-site compatibility (every caller already
+// awaits a MemberWeeklyCapacityResult).
 export async function loadMemberWeeklyCapacity(
-  profileId: string,
+  _profileId: string,
   organizationWeeklyCapacity: number
 ): Promise<MemberWeeklyCapacityResult> {
-  const supabase = getSupabaseBrowserClient();
-
-  const { data: rows, error } = await supabase
-    .from("project_memberships")
-    .select("weekly_capacity")
-    .eq("profile_id", profileId)
-    .returns<{ weekly_capacity: number | null }[]>();
-
-  if (error) {
-    logDev("member weekly capacity query failed", error);
-    return { status: "error", message: error.message };
-  }
-
-  if (!rows || rows.length === 0) {
-    return { status: "ready", weeklyCapacity: organizationWeeklyCapacity };
-  }
-
-  const weeklyCapacity = Math.max(...rows.map((row) => row.weekly_capacity ?? organizationWeeklyCapacity));
-  return { status: "ready", weeklyCapacity };
+  return { status: "ready", weeklyCapacity: organizationWeeklyCapacity };
 }
 
 export interface MemberWeeklyCapacityEntry {
@@ -1259,10 +1236,12 @@ export type OrganizationMemberWeeklyCapacitiesResult =
   | { status: "ready"; capacities: MemberWeeklyCapacityEntry[] }
   | { status: "error"; message: string };
 
-// Same fallback as loadMemberWeeklyCapacity above (project_memberships.weekly_capacity
-// ?? organization_memberships.weekly_capacity, max across a member's own
-// project rows when they have more than one), batched for every active org
-// member at once — backs Admin Reports' "Hours by Person" Capacity column.
+// A member's real weekly capacity belongs to the member, never a project —
+// organization_memberships.weekly_capacity is the single org-wide source of
+// truth (never project_memberships.weekly_capacity, and never summed across
+// however many projects a member is staffed on), batched for every active
+// org member at once — backs Admin Reports' "Hours by Person" Capacity
+// column and every other org-wide capacity/utilization consumer.
 export async function loadOrganizationMemberWeeklyCapacities(
   organizationId: string
 ): Promise<OrganizationMemberWeeklyCapacitiesResult> {
@@ -1280,32 +1259,9 @@ export async function loadOrganizationMemberWeeklyCapacities(
     return { status: "error", message: orgError.message };
   }
 
-  const orgCapacityByProfileId = new Map((orgRows ?? []).map((row) => [row.profile_id, row.weekly_capacity ?? 0]));
-  const profileIds = Array.from(orgCapacityByProfileId.keys());
-  if (profileIds.length === 0) return { status: "ready", capacities: [] };
-
-  const { data: projectRows, error: projectError } = await supabase
-    .from("project_memberships")
-    .select("profile_id, weekly_capacity")
-    .in("profile_id", profileIds)
-    .returns<{ profile_id: string; weekly_capacity: number | null }[]>();
-
-  if (projectError) {
-    logDev("member project memberships capacities query failed", projectError);
-    return { status: "error", message: projectError.message };
-  }
-
-  const resolvedByProfileId = new Map(orgCapacityByProfileId);
-  for (const row of projectRows ?? []) {
-    const orgCapacity = orgCapacityByProfileId.get(row.profile_id) ?? 0;
-    const resolved = row.weekly_capacity ?? orgCapacity;
-    const current = resolvedByProfileId.get(row.profile_id) ?? orgCapacity;
-    resolvedByProfileId.set(row.profile_id, Math.max(current, resolved));
-  }
-
-  const capacities = Array.from(resolvedByProfileId.entries()).map(([profileId, weeklyCapacity]) => ({
-    profileId,
-    weeklyCapacity,
+  const capacities = (orgRows ?? []).map((row) => ({
+    profileId: row.profile_id,
+    weeklyCapacity: row.weekly_capacity ?? 0,
   }));
 
   return { status: "ready", capacities };

@@ -21,6 +21,7 @@ import type { OrganizationTimeEntry } from "@/lib/tickets";
 import { loadOrganizationProjects, loadOrganizationMemberWeeklyCapacities } from "@/lib/projects";
 import type { MemberWeeklyCapacityEntry } from "@/lib/projects";
 import { loadOrganizationUsers } from "@/lib/users";
+import { isActiveDay, countActiveDaysInRange } from "@/lib/active-days";
 import {
   buildFinanceKpiSummary,
   buildBillingOverviewRows,
@@ -291,31 +292,38 @@ export function getCurrentMonthRange(): CustomRange {
   return { from: toISODate(new Date(y, m - 1, 1)), to: toISODate(new Date(y, m, 0)) };
 }
 
-// Same "hours per weekday" capacity model the Custom Range estimate used
-// before this screen was real, just now applied to a real weeklyCapacity
-// and real logged hours instead of a mock row's static fields.
-function countWeekdays(fromISO: string, toISO: string): number {
-  const [fy, fm, fd] = fromISO.split("-").map(Number);
-  const [ty, tm, td] = toISO.split("-").map(Number);
-  const end = new Date(ty, tm - 1, td);
-  let cur = new Date(fy, fm - 1, fd);
-  let count = 0;
-  while (cur <= end) {
-    const d = cur.getDay();
-    if (d !== 0 && d !== 6) count++;
-    cur = new Date(cur.getFullYear(), cur.getMonth(), cur.getDate() + 1);
-  }
-  return count;
-}
-
-const MONTH_WEEKS = 4.33;
-
-export function expectedHoursForPeriod(weeklyCapacity: number, period: TimePeriod, customRange: CustomRange): number {
-  const dailyRate = weeklyCapacity / 5;
-  if (period === "today") return dailyRate;
+// Expected hours per active day — the organization's real weekly capacity
+// spread across however many days it actually counts as working days
+// (organization.activeDays, ISO weekday numbers), never a hardcoded ÷5.
+// activeDays is always non-empty (organizations.active_days' own CHECK
+// constraint guarantees it), so this never divides by zero in practice;
+// the 0 guard is only defense-in-depth.
+//
+// "week" stays exactly `weeklyCapacity` regardless of which specific days
+// are active: a full Monday–Sunday week always contains every one of the
+// organization's own active weekdays exactly once, so
+// dailyRate × activeDays.length always reduces back to weeklyCapacity —
+// same real total, just no longer assuming which 5 (or however many) days
+// they fall on. "month" now counts the real current month's own active
+// days (via getCurrentMonthRange, already used elsewhere on this page for
+// the same "this month" window) instead of a fixed 4.33-week
+// approximation, so a shorter/longer active-day count changes the month's
+// own expected total too, same as "custom" already did.
+export function expectedHoursForPeriod(
+  weeklyCapacity: number,
+  period: TimePeriod,
+  customRange: CustomRange,
+  activeDays: number[]
+): number {
+  if (activeDays.length === 0) return 0;
+  const dailyRate = weeklyCapacity / activeDays.length;
+  if (period === "today") return isActiveDay(getTodayISO(), activeDays) ? dailyRate : 0;
   if (period === "week") return weeklyCapacity;
-  if (period === "month") return weeklyCapacity * MONTH_WEEKS;
-  return dailyRate * countWeekdays(customRange.from, customRange.to);
+  if (period === "month") {
+    const month = getCurrentMonthRange();
+    return dailyRate * countActiveDaysInRange(month.from, month.to, activeDays);
+  }
+  return dailyRate * countActiveDaysInRange(customRange.from, customRange.to, activeDays);
 }
 
 // A member's logged minutes for a project/client/billing-filtered ticket set,
@@ -401,6 +409,15 @@ export function TimeTrackingScreen() {
   const { user, organization } = useCurrentUser();
   const router = useRouter();
   const searchParams = useSearchParams();
+
+  // The real, org-wide source of truth for expected-hours/Hours Missing —
+  // never a hardcoded Monday–Friday. `organization` is guaranteed by
+  // AuthGuard by the time this renders; the `?? []` only guards the type,
+  // and safely yields "0 expected hours" (via expectedHoursForPeriod's own
+  // guard below) rather than fabricating a default in the one case it'd
+  // ever matter. Memoized so its identity only changes when `organization`
+  // itself does, not on every render.
+  const activeDays = useMemo(() => organization?.activeDays ?? [], [organization]);
 
   // ── Filter/period state — seeded from the URL so it survives a refresh or
   //    a navigate-away-and-back, then kept in sync back to the URL below. ──
@@ -678,7 +695,7 @@ export function TimeTrackingScreen() {
 
       const weeklyCapacity = capacityByMember.get(m.id) ?? 0;
       const capacityPct = weeklyCapacity > 0 ? Math.round((hoursWeek / weeklyCapacity) * 100) : 0;
-      const expected = expectedHoursForPeriod(weeklyCapacity, period, customRange);
+      const expected = expectedHoursForPeriod(weeklyCapacity, period, customRange, activeDays);
       const status: TimesheetStatus = hoursSelected + 0.01 < expected ? "Missing" : "Complete";
 
       const billing = billingByMember.get(m.id);
@@ -700,7 +717,7 @@ export function TimeTrackingScreen() {
         status,
       };
     });
-  }, [visibleMembers, todayHours, yesterdayHours, weekHours, monthHours, customHours, capacityByMember, billingByMember, period, customRange]);
+  }, [visibleMembers, todayHours, yesterdayHours, weekHours, monthHours, customHours, capacityByMember, billingByMember, period, customRange, activeDays]);
 
   // Real scope handoff for every Member Profile Modal trigger below
   // (Timesheets, Members Missing Hours) — reuses the existing Project
@@ -720,7 +737,7 @@ export function TimeTrackingScreen() {
       .filter((r) => r.status === "Missing")
       .map((r) => {
         const weeklyCapacity = capacityByMember.get(r.id) ?? 0;
-        const expected = expectedHoursForPeriod(weeklyCapacity, period, customRange);
+        const expected = expectedHoursForPeriod(weeklyCapacity, period, customRange, activeDays);
         return {
           id: r.id,
           name: r.name,
@@ -730,7 +747,7 @@ export function TimeTrackingScreen() {
         };
       })
       .sort((a, b) => b.missingHours - a.missingHours);
-  }, [viewRows, capacityByMember, period, customRange]);
+  }, [viewRows, capacityByMember, period, customRange, activeDays]);
 
   // Always week-based, independent of the selected period — same real
   // weekHours/capacity source the table's own Capacity column reads, and

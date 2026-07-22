@@ -72,14 +72,13 @@ interface LedTeamMember {
 
 // Merges a member's roster entries across every led project they're staffed
 // on. `weeklyCapacity` is a person's real total availability, not a
-// per-project allocation, so it's resolved to a single canonical value via
-// `Math.max` across their own already-resolved (project_memberships.weekly_capacity
-// ?? organization_memberships.weekly_capacity) per-project rows — the exact
-// same fallback/aggregation `loadMemberWeeklyCapacity`/
-// `loadOrganizationMemberWeeklyCapacities` (lib/projects.ts) already use for
-// this — never summed across the projects they're staffed on. `projectSlugs`
-// still concatenates every led project they're on (used for scoping, not
-// capacity).
+// per-project allocation — loadProjectTeam (lib/projects.ts) now resolves it
+// purely from organization_memberships.weekly_capacity, the single org-wide
+// source of truth, so every one of a member's own per-project rows already
+// carries the exact same real number; `Math.max` across those rows reduces
+// them to that one canonical value — never summed across the projects
+// they're staffed on. `projectSlugs` still concatenates every led project
+// they're on (used for scoping, not capacity).
 function mergeLedTeams(perProject: { slug: string; members: ProjectTeamMember[] }[]): LedTeamMember[] {
   const merged = new Map<string, LedTeamMember>();
   for (const { slug, members } of perProject) {
@@ -305,6 +304,12 @@ export function ProjectLeadTimeTrackingScreen() {
   const { organization, userId, isDevFallback } = useCurrentUser();
   const router = useRouter();
   const searchParams = useSearchParams();
+
+  // Same real, org-wide source of truth Admin/Member Time Tracking reads
+  // (time-tracking-screen.tsx) — never a second/different definition of
+  // "active days" for this role's own view. Memoized so its identity only
+  // changes when `organization` itself does, not on every render.
+  const activeDays = useMemo(() => organization?.activeDays ?? [], [organization]);
 
   const [period, setPeriod] = useState<TimePeriod>("week");
   const [customRange, setCustomRange] = useState<CustomRange>({ from: getTodayISO(-13), to: getTodayISO() });
@@ -578,7 +583,7 @@ export function ProjectLeadTimeTrackingScreen() {
       // disagree with the Member Profile Modal opened from this same row.
       const assignedHours = assignedHoursByMember.get(m.id) ?? 0;
       const capacityPct = weeklyCapacity > 0 ? Math.round((assignedHours / weeklyCapacity) * 100) : 0;
-      const expected = expectedHoursForPeriod(weeklyCapacity, period, customRange);
+      const expected = expectedHoursForPeriod(weeklyCapacity, period, customRange, activeDays);
       const status: TimesheetStatus = hoursSelected + 0.01 < expected ? "Missing" : "Complete";
 
       return {
@@ -600,14 +605,14 @@ export function ProjectLeadTimeTrackingScreen() {
         status,
       };
     });
-  }, [visibleMembers, todayHours, weekHours, monthHours, customHours, capacityByMember, assignedHoursByMember, period, customRange, projectFilter, leadProjects]);
+  }, [visibleMembers, todayHours, weekHours, monthHours, customHours, capacityByMember, assignedHoursByMember, period, customRange, projectFilter, leadProjects, activeDays]);
 
   const missingHours = useMemo(() => {
     return viewRows
       .filter((r) => r.status === "Missing")
       .map((r) => {
         const weeklyCapacity = capacityByMember.get(r.id) ?? 0;
-        const expected = expectedHoursForPeriod(weeklyCapacity, period, customRange);
+        const expected = expectedHoursForPeriod(weeklyCapacity, period, customRange, activeDays);
         return {
           id: r.id,
           name: r.name,
@@ -618,7 +623,7 @@ export function ProjectLeadTimeTrackingScreen() {
         };
       })
       .sort((a, b) => b.missingHours - a.missingHours);
-  }, [viewRows, capacityByMember, period, customRange]);
+  }, [viewRows, capacityByMember, period, customRange, activeDays]);
 
   const weeklyUtilizationPct = useMemo(() => {
     let totalWeekHours = 0;

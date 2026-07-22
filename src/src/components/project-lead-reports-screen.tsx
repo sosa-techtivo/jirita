@@ -9,8 +9,7 @@ import { MemberTrigger, useMemberProfile } from "@/components/member-profile";
 import { StatusBadge, HealthBadge } from "@/components/status-badge";
 import { ReportStatusBar, Section, KpiCard, BlockCompletion, AnimatedBar } from "@/components/reports-shared";
 import type { StatusItem } from "@/components/reports-shared";
-import { RecentActivityList, SkeletonBlock } from "@/components/dashboard-shared";
-import type { DashboardActivityEntry } from "@/components/dashboard-shared";
+import { SkeletonBlock } from "@/components/dashboard-shared";
 import { FilterDropdown } from "@/components/tickets/filter-dropdown";
 import type { DropdownGroup } from "@/components/tickets/filter-dropdown";
 import { FilterChip } from "@/components/tickets/filter-chip";
@@ -24,15 +23,24 @@ import {
   STATUS_LABEL,
   PRIORITY_LABEL,
   PRIORITY_VALUES,
+  StatusBadge as TicketStatusBadge,
+  PriorityBadge,
 } from "@/components/tickets/ticket-ui";
 import { useCurrentUser } from "@/components/current-user-provider";
 import { useOrganizationProjects } from "@/components/organization-projects-provider";
-import { loadOrganizationTickets, loadOrganizationActivity } from "@/lib/tickets";
-import type { OrganizationActivityEvent } from "@/lib/tickets";
+import { loadOrganizationTickets, loadOrganizationLoggedTimeForRange } from "@/lib/tickets";
+import type { OrganizationTimeEntry } from "@/lib/tickets";
 import { loadProjectTeam } from "@/lib/projects";
-import type { ProjectTeamMember } from "@/lib/projects";
-import { buildProjectHealthRows, computeProjectProgressPct } from "@/components/reports-screen";
-import type { Risk } from "@/components/reports-screen";
+import type { ProjectTeamMember, OrgWorkloadMember } from "@/lib/projects";
+import {
+  buildProjectHealthRows,
+  computeProjectProgressPct,
+  buildTicketsByMember,
+  PeriodSelector,
+  DEFAULT_CUSTOM_RANGE,
+  realRangeForPeriod,
+} from "@/components/reports-screen";
+import type { Risk, PeriodKey, CustomRange } from "@/components/reports-screen";
 
 // ── Delivery tab (real) ──────────────────────────────────────────────────────
 //
@@ -83,58 +91,6 @@ function getWeekRangeISO(todayISO: string): { start: string; end: string } {
   const toISO = (d: Date) =>
     `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   return { start: toISO(monday), end: toISO(sunday) };
-}
-
-// Real "Recent Changes" — same real ticket_activity feed
-// (loadOrganizationActivity) and the same 5-event-type mapping the Admin
-// and Project Lead Dashboards already use for their own "Recent Activity",
-// just resolved across every led project's own real tickets/name instead
-// of one already-selected project.
-const RECENT_CHANGES_LIMIT = 10;
-
-function buildActivityEntries(
-  events: OrganizationActivityEvent[],
-  ticketsById: Map<string, Ticket>,
-  projectNameBySlug: Map<string, string>
-): DashboardActivityEntry[] {
-  return events.map((event) => {
-    const ticket = ticketsById.get(event.ticketId);
-    const projectName = ticket ? projectNameBySlug.get(ticket.projectSlug) ?? ticket.projectSlug : "";
-    const base = {
-      id: event.id,
-      avatar: event.actorAvatar,
-      name: event.actorName ?? "Someone",
-      actorProfileId: event.actorProfileId ?? undefined,
-      ticket,
-      project: projectName,
-      time: event.time,
-    };
-
-    if (event.type === "blocked") return { ...base, type: "blocked" as const, verb: "marked" };
-    if (event.type === "completed") return { ...base, type: "completed" as const, verb: "completed" };
-    if (event.type === "hours") {
-      return {
-        ...base,
-        type: "hours" as const,
-        verb: "updated the estimate on",
-        detail: <span className="font-medium">{event.oldHours}h → {event.newHours}h</span>,
-      };
-    }
-    if (event.type === "assigned") {
-      return {
-        ...base,
-        type: "assigned" as const,
-        verb: "reassigned",
-        detail: <>to <span className="font-medium">{event.newAssigneeName}</span></>,
-      };
-    }
-    return {
-      ...base,
-      type: "priority" as const,
-      verb: event.priorityRaised ? "raised priority on" : "lowered priority on",
-      detail: <span className="font-medium">{event.oldPriorityLabel} → {event.newPriorityLabel}</span>,
-    };
-  });
 }
 
 // ── Team tab (real) ──────────────────────────────────────────────────────────
@@ -323,6 +279,12 @@ function ProjectLeadReportsLoadingSkeleton() {
         <SkeletonBlock className="h-7 w-16" />
       </div>
 
+      {/* Reporting period */}
+      <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
+        <SkeletonBlock className="h-[10px] w-28" />
+        <SkeletonBlock className="h-8 w-64 rounded-lg" />
+      </div>
+
       <div className="space-y-5">
         {/* Project Health */}
         <Section title="Project Health" icon={ProjectIcon}>
@@ -355,16 +317,29 @@ function ProjectLeadReportsLoadingSkeleton() {
           </div>
         </Section>
 
-        {/* Recent Changes */}
-        <Section title="Recent Changes" icon={ClockIcon}>
-          <div className="space-y-3.5">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <div key={i} className="flex items-start gap-3">
-                <SkeletonBlock className="h-6 w-6 rounded-full flex-shrink-0 mt-0.5" />
-                <div className="flex-1 min-w-0">
-                  <SkeletonBlock className="h-4 w-3/4 mb-1.5" />
-                  <SkeletonBlock className="h-3 w-1/3" />
+        {/* Tickets by Member */}
+        <Section title="Tickets by Member" icon={PersonIcon}>
+          <div className="space-y-5">
+            {Array.from({ length: 3 }).map((_, gi) => (
+              <div key={gi}>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <SkeletonBlock className="h-6 w-6 rounded-full flex-shrink-0" />
+                    <SkeletonBlock className="h-4 w-24" />
+                  </div>
+                  <SkeletonBlock className="h-3 w-20" />
                 </div>
+                <ul className="space-y-1.5 pl-8">
+                  {Array.from({ length: 3 }).map((_, ti) => (
+                    <li key={ti} className="flex items-center gap-3 py-1">
+                      <SkeletonBlock className="h-3 w-16 flex-shrink-0" />
+                      <SkeletonBlock className="h-3 flex-1" />
+                      <SkeletonBlock className="h-3 w-8 flex-shrink-0" />
+                      <SkeletonBlock className="h-4 w-14 rounded-md flex-shrink-0" />
+                    </li>
+                  ))}
+                </ul>
+                <SkeletonBlock className="h-3 w-24 mt-1.5 ml-8" />
               </div>
             ))}
           </div>
@@ -398,6 +373,18 @@ export function ProjectLeadReportsScreen() {
   const [priorityFilter, setPriorityFilter] = useState<string[]>([]);
   const [preview, setPreview] = useState<Ticket | null>(null);
 
+  // Delivery tab's own reporting period, for Tickets by Member (and any
+  // other historical/logged-hours metric on that tab) — same real
+  // PeriodSelector component/PeriodKey/CustomRange/realRangeForPeriod Admin
+  // Reports' own Delivery tab already uses. Never applied to Project
+  // Health/Upcoming Deadlines, which stay current-state-only, same as
+  // before. Team has no period selector of its own (every Team widget is a
+  // current-state metric — active assignments vs. organization_memberships'
+  // own real weekly capacity — never scoped to a date range), so this is
+  // the only reporting period on this whole screen.
+  const [period, setPeriod] = useState<PeriodKey>("this-month");
+  const [customRange, setCustomRange] = useState<CustomRange>(DEFAULT_CUSTOM_RANGE);
+
   function clearTeamCapacityFilter() {
     setTeamCapacityFilterActive(false);
     const params = new URLSearchParams(searchParams.toString());
@@ -407,12 +394,12 @@ export function ProjectLeadReportsScreen() {
   }
 
   // ── Real data load — tickets across every led project, that same
-  //    project's own real team roster/capacity, and the same real
-  //    ticket_activity feed the Dashboards already use for "Recent
-  //    Activity" — one fetch backs every widget below, no per-widget query. ─
+  //    project's own real team roster/capacity, and that same real ticket
+  //    set's own real logged time within the active Period (Tickets by
+  //    Member) — one fetch backs every widget below, no per-widget query. ─
   const [rawTickets, setRawTickets] = useState<Ticket[]>([]);
   const [teamBySlug, setTeamBySlug] = useState<Map<string, ProjectTeamMember[]>>(new Map());
-  const [activityEvents, setActivityEvents] = useState<OrganizationActivityEvent[]>([]);
+  const [rawTimeEntries, setRawTimeEntries] = useState<OrganizationTimeEntry[]>([]);
   const [loadState, setLoadState] = useState<"loading" | "ready" | "error">("loading");
   const [loadError, setLoadError] = useState<string | null>(null);
   const [requestId, setRequestId] = useState(0);
@@ -420,7 +407,7 @@ export function ProjectLeadReportsScreen() {
   useEffect(() => {
     if (!organization) return;
     let cancelled = false;
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: clears the previous scope's data the instant this effect re-runs, before the async fetch below resolves, same pattern used elsewhere in this app.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: clears the previous scope's data the instant this effect re-runs (on mount, on a Period change, and on tab-regain), before the async fetch below resolves, same pattern used elsewhere in this app.
     setLoadState("loading");
 
     (async () => {
@@ -436,11 +423,12 @@ export function ProjectLeadReportsScreen() {
       if (cancelled) return;
 
       const ticketIds = ticketsResult.tickets.map((t) => t.id);
-      const activityResult = await loadOrganizationActivity(ticketIds, RECENT_CHANGES_LIMIT);
+      const { from, to } = realRangeForPeriod(period, customRange, getTodayISO());
+      const timeResult = await loadOrganizationLoggedTimeForRange(ticketIds, from, to);
       if (cancelled) return;
-      if (activityResult.status === "error") {
+      if (timeResult.status === "error") {
         setLoadState("error");
-        setLoadError(activityResult.message);
+        setLoadError(timeResult.message);
         return;
       }
 
@@ -452,14 +440,14 @@ export function ProjectLeadReportsScreen() {
 
       setRawTickets(ticketsResult.tickets);
       setTeamBySlug(teamMap);
-      setActivityEvents(activityResult.events);
+      setRawTimeEntries(timeResult.entries);
       setLoadState("ready");
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [organization, myProjects, requestId]);
+  }, [organization, myProjects, requestId, period, customRange]);
 
   const todayISO = getTodayISO();
 
@@ -521,16 +509,26 @@ export function ProjectLeadReportsScreen() {
   );
   const totalDueThisWeek = dueThisWeekList.length;
 
-  // Real Team Capacity/Utilization — reuses Team's own real per-member
-  // definition (assignedHours from that project's own active tickets,
-  // greater than the real weeklyCapacity loadProjectTeam already resolves
-  // with its own org-then-project fallback), evaluated per led project and
-  // unioned by profileId (same "count unique people, never per-project"
-  // rule Projects' own Over Capacity KPI already established) rather than a
-  // second calculation.
+  // Real Team Capacity/Utilization — weeklyCapacity belongs to the member,
+  // never the project: loadProjectTeam now resolves it purely from
+  // organization_memberships.weekly_capacity (the single org-wide source of
+  // truth), so every one of a member's own per-led-project roster rows
+  // already carries the exact same real number — `Math.max` across those
+  // rows (same de-dupe pattern project-lead-time-tracking-screen.tsx's own
+  // mergeLedTeams already uses) reduces them to that one canonical value,
+  // never `+=` (a member staffed on 2 led projects must never show
+  // 2×capacity). assignedHours, by contrast, legitimately accumulates
+  // across every led project's own active tickets (that's real work in
+  // real scope, not a per-project capacity allocation) — unioned by
+  // profileId, same "count unique people, never per-project" rule
+  // Projects' own Over Capacity KPI already established. Over-capacity is
+  // evaluated once, after the full merge, against each member's own final
+  // total assignedHours vs. their single real weeklyCapacity — never a
+  // per-project partial comparison, which could miss a member whose hours
+  // are split (and so individually under capacity) across several led
+  // projects but whose real total exceeds it.
   const teamStats = useMemo(() => {
     const byProfileId = new Map<string, RealTeamMemberStat>();
-    const overCapacityProfileIds = new Set<string>();
 
     for (const project of myProjects) {
       const members = teamBySlug.get(project.slug) ?? [];
@@ -552,7 +550,7 @@ export function ProjectLeadReportsScreen() {
         const blockedInProject = blockedByProfileId.get(member.id) ?? 0;
         const existing = byProfileId.get(member.id);
         if (existing) {
-          existing.weeklyCapacity += member.weeklyCapacity;
+          existing.weeklyCapacity = Math.max(existing.weeklyCapacity, member.weeklyCapacity);
           existing.assignedHours += assignedInProject;
           existing.blockedHours += blockedInProject;
           existing.projectSlugs.push(project.slug);
@@ -569,13 +567,15 @@ export function ProjectLeadReportsScreen() {
             isOverCapacity: false,
           });
         }
-        if (assignedInProject > member.weeklyCapacity) overCapacityProfileIds.add(member.id);
       }
     }
 
-    for (const id of overCapacityProfileIds) {
-      const member = byProfileId.get(id);
-      if (member) member.isOverCapacity = true;
+    let overCapacityCount = 0;
+    for (const member of byProfileId.values()) {
+      if (member.assignedHours > member.weeklyCapacity) {
+        member.isOverCapacity = true;
+        overCapacityCount++;
+      }
     }
 
     const members = Array.from(byProfileId.values()).sort((a, b) => a.name.localeCompare(b.name));
@@ -587,7 +587,7 @@ export function ProjectLeadReportsScreen() {
 
     return {
       members,
-      overCapacityCount: overCapacityProfileIds.size,
+      overCapacityCount,
       totalCapacityHours,
       totalAssignedHours,
       utilizationPct,
@@ -819,14 +819,52 @@ export function ProjectLeadReportsScreen() {
     [rawTickets]
   );
 
-  // ── Recent Changes — real ticket_activity feed, resolved against this
-  //    project's own real tickets/names (never the mock catalog). ────────
-  const ticketsById = useMemo(() => new Map(rawTickets.map((t) => [t.id, t])), [rawTickets]);
-  const projectNameBySlug = useMemo(() => new Map(myProjects.map((p) => [p.slug, p.name])), [myProjects]);
-  const recentChanges = useMemo(
-    () => buildActivityEntries(activityEvents, ticketsById, projectNameBySlug),
-    [activityEvents, ticketsById, projectNameBySlug]
+  // ── Tickets by Member — same real grouping/dedup/hours rules as Admin
+  //    Reports' own Delivery tab (buildTicketsByMember, reports-screen.tsx,
+  //    reused as-is): a ticket belongs to a member's group when it's
+  //    currently assigned to them and not Done, OR they logged real hours
+  //    on it within the active Period, regardless of current
+  //    assignee/status. `scopedProjectSlugs` keeps this to exactly the
+  //    Lead's own led projects (further narrowed by the Project filter),
+  //    never a project outside their scope — same defense-in-depth
+  //    intersection every other real scope on this page already applies. ──
+  const scopedProjectSlugs = useMemo(() => {
+    const ledSlugs = new Set(myProjects.map((p) => p.slug));
+    if (projectFilter.length === 0) return ledSlugs;
+    return new Set(projectFilter.filter((slug) => ledSlugs.has(slug)));
+  }, [myProjects, projectFilter]);
+
+  const ticketsByMemberScope = useMemo(
+    () =>
+      rawTickets.filter((t) => {
+        if (!scopedProjectSlugs.has(t.projectSlug)) return false;
+        if (statusFilter.length > 0 && !statusFilter.includes(t.status)) return false;
+        if (priorityFilter.length > 0 && !priorityFilter.includes(t.priority)) return false;
+        return true;
+      }),
+    [rawTickets, scopedProjectSlugs, statusFilter, priorityFilter]
   );
+  const ticketsByMemberScopeIds = useMemo(
+    () => new Set(ticketsByMemberScope.map((t) => t.id)),
+    [ticketsByMemberScope]
+  );
+  const timeEntriesForMemberBlock = useMemo(
+    () => rawTimeEntries.filter((e) => ticketsByMemberScopeIds.has(e.ticketId)),
+    [rawTimeEntries, ticketsByMemberScopeIds]
+  );
+  // Real name/avatar/weeklyCapacity roster for grouping — teamStats.members
+  // is already scoped to exactly this Lead's own led projects (see
+  // teamStats above), reshaped to the OrgWorkloadMember shape
+  // buildTicketsByMember expects, never the org-wide roster.
+  const membersForGrouping = useMemo<OrgWorkloadMember[]>(
+    () => teamStats.members.map((m) => ({ id: m.id, name: m.name, avatar: m.avatar, weeklyCapacity: m.weeklyCapacity })),
+    [teamStats.members]
+  );
+  const ticketsByMember = useMemo(() => {
+    const groups = buildTicketsByMember(ticketsByMemberScope, timeEntriesForMemberBlock, membersForGrouping, todayISO);
+    if (assigneeFilter.length === 0) return groups;
+    return groups.filter((g) => g.profileId !== null && assigneeFilter.includes(g.profileId));
+  }, [ticketsByMemberScope, timeEntriesForMemberBlock, membersForGrouping, assigneeFilter, todayISO]);
 
   // "My Projects" KPI — reuses `myProjects`, the exact same real collection
   // already driving this KPI's own displayed count, regardless of health/
@@ -950,6 +988,18 @@ export function ProjectLeadReportsScreen() {
             <FilterDropdown label="Assignee" mode="multi" groups={assigneeGroups} selected={assigneeFilter} onChange={setAssigneeFilter} searchable />
             <FilterDropdown label="Status" mode="multi" groups={statusGroups} selected={statusFilter} onChange={setStatusFilter} />
             <FilterDropdown label="Priority" mode="multi" groups={priorityGroups} selected={priorityFilter} onChange={setPriorityFilter} />
+          </div>
+
+          {/* ── Reporting period — same real PeriodSelector component/behavior
+              Admin Reports' own Delivery tab uses, combines with the 4
+              filters above without resetting either. Scopes Tickets by
+              Member's own logged hours/historical inclusion only — Project
+              Health/Upcoming Deadlines/KPIs above stay current-state-only. */}
+          <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
+            <h2 className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600">
+              Reporting Period
+            </h2>
+            <PeriodSelector value={period} onChange={setPeriod} customRange={customRange} onCustomRangeChange={setCustomRange} />
           </div>
 
           <div className="space-y-5">
@@ -1076,13 +1126,90 @@ export function ProjectLeadReportsScreen() {
               )}
             </Section>
 
-            {/* ── Recent Changes ──────────────────────────────────────────── */}
-            <Section title="Recent Changes" icon={ClockIcon}>
-              {recentChanges.length === 0 ? (
-                <p className="text-sm text-slate-400 dark:text-zinc-500">No real changes in the current report scope.</p>
-              ) : (
-                <RecentActivityList items={recentChanges} onOpenTicket={setPreview} />
-              )}
+            {/* ── Tickets by Member — same real implementation (grouping,
+                dedup, hours, ordering) as Admin Reports' own Delivery tab
+                (buildTicketsByMember, reports-screen.tsx), scoped to
+                exactly this Lead's own led projects. ─────────────────── */}
+            <Section
+              title="Tickets by Member"
+              count={ticketsByMember.reduce((sum, g) => sum + g.tickets.length, 0)}
+              icon={PersonIcon}
+            >
+              <div className="space-y-5">
+                {ticketsByMember.length === 0 ? (
+                  <p className="text-sm text-slate-400 dark:text-zinc-500">No real active tickets in the current report scope.</p>
+                ) : (
+                  ticketsByMember.map((group) => (
+                    <div key={group.key}>
+                      <div className="flex items-center justify-between mb-2">
+                        {group.profileId ? (
+                          <MemberTrigger
+                            name={group.name}
+                            avatar={group.avatar}
+                            profileId={group.profileId}
+                            projectSlug={projectFilter.length === 1 ? projectFilter[0] : undefined}
+                            className="flex items-center gap-2"
+                          >
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={group.avatar} alt={group.name} className="w-6 h-6 rounded-full flex-shrink-0" />
+                            <span className="text-sm font-medium text-slate-900 dark:text-zinc-100 hover:underline">
+                              {group.name}
+                            </span>
+                          </MemberTrigger>
+                        ) : (
+                          <span className="flex items-center gap-2">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={group.avatar} alt={group.name} className="w-6 h-6 rounded-full flex-shrink-0" />
+                            <span className="text-sm font-medium text-slate-700 dark:text-zinc-300">
+                              {group.name}
+                            </span>
+                          </span>
+                        )}
+                        <span className="text-xs font-semibold text-slate-400 dark:text-zinc-500 tabular-nums flex-shrink-0">
+                          {group.tickets.length} ticket{group.tickets.length === 1 ? "" : "s"}
+                        </span>
+                      </div>
+                      <ul className="space-y-1 pl-8">
+                        {group.tickets.map(({ ticket: t, loggedHours }) => (
+                          <li key={t.id}>
+                            <button
+                              type="button"
+                              onClick={() => setPreview(t)}
+                              className="group/ref w-full flex items-center gap-3 py-1 text-left"
+                            >
+                              <span className="text-xs font-mono text-slate-400 dark:text-zinc-500 flex-shrink-0 w-16">
+                                {getTicketDisplayKey(t)}
+                              </span>
+                              <span className="flex-1 min-w-0 text-sm text-slate-700 dark:text-zinc-300 group-hover/ref:text-brand-600 dark:group-hover/ref:text-brand-400 group-hover/ref:underline truncate">
+                                {t.title}
+                              </span>
+                              {t.dueDate && (
+                                <span className="text-[11px] text-slate-400 dark:text-zinc-500 flex-shrink-0">
+                                  {t.dueDate}
+                                </span>
+                              )}
+                              {/* Real hours this member logged on this ticket
+                                  (ticket_time_entries, period-scoped) —
+                                  never the ticket's own estimate. */}
+                              <span className="text-[11px] text-slate-400 dark:text-zinc-500 flex-shrink-0 tabular-nums">
+                                {loggedHours}h
+                              </span>
+                              <PriorityBadge priority={t.priority} />
+                              <TicketStatusBadge status={t.status} />
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                      {/* Real per-group total — sum of this same group's own
+                          already-shown per-ticket logged hours, never a
+                          separate KPI/card and never clickable. */}
+                      <p className="pl-8 mt-1 text-[11px] text-slate-400 dark:text-zinc-500">
+                        Total Logged: <span className="tabular-nums">{group.totalLoggedHours}h</span>
+                      </p>
+                    </div>
+                  ))
+                )}
+              </div>
             </Section>
           </div>
         </>

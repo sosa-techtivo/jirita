@@ -489,12 +489,12 @@ No new database tables or columns were needed — pure application-layer query/r
 
 Completed.
 
-Routes: `/settings` (redirects to `/settings/general`) and `/settings/[section]` for 6 sections.
+Routes: `/settings` (redirects to `/settings/general`) and `/settings/[section]` for 5 sections.
 
 Sections:
 
-- **General**: Workspace name, logo, timezone, language, working days (day picker), and Defaults (default role + default capacity applied when inviting a user from `/users`)
-- **Projects**: Chip pickers for statuses, priorities, labels, and ticket types (+ Add buttons)
+- **General**: **now real** — Workspace Name, Active Days (day picker), Default Role, and Default Weekly Capacity read/write `organizations` directly (see Architecture Status → Settings → General for the full breakdown); Logo/Timezone/Language were removed outright (no schema, no real consumer anywhere in the app — see the audit this was based on), not just left mock
+- **Removed**: Projects (`/settings/projects` — Ticket Statuses/Priorities/Ticket Types/Labels) was retired outright, not left mock — see Architecture Status → Removed (Settings → Projects) for why. `/settings/projects` no longer appears in the nav/hub and no longer statically generates; a direct visit falls through to the same "Section not found." default `SectionContent` already renders for any unrecognized slug.
 - **Time Tracking**: Hours per day, weekly capacity, estimation defaults, rounding preferences
 - **Notifications**: Email, desktop, and digest toggles with per-channel granularity
 - **Integrations**: GitHub (connected, 3 repos), Slack and Google Calendar (Connect buttons), Jira Import (Coming Soon)
@@ -503,7 +503,7 @@ Sections:
 People (formerly a Settings section) is now the dedicated **Users** module — see below.
 
 Navigation:
-- Left sub-nav lists all 6 sections; active section highlighted
+- Left sub-nav lists all 5 sections; active section highlighted
 - Breadcrumb: `Settings / Section Name`
 - `/settings` redirects server-side to `/settings/general`
 - Sidebar Settings link goes directly to `/settings/general`
@@ -1885,14 +1885,153 @@ navigation. No new migrations.
   popover from anywhere in the app; `ArrowDown`/`ArrowUp` walk the results
   as one continuous list; `Enter` selects; `Escape` closes.
 
+## Confirmed working (Settings → General — Workspace Name, Active Days, Default Role, Default Capacity)
+
+**Implemented and build/type-checked, not yet confirmed against a live
+Supabase project or in a browser.** Route: `/settings/general`, reached via
+`settings-section-screen.tsx`'s `GeneralContent()`. Logo, Timezone, and
+Language were removed outright — not disabled, not placeholders, no row
+renders for them at all — since none had a real schema, a real consumer
+anywhere else in the app, or an MVP-scope justification (see the audit this
+whole pass was based on). The rest of Settings (Projects/Time
+Tracking/Notifications/Integrations/Danger Zone) is untouched, still mock.
+
+- Reads real `organizations.name`/`default_role`/`default_weekly_capacity`/
+  `active_days` via `useCurrentUser().organization` (`lib/membership.ts`'s
+  `loadMembership`, extended to select/expose the three new columns
+  alongside the pre-existing `name`).
+- A locally-controlled `draft` (name/defaultRole/defaultWeeklyCapacity/
+  activeDays) is seeded from `organization` and only ever re-synced from a
+  fresh `organization` reference while there are no unsaved local edits
+  (`isDirty`) — a background refresh (tab-regain focus, route change; both
+  already handled by `CurrentUserProvider`'s existing mechanisms, no new
+  listener added) can never silently overwrite an in-progress edit, and a
+  failed save leaves every edited value exactly as typed.
+- **Active Days** reuses the existing day-picker buttons (now real toggles,
+  ISO weekday numbers 1–7) instead of the old fixed Mon–Fri highlight;
+  **Default Role** reuses `SelectField` with the three real `Role` values
+  (`ROLE_LABELS`); **Default Capacity** reuses `NumberField`; **Workspace
+  Name** reuses `TextField` — no new visual controls added to
+  `settings-ui.tsx`.
+- **Save**: a "Save Changes" button following the exact same
+  button/"Saving…"/"Changes saved" checkmark/inline red error pattern as
+  Project Settings' own save button (the closest existing precedent) —
+  disabled while there are no unsaved changes, while a save is in flight,
+  or for a non-Admin (defense-in-depth alongside the Server Action's own
+  admin check below). Client-side validation (name non-empty, at least one
+  active day, capacity > 0) runs before any network call, surfaced through
+  the same error text. On success, calls the existing `retry()` from
+  `useCurrentUser()` to refresh the real organization context — no new
+  loader/context method needed for that.
+- Write path: a new Server Action, `updateOrganizationSettingsAction`
+  (`lib/server/update-organization-settings-action.ts`), called directly
+  from `GeneralContent()` (session obtained via
+  `getSupabaseBrowserClient().auth.getSession()`, same as every other
+  Server-Action-backed screen) — re-validates every field server-side, then
+  verifies the caller is an active org admin of *exactly* the organization
+  being updated before escalating to the service-role client for the write
+  (`organizations` has no `UPDATE` grant for `authenticated`, same gap as
+  `organization_memberships`; see `edit-user-action.ts` for the identical
+  pattern). A non-admin's save attempt is rejected here regardless of what
+  the UI does.
+- Schema: `organizations` gained `default_role` (reuses the existing
+  `org_role` enum), `default_weekly_capacity` (`numeric`, `> 0`), and
+  `active_days` (`smallint[]`, validated by a new `is_valid_active_days`
+  Postgres function — non-empty, no duplicates, 1–7 only), all backfilled
+  to `MEMBER` / `40` / Monday–Friday for every existing organization via
+  column defaults, plus an admin-only `organizations_update` RLS policy —
+  `20260815000000_add_organization_settings_defaults.sql`.
+- Skeleton: `GeneralSkeleton()` mirrors the real title/group/row/input
+  structure (title/group labels are static UI text, not organization data,
+  so they render immediately; only the still-loading values are
+  placeholders) — shown whenever `organization`/`draft` isn't resolved yet,
+  never a generic "Loading…" text and never the old hardcoded values.
+- **Now consumed by** (a later, separate pass):
+  - **Invite User** (`invite-user-modal.tsx`) — a brand-new invite (no
+    `editingUser`) now seeds Role/Weekly Capacity from
+    `organization.defaultRole`/`defaultWeeklyCapacity` instead of a fixed
+    `"MEMBER"`/`40`. Editing an existing user is untouched: `editingUser`'s
+    own real `role`/`weeklyCapacity` always wins first in the fallback
+    chain, so changing Settings → General's defaults later can never
+    retroactively alter an existing member — the literal `"MEMBER"`/`40`
+    left in the code is only a type-safety net for the one instant
+    `organization` itself hasn't resolved yet (this modal only opens from
+    the already-AuthGuard-gated `/users` page), never the real functional
+    default.
+  - **Time Tracking** (Admin/Member `time-tracking-screen.tsx`, reused
+    verbatim by `project-lead-time-tracking-screen.tsx`) — `countWeekdays`
+    (hardcoded Mon–Fri) is gone; `expectedHoursForPeriod` now takes a 4th
+    `activeDays` param and spreads the real `weeklyCapacity` across however
+    many days the organization actually configured (`weeklyCapacity /
+    activeDays.length`), via a new shared helper,
+    `src/lib/active-days.ts` (`isActiveDay`/`countActiveDaysInRange` —
+    the one place ISO weekday numbers 1–7 are reconciled with
+    `Date.getDay()`'s 0–6). "Today" only expects hours on a real active
+    day; "This Month" now counts the real current month's own active days
+    (via the already-existing `getCurrentMonthRange`) instead of a fixed
+    4.33-week approximation; "This Week"/"Custom Range" were already
+    real-range-based and now filter by `activeDays` too. "Week" still
+    reduces to the plain `weeklyCapacity` (a full 7-day week always
+    contains every configured active day exactly once, so the math is
+    provably unchanged) — same real total, no longer assuming which days
+    they fall on. Scoped strictly to expected-hours/Hours Missing/timesheet
+    compliance — Workload, Assigned Hours, and Weekly Utilization (all
+    logged/assigned-hours ratios, not "vs. expected") are untouched, same
+    as the capacity-unification pass above left them.
+
+## Removed (Settings → Projects)
+
+Retired outright rather than left mock or built out further — its own two
+prior passes had already made Labels real (list + "+ Add", reusing
+`loadOrganizationLabels`/`createOrganizationLabel`, `lib/tickets.ts`) and
+made Ticket Statuses/Priorities/Ticket Types real-but-read-only chips
+sourced from the official `STATUS_LABEL`/`PRIORITY_LABEL`/
+`PRIORITY_VALUES`/`TICKET_TYPE_LABEL` constants, but that still left the
+section without enough real administrative value for the MVP: Statuses/
+Priorities/Ticket Types can't go further than read-only without converting
+their underlying Postgres enums (`ticket_status`/`ticket_priority`/
+`ticket_type` — global to the database, shared by every organization, not
+per-org rows) into organization-scoped lookup tables, a genuine
+architecture change touching the ~17 files across Board/List/Calendar/
+filters/badges/Reports/Time Tracking that treat them as a fixed TypeScript
+union; and Labels' own "+ Add" already exists inside the real Tickets flow
+(Ticket Detail's own Labels picker), so it added nothing this section alone
+justified keeping.
+
+`/settings/projects` no longer appears in the Settings hub's cards or left
+sub-nav (both read `SETTINGS_SECTIONS`, `settings-screen.tsx`, which no
+longer has a `"projects"` entry) and no longer statically generates
+(`SECTION_TITLES`, `app/settings/[section]/page.tsx`). A direct visit falls
+through to the exact same "Section not found." default branch
+`SectionContent` (`settings-section-screen.tsx`) already renders for any
+other unrecognized slug — no new page/redirect logic. `ProjectsContent`/
+`LabelsGroup` and every constant/import used exclusively by them were
+deleted, including the now-fully-dead `Chip` component
+(`settings-ui.tsx` — confirmed unused by every other consumer of that
+file). `loadOrganizationLabels`/`createOrganizationLabel` (`lib/tickets.ts`)
+and the real `ticket_status`/`ticket_priority`/`ticket_type` enums/
+constants themselves are completely untouched — Ticket Detail's own Labels
+picker (and everything else in Tickets/Board/Reports/Time Tracking) works
+exactly as before.
+
 ## Still mock
 
-- The rest of Settings (`/settings/*`) all still reads from
-  `src/lib/mock-*.ts`. Everything else listed above is now fully real —
-  **resolved**: `src/components/project-lead-reports-screen.tsx` (the
+- The rest of Settings (`/settings/*` — Time Tracking, Notifications,
+  Integrations, Danger Zone) still reads from `src/lib/mock-*.ts`.
+  **Resolved**: General is no longer part of this list — see Confirmed
+  working → Settings → General for the real Workspace Name/Active Days/
+  Default Role/Default Capacity (and why Logo/Timezone/Language were
+  removed instead of left mock). Projects was retired outright rather than
+  left mock — see Removed → Settings → Projects. Also **resolved**:
+  `src/components/project-lead-reports-screen.tsx` (the
   Project Lead role's own Reports view) no longer reads
   `PROJECT_TICKETS`/`RECENT_ACTIVITY`/`MY_PROJECT_NAMES` or any other
   mock data — see Confirmed working → Reports → Project Lead.
+- **Resolved**: Invite User's Default Role/Weekly Capacity prefill and Time
+  Tracking's expected-hours/Hours Missing calculations now read the real
+  `organizations.default_role`/`default_weekly_capacity`/`active_days`
+  Settings → General writes — see Confirmed working → Settings → General →
+  "Now consumed by" for the full breakdown.
 - Within Tickets/Ticket Detail specifically, still mock/unimplemented on
   purpose: New Ticket's "More Options" fields (Type/Status/Priority/
   Labels/Due Date always write fixed defaults); editing or deleting a
@@ -1963,7 +2102,6 @@ Current working routes:
 - `/activity` — dedicated, server-side-paginated, org-wide Activity History page (new), the org-wide sibling of `/projects/[slug]/activity`; not on the Sidebar's main nav, reached only via the Dashboard's "View all activity →" action, same "link-only" precedent as `/projects/[slug]/team/[userId]/work-history`
 - `/settings` → redirects to `/settings/general`
 - `/settings/general`
-- `/settings/projects`
 - `/settings/time-tracking`
 - `/settings/notifications`
 - `/settings/integrations`
@@ -2043,7 +2181,7 @@ Current known items:
 - Milestone and Story Points fields on Ticket Detail's sidebar are dead code — defined in `ticket-detail-screen.tsx` but never rendered.
 - **Resolved for all three roles**: Admin, Project Lead, and Member Project Overview all now create/view real tickets against the same real Tickets data — see Architecture Status → Project Overview.
 - `settings-screen.tsx` (`SettingsScreen` hub component) is retained but no longer rendered — `/settings` redirects directly to `/settings/general`.
-- Org-wide Settings (`/settings/*`) toggles and fields are visual only; no state persists between page loads. (Project Settings — `/projects/[slug]/settings` — is the one exception: it's real and persists, see Current Sprint → Completed → Project Settings.)
+- Org-wide Settings (`/settings/*`) toggles and fields are visual only; no state persists between page loads. **Exceptions**: Project Settings (`/projects/[slug]/settings`, see Current Sprint → Completed → Project Settings) and, since then, Settings → General's Workspace Name/Active Days/Default Role/Default Capacity (see Confirmed working → Settings → General) are both real and persist.
 - Role now comes from a real `organization_membership` when one exists; `current-user.ts`'s mock identities are a dev-only fallback (never in production) rather than the only source of truth. **Resolved**: the `RoleSwitcher` is now gated behind `isDevFallback` (only renders, with a visible "Dev fallback" badge, when there's no real membership) instead of always showing. No real server-side permission enforcement is wired into the UI yet for projects/tickets/etc. — the RLS policies in `supabase/migrations/20260708000000_mvp_schema.sql` are applied and enforce tenant isolation at the DB layer, but the UI doesn't call any of those tables yet.
 - **Resolved**: Note "Duplicate" and "Delete" menu actions in `NoteDetailModal` are now real (`duplicateNote`/`deleteNote`), no longer visual stubs — see Current Sprint → Completed → Project Notes.
 - In dev fallback only (no real organization membership — never in production): the Projects list no longer filters by the old `LEAD_PROJECT_SLUGS` array (removed since real data is scoped by RLS instead), so a Project Lead testing without a seeded Supabase project now sees the full mock projects list rather than just their 3 owned slugs, while the summary cells (Blocked Tickets, Due This Week, Team Members Over Capacity) still compute against the `LEAD_PROJECT_SLUGS`-scoped team aggregation — a minor mismatch specific to unauthenticated/dev-fallback local testing, not the real-org path.

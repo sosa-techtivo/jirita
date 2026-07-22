@@ -115,8 +115,22 @@ export function InviteUserModal({
   const [firstName, setFirstName] = useState(editingUser?.firstName ?? "");
   const [lastName, setLastName] = useState(editingUser?.lastName ?? "");
   const [email, setEmail] = useState(editingUser?.email ?? "");
-  const [role, setRole] = useState<Role>(editingUser?.role ?? "MEMBER");
-  const [weeklyCapacity, setWeeklyCapacity] = useState(String(editingUser?.weeklyCapacity ?? 40));
+  // Editing an existing user always keeps *their own* real role/capacity
+  // (editingUser.role/weeklyCapacity) — Settings → General's own defaults
+  // below are never consulted in that case, so changing them later can
+  // never retroactively alter an existing member. A brand-new invite has no
+  // editingUser, so it falls through to organization.defaultRole/
+  // defaultWeeklyCapacity — the real, admin-configured workspace policy
+  // (organizations.default_role/default_weekly_capacity) — never a fixed
+  // "MEMBER"/40 assumption. The final `?? "MEMBER"`/`?? 40` is only a
+  // type-safety net for the one instant `organization` itself hasn't
+  // resolved yet (this modal only ever opens from the already
+  // AuthGuard-gated `/users` page, so organization is real by the time
+  // anyone can click "Invite User") — never the actual functional default.
+  const [role, setRole] = useState<Role>(editingUser?.role ?? organization?.defaultRole ?? "MEMBER");
+  const [weeklyCapacity, setWeeklyCapacity] = useState(
+    String(editingUser?.weeklyCapacity ?? organization?.defaultWeeklyCapacity ?? 40)
+  );
   const [method, setMethod] = useState<InviteMethod>("email");
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);

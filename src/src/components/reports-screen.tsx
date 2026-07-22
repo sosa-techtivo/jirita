@@ -79,25 +79,25 @@ interface HoursEntry {
   barClass: string;
 }
 
-type PeriodKey = "this-month" | "last-month" | "this-quarter" | "custom";
+export type PeriodKey = "this-month" | "last-month" | "this-quarter" | "custom";
 
 // ── Billing (Admin-only) ─────────────────────────────────────────────────────
 
-const PERIOD_OPTIONS: { key: PeriodKey; label: string }[] = [
+export const PERIOD_OPTIONS: { key: PeriodKey; label: string }[] = [
   { key: "this-month",   label: "This Month" },
   { key: "last-month",   label: "Last Month" },
   { key: "this-quarter", label: "This Quarter" },
   { key: "custom",       label: "Custom Range" },
 ];
 
-interface CustomRange {
+export interface CustomRange {
   from: string; // yyyy-mm-dd, native <input type="date"> format
   to:   string;
 }
 
 // Pre-filled with June's bounds so Apply produces a sensible label even if
 // nobody touches the fields — matches the "This Month" mock period.
-const DEFAULT_CUSTOM_RANGE: CustomRange = { from: "2026-06-01", to: "2026-06-30" };
+export const DEFAULT_CUSTOM_RANGE: CustomRange = { from: "2026-06-01", to: "2026-06-30" };
 
 const SHORT_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -107,7 +107,7 @@ function formatShortDate(iso: string): string {
   return `${SHORT_MONTHS[month - 1]} ${day}`;
 }
 
-function formatRangeLabel(range: CustomRange): string {
+export function formatRangeLabel(range: CustomRange): string {
   return `${formatShortDate(range.from)} – ${formatShortDate(range.to)}`;
 }
 
@@ -179,7 +179,7 @@ function rangeForPreset(preset: PresetKey): CustomRange {
 // to Hours by Person and used only to prefill the custom-range popover's
 // own quick-pick buttons) so Hours by Person's real Supabase query is
 // scoped to the user's actual current date, not the mock report date.
-function realRangeForPeriod(period: PeriodKey, customRange: CustomRange, todayISO: string): CustomRange {
+export function realRangeForPeriod(period: PeriodKey, customRange: CustomRange, todayISO: string): CustomRange {
   if (period === "custom") return customRange;
   const [y, m] = todayISO.split("-").map(Number);
   const year = y;
@@ -381,10 +381,10 @@ function ReportTabs({ tab, onChange }: { tab: ReportTab; onChange: (t: ReportTab
   );
 }
 
-// Global period selector — cosmetic only for now. Selecting a period doesn't
-// recompute any figures yet; it's here to establish where a real Time
-// Tracking date-range integration will plug in later.
-function PeriodSelector({
+// Global period selector — reused as-is by the Project Lead's own Reports
+// page (see project-lead-reports-screen.tsx) so both screens share one
+// implementation.
+export function PeriodSelector({
   value,
   onChange,
   customRange,
@@ -1104,9 +1104,10 @@ function exclusiveEndDate(dateISO: string): string {
 // Real "Workload" rows — only people with at least one real active
 // (status !== "done") ticket assigned to them within the current report
 // scope. Reuses the exact same real weekly-capacity source as Hours by
-// Person/Team (project_memberships.weekly_capacity, max across a member's
-// own project rows, falling back to organization_memberships.weekly_capacity
-// only when a project-level value is null — see loadOrganizationMemberWeeklyCapacities).
+// Person/Team — organization_memberships.weekly_capacity, the single
+// org-wide source of truth (see loadOrganizationMemberWeeklyCapacities),
+// never project_memberships.weekly_capacity and never summed across
+// however many projects a member is staffed on.
 // "Variación de esta semana" is derived only from real hours_changed/
 // assignee_changed ticket_activity rows on tickets currently in scope for
 // that person — a person with zero such events this week gets weekDelta:
@@ -1207,7 +1208,7 @@ function buildWorkloadRows(
 // already resolved to a real value by rowToTicket (lib/tickets.ts) for
 // every real ticket, reused as-is (with the org member roster) rather than
 // re-deriving identity here.
-interface MemberTicketRow {
+export interface MemberTicketRow {
   ticket: Ticket;
   /** Real hours this exact group's own member logged on this exact ticket
    *  — never the ticket's own `hours` estimate, never assigned/capacity
@@ -1218,7 +1219,7 @@ interface MemberTicketRow {
   loggedHours: number;
 }
 
-interface MemberTicketGroup {
+export interface MemberTicketGroup {
   key: string;
   profileId: string | null;
   name: string;
@@ -1255,7 +1256,10 @@ function compareTicketsForMemberGroup(a: Ticket, b: Ticket, todayISO: string): n
   return getTicketDisplayKey(a).localeCompare(getTicketDisplayKey(b));
 }
 
-function buildTicketsByMember(
+// Exported so Project Lead's own Reports page (project-lead-reports-screen.tsx)
+// reuses this exact grouping/dedup/hours logic instead of a second
+// implementation — see that file's own Tickets by Member block.
+export function buildTicketsByMember(
   tickets: Ticket[],
   timeEntries: OrganizationTimeEntry[],
   members: OrgWorkloadMember[],

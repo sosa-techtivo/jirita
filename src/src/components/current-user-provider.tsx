@@ -62,7 +62,14 @@ export type MembershipStatus = "loading" | "unauthenticated" | "ready" | "no-mem
 interface CurrentUserContextValue {
   status: MembershipStatus;
   user: CurrentUser;
-  organization: { id: string; name: string; slug: string } | null;
+  organization: {
+    id: string;
+    name: string;
+    slug: string;
+    defaultRole: Role;
+    defaultWeeklyCapacity: number;
+    activeDays: number[];
+  } | null;
   /** The signed-in user's real Supabase auth/profile id (profiles.id === auth.users.id)
    *  — the stable identifier tickets' assignee_profile_id should be compared against
    *  (e.g. a "Mine" filter), never the display name. Null whenever there's no real

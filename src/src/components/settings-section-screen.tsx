@@ -1,50 +1,228 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { SETTINGS_SECTIONS, DANGER_SECTION } from "./settings-screen";
 import { useCurrentUser } from "@/components/current-user-provider";
-import { Toggle, SelectField, TextField, NumberField, SettingRow, SettingGroup, Chip } from "@/components/settings-ui";
+import { Toggle, SelectField, TextField, NumberField, SettingRow, SettingGroup } from "@/components/settings-ui";
+import { SkeletonBlock } from "@/components/dashboard-shared";
+import { ROLE_LABELS, type Role } from "@/lib/current-user";
+import type { Organization } from "@/lib/membership";
+import { getSupabaseBrowserClient } from "@/lib/supabase-client";
+import { updateOrganizationSettingsAction } from "@/lib/server/update-organization-settings-action";
 
 // ── Section content components ─────────────────────────────────────────────────
 
-function GeneralContent() {
+// ISO weekday numbers (1 = Monday .. 7 = Sunday), same convention
+// organizations.active_days is stored/validated in
+// (20260815000000_add_organization_settings_defaults.sql) — reused for both
+// the real day-picker below and its loading skeleton, so they can never
+// drift out of sync with each other.
+const WEEKDAYS: { value: number; label: string }[] = [
+  { value: 1, label: "Mo" },
+  { value: 2, label: "Tu" },
+  { value: 3, label: "We" },
+  { value: 4, label: "Th" },
+  { value: 5, label: "Fr" },
+  { value: 6, label: "Sa" },
+  { value: 7, label: "Su" },
+];
+
+const GENERAL_ROLE_OPTIONS: Role[] = ["ADMIN", "PROJECT_LEAD", "MEMBER"];
+
+interface GeneralDraft {
+  name: string;
+  defaultRole: Role;
+  defaultWeeklyCapacity: number;
+  activeDays: number[];
+}
+
+function toDraft(organization: Organization): GeneralDraft {
+  return {
+    name: organization.name,
+    defaultRole: organization.defaultRole,
+    defaultWeeklyCapacity: organization.defaultWeeklyCapacity,
+    activeDays: organization.activeDays,
+  };
+}
+
+// Same three real, functional rules the Server Action itself re-validates
+// (update-organization-settings-action.ts) — checked here first so an
+// invalid value never even reaches the network, surfaced through the same
+// saveError display a real rejection from the action would use.
+function validateGeneralDraft(draft: GeneralDraft): string | null {
+  if (!draft.name.trim()) return "Workspace name is required.";
+  if (draft.activeDays.length === 0) return "Select at least one active day.";
+  if (!Number.isFinite(draft.defaultWeeklyCapacity) || draft.defaultWeeklyCapacity <= 0) {
+    return "Default capacity must be greater than 0.";
+  }
+  return null;
+}
+
+// Mirrors GeneralContent's own real layout (title/groups/rows/inputs) below
+// — only the still-loading *values* are placeholders, same convention every
+// other real skeleton in this app already uses (never a generic "Loading…"
+// text, never the old hardcoded mock values flashing first).
+function GeneralSkeleton() {
   return (
     <>
       <SettingGroup title="Workspace">
         <SettingRow label="Workspace Name">
-          <TextField value="Techtivo" />
-        </SettingRow>
-        <SettingRow label="Logo" hint="PNG or SVG, recommended 256×256">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-brand-50 dark:bg-brand-500/10 flex items-center justify-center border border-slate-200 dark:border-zinc-700">
-              <span className="text-[13px] font-bold text-brand-600 dark:text-brand-400">T</span>
-            </div>
-            <button className="text-[12px] text-brand-600 dark:text-brand-400 hover:underline">Change</button>
-          </div>
-        </SettingRow>
-        <SettingRow label="Timezone" hint="Used for due dates and digest scheduling">
-          <SelectField value="UTC−5 · Eastern Time" />
-        </SettingRow>
-        <SettingRow label="Language">
-          <SelectField value="English (US)" />
+          <SkeletonBlock className="h-8 w-52 rounded-lg" />
         </SettingRow>
       </SettingGroup>
 
       <SettingGroup title="Working Days">
         <SettingRow label="Active Days" hint="Days counted in capacity calculations">
           <div className="flex gap-1">
-            {(["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"] as const).map((d, i) => (
-              <button
-                key={d}
-                className={`w-8 h-8 rounded-lg text-[12px] font-semibold transition-colors ${
-                  i < 5
-                    ? "bg-brand-500 text-white hover:bg-brand-600"
-                    : "bg-slate-100 text-slate-400 hover:bg-slate-200 dark:bg-zinc-800 dark:text-zinc-600 dark:hover:bg-zinc-700"
-                }`}
-              >
-                {d}
-              </button>
+            {WEEKDAYS.map((weekday) => (
+              <SkeletonBlock key={weekday.value} className="w-8 h-8 rounded-lg" />
             ))}
+          </div>
+        </SettingRow>
+      </SettingGroup>
+
+      <SettingGroup title="Defaults">
+        <SettingRow label="Default Role" hint="Applied when inviting new users">
+          <SkeletonBlock className="h-8 w-40 rounded-lg" />
+        </SettingRow>
+        <SettingRow label="Default Capacity" hint="Weekly hour limit per person">
+          <SkeletonBlock className="h-8 w-28 rounded-lg" />
+        </SettingRow>
+      </SettingGroup>
+    </>
+  );
+}
+
+// Real Workspace/Active Days/Defaults — reads from organizations.name/
+// default_role/default_weekly_capacity/active_days via useCurrentUser()'s
+// real `organization` (see lib/membership.ts's loadMembership). Logo/
+// Timezone/Language are gone outright (not disabled, not placeholders —
+// see the audit this is based on: no schema, no consumer anywhere in the
+// app, out of MVP scope).
+//
+// `draft` is a locally-controlled copy of the real organization row, only
+// ever synced back from context while there are no unsaved local edits
+// (`isDirty`) — see the effect below — so a background refresh (tab-regain
+// focus, route change; both already handled by CurrentUserProvider's
+// existing mechanisms, no new listener added here) can never silently
+// clobber an in-progress edit, and a failed save never discards what the
+// admin typed.
+function GeneralContent() {
+  const { organization, user, retry } = useCurrentUser();
+  const isAdmin = user.role === "ADMIN";
+
+  const [draft, setDraft] = useState<GeneralDraft | null>(() => (organization ? toDraft(organization) : null));
+  const [isDirty, setIsDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!organization || isDirty) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: resyncs the local draft the instant a genuinely new `organization` reference arrives (mount, or after a successful save's own retry() refetch resolves), same "reset before/because of an external data change" pattern used elsewhere in this app.
+    setDraft(toDraft(organization));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: only resync from a genuinely new `organization` reference — `isDirty` is read but deliberately excluded from the deps so this doesn't re-run (and revert the just-saved draft back to a still-stale `organization`) the instant a save flips isDirty from true to false, before that refetch has actually completed.
+  }, [organization]);
+
+  if (!organization || !draft) {
+    return <GeneralSkeleton />;
+  }
+
+  function updateDraft<K extends keyof GeneralDraft>(key: K, value: GeneralDraft[K]) {
+    setDraft((prev) => (prev ? { ...prev, [key]: value } : prev));
+    setIsDirty(true);
+    setSaveError(null);
+    setSaved(false);
+  }
+
+  function toggleDay(day: number) {
+    setDraft((prev) => {
+      if (!prev) return prev;
+      const activeDays = prev.activeDays.includes(day)
+        ? prev.activeDays.filter((d) => d !== day)
+        : [...prev.activeDays, day];
+      return { ...prev, activeDays };
+    });
+    setIsDirty(true);
+    setSaveError(null);
+    setSaved(false);
+  }
+
+  async function handleSave() {
+    if (saving || !isDirty || !organization || !draft) return; // no-op saves and duplicate submits both bail out here
+    const validationError = validateGeneralDraft(draft);
+    if (validationError) {
+      setSaveError(validationError);
+      return;
+    }
+
+    setSaving(true);
+    setSaveError(null);
+    setSaved(false);
+
+    const supabase = getSupabaseBrowserClient();
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (!session) {
+      setSaving(false);
+      setSaveError("Your session has expired. Please sign in again.");
+      return;
+    }
+
+    const result = await updateOrganizationSettingsAction({
+      accessToken: session.access_token,
+      organizationId: organization.id,
+      name: draft.name.trim(),
+      defaultRole: draft.defaultRole,
+      defaultWeeklyCapacity: draft.defaultWeeklyCapacity,
+      activeDays: draft.activeDays,
+    });
+
+    setSaving(false);
+
+    if (result.status === "error") {
+      setSaveError(result.message); // keep the edited values on screen — never reset to a default
+      return;
+    }
+
+    setIsDirty(false);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+    retry(); // refreshes useCurrentUser().organization with the real persisted row
+  }
+
+  return (
+    <>
+      <SettingGroup title="Workspace">
+        <SettingRow label="Workspace Name">
+          <TextField value={draft.name} onChange={(v) => updateDraft("name", v)} disabled={!isAdmin} />
+        </SettingRow>
+      </SettingGroup>
+
+      <SettingGroup title="Working Days">
+        <SettingRow label="Active Days" hint="Days counted in capacity calculations">
+          <div className="flex gap-1">
+            {WEEKDAYS.map((weekday) => {
+              const active = draft.activeDays.includes(weekday.value);
+              return (
+                <button
+                  key={weekday.value}
+                  type="button"
+                  disabled={!isAdmin}
+                  onClick={() => toggleDay(weekday.value)}
+                  className={`w-8 h-8 rounded-lg text-[12px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+                    active
+                      ? "bg-brand-500 text-white hover:bg-brand-600"
+                      : "bg-slate-100 text-slate-400 hover:bg-slate-200 dark:bg-zinc-800 dark:text-zinc-600 dark:hover:bg-zinc-700"
+                  }`}
+                >
+                  {weekday.label}
+                </button>
+              );
+            })}
           </div>
         </SettingRow>
       </SettingGroup>
@@ -54,99 +232,46 @@ function GeneralContent() {
           workspace-wide policy, not something set per-invite. */}
       <SettingGroup title="Defaults">
         <SettingRow label="Default Role" hint="Applied when inviting new users">
-          <SelectField value="Member" />
+          <SelectField
+            value={draft.defaultRole}
+            onChange={(v) => updateDraft("defaultRole", v as Role)}
+            options={GENERAL_ROLE_OPTIONS.map((r) => ({ value: r, label: ROLE_LABELS[r] }))}
+            disabled={!isAdmin}
+          />
         </SettingRow>
         <SettingRow label="Default Capacity" hint="Weekly hour limit per person">
-          <NumberField value={40} suffix="h / week" />
+          <NumberField
+            value={draft.defaultWeeklyCapacity}
+            suffix="h / week"
+            onChange={(v) => updateDraft("defaultWeeklyCapacity", v)}
+            disabled={!isAdmin}
+          />
         </SettingRow>
       </SettingGroup>
-    </>
-  );
-}
 
-const STATUSES = [
-  { label: "Inbox",       color: "slate"  },
-  { label: "To Do",       color: "blue"   },
-  { label: "In Progress", color: "violet" },
-  { label: "In Review",   color: "sky"    },
-  { label: "Blocked",     color: "red"    },
-  { label: "Done",        color: "green"  },
-] as const;
-
-const PRIORITIES = [
-  { label: "High",   color: "red"   },
-  { label: "Normal", color: "amber" },
-  { label: "Low",    color: "slate" },
-] as const;
-
-const LABELS = [
-  { label: "Security",    color: "red"    },
-  { label: "Bug",         color: "orange" },
-  { label: "Performance", color: "amber"  },
-  { label: "Design",      color: "violet" },
-  { label: "API",         color: "sky"    },
-  { label: "Compliance",  color: "blue"   },
-] as const;
-
-const TICKET_TYPES = [
-  { label: "Feature",     color: "blue"    },
-  { label: "Bug",         color: "red"     },
-  { label: "Task",        color: "slate"   },
-  { label: "Improvement", color: "emerald" },
-  { label: "Research",    color: "violet"  },
-] as const;
-
-function ProjectsContent() {
-  return (
-    <>
-      <SettingGroup title="Ticket Statuses">
-        <div className="py-4">
-          <div className="flex flex-wrap gap-2">
-            {STATUSES.map((s) => (
-              <Chip key={s.label} label={s.label} color={s.color} />
-            ))}
-            <button className="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-full border border-dashed border-slate-300 dark:border-zinc-700 text-slate-400 hover:border-slate-400 dark:text-zinc-600 dark:hover:border-zinc-600">
-              + Add
-            </button>
-          </div>
-        </div>
-      </SettingGroup>
-
-      <SettingGroup title="Priorities">
-        <div className="py-4">
-          <div className="flex flex-wrap gap-2">
-            {PRIORITIES.map((p) => (
-              <Chip key={p.label} label={p.label} color={p.color} />
-            ))}
-          </div>
-        </div>
-      </SettingGroup>
-
-      <SettingGroup title="Labels">
-        <div className="py-4">
-          <div className="flex flex-wrap gap-2">
-            {LABELS.map((l) => (
-              <Chip key={l.label} label={l.label} color={l.color} />
-            ))}
-            <button className="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-full border border-dashed border-slate-300 dark:border-zinc-700 text-slate-400 hover:border-slate-400 dark:text-zinc-600 dark:hover:border-zinc-600">
-              + Add
-            </button>
-          </div>
-        </div>
-      </SettingGroup>
-
-      <SettingGroup title="Ticket Types">
-        <div className="py-4">
-          <div className="flex flex-wrap gap-2">
-            {TICKET_TYPES.map((t) => (
-              <Chip key={t.label} label={t.label} color={t.color} />
-            ))}
-            <button className="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-full border border-dashed border-slate-300 dark:border-zinc-700 text-slate-400 hover:border-slate-400 dark:text-zinc-600 dark:hover:border-zinc-600">
-              + Add
-            </button>
-          </div>
-        </div>
-      </SettingGroup>
+      {/* Save Changes — same pattern (button label/disabled state, "Changes
+          saved" checkmark, inline red error text) as Project Settings'
+          own save button, the closest existing precedent for a real save
+          in this app's Settings-style screens. */}
+      <div className="flex items-center gap-3 mt-2 mb-6">
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={!isAdmin || saving || !isDirty}
+          className="text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3.5 py-2 shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-500 dark:hover:bg-brand-600 dark:shadow-brand-500/20 disabled:opacity-60 disabled:cursor-not-allowed"
+        >
+          {saving ? "Saving…" : "Save Changes"}
+        </button>
+        {saved && (
+          <span className="flex items-center gap-1.5 text-[13px] font-medium text-emerald-600 dark:text-emerald-400">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+              <path d="M5 12l5 5L20 7" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            Changes saved
+          </span>
+        )}
+        {saveError && <span className="text-[13px] font-medium text-red-600 dark:text-red-400">{saveError}</span>}
+      </div>
     </>
   );
 }
@@ -340,7 +465,6 @@ function DangerZoneContent() {
 function SectionContent({ slug }: { slug: string }) {
   switch (slug) {
     case "general":       return <GeneralContent />;
-    case "projects":      return <ProjectsContent />;
     case "time-tracking": return <TimeTrackingContent />;
     case "notifications": return <NotificationsContent />;
     case "integrations":  return <IntegrationsContent />;

@@ -24,6 +24,18 @@ export interface Organization {
   id: string;
   name: string;
   slug: string;
+  /** organizations.default_role — applied when inviting a new user (not yet
+   *  wired to Invite User; see updateOrganizationSettingsAction). */
+  defaultRole: Role;
+  /** organizations.default_weekly_capacity — the starting value copied onto
+   *  a *new* member's own weekly_capacity, never a live multiplier and
+   *  never something an existing member's own row reads from. */
+  defaultWeeklyCapacity: number;
+  /** organizations.active_days — ISO weekday numbers (1 = Monday .. 7 =
+   *  Sunday) the organization counts as working days. Always non-empty,
+   *  never duplicated, every value 1–7 (enforced in Postgres by
+   *  is_valid_active_days, 20260815000000_add_organization_settings_defaults.sql). */
+  activeDays: number[];
 }
 
 export interface Membership {
@@ -70,6 +82,9 @@ interface OrganizationRow {
   id: string;
   name: string;
   slug: string;
+  default_role: string;
+  default_weekly_capacity: number;
+  active_days: number[];
 }
 
 interface MembershipRow {
@@ -127,9 +142,9 @@ export async function loadMembership(userId: string): Promise<MembershipResult> 
     return { status: "no-membership" };
   }
 
-  const { data: organization, error: organizationError } = await supabase
+  const { data: organizationRow, error: organizationError } = await supabase
     .from("organizations")
-    .select("id, name, slug")
+    .select("id, name, slug, default_role, default_weekly_capacity, active_days")
     .eq("id", membershipRow.organization_id)
     .maybeSingle<OrganizationRow>();
 
@@ -137,7 +152,7 @@ export async function loadMembership(userId: string): Promise<MembershipResult> 
     logDev("organizations query failed", organizationError);
     return { status: "error", message: organizationError.message };
   }
-  if (!organization) {
+  if (!organizationRow) {
     logDev("organization_membership points at a missing organization", membershipRow.organization_id);
     return { status: "no-membership" };
   }
@@ -147,6 +162,21 @@ export async function loadMembership(userId: string): Promise<MembershipResult> 
     logDev("unrecognized org_role value", membershipRow.role);
     return { status: "error", message: `Unrecognized organization role "${membershipRow.role}".` };
   }
+
+  const defaultRole = ROLE_FROM_DB[organizationRow.default_role];
+  if (!defaultRole) {
+    logDev("unrecognized organizations.default_role value", organizationRow.default_role);
+    return { status: "error", message: `Unrecognized default role "${organizationRow.default_role}".` };
+  }
+
+  const organization: Organization = {
+    id: organizationRow.id,
+    name: organizationRow.name,
+    slug: organizationRow.slug,
+    defaultRole,
+    defaultWeeklyCapacity: organizationRow.default_weekly_capacity,
+    activeDays: organizationRow.active_days,
+  };
 
   return {
     status: "ready",

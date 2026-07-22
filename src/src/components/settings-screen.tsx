@@ -21,21 +21,6 @@ export const SETTINGS_SECTIONS = [
     ),
   },
   {
-    slug:        "projects",
-    title:       "Projects",
-    description: "Statuses, priorities and labels",
-    iconBg:      "bg-violet-50 dark:bg-violet-500/10",
-    iconColor:   "text-violet-600 dark:text-violet-400",
-    items:       ["Statuses", "Priorities", "Labels", "Ticket Types"],
-    icon: (
-      <svg className="w-4.5 h-4.5" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
-        <path d="M3 7l4-4h6l4 4" />
-        <rect x="3" y="7" width="18" height="13" rx="2" />
-        <path d="M9 14h6M9 10h3" />
-      </svg>
-    ),
-  },
-  {
     slug:        "time-tracking",
     title:       "Time Tracking",
     description: "Capacity, estimation and rounding",
