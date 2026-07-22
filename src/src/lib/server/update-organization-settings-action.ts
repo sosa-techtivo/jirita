@@ -1,10 +1,20 @@
 "use server";
 
 // Server Action for Settings → General's functional fields (Workspace Name,
-// Default Role, Default Weekly Capacity, Active Days) — not called by any
-// UI yet (Settings still renders GeneralContent's own hardcoded literals;
-// see settings-section-screen.tsx). Exists so the backend write path is
-// real and ready before that wiring happens.
+// Default Role, Default Weekly Capacity, Active Days) — see
+// settings-section-screen.tsx's GeneralContent.
+//
+// Previously also backed a since-removed Settings → Time Tracking section
+// (Show Estimated Hours on Tickets, Require Estimation on New Tickets,
+// Hour Rounding, Round Up by Default) — those four fields/params were
+// reverted here along with that section: ticket estimate visibility/
+// requirement and time-entry rounding are now fixed, non-configurable
+// product rules (see lib/tickets.ts's updateTicket and
+// lib/time-rounding.ts), not something an Admin sets. The underlying
+// `organizations` columns those Settings once wrote
+// (show_ticket_estimates/require_ticket_estimate/time_rounding_minutes/
+// round_time_up) still exist for compatibility but are no longer read or
+// written by this action or anywhere else in the app.
 //
 // Mirrors edit-user-action.ts's authorization pattern exactly: a caller-
 // authenticated client (anon key + the caller's own bearer token) for
@@ -21,8 +31,8 @@
 // (42501) — a table-privilege error Postgres raises before RLS is ever
 // evaluated.
 //
-// Scoped to exactly the fields this migration added/reuses — never email,
-// slug, id, or any other organizations column.
+// Scoped to exactly the fields the two migrations above added/reuse —
+// never email, slug, id, or any other organizations column.
 
 import { createClient } from "@supabase/supabase-js";
 import type { SupabaseClient } from "@supabase/supabase-js";

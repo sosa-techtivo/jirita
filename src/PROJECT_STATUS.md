@@ -38,7 +38,9 @@ Most recently, Admin → Users gained real auto-refresh and skeleton loading thr
 
 After that, Admin → Reports → Delivery's old "Recent Changes" block (a flat, deduped ticket-activity feed) was replaced outright by a new **Tickets by Member** block, built up over several passes: real tickets grouped by real `assigneeProfileId` (never name/avatar), excluding Done, sorted Blocked → Overdue → Priority → due date → ticket code within each group, each ticket row opening the real Ticket Preview and each group header opening the real Member Profile Modal; each ticket then gained its own real logged-hours figure (from real `ticket_time_entries`, never the `ticket.hours` estimate); the per-member cap and its "View all N →" link were then removed in favor of the full real list plus a per-group **Total Logged** summary line; and finally its inclusion rule was corrected to a real union — `(currently assigned to this member AND not Done) OR (this member logged real hours on this ticket within the active period)` — so a ticket a member has since been reassigned off of, or that's since moved to Done, still correctly shows in their group if they logged real time on it, with the Member filter re-scoped to apply *after* grouping (filtering which groups are visible, never which tickets a group's history can include) since the same ticket can now legitimately appear in more than one member's group. A follow-up **read-only audit**, run at the user's explicit request to check Workload against this new block for a coherent shared definition, found and confirmed one real, pre-existing bug: `buildWorkloadRows`' `assignedHours` computed `Σ max(ticket.hours − hours logged this period, 0)` — "remaining hours" — silently diverging from the "official" `Σ ticket.hours` assigned-hours definition every other real consumer (Team, the Dashboards, the Member Profile Modal, Project Lead Time Tracking) already shares and documents in their own code comments. The fix, applied as its own minimal, scoped change: `assignedHours` is now the same plain `Σ ticket.hours` over currently-assigned, non-Done tickets as everywhere else, never netted against logged time — Workload and Tickets by Member's own Total Logged now measure two legitimately different, clearly-separate things (current assigned load vs. real historical hours worked) instead of silently disagreeing about the same one.
 
-Most recently, Delivery gained its own **Period selector** (This Month/Last Month/This Quarter/Custom Range), reusing Finance's exact `PeriodSelector` component, styling, and date-range helpers, but with fully independent state (`deliveryPeriod`/`deliveryCustomRange`, default This Month) that never overwrites or is overwritten by Finance's own Billing Period — each tab keeps its own selection for the session, and both combine correctly with Delivery's existing 7 filters. The shared data-fetch effect now also loads a Delivery-scoped logged-time range and a real completed-in-range ticket count (`loadTicketsCompletedInRange`, the same real `ticket_activity` status→done signal per-project Reports' Delivery Snapshot already uses — never `updated_at`) in parallel alongside Finance's own existing queries — no N+1, no per-ticket/per-member queries. **Responds to Delivery's period**: Hours Burn's logged-hours half, Hours by Person's Completed (and Remaining/Capacity, which already derived from Completed), Project Health's Completion column, Tickets by Member in full (hours per ticket, Total Logged, and historical inclusion), and the "Done …" KPI — now correctly relabeling itself ("Done This Month"/"Done Last Month"/"Done This Quarter"/"Done in Range") as the period changes, via a new optional 5th parameter on `buildDeliveryKpiSummary` that leaves its two existing external callers (Admin/Project Lead Project Overview, both still on the 4-arg call) byte-for-byte unchanged. **Explicitly does not respond to it** (current-state metrics): Projects, Active Tickets, Blocked, Overdue, and — reconfirming the Workload fix above — Workload, whose own `timeEntries` parameter is received but deliberately left unused by its `assignedHours` calculation. All of the above is implemented and type/build-clean, not yet clicked through in a live browser — same "should work, not yet verified" status as everything else in this list.
+After that, Delivery gained its own **Period selector** (This Month/Last Month/This Quarter/Custom Range), reusing Finance's exact `PeriodSelector` component, styling, and date-range helpers, but with fully independent state (`deliveryPeriod`/`deliveryCustomRange`, default This Month) that never overwrites or is overwritten by Finance's own Billing Period — each tab keeps its own selection for the session, and both combine correctly with Delivery's existing 7 filters. The shared data-fetch effect now also loads a Delivery-scoped logged-time range and a real completed-in-range ticket count (`loadTicketsCompletedInRange`, the same real `ticket_activity` status→done signal per-project Reports' Delivery Snapshot already uses — never `updated_at`) in parallel alongside Finance's own existing queries — no N+1, no per-ticket/per-member queries. **Responds to Delivery's period**: Hours Burn's logged-hours half, Hours by Person's Completed (and Remaining/Capacity, which already derived from Completed), Project Health's Completion column, Tickets by Member in full (hours per ticket, Total Logged, and historical inclusion), and the "Done …" KPI — now correctly relabeling itself ("Done This Month"/"Done Last Month"/"Done This Quarter"/"Done in Range") as the period changes, via a new optional 5th parameter on `buildDeliveryKpiSummary` that leaves its two existing external callers (Admin/Project Lead Project Overview, both still on the 4-arg call) byte-for-byte unchanged. **Explicitly does not respond to it** (current-state metrics): Projects, Active Tickets, Blocked, Overdue, and — reconfirming the Workload fix above — Workload, whose own `timeEntries` parameter is received but deliberately left unused by its `assignedHours` calculation. All of the above is implemented and type/build-clean, not yet clicked through in a live browser — same "should work, not yet verified" status as everything else in this list.
+
+Most recently, Settings gained, then immediately lost, a **Time Tracking** section: a first pass made Show Estimated Hours on Tickets, Require Estimation on New Tickets, Hour Rounding, and Round Up by Default into real, Admin-configurable `organizations` columns wired into New Ticket/Ticket Detail/Ticket Preview/`logTicketTime`; a follow-up product decision then retired that section outright in favor of the same four rules as **fixed, non-configurable JIRITA behavior** instead — Estimated Hours is now always visible, estimation stays optional at ticket creation, every logged time entry rounds up to a fixed 15-minute increment (`lib/time-rounding.ts`'s `roundLoggedMinutesUp`, the one shared helper `logTicketTime` — the single real time-entry write path — applies before persisting), and a genuinely new rule was added along the way: a ticket now needs a real estimate (`hours > 0`) before it can move to In Progress, In Review, or Done, enforced once, backend-side, in `updateTicket` (the single real gateway every status change already goes through, so Ticket Detail/Ticket Preview/Board can't diverge or be bypassed) and surfaced through the same existing error-toast/rollback pattern every other inline edit already used — no new UI code. `/settings/time-tracking` no longer exists (falls through to the standard "Section not found." branch, same as `/settings/projects`); the four `organizations` columns backing the old setting were deliberately left in place, unread, for compatibility. See Architecture Status → Removed (Settings → Time Tracking) for the full before/after and exactly where each fixed rule is enforced.
 
 ---
 
@@ -489,13 +491,13 @@ No new database tables or columns were needed — pure application-layer query/r
 
 Completed.
 
-Routes: `/settings` (redirects to `/settings/general`) and `/settings/[section]` for 5 sections.
+Routes: `/settings` (redirects to `/settings/general`) and `/settings/[section]` for 4 sections.
 
 Sections:
 
 - **General**: **now real** — Workspace Name, Active Days (day picker), Default Role, and Default Weekly Capacity read/write `organizations` directly (see Architecture Status → Settings → General for the full breakdown); Logo/Timezone/Language were removed outright (no schema, no real consumer anywhere in the app — see the audit this was based on), not just left mock
 - **Removed**: Projects (`/settings/projects` — Ticket Statuses/Priorities/Ticket Types/Labels) was retired outright, not left mock — see Architecture Status → Removed (Settings → Projects) for why. `/settings/projects` no longer appears in the nav/hub and no longer statically generates; a direct visit falls through to the same "Section not found." default `SectionContent` already renders for any unrecognized slug.
-- **Time Tracking**: Hours per day, weekly capacity, estimation defaults, rounding preferences
+- **Removed**: Time Tracking (`/settings/time-tracking` — Show Estimated Hours on Tickets, Require Estimation on New Tickets, Hour Rounding, Round Up by Default) was retired outright — those four rules are now fixed, non-configurable JIRITA product behavior instead of an Admin setting. See Architecture Status → Removed (Settings → Time Tracking) for the current fixed rules and exactly where each is enforced.
 - **Notifications**: Email, desktop, and digest toggles with per-channel granularity
 - **Integrations**: GitHub (connected, 3 repos), Slack and Google Calendar (Connect buttons), Jira Import (Coming Soon)
 - **Danger Zone**: Archive Workspace (amber) and Delete Workspace (red) actions with warning messaging
@@ -503,7 +505,7 @@ Sections:
 People (formerly a Settings section) is now the dedicated **Users** module — see below.
 
 Navigation:
-- Left sub-nav lists all 5 sections; active section highlighted
+- Left sub-nav lists all 4 sections (Admin only — see SettingsNav); active section highlighted
 - Breadcrumb: `Settings / Section Name`
 - `/settings` redirects server-side to `/settings/general`
 - Sidebar Settings link goes directly to `/settings/general`
@@ -2014,15 +2016,86 @@ constants themselves are completely untouched — Ticket Detail's own Labels
 picker (and everything else in Tickets/Board/Reports/Time Tracking) works
 exactly as before.
 
+## Removed (Settings → Time Tracking)
+
+Retired outright, one pass after being made real: Show Estimated Hours on
+Tickets, Require Estimation on New Tickets, Hour Rounding, and Round Up by
+Default are no longer an Admin-configurable setting at all — they're now
+**fixed JIRITA product behavior**, per explicit product decision. The
+`updateOrganizationSettingsAction` Server Action, `Organization` type/
+`loadMembership`, and `current-user-provider.tsx` all reverted to exactly
+their Settings → General-only shape from before that section existed —
+none of them read or write `show_ticket_estimates`/`require_ticket_estimate`/
+`time_rounding_minutes`/`round_time_up` anymore. `settings-screen.tsx`/
+`settings-section-screen.tsx`/`app/settings/[section]/page.tsx` no longer
+reference the section at all — `/settings/time-tracking` falls through to
+the same "Section not found." default `SectionContent` already renders for
+any unrecognized slug, and no longer statically generates. `SettingsNav`'s
+old non-Admin special case (a Project Lead/Member could reach this one
+section only) is gone along with it — every remaining Settings section
+(General/Notifications/Integrations/Danger Zone) is Admin-only, so
+non-Admins now see an empty Settings nav.
+
+**The four `organizations` columns still exist** (kept for compatibility,
+not dropped — `20260816000000_add_organization_time_tracking_settings.sql`
+is untouched), but are deliberately unread/unwritten by any code path now
+— see the deprecation notes on `lib/membership.ts`'s `Organization`,
+`lib/time-rounding.ts`, `lib/tickets.ts`'s `logTicketTime`, and
+`update-organization-settings-action.ts`'s own header comment.
+
+**The fixed rules themselves, and exactly where each is enforced:**
+
+- **Estimated Hours is always visible** — New Ticket, Ticket Detail's
+  sidebar "Estimated" field, and the Ticket Preview panel's Hours field all
+  reverted to their original, unconditional rendering (`ticket-preview-panel.tsx`'s
+  now-unnecessary `useCurrentUser()` call was removed along with it — it
+  had no other use).
+- **Estimation stays optional at ticket creation** — `createTicket`
+  (`lib/tickets.ts`) reverted to no estimate check at all; `new-ticket-modal.tsx`
+  reverted its Hours field/submit validation to the original
+  always-optional behavior.
+- **A real estimate (`hours > 0`) is now required before a ticket can move
+  to In Progress, In Review, or Done** (new rule — never existed before
+  this pass). Enforced in exactly one place: `updateTicket`
+  (`lib/tickets.ts`), the single real gateway every status change in the
+  app already goes through (Ticket Detail's `EditableSidebarStatus`,
+  Ticket Preview's `EditableStatusBadge` — confirmed by an exhaustive
+  search that neither Board nor any other surface has a status-change path
+  of its own). Reads the ticket's current `hours` (or the same call's own
+  `input.hours`, if it's setting both at once) — never a second query per
+  ticket in a loop. Backlog/To Do/Blocked stay estimate-free, and a ticket
+  already sitting in a restricted status without an estimate is never
+  retroactively flagged — the check only runs when `input.status` is
+  actively being set to one of the three. Rejecting requires **no new UI
+  code**: both call sites' existing `persist()`/`persistPatch()` wrappers
+  (ticket-detail-screen.tsx/ticket-preview-panel.tsx) already show a
+  rejection via the shared error toast and never apply the optimistic
+  status change on failure — the same "real backend rejection, existing
+  error pattern, data preserved" behavior every other inline edit in this
+  app already had.
+- **Every logged time entry now rounds up to a fixed 15-minute increment**
+  — `lib/time-rounding.ts`'s `roundLoggedMinutesUp` (rewritten; the
+  previous configurable `roundLoggedMinutes(raw, increment, roundUp)` and
+  its Settings-only exports were removed) is the one shared pure helper,
+  applied inside `logTicketTime` (`lib/tickets.ts` — again the single real
+  write path, so Admin/Project Lead/Member can never diverge) before
+  persisting. A positive entry can never round to 0 (`ceil` of any positive
+  value is always >= 1 increment). No organization lookup anymore — the
+  increment is a fixed constant, not read from any `organizations` column.
+  No historical `ticket_time_entries` row was touched or re-rounded.
+
 ## Still mock
 
-- The rest of Settings (`/settings/*` — Time Tracking, Notifications,
-  Integrations, Danger Zone) still reads from `src/lib/mock-*.ts`.
+- The rest of Settings (`/settings/*` — Notifications, Integrations,
+  Danger Zone) still reads from `src/lib/mock-*.ts`.
   **Resolved**: General is no longer part of this list — see Confirmed
-  working → Settings → General for the real Workspace Name/Active Days/
-  Default Role/Default Capacity (and why Logo/Timezone/Language were
-  removed instead of left mock). Projects was retired outright rather than
-  left mock — see Removed → Settings → Projects. Also **resolved**:
+  working → Settings → General for the real Workspace Name/Active
+  Days/Default Role/Default Capacity (and why Logo/Timezone/Language were
+  removed instead of left mock). Time Tracking and Projects were both
+  retired outright rather than left mock — see Removed → Settings → Time
+  Tracking (estimate visibility/requirement and time rounding are now
+  fixed product behavior, not a setting) and Removed → Settings → Projects.
+  Also **resolved**:
   `src/components/project-lead-reports-screen.tsx` (the
   Project Lead role's own Reports view) no longer reads
   `PROJECT_TICKETS`/`RECENT_ACTIVITY`/`MY_PROJECT_NAMES` or any other
@@ -2102,7 +2175,6 @@ Current working routes:
 - `/activity` — dedicated, server-side-paginated, org-wide Activity History page (new), the org-wide sibling of `/projects/[slug]/activity`; not on the Sidebar's main nav, reached only via the Dashboard's "View all activity →" action, same "link-only" precedent as `/projects/[slug]/team/[userId]/work-history`
 - `/settings` → redirects to `/settings/general`
 - `/settings/general`
-- `/settings/time-tracking`
 - `/settings/notifications`
 - `/settings/integrations`
 - `/settings/danger-zone`
@@ -2206,7 +2278,7 @@ Current known items:
 
 Planned future work:
 
-- Live verification (click through each in a browser against a real Supabase project) of Users, the **Admin** Project Overview (including its new Project Activity history page), per-project Reports, Time Tracking (Admin/Member/Project Lead), the Dashboard's org-wide Activity History page, the Project Lead's and Member's own Project Overview, all three Dashboards' project scope selectors, My Work (Member, including its own KPI click-through and skeleton loader), ticket-assignment restriction, Member's own `/projects` ("My Projects"), global Search, the Project Lead's own scoped Reports (Delivery + Team, including its KPI click-throughs), the `/projects` list's Project Lead KPI band, and the Reports/Time Tracking Member Profile Modal trigger fixes — the immediate next step, ahead of any new backend seam
+- Live verification (click through each in a browser against a real Supabase project) of Users, the **Admin** Project Overview (including its new Project Activity history page), per-project Reports, Time Tracking (Admin/Member/Project Lead), the Dashboard's org-wide Activity History page, the Project Lead's and Member's own Project Overview, all three Dashboards' project scope selectors, My Work (Member, including its own KPI click-through and skeleton loader), ticket-assignment restriction, Member's own `/projects` ("My Projects"), global Search, the Project Lead's own scoped Reports (Delivery + Team, including its KPI click-throughs), the `/projects` list's Project Lead KPI band, the Reports/Time Tracking Member Profile Modal trigger fixes, and the new fixed Time Tracking rules (estimate required before In Progress/In Review/Done in `updateTicket`, 15-minute always-round-up in `logTicketTime`) — the immediate next step, ahead of any new backend seam
 - Backend integration for the rest of Settings (everything else, including the Project Lead's own scoped Reports and Time Tracking views, is done — see Architecture Status; schema for Settings is designed in `docs/SUPABASE_MVP_SCHEMA.md` and applied via the migrations in `supabase/migrations/`, just not queried by the UI yet)
 - API layer
 - Real drag & drop (Kanban)

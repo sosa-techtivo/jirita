@@ -710,6 +710,8 @@ export function TicketPreviewPanel({
               </div>
             </div>
 
+            {/* Estimated Hours — always visible when set (fixed product
+                rule; unchanged from before showTicketEstimates existed). */}
             {t.hours !== undefined && (
               <div>
                 <p className={FIELD_LABEL}>Hours</p>

@@ -2964,6 +2964,7 @@ export function TicketDetailScreen({
               onChange={(v) => { update("priority", v); persist({ priority: v }); }}
             />
 
+            {/* Estimated Hours — always visible (fixed product rule). */}
             <EditableSidebarHours
               value={ticket.hours}
               onChange={(next) => {

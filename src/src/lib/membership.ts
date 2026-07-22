@@ -36,6 +36,17 @@ export interface Organization {
    *  never duplicated, every value 1–7 (enforced in Postgres by
    *  is_valid_active_days, 20260815000000_add_organization_settings_defaults.sql). */
   activeDays: number[];
+
+  // NOT exposed here (deliberately): organizations.show_ticket_estimates,
+  // require_ticket_estimate, time_rounding_minutes, and round_time_up.
+  // These columns still exist (kept for compatibility, see
+  // 20260816000000_add_organization_time_tracking_settings.sql), but
+  // ticket estimate visibility/requirement and time-entry rounding are now
+  // fixed, non-configurable product rules — see lib/tickets.ts's
+  // updateTicket (estimate required before In Progress/In Review/Done) and
+  // lib/time-rounding.ts (always round up to 15 minutes). Settings →
+  // Time Tracking, the one UI that used to read/write these four fields,
+  // was removed outright.
 }
 
 export interface Membership {

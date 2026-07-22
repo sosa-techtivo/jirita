@@ -299,6 +299,12 @@ export function NewTicketModal({
   const handleSubmit = async () => {
     if (!canSubmit) { titleRef.current?.focus(); return; }
 
+    // Estimation stays optional at creation — JIRITA only ever requires a
+    // real estimate before a ticket moves to In Progress/In Review/Done
+    // (enforced in updateTicket, lib/tickets.ts), never at creation time.
+    const parsedHours = hours ? parseInt(hours, 10) : undefined;
+    const validHours = parsedHours !== undefined && parsedHours >= 0 ? parsedHours : undefined;
+
     // Dev-only fallback: no real organization — unchanged local/mock
     // behavior (never reached once a real organization exists).
     if (isDevFallback || !organization) {
@@ -316,7 +322,7 @@ export function NewTicketModal({
         title: title.trim(),
         description: description.trim() || undefined,
         acceptanceCriteria: filledCriteria.length > 0 ? filledCriteria : undefined,
-        hours: hours ? (parseInt(hours, 10) >= 0 ? parseInt(hours, 10) : undefined) : undefined,
+        hours: validHours,
         assigneeProfileId: assigneeId || undefined,
       });
       if (result.status === "error") {
@@ -511,7 +517,7 @@ export function NewTicketModal({
               </button>
             </div>
 
-            {/* Hours */}
+            {/* Hours — always visible, always optional at creation. */}
             <div>
               <label className={FIELD_LABEL}>
                 Hours

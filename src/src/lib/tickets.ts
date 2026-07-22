@@ -17,6 +17,7 @@ import { registerProjectCode } from "./mock-tickets";
 import type { Ticket, TicketPriority, TicketStatus, TicketType } from "./mock-tickets";
 import { loadOrganizationProjects } from "./projects";
 import type { ProjectStatus } from "./mock-projects";
+import { roundLoggedMinutesUp } from "./time-rounding";
 
 export type TicketsResult =
   | { status: "ready"; tickets: Ticket[] }
@@ -464,12 +465,53 @@ export type UpdateTicketResult =
   | { status: "success"; ticket: Ticket }
   | { status: "error"; message: string };
 
+// Fixed product rule (never configurable): a ticket must carry a real
+// estimate greater than 0 before it can move into any of these three
+// statuses. Backlog/To Do/Blocked never require one, and a ticket already
+// sitting in one of these three without an estimate (e.g. from before this
+// rule existed) is never retroactively flagged — the check below only ever
+// runs when `input.status` is actively being set to one of these values.
+const ESTIMATE_REQUIRED_STATUSES: TicketStatus[] = ["in-progress", "review", "done"];
+
 export async function updateTicket(
   ticketId: string,
   slug: string,
   input: UpdateTicketInput
 ): Promise<UpdateTicketResult> {
   const supabase = getSupabaseBrowserClient();
+
+  // Estimate-required-before-transition — the one real gateway every status
+  // change in the app goes through (Ticket Detail's EditableSidebarStatus,
+  // Ticket Preview's EditableStatusBadge; Board has no status-change UI of
+  // its own, only these two), so this single check is the authoritative,
+  // unbypassable backend enforcement of the rule — both callers' own
+  // existing persist()/persistPatch() wrappers already show a rejection's
+  // message via the shared error toast and never apply the optimistic
+  // status change on failure, so no UI change was needed to get that
+  // behavior. Uses `input.hours` when the same call also sets it (e.g. a
+  // future combined edit), otherwise reads the ticket's current real value
+  // — never assumes an unrelated edit implicitly clears/keeps the estimate.
+  if (input.status !== undefined && ESTIMATE_REQUIRED_STATUSES.includes(input.status)) {
+    let effectiveHours = input.hours;
+    if (effectiveHours === undefined) {
+      const { data: currentRow, error: currentError } = await supabase
+        .from("tickets")
+        .select("hours")
+        .eq("id", ticketId)
+        .maybeSingle<{ hours: number | null }>();
+      if (currentError) {
+        logDev("ticket hours lookup for status-change validation failed", currentError);
+        return { status: "error", message: currentError.message };
+      }
+      effectiveHours = currentRow?.hours ?? undefined;
+    }
+    if (!(effectiveHours !== null && effectiveHours !== undefined && effectiveHours > 0)) {
+      return {
+        status: "error",
+        message: "An estimate greater than 0 is required before moving this ticket to In Progress, In Review, or Done.",
+      };
+    }
+  }
 
   // Same real-membership validation createTicket applies — reject setting
   // (not clearing) an assignee who isn't an active member of this ticket's
@@ -2246,11 +2288,25 @@ export async function logTicketTime(ticketId: string, input: LogTimeInput): Prom
 
   const supabase = getSupabaseBrowserClient();
 
+  // Real normalization, not just validation: the raw minutes the caller
+  // computed (e.g. LogTimeModal's own h*60+m, ticket-detail-screen.tsx) are
+  // never persisted as-is — always rounded here, server-side, to JIRITA's
+  // fixed product rule (TIME_ROUNDING_INCREMENT_MINUTES, always rounding
+  // up — see lib/time-rounding.ts), via the one shared pure helper every
+  // real time-entry write path in the app reuses. This is the only real
+  // write path today (Admin/Project Lead/Member all share this same Ticket
+  // Detail component and this same function), so there is nowhere else
+  // rounding could be applied differently. Fixed, not configurable — no
+  // organization lookup, never reads organizations.time_rounding_minutes/
+  // round_time_up (deprecated, unused columns; see that file's own header
+  // comment).
+  const roundedMinutes = roundLoggedMinutesUp(input.minutes);
+
   const { data: row, error } = await supabase
     .from("ticket_time_entries")
     .insert({
       ticket_id: ticketId,
-      minutes: Math.round(input.minutes),
+      minutes: roundedMinutes,
       comment: input.comment?.trim() || null,
       work_date: input.workDate,
     })

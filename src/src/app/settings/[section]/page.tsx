@@ -3,7 +3,6 @@ import { SettingsSectionScreen, SettingsBreadcrumb } from "@/components/settings
 
 const SECTION_TITLES: Record<string, string> = {
   "general":       "General",
-  "time-tracking": "Time Tracking",
   "notifications": "Notifications",
   "integrations":  "Integrations",
   "danger-zone":   "Danger Zone",
@@ -34,7 +33,7 @@ export default async function SettingsSectionPage({
   return (
     <AppShell
       activePage="settings"
-      breadcrumb={<SettingsBreadcrumb section={section} title={title} />}
+      breadcrumb={<SettingsBreadcrumb title={title} />}
     >
       <SettingsSectionScreen section={section} />
     </AppShell>

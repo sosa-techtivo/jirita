@@ -21,20 +21,6 @@ export const SETTINGS_SECTIONS = [
     ),
   },
   {
-    slug:        "time-tracking",
-    title:       "Time Tracking",
-    description: "Capacity, estimation and rounding",
-    iconBg:      "bg-amber-50 dark:bg-amber-500/10",
-    iconColor:   "text-amber-600 dark:text-amber-400",
-    items:       ["Hours per day", "Weekly capacity", "Estimation defaults", "Hour rounding"],
-    icon: (
-      <svg className="w-4.5 h-4.5" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
-        <circle cx="12" cy="12" r="10" />
-        <path d="M12 6v6l4 2" />
-      </svg>
-    ),
-  },
-  {
     slug:        "notifications",
     title:       "Notifications",
     description: "Email, desktop and digest preferences",

@@ -276,42 +276,6 @@ function GeneralContent() {
   );
 }
 
-function TimeTrackingContent() {
-  return (
-    <>
-      <SettingGroup title="Working Hours">
-        <SettingRow label="Hours per Day" hint="Standard workday length">
-          <NumberField value={8} suffix="h / day" />
-        </SettingRow>
-        <SettingRow label="Weekly Capacity" hint="Max billable hours per person per week">
-          <NumberField value={40} suffix="h / week" />
-        </SettingRow>
-      </SettingGroup>
-
-      <SettingGroup title="Estimation">
-        <SettingRow label="Default Estimation Unit">
-          <SelectField value="Hours" />
-        </SettingRow>
-        <SettingRow label="Show Estimated Hours on Tickets" hint="Displays the estimation field in ticket view">
-          <Toggle on />
-        </SettingRow>
-        <SettingRow label="Require Estimation on New Tickets">
-          <Toggle on={false} />
-        </SettingRow>
-      </SettingGroup>
-
-      <SettingGroup title="Rounding">
-        <SettingRow label="Hour Rounding" hint="Log entries are rounded to this increment">
-          <SelectField value="0.5h increments" />
-        </SettingRow>
-        <SettingRow label="Round Up by Default">
-          <Toggle on={false} />
-        </SettingRow>
-      </SettingGroup>
-    </>
-  );
-}
-
 function NotificationsContent() {
   return (
     <>
@@ -465,7 +429,6 @@ function DangerZoneContent() {
 function SectionContent({ slug }: { slug: string }) {
   switch (slug) {
     case "general":       return <GeneralContent />;
-    case "time-tracking": return <TimeTrackingContent />;
     case "notifications": return <NotificationsContent />;
     case "integrations":  return <IntegrationsContent />;
     case "danger-zone":   return <DangerZoneContent />;
@@ -490,10 +453,13 @@ function sectionMeta(slug: string) {
 
 function SettingsNav({ active }: { active: string }) {
   const { user } = useCurrentUser();
-  // Only ADMIN has the Settings nav item; other roles reach this screen via
-  // the Time Tracking nav link only, so they shouldn't see the rest of the
-  // admin settings area from here.
-  const sections = user.role === "ADMIN" ? ALL_SECTIONS : ALL_SECTIONS.filter((s) => s.slug === "time-tracking");
+  // Only ADMIN has the Settings nav item at all — every remaining section
+  // (General/Notifications/Integrations/Danger Zone) is admin-oriented
+  // workspace configuration, so other roles see none of them here. (Time
+  // Tracking used to be the one section non-admins could reach this way;
+  // it was removed outright — the app's real Time Tracking module lives at
+  // the unrelated /time-tracking route, untouched by this.)
+  const sections = user.role === "ADMIN" ? ALL_SECTIONS : [];
 
   return (
     <nav className="space-y-0.5 sticky top-4">
@@ -532,13 +498,7 @@ function SettingsNav({ active }: { active: string }) {
 
 // ── Breadcrumb ─────────────────────────────────────────────────────────────────
 
-export function SettingsBreadcrumb({ section, title }: { section: string; title: string }) {
-  const { user } = useCurrentUser();
-  // Non-admins only ever reach here via the Time Tracking nav item, so the
-  // "Settings" crumb shouldn't link them into the admin-only settings hub.
-  if (section === "time-tracking" && user.role !== "ADMIN") {
-    return <span className="text-slate-800 font-medium dark:text-zinc-200">{title}</span>;
-  }
+export function SettingsBreadcrumb({ title }: { title: string }) {
   return (
     <>
       <Link
