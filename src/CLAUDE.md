@@ -56,6 +56,14 @@ If a requested change would require modifying them, stop and explain why instead
 
 ---
 
+# Git Workflow
+
+Always work on `main`. Commit and push only to `origin/main`.
+
+Never create branches or Pull Requests unless explicitly asked to.
+
+---
+
 # Primary Goal
 
 Replace the current internal workflow used in Unfuddle while significantly improving:

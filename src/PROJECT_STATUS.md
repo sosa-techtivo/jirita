@@ -2875,6 +2875,8 @@ Maintain visual consistency across Light and Dark modes.
 
 Favor reusable components over duplicated implementations.
 
+**Git workflow**: always work on `main`; commit and push only to `origin/main`; never create branches or Pull Requests unless explicitly asked to.
+
 ---
 
 # Technical Debt
