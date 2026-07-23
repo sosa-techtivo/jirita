@@ -399,6 +399,17 @@ export function DashboardScreen() {
   return <AdminDashboard />;
 }
 
+// Matches the header's original "Tuesday, June 30" style, built from the
+// user's real local date instead of a fixed string — same helper shape as
+// Member/Project Lead Dashboards' own formatFullDate.
+function formatFullDate(todayISO: string): string {
+  return new Date(`${todayISO}T00:00:00`).toLocaleDateString("en-US", {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+  });
+}
+
 // Real data for Assigned Tickets / Hours Burn / Blocked / Due Today / My
 // Active Work / Recent Activity / My Upcoming Deadlines / Team Workload /
 // Projects at Risk — see loadOrganizationTickets/loadOrganizationLoggedMinutes/
@@ -568,12 +579,17 @@ function AdminDashboard() {
 
   const ticketsById = useMemo(() => new Map(tickets.map((t) => [t.id, t])), [tickets]);
 
-  // "Assigned Tickets" KPI — the org's/project's own open (non-"done")
-  // tickets in the current Dashboard scope. This is the single source of
-  // truth for the card: the number shown, the ticket a single-ticket click
-  // resolves to, and the `?alerts=` filter applied on the destination
-  // Tickets page all derive from this same list — never a second,
-  // independently-filtered copy of it.
+  // "Assigned Tickets" KPI — deliberately organization-wide (Organization
+  // Health section, not personal): every open (non-"done") ticket in the
+  // current Dashboard scope, assigned or not, across every member. This is
+  // NOT the signed-in Admin's own assignments — that's "My Active Work"
+  // below (filtered by assigneeProfileId === userId). The card's sub text
+  // ("across all projects") exists precisely so this scope reads
+  // unambiguously next to that personal widget. Single source of truth for
+  // the card: the number shown, the ticket a single-ticket click resolves
+  // to, and the `?alerts=` filter applied on the destination Tickets page
+  // all derive from this same list — never a second, independently
+  // -filtered copy of it.
   const assignedTickets = useMemo(() => scopedTickets.filter((t) => t.status !== "done"), [scopedTickets]);
   const assignedTicketsCount = assignedTickets.length;
 
@@ -591,9 +607,13 @@ function AdminDashboard() {
   // href to land on.
   const assignedTicketsHref =
     assignedTicketsCount === 0 ? undefined : buildAssignedTicketsHref(assignedTickets, selectedProjectSlug);
+  // Real subset of assignedTickets itself (never a second, independently
+  // -filtered read of scopedTickets) — "actively being worked on" (in
+  // progress/in review) vs. merely open (backlog/to-do/blocked too, which
+  // assignedTickets also counts).
   const activeTicketsCount = useMemo(
-    () => scopedTickets.filter((t) => t.status === "in-progress" || t.status === "review").length,
-    [scopedTickets]
+    () => assignedTickets.filter((t) => t.status === "in-progress" || t.status === "review").length,
+    [assignedTickets]
   );
   // "Blocked" KPI — single source of truth for the card: the number shown,
   // the ticket a single-ticket click resolves to, and the `?alerts=blocked`
@@ -1053,7 +1073,7 @@ function AdminDashboard() {
           <h1 className="text-[22px] font-bold text-slate-900 dark:text-zinc-50 tracking-tight leading-none mb-1">
             Good morning, {user.name.split(" ")[0]} 👋
           </h1>
-          <p className="text-sm text-slate-400 dark:text-zinc-500">Tuesday, June 30</p>
+          <p className="text-sm text-slate-400 dark:text-zinc-500">{formatFullDate(todayISO)}</p>
         </div>
 
         {/* Top actions: project scope selector + Quick Actions */}
@@ -1114,7 +1134,7 @@ function AdminDashboard() {
         <DashKpiCard
           label="Assigned Tickets"
           value={assignedTicketsCount}
-          sub={`${activeTicketsCount} active`}
+          sub={`${activeTicketsCount} active · across all projects`}
           href={assignedTicketsHref}
         />
         <DashKpiCard
