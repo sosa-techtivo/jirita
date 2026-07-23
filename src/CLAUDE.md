@@ -292,8 +292,12 @@ Project Lead's own scoped view (Delivery + Team, including its own
 clickable KPI band), Project Overview (all three roles, each with its own
 real loading skeleton), per-project Reports (all roles), Time Tracking
 (all three roles), My Work (Member, including its own clickable KPI),
-Users, global Search, and a global in-app Notifications system (header
-bell + dropdown + `/notifications` page) are all real.
+Users (including real permanent account deletion for Admins and
+link-only invitations — the email-invite path still exists but is no
+longer offered from the UI), global Search, and a global in-app
+Notifications system (header bell + dropdown + `/notifications` page)
+are all real. A real production bug in invitation acceptance (session
+lost before password submission) has also been found and fixed.
 
 Auth/Profile through company-wide Reports (Admin) are confirmed working
 end-to-end against a live Supabase project. Everything from the Admin

@@ -1,4 +1,4 @@
-> Last Updated: July 22, 2026
+> Last Updated: July 23, 2026
 
 ---
 
@@ -61,6 +61,12 @@ Most recently, the workspace-wide **Settings** screen (General, Danger Zone) was
 Most recently, all three **Project Overview** variants (Admin, Project Lead, Member) gained a real structural loading skeleton in place of the old plain "Loading project…" text, shown only on the true first load — no data-loading effect changed. Admin and Project Lead share one `ProjectOverviewSkeleton` (both variants render the identical layout shape), while Member — whose layout genuinely differs — gets its own `MemberProjectOverviewSkeleton`. See Architecture Status → "Project Overview → loading skeleton" for the full detail.
 
 Most recently, **Tickets** (`tickets-screen.tsx`, every view — Board/List/Calendar/Timeline/Insights, both per-project and the org-wide `/tickets` mode) gained a real background refresh on tab focus/visibility regain, reusing the existing shared `useRefreshOnFocusAndVisibility` hook rather than a second implementation, plus a real structural loading skeleton (header, filter bar, quick-stats line, and the Board's own 6 real columns with card placeholders) in place of the old plain "Loading tickets…" text. The refresh only ever swaps in a freshly-fetched ticket list once it arrives — filters, search, the selected view, and the sessionStorage-based navigation/scroll state are untouched, and a background refresh never re-shows the skeleton or blanks the screen once real tickets already exist. See Architecture Status → "Tickets → focus/visibility auto-refresh + loading skeleton" for the full detail.
+
+Most recently, JIRITA's Open Graph/Twitter social-preview metadata was fixed for the two auth links shared outside the app — `/reset-password` and `/accept-invite` — which previously inherited the root layout's stale placeholder description ("Project Overview prototype for Jirita...") and Next.js's own generic Vercel preview image whenever a link was pasted into WhatsApp/Slack/etc. Each route now has its own distinct title/description (`reset-password/page.tsx`, `accept-invite/page.tsx`), the root layout's description was replaced with a real, general JIRITA blurb, `metadataBase` now resolves every relative metadata URL against `https://jirita.techtivo.com`, and both routes get a real, branded 1200×630 Open Graph/Twitter image (`lib/og-image.tsx`, rendered via `next/og`'s `ImageResponse` from the existing Techtivo/Jirita logo — no Vercel branding, no new static asset file) via `opengraph-image.tsx`/`twitter-image.tsx` in each route folder. Purely metadata — no page UI, routing, or auth behavior changed. See Architecture Status → "Metadata — Open Graph / Twitter previews" for the full detail.
+
+Most recently, Admin → Users gained a real, permanent **Delete User** action — previously only a confirmation-modal stub wired to nothing — offered from the row menu for Active, Disabled, and Invited users alike, no longer gated to Disabled-only. `deleteUserAction` (`lib/server/delete-user-action.ts`) re-verifies eligibility server-side at the moment of deletion, never trusting the already-loaded list: it blocks deletion (with the exact reason — e.g. "...they have 3 assigned tickets"/"...they belong to 2 project teams", both reported together if both apply) when the target has any assigned tickets, any project team membership, or — a broader safety net — any other row anywhere in the schema that still references their profile (`ticket_comments`, `ticket_time_entries`, `ticket_attachments`, `ticket_relations`, `ticket_activity`, `tickets.created_by`, `project_notes`, `project_note_activity`, `projects.created_by`/`owner_profile_id`, `project_repository_connections`, `notifications.actor_profile_id`) — most of these are `on delete set null` in the schema, so deleting the profile without this check could silently null out attribution on records belonging to other users' tickets/projects. Eligible deletes remove `organization_memberships`, then `profiles`, and only last — once both app-side deletes have actually succeeded — the Supabase Auth identity itself; an Auth-deletion failure is reported as an explicit error, never silently reported as success. In the same pass, the Invite User modal's "Send by email" method was removed outright — **Generate Invite Link** is now the only invitation method, shown directly with no method selector; the underlying email Server Action (`inviteUserAction`/`inviteOrganizationUser`) was left fully in place, just unreachable from this UI, in case it's restored later. See Architecture Status → "Users → Delete User (permanent, Admin-only)" for the full detail.
+
+Most recently, a real, production-reported bug in invitation acceptance (`/accept-invite?token_hash=...&type=invite`) was audited and fixed in two passes. The first fixed a straightforward duplicate-verification hazard: the page's own effect could call `verifyOtp` more than once for the same single-use token (React Strict Mode's dev double-invoke, or any rerender), and readiness was derived from a secondary `getSession()` poll rather than `verifyOtp`'s own returned session — a `useRef` guard now ensures the exchange only ever runs once, `token_hash`/`type` are validated (`type` must be exactly `"invite"`) before it's even attempted, and a literal "Auth session missing!" is now mapped to the existing friendly "invitation link is invalid or expired" message rather than shown verbatim. That fix surfaced a second, deeper bug on the very next report: `CurrentUserProvider` — mounted globally at the root layout — reacts to the invite session's own `SIGNED_IN` event by fetching membership, which only ever matches `status='active'`; a freshly invited user is still `'invited'` at that exact moment (`accept_own_invitation` is what flips it, and hadn't run yet), so this read as "no-membership" and triggered `CurrentUserProvider`'s own auto-sign-out safety net (there to catch, e.g., a disabled-while-tab-open account), destroying the very session `verifyOtp` had just established seconds before the user could submit their password. The fix skips that auto-sign-out specifically on `/accept-invite` (every other page's protection is unchanged) and makes `retry()` clear the stale fetch result immediately rather than leaving it live until the fresh one resolves, closing the same gap right after acceptance succeeds; the one-time token is now also stripped from the visible URL once verification succeeds. Both the root cause and the fix were confirmed against the real Supabase project via direct API-level testing (minting a real invite, verifying once, updating the password, running `accept_own_invitation`, confirming the membership row flips `invited` → `active`, confirming the original token can't be reused, and logging in with the new password) — not yet a live-browser click-through. See Architecture Status → "Accept Invite → invitation acceptance fixed" for the full detail.
 
 ---
 
@@ -544,8 +550,8 @@ A dedicated top-level management module, replacing the old Settings → People p
 - **Header**: "Users" title, "Manage user accounts, access and permissions." subtitle, "+ Invite User" button
 - **Filters**: Search, Role, Status, Project (multi-select dropdowns, same `FilterDropdown` component used across Tickets/Team/Time Tracking)
 - **Table columns**: Avatar + Name, Email, Role, Status (Active/Invited/Disabled), Projects (count, clickable — opens the Projects tab), Weekly Capacity, Last Login (real, via the Auth Admin API), Actions
-- **Row actions (⋯)**: View Profile, Edit User (real), Reset Password (real — generates a link, see below), Resend Invitation (Invited only — still mock, toast-only), Disable/Enable User (real), Delete User (confirmation modal required, still visual-only)
-- **Invite User modal** (`invite-user-modal.tsx`): a pill toggle between **Send by email** (real, via the Auth Admin API) and **Generate invite link** (mints a single-use link and shows a Copy Link success view instead of closing) — both share one underlying validation/write path so they can't drift. First/Last Name, Email, Role, Weekly Capacity, Assign Projects (checkbox list). The same component also powers **Edit User** via an `editingUser` prop (pre-filled, no invite toggle, "Save Changes" — real: first/last name, role, and weekly capacity persist; the email field still doesn't)
+- **Row actions (⋯)**: View Profile, Edit User (real), Reset Password (Active only, real — generates a link, see below), Resend Invitation (Invited only — still mock, toast-only), Copy Invitation Link (Invited only), Disable/Enable User (real), **Delete User (real — Active/Disabled/Invited alike, not gated to Disabled-only; server-verified eligibility, permanent, confirmation modal identifies the user by name and email; see Architecture Status → Users → Delete User)**
+- **Invite User modal** (`invite-user-modal.tsx`): **Generate Invite Link only** — the "Send by email" method (and its pill toggle) was removed outright; the form now opens directly to the link-generation fields with no method selector, mints a single-use link, and shows a Copy Link success view instead of closing. First/Last Name, Email, Role, Weekly Capacity. The same component also powers **Edit User** via an `editingUser` prop (pre-filled, "Save Changes" — real: first/last name, role, and weekly capacity persist; the email field still doesn't). The underlying email-invite Server Action (`inviteUserAction`/`inviteOrganizationUser`) still exists, just unreachable from this modal — see Architecture Status → Users → Delete User for the same pass's full detail.
 - **Reset Password**: generates a single-use link (`reset-password-link-modal.tsx`, shared with the Member Profile Modal's Security tab below) instead of sending an email — no email is sent by this action
 - **Disable/Enable User**: real — flips `organization_memberships.status` only, never touches `profiles`/`auth.users`; a disabled user's own open session is signed out immediately if they're still logged in, and a re-enabled user can log back in correctly (a real bug — stale client-side auth state surviving the disable/enable cycle — was fixed here)
 - Every privileged write above (Invite, Disable/Enable, Edit, Reset Password link) goes through its own Server Action (`src/lib/server/*.ts`) using the Supabase service-role key, because `organization_memberships` has no direct `UPDATE`/`INSERT` grant for the `authenticated` role — RLS alone was never the gate, Postgres checks table privileges first — and because each write re-verifies the caller server-side (active org admin, same organization) rather than trusting the browser
@@ -554,7 +560,7 @@ The existing Member Profile Modal (`member-profile-modal.tsx`) is reused rather 
 
 - **Activity tab** — real, and **summarized rather than a detailed log**: reuses `ticket_activity` (`loadUserActivity`), grouping every non-milestone action on the same ticket into one "Working on `JIR-x` · N updates" entry, capped at the 10 most recent after grouping; `ticket_created` and "Joined the workspace" stay as their own entries. The old mock events ("Logged in", "Invitation email sent", "User disabled", etc.) were removed rather than kept alongside real data.
 - **Security tab** — real Last Login, and a "Generate Reset Link" button (renamed from "Send Reset Email") that reuses the same link-generation flow as the Users list's Reset Password action. `browser`/`os`/`device` have no real source yet and simply don't render.
-- **`src/app/accept-invite/`** — the real "set your password" landing page both invite-delivery methods (email link and generated link) resolve to.
+- **`src/app/accept-invite/`** — the real "set your password" landing page. Reachable today only via a generated link (the only invitation method offered from the UI); the email-invite code path still resolves here too, it's just not currently triggerable from `/users`. See Architecture Status → "Accept Invite → invitation acceptance fixed" for the real production bug found and fixed here.
 
 ---
 
@@ -625,7 +631,7 @@ The following features are documented as planned but do not exist in the codebas
 
 - Register / Sign Up screen (no self-service account creation — accounts are provisioned directly in Supabase; see `docs/UNFUDDLE_IMPORT_SPECIFICATION.md` for the eventual bulk-provisioning path)
 
-Login, Logout, Forgot Password, Reset Password, Change Password, and real server-verified session persistence (a real Supabase session, not a mock `localStorage` flag) are implemented — see Current Sprint → Completed → Authentication & Profile. Invitations (inviting a new user to an organization, by email or by generated link) are also implemented, from `/users` — see Current Sprint → Completed → Users — though like the rest of that module, not yet confirmed against a live project.
+Login, Logout, Forgot Password, Reset Password, Change Password, and real server-verified session persistence (a real Supabase session, not a mock `localStorage` flag) are implemented — see Current Sprint → Completed → Authentication & Profile. Invitations (inviting a new user to an organization, by generated link — the email-invite code path still exists but is no longer offered from the UI) are also implemented, from `/users` — see Current Sprint → Completed → Users. Real, permanent user deletion (Delete User, `/users` row menu) is also implemented. Invitation acceptance's own real production bug (session lost before password submission) has been found and fixed, and confirmed via direct testing against the real Supabase project — see Architecture Status → "Accept Invite → invitation acceptance fixed" — though like the rest of that module, none of this has yet been clicked through live in a browser.
 
 ### Sidebar Navigation
 
@@ -1325,18 +1331,21 @@ rather than trust anything the browser claims.
 - `src/lib/server/last-sign-in-action.ts` — `loadLastSignInTimesAction`
   resolves real `last_sign_in_at` per org member via the Auth Admin API
   (`listUsers`, paged).
-- `src/components/invite-user-modal.tsx` — a pill toggle between "Send by
-  email" and "Generate invite link"; the latter replaces the form with a
-  success view (read-only link field, Copy Link, Done). Edit mode now
-  genuinely awaits `editOrganizationMember` and only closes on real
-  success.
+- `src/components/invite-user-modal.tsx` — **Generate Invite Link only**
+  (the "Send by email" method and its pill toggle were removed outright —
+  see Architecture Status → "Users → Delete User" for that pass's full
+  detail); mints a single-use link and replaces the form with a success
+  view (read-only link field, Copy Link, Done). Edit mode now genuinely
+  awaits `editOrganizationMember` and only closes on real success.
 - `src/components/reset-password-link-modal.tsx` — the shared "link
   generated" success modal, used both by the Users row menu's "Reset
   Password" and by the Member Profile Modal's Security tab "Generate Reset
   Link".
 - `src/components/users-screen.tsx` — Disable/Enable/Edit/Reset Password
-  link are all real now. The shared `Toast` gained a real `variant`
-  ("success" | "error"). Resend Invitation stays intentionally mock.
+  link/**Delete User** are all real now. The shared `Toast` gained a real
+  `variant` ("success" | "error"). Resend Invitation stays intentionally
+  mock. See Architecture Status → "Users → Delete User (permanent,
+  Admin-only)" for Delete User's own full detail.
 - `src/components/member-profile-modal.tsx` (user-mode tabs) — the
   Activity tab is real and **summarized**: reuses `ticket_activity` (via
   `loadUserActivity`), grouping every non-milestone action on the same
@@ -1357,7 +1366,12 @@ rather than trust anything the browser claims.
   loading skeleton on first load only — a background refresh never blanks
   already-valid data.
 - `src/app/accept-invite/` + `src/components/accept-invite-screen.tsx` —
-  the real "set your password" landing page for both invite methods.
+  the real "set your password" landing page, reached via a generated link
+  (the only invitation method currently offered from the UI — the
+  email-invite code path still resolves here too, just not currently
+  triggerable). A real production bug here — session lost before password
+  submission — was found and fixed; see Architecture Status → "Accept
+  Invite → invitation acceptance fixed" for the full detail.
 - `.env.example` — `NEXT_PUBLIC_APP_URL`, the app's own public base URL
   used to build every generated link above — never a Supabase URL.
 - Migrations: `20260805000000_accept_own_invitation_rpc.sql` and
@@ -2776,6 +2790,171 @@ neither trigger changed; only what gets rendered while `loadState ===
   `ticket-development-actions.ts`, GitHub OAuth, Project Settings, or
   any migration.
 
+## Metadata — Open Graph / Twitter previews (reset-password, accept-invite)
+
+Fixes a real, reported bug: sharing a `/reset-password` or `/accept-invite`
+link (WhatsApp, Slack, etc.) showed the root layout's stale placeholder
+description ("Project Overview prototype for Jirita, a simple project
+management platform.") and Next.js's own generic Vercel preview image,
+since neither route had its own metadata.
+
+- `src/app/layout.tsx` — `metadataBase: new URL("https://jirita.techtivo.com")`
+  (every relative metadata URL, including the new OG/Twitter image URLs
+  below, now resolves absolutely against it); the root `description` was
+  replaced with a real, general JIRITA blurb; added baseline
+  `openGraph`/`twitter` defaults (`siteName`, `type: "website"`,
+  `card: "summary_large_image"`).
+- `src/app/reset-password/page.tsx` / `src/app/accept-invite/page.tsx` —
+  each now has its own distinct `title`/`description`/`openGraph`/`twitter`
+  metadata. Next.js metadata objects don't deep-merge between layout and
+  page, so each page repeats `card: "summary_large_image"` explicitly
+  rather than silently losing it to the layout's default (a real bug
+  caught and fixed during this same pass — the first version only fell
+  back to `"summary"`, a small thumbnail).
+- `src/lib/og-image.tsx` — shared `ImageResponse` (`next/og`) generator: a
+  1200×630 branded card (brand-purple gradient, the existing Techtivo/Jirita
+  logo — `public/img/jirita-logo.png`, embedded via a base64 `<img>` — plus
+  "JIRITA — Project management, done simply"). No new static image asset
+  was created; the existing logo (217×47px, too small for a real OG card
+  on its own) is composited into this generated image instead.
+- `src/app/reset-password/opengraph-image.tsx` / `twitter-image.tsx` and
+  the same pair under `accept-invite/` — each just imports and calls the
+  shared generator; both routes needed their own copies since Next's
+  image-file convention doesn't inherit between sibling route segments.
+
+No page UI, routing, auth behavior, or query-parameter handling
+(`token_hash`/`type`) changed. Verified via `next build` (all four image
+routes statically generated, confirmed absolute `og:image`/`twitter:image`
+URLs and `summary_large_image` card in the built HTML) and a rendered PNG
+inspection of the generated image.
+
+## Users → Delete User (permanent, Admin-only)
+
+Real, server-verified permanent account deletion from `/users`'s row
+menu — offered for Active, Disabled, and Invited users alike (previously
+only ever a Disabled-only, non-functional confirmation-modal stub).
+
+- `src/lib/server/delete-user-action.ts` — `deleteUserAction`, the same
+  caller-authenticated-client-for-identity + service-role-client-for-the-
+  privileged-work pattern every other Users Server Action already uses.
+  Blocks the caller from deleting themselves, and confirms the target
+  actually belongs to the caller's org via the service-role client before
+  anything else.
+- **Eligibility, re-verified server-side, never trusted from the
+  already-loaded list**:
+  - Any ticket where `assignee_profile_id` = the target, scoped to the
+    org's own projects → `"...they have N assigned tickets."`
+  - Any `project_memberships` row for the target, scoped to the org's own
+    projects → `"...they belong to N project teams."` (both reported
+    together if both apply)
+  - A broader safety-net check across every other schema column
+    referencing `profiles(id)`: `ticket_comments.author_profile_id`,
+    `ticket_time_entries.logged_by`, `ticket_attachments.uploaded_by`,
+    `ticket_relations.created_by`, `ticket_activity.actor_profile_id`,
+    `tickets.created_by`, `project_notes.created_by`/`updated_by`,
+    `project_note_activity.actor_profile_id`,
+    `projects.created_by`/`owner_profile_id`,
+    `project_repository_connections.connected_by_profile_id`,
+    `notifications.actor_profile_id` — most of these are `on delete set
+    null` in the schema (one, `project_repository_connections`, is `on
+    delete restrict`), so deleting the profile without this check could
+    silently null out (or hard-fail mid-delete) attribution on records
+    belonging to other users' tickets/projects/notes. Any single row found
+    here blocks deletion with a generic "other operational records"
+    message instead.
+- **Deletion order, application records before Auth**:
+  `organization_memberships` row deleted first, then `profiles`, and only
+  once both have actually succeeded, `admin.auth.admin.deleteUser()` —
+  never the reverse. If the Auth deletion itself fails, this returns an
+  explicit error and never reports success, even though the app-side rows
+  are already gone (the clearest state this architecture's
+  non-transactional service-role client calls can guarantee).
+- No cascade-deletion of tickets, project memberships, comments, time
+  entries, activity history, or attachments ever happens as a side
+  effect — eligibility failure means nothing is touched at all.
+- `src/components/users-screen.tsx` — `DeleteUserModal` now identifies the
+  user by name **and email**, shows the exact server-reported rejection
+  reason inline (red banner, same pattern `InviteUserModal`'s own form
+  error already uses) rather than a toast, disables both buttons and shows
+  "Deleting…" while in flight, and on success closes both the confirmation
+  modal and (if it happened to be open) the profile modal, drops the row
+  from the list without a reload, and shows the existing toast pattern.
+- **Invite User modal simplified alongside this**: the "Send by email"
+  method was removed outright — `src/components/invite-user-modal.tsx` no
+  longer has an `InviteMethod`/`InviteMethodToggle`, and always calls
+  `generateOrganizationInviteLink`. Title/button copy now reads "Generate
+  Invite Link" instead of "Invite User"/"Send Invitation".
+  `inviteUserAction`/`inviteOrganizationUser` (the email path) were **not
+  deleted** — they're simply no longer imported/called from this modal, so
+  email invites can be restored later without rebuilding anything.
+
+**Implemented and build/type-checked; Delete User's server-side
+eligibility/deletion logic was additionally exercised directly against
+the real Supabase project (not yet a live-browser click-through)** — same
+"should work, not yet verified [in a browser]" status as the rest of
+Users.
+
+## Accept Invite → invitation acceptance fixed (verify-once, no forced sign-out)
+
+Fixes a real, reported production bug: opening a freshly generated
+`/accept-invite?token_hash=...&type=invite` link showed the password form
+correctly, but submitting a valid new password always failed with "Auth
+session missing!", and the invited user never left the `Invited` state.
+
+**Root cause** (confirmed, not the SSR/cookie theory initially
+suspected — this app has no `@supabase/ssr`/middleware layer at all):
+`CurrentUserProvider` is mounted globally at the root layout, so it reacts
+to the invite session's own `SIGNED_IN` event (fired by `verifyOtp`) the
+same as it would on any other page — fetching membership via
+`loadMembership()`, which only ever matches an `organization_memberships`
+row with `status = 'active'`. A freshly invited user's row is still
+`'invited'` at that exact moment (`accept_own_invitation` is what flips
+it, and it runs *after* this), so the fetch correctly-but-misleadingly
+resolved to `"no-membership"`, which triggered `CurrentUserProvider`'s
+existing auto-sign-out safety net (`logout()` — there to catch, e.g., an
+admin disabling someone mid-session) and destroyed the very session
+`verifyOtp` had just established, seconds before the user could submit.
+
+- `src/components/current-user-provider.tsx` — the no-membership
+  auto-sign-out effect now skips entirely while `pathname ===
+  "/accept-invite"` (the one page whose entire job is completing the
+  invited → active transition); every other page's protection against a
+  disabled/removed mid-session user is unchanged. `retry()` also now
+  clears the stale `fetchState` immediately (`setFetchState(null)`) rather
+  than leaving the old result live until the fresh one resolves — closes a
+  secondary timing gap right after `accept_own_invitation()` succeeds and
+  before the refreshed membership fetch lands, so a stale "no-membership"
+  read can't retrigger the sign-out once past `/accept-invite` either.
+- `src/components/accept-invite-screen.tsx` — a `useRef` guard ensures
+  `verifyOtp` only ever runs once per page load (React Strict Mode's dev
+  double-invoke, or any rerender, would otherwise fire it twice against
+  the same single-use token); `token_hash`/`type` are validated (`type`
+  must be exactly `"invite"`) before `verifyOtp` is even attempted;
+  readiness is read directly from `verifyOtp`'s own returned
+  session/error, never a secondary `getSession()` poll; a literal "Auth
+  session missing!" is mapped to the existing friendly "This invitation
+  link is invalid or has expired. Ask an administrator for a new
+  invitation." message rather than shown verbatim; `handleSubmit` now also
+  guards against a duplicate submit while one is already in flight; and
+  the one-time token is stripped from the visible URL
+  (`window.history.replaceState`, no navigation/refetch) once verification
+  succeeds.
+- `accept_own_invitation()` (the real, pre-existing RPC that flips
+  `organization_memberships.status` from `invited` to `active` — the same
+  source `/users` reads) is untouched and remains the sole source of
+  truth; no parallel status field was introduced.
+- Password validation/strength meter, `/reset-password` (a separate
+  recovery flow, untouched), invite-link generation, and all other
+  auth/user-management behavior are unchanged.
+
+**Confirmed via direct testing against the real Supabase project** (not
+yet a live-browser click-through): minted a real invite, verified the
+token once, updated the password, ran `accept_own_invitation`, confirmed
+the `organization_memberships` row flips `invited` → `active` (both via
+the invited user's own session and via a service-role read — the same
+source `/users` uses), confirmed the original `token_hash` can no longer
+be redeemed, and logged in with the new password.
+
 ## Still mock
 
 - **Resolved, differently than planned**: the workspace-wide Settings screen
@@ -2970,6 +3149,8 @@ Current known items:
 - **New, expanded since**: the Member Profile Modal's real-data fetch (see Architecture Status → Member Profile Modal) was originally wired for exactly two entry points — the Admin Dashboard's Team Workload and Recent Activity — plus `team-screen.tsx`, which already qualified before that fix. It has since been extended to every trigger on company-wide Reports (Hours by Person, Workload, Recent Changes, Billable Hours by Member) and Time Tracking (Timesheets, Missing Hours). Every other remaining `MemberTrigger`/`openMemberProfile` caller (Project Overview's team roster/ticket assignees/activity, ticket assignees/comments/attachments across Board/List/Calendar/Insights/Ticket Detail/Quick Ticket Preview, My Work's Recently Updated) still opens the modal with only a name/avatar, so it still resolves through `resolveTeamMember`'s old name-matching/`unknown-*` fallback and can show stale/zeroed numbers for a real (non-mock-roster) org member. A real `profileId` is already obtainable at almost all of these remaining sites today without any loader changes (`ticket.assigneeProfileId`, `ProjectTeamMember.id`) — the remaining work is threading it through, plus two small additive loader fields (`TicketComment.authorProfileId`, `TicketAttachment.uploadedByProfileId`, and restructuring `insights-view.tsx`'s `AssigneeWorkload` map to key by id instead of name) for comment/attachment/insights callers specifically. Deliberately scoped out of this pass rather than attempted as one large migration.
 - **Resolved**: Admin Reports → Delivery's Workload block (`buildWorkloadRows`) computed `assignedHours` as `ticket.hours` netted against hours already logged this period ("remaining work"), silently diverging from the "official" `Σ ticket.hours` assigned-hours definition Team/the Dashboards/the Member Profile Modal/Project Lead Time Tracking already share — found via a user-requested read-only audit against the new Tickets by Member block, then fixed to the same plain sum, scoped to just that one calculation. See Overall Progress for the full audit/fix/Period-selector history.
 - **Resolved**: the Member Profile Modal's own **user-mode** Projects tab (`ProjectsTabContent`, opened from Admin → Users → View Profile) used to compute each project's "N active tickets"/"Nh assigned" from `lib/mock-tickets.ts`'s static dataset, matched by `t.assignee.name === fullName(user)` string equality — never `assigneeProfileId`/`loadProjectTickets`, the real pattern this same file's own non-user-mode view and `team-screen.tsx` already use. Now real: `loadOrganizationTickets` filtered by `assigneeProfileId === user.id && status !== "done"`, and project name/slug/id/Lead from `useOrganizationProjects()` — the `mock-tickets`/`mock-projects` imports this tab used were removed (see Confirmed working → Users → Member Profile Modal).
+- **Resolved**: Delete User (Users row menu) is no longer a non-functional confirmation-modal stub — it's a real, server-verified permanent deletion (Auth + `profiles` + `organization_memberships`), re-checked for eligibility at delete time regardless of what the UI already loaded. The Invite User modal's "Send by email" method was removed alongside this — Generate Invite Link is now the only path. See Architecture Status → "Users → Delete User (permanent, Admin-only)".
+- **Resolved**: a real, production-reported bug in invitation acceptance (`/accept-invite` — "Auth session missing!" on password submission, the invited user stuck in `Invited` forever) is fixed. Root cause was `CurrentUserProvider`'s own auto-sign-out safety net force-signing the invite session back out before the user could submit, not a session-persistence/cookie issue. See Architecture Status → "Accept Invite → invitation acceptance fixed".
 
 Planned future work:
 
