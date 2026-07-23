@@ -12,8 +12,17 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL("https://jirita.techtivo.com"),
   title: "Jirita — Project Overview",
-  description: "Project Overview prototype for Jirita, a simple project management platform.",
+  description:
+    "Jirita is Techtivo's project management platform for tracking projects, milestones, tickets, and team collaboration.",
+  openGraph: {
+    siteName: "Jirita",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+  },
 };
 
 export default function RootLayout({
