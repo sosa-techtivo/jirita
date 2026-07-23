@@ -193,6 +193,7 @@ export function CurrentUserProvider({ children }: { children: ReactNode }) {
   const mounted = useMounted();
   const devRole = mounted ? readDevRole() : DEFAULT_ROLE;
   const [, forceUpdate] = useReducer((n: number) => n + 1, 0);
+  const pathname = usePathname();
 
   useEffect(
     () =>
@@ -234,8 +235,20 @@ export function CurrentUserProvider({ children }: { children: ReactNode }) {
     runFetch(authUser.id);
   }, [authUser, runFetch]);
 
+  // Clears the previous result immediately, not just once the fresh one
+  // lands — a caller reaching for retry() (accept-invite's own post-accept
+  // refresh, in particular) means "the last result is known-stale," so
+  // currentFetch must read as "loading" for that whole in-flight window,
+  // never keep showing the old result. Without this, a stale
+  // "no-membership" read from *before* the accept (still the same
+  // forUserId, same session) would stay live long enough for the
+  // auto-sign-out effect above to act on it after all — even once past
+  // /accept-invite itself — since nothing else marks it stale until the new
+  // fetch resolves.
   const retry = useCallback(() => {
-    if (authUser) runFetch(authUser.id);
+    if (!authUser) return;
+    setFetchState(null);
+    runFetch(authUser.id);
   }, [authUser, runFetch]);
 
   const setRole = useCallback((next: Role) => {
@@ -260,11 +273,26 @@ export function CurrentUserProvider({ children }: { children: ReactNode }) {
   // logic needed here. The dependency array only changes when authUser or
   // fetchState itself actually changes, so this fires once per resolution,
   // not on every render while the (async) sign-out is in flight.
+  //
+  // Exception: /accept-invite. loadMembership only ever matches a *active*
+  // organization_memberships row (see membership.ts) — an invited user who
+  // just had their token verified there is, by definition, still 'invited'
+  // at this exact moment (accept_own_invitation is what flips that to
+  // 'active', and it hasn't run yet), so this always resolves to
+  // "no-membership" for them too. Without this exception, CurrentUserProvider
+  // — mounted globally at the root layout, so it reacts to that page's
+  // SIGNED_IN event the same as anywhere else — would force-sign the invite
+  // session back out via logout() moments after it was established, which
+  // is exactly what was surfacing as "Auth session missing!" on that page's
+  // password submission (the session updateUser needed had already been
+  // destroyed here first). Every other page keeps the original protection
+  // unchanged.
   useEffect(() => {
+    if (pathname === "/accept-invite") return;
     if (authUser && currentFetch?.status === "no-membership") {
       logout();
     }
-  }, [authUser, currentFetch]);
+  }, [authUser, currentFetch, pathname]);
 
   // Revalidates the still-open session's membership on the two moments
   // most likely to catch a change made elsewhere — regaining window focus
@@ -281,7 +309,6 @@ export function CurrentUserProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener("focus", onFocus);
   }, [authUser, runFetch]);
 
-  const pathname = usePathname();
   const lastPathnameRef = useRef(pathname);
   useEffect(() => {
     if (!authUser) return;

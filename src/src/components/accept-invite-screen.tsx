@@ -92,8 +92,18 @@ export function AcceptInviteScreen() {
 
         const { data, error } = await supabase.auth.verifyOtp({ token_hash: tokenHash, type: "invite" });
         if (cancelled) return;
-        setHasSession(!error && data.session !== null);
+        const verified = !error && data.session !== null;
+        setHasSession(verified);
         setChecking(false);
+        // The one-time token has now been exchanged (or has already failed
+        // — either way it's spent, per Supabase's own single-use
+        // enforcement) — strip it from the visible URL so a page refresh,
+        // or the URL being copied/shared/screenshotted, can never attempt
+        // to redeem it again. A plain history replace, not a router
+        // navigation: this component doesn't read the query string via
+        // useSearchParams (only window.location.search, once, above), so
+        // there's nothing to re-fetch or remount.
+        if (verified) window.history.replaceState(null, "", window.location.pathname);
         return;
       }
 
@@ -127,14 +137,14 @@ export function AcceptInviteScreen() {
       // CurrentUserProvider (mounted at the root layout, never remounted by
       // this client-side navigation) already ran its own membership fetch
       // the moment this page's invite session was established — *before*
-      // acceptInvitation's RPC flipped the row from invited to active, so
-      // it cached a stale "no-membership" result for this same user. authUser
-      // itself doesn't change here, so nothing would otherwise re-trigger
-      // that fetch. Without this, /dashboard would render with that stale
-      // status (a neutral placeholder here, or the wrong screen entirely)
-      // until something unrelated happened to refetch. retry() invalidates
-      // it immediately, so by the time /dashboard mounts the real,
-      // now-active membership is already loading or loaded.
+      // acceptInvitation's RPC flipped the row from invited to active, so it
+      // cached a "no-membership" result for this same user (correctly: an
+      // invited row isn't an active one yet). See current-user-provider.tsx's
+      // own no-membership handling for why that result, left in place, is
+      // more than cosmetic — retry() clears it immediately (not just
+      // starting a fresh fetch in the background) so nothing here or on
+      // /dashboard can act on that now-stale read again before the real,
+      // now-active membership is loading or loaded.
       retry();
       router.push("/dashboard");
     } catch (err) {
