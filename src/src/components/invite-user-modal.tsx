@@ -5,7 +5,7 @@ import type { Role } from "@/lib/current-user";
 import { ROLE_LABELS } from "@/lib/current-user";
 import type { User } from "@/lib/mock-users";
 import { useCurrentUser } from "@/components/current-user-provider";
-import { inviteOrganizationUser, generateOrganizationInviteLink, editOrganizationMember } from "@/lib/users";
+import { generateOrganizationInviteLink, editOrganizationMember } from "@/lib/users";
 
 // Modeled on the New Ticket modal's shell (backdrop, centered dialog,
 // scrollable body, sticky footer) — see tickets/new-ticket-modal.tsx.
@@ -20,54 +20,6 @@ const INPUT =
   "placeholder:text-slate-300 dark:placeholder:text-zinc-600 transition-colors";
 
 const ROLE_OPTIONS: Role[] = ["MEMBER", "PROJECT_LEAD", "ADMIN"];
-
-type InviteMethod = "email" | "link";
-
-const INVITE_METHOD_OPTIONS: { value: InviteMethod; label: string }[] = [
-  { value: "email", label: "Send by email" },
-  { value: "link", label: "Generate invite link" },
-];
-
-// Same pill segmented-control pattern as profile-screen.tsx's
-// TicketViewToggle — reused here rather than a new visual pattern.
-function InviteMethodToggle({
-  value,
-  onChange,
-  disabled,
-}: {
-  value: InviteMethod;
-  onChange: (v: InviteMethod) => void;
-  disabled?: boolean;
-}) {
-  return (
-    <div
-      className="inline-flex items-center gap-0.5 rounded-md border border-slate-200 bg-slate-50 p-0.5 dark:border-zinc-700 dark:bg-zinc-800"
-      role="radiogroup"
-      aria-label="Invitation Method"
-    >
-      {INVITE_METHOD_OPTIONS.map((opt) => {
-        const isActive = value === opt.value;
-        return (
-          <button
-            key={opt.value}
-            type="button"
-            role="radio"
-            aria-checked={isActive}
-            disabled={disabled}
-            onClick={() => onChange(opt.value)}
-            className={`rounded-[5px] px-2.5 py-1.5 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
-              isActive
-                ? "bg-white text-slate-700 shadow-sm dark:bg-zinc-700 dark:text-zinc-100"
-                : "text-slate-400 hover:text-slate-600 dark:text-zinc-500 dark:hover:text-zinc-300"
-            }`}
-          >
-            {opt.label}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
 
 // Mirrors users-screen.tsx's Toast exactly (same feedback surface used by
 // the project's other copy-to-clipboard action, copyInvitationLink) — kept
@@ -92,21 +44,26 @@ function CopyFeedback({ message, onDismiss }: { message: string; onDismiss: () =
 // Also reused for "Edit User" (from the row Actions menu) via `editingUser`
 // — same fields, so there's one form instead of two near-duplicates.
 // Editing is real (editOrganizationMember, a Server Action — see
-// handleSubmit below), same as inviting (onInviteSent).
+// handleSubmit below), same as inviting (onLinkGenerated).
+//
+// Invite-User-only, not edit mode: "Send by email" (inviteUserAction /
+// inviteOrganizationUser) has been removed from this modal — "Generate
+// invite link" is now the only invitation method reachable from /users.
+// The underlying email-invite Server Action is untouched and still exists
+// (see src/lib/server/invite-user-action.ts / src/lib/users.ts's
+// inviteOrganizationUser) in case it's restored later; this modal simply no
+// longer calls it or offers a way to choose it.
 export function InviteUserModal({
   editingUser,
   onClose,
   onEdited,
-  onInviteSent,
   onLinkGenerated,
 }: {
   editingUser?: User;
   onClose: () => void;
   /** Edit mode only — called after the real edit succeeds, so the parent can refetch the list. */
   onEdited?: (user: User) => void;
-  /** "Send by email" only — called after the real invite succeeds, so the parent can refetch the list. */
-  onInviteSent?: (email: string) => void;
-  /** "Generate invite link" only — called once the link (and its profile/membership rows) are created, so the parent can quietly refetch the list while the modal stays open showing the link. */
+  /** Invite mode only — called once the link (and its profile/membership rows) are created, so the parent can quietly refetch the list while the modal stays open showing the link. */
   onLinkGenerated?: () => void;
 }) {
   const { organization, isDevFallback } = useCurrentUser();
@@ -131,7 +88,6 @@ export function InviteUserModal({
   const [weeklyCapacity, setWeeklyCapacity] = useState(
     String(editingUser?.weeklyCapacity ?? organization?.defaultWeeklyCapacity ?? 40)
   );
-  const [method, setMethod] = useState<InviteMethod>("email");
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [inviteLink, setInviteLink] = useState<string | null>(null);
@@ -222,20 +178,6 @@ export function InviteUserModal({
 
     setSubmitting(true);
 
-    if (method === "email") {
-      const result = await inviteOrganizationUser(organization.id, fields);
-      setSubmitting(false);
-
-      if (result.status === "error") {
-        setFormError(result.message);
-        return;
-      }
-
-      onInviteSent?.(email.trim());
-      handleClose();
-      return;
-    }
-
     const result = await generateOrganizationInviteLink(organization.id, fields);
     setSubmitting(false);
 
@@ -277,7 +219,7 @@ export function InviteUserModal({
         <div
           role="dialog"
           aria-modal
-          aria-label="Invite User"
+          aria-label={isEditing ? "Edit User" : "Generate Invite Link"}
           className={
             "pointer-events-auto w-full max-w-lg flex flex-col " +
             "max-h-[calc(100dvh-3rem)] bg-white dark:bg-zinc-950 " +
@@ -289,7 +231,7 @@ export function InviteUserModal({
         >
           {/* Header */}
           <div className="flex items-center justify-between px-6 pt-5 pb-4 flex-shrink-0">
-            <h2 className="text-[15px] font-semibold text-slate-900 dark:text-zinc-50">{isEditing ? "Edit User" : "Invite User"}</h2>
+            <h2 className="text-[15px] font-semibold text-slate-900 dark:text-zinc-50">{isEditing ? "Edit User" : "Generate Invite Link"}</h2>
             <button
               onClick={handleClose}
               aria-label="Close"
@@ -341,13 +283,6 @@ export function InviteUserModal({
               </div>
             ) : (
               <>
-                {!isEditing && (
-                  <div>
-                    <label className={FIELD_LABEL}>Invitation Method</label>
-                    <InviteMethodToggle value={method} onChange={setMethod} disabled={submitting} />
-                  </div>
-                )}
-
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className={FIELD_LABEL}>
@@ -457,9 +392,7 @@ export function InviteUserModal({
                 >
                   {isEditing
                     ? submitting ? "Saving…" : "Save Changes"
-                    : submitting
-                      ? method === "link" ? "Generating…" : "Sending…"
-                      : method === "link" ? "Generate Invite Link" : "Send Invitation"}
+                    : submitting ? "Generating…" : "Generate Invite Link"}
                   {canSubmit && !submitting && (
                     <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
                       <path d="M5 12h14M12 5l7 7-7 7" strokeLinecap="round" strokeLinejoin="round" />

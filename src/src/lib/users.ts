@@ -30,8 +30,9 @@ import {
 import { disableUserAction, enableUserAction } from "./server/disable-user-action";
 import { editUserAction } from "./server/edit-user-action";
 import { loadLastSignInTimesAction } from "./server/last-sign-in-action";
+import { deleteUserAction, type DeleteUserResult } from "./server/delete-user-action";
 
-export type { InviteUserResult, GenerateInviteLinkResult, GeneratePasswordResetLinkResult };
+export type { InviteUserResult, GenerateInviteLinkResult, GeneratePasswordResetLinkResult, DeleteUserResult };
 
 export type OrgUsersResult =
   | { status: "ready"; users: User[] }
@@ -397,6 +398,30 @@ export async function generateOrganizationInviteLink(
     accessToken: session.access_token,
     organizationId,
     ...fields,
+  });
+}
+
+// "Delete User" (Users row menu, any status) — permanent removal, never a
+// direct client-side delete: organization_memberships/profiles have no
+// DELETE grant for the authenticated role, and the real eligibility check
+// (no assigned tickets, no project team membership, no other operational
+// records referencing this profile) has to be re-verified against current
+// data server-side regardless of what this screen's own list happens to
+// show. See src/lib/server/delete-user-action.ts.
+export async function deleteOrganizationMember(organizationId: string, profileId: string): Promise<DeleteUserResult> {
+  const supabase = getSupabaseBrowserClient();
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+
+  if (!session) {
+    return { status: "error", message: "Your session has expired. Please sign in again." };
+  }
+
+  return deleteUserAction({
+    accessToken: session.access_token,
+    organizationId,
+    targetProfileId: profileId,
   });
 }
 

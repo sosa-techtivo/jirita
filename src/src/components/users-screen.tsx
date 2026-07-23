@@ -13,6 +13,8 @@ import {
   disableOrganizationMember,
   enableOrganizationMember,
   generatePasswordResetLink,
+  deleteOrganizationMember,
+  type DeleteUserResult,
 } from "@/lib/users";
 import { FilterDropdown } from "@/components/tickets/filter-dropdown";
 import type { DropdownGroup } from "@/components/tickets/filter-dropdown";
@@ -148,21 +150,40 @@ function Toast({ toast, onDismiss }: { toast: ToastState; onDismiss: () => void 
 function DeleteUserModal({
   user,
   onCancel,
-  onConfirm,
+  onDelete,
 }: {
   user: User;
   onCancel: () => void;
-  onConfirm: () => void;
+  onDelete: (user: User) => Promise<DeleteUserResult>;
 }) {
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onCancel(); };
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape" && !submitting) onCancel(); };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [onCancel]);
+  }, [onCancel, submitting]);
+
+  async function handleConfirm() {
+    if (submitting) return;
+    setSubmitting(true);
+    setError(null);
+    // Real eligibility (no assigned tickets, no project team membership, no
+    // other operational records referencing this account) is re-verified
+    // server-side at the moment of deletion — see deleteUserAction. On
+    // success the caller (UsersScreen's handleDeleteUser) closes this modal
+    // itself; on error this stays open and shows exactly why.
+    const result = await onDelete(user);
+    if (result.status === "error") {
+      setError(result.message);
+      setSubmitting(false);
+    }
+  }
 
   return (
     <>
-      <div aria-hidden onClick={onCancel} className="fixed inset-0 z-50 bg-black/30 dark:bg-black/50" />
+      <div aria-hidden onClick={() => !submitting && onCancel()} className="fixed inset-0 z-50 bg-black/30 dark:bg-black/50" />
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
         <div
           role="alertdialog"
@@ -177,20 +198,36 @@ function DeleteUserModal({
           </div>
           <h2 className="text-[15px] font-semibold text-slate-900 dark:text-zinc-50">Delete {fullName(user)}?</h2>
           <p className="text-[13px] text-slate-500 dark:text-zinc-400 mt-1.5">
-            This permanently removes their account and access. Any tickets already assigned to them keep their assignment history. This action cannot be undone.
+            You&apos;re about to permanently delete <span className="font-medium text-slate-700 dark:text-zinc-300">{fullName(user)}</span> ({user.email}). This removes their account and access entirely. This action cannot be undone.
           </p>
+
+          {error && (
+            <div
+              role="alert"
+              className="flex items-start gap-2 rounded-lg border border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/10 px-3 py-2.5 text-[12.5px] text-red-700 dark:text-red-400 mt-4"
+            >
+              <svg className="w-4 h-4 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                <circle cx="12" cy="12" r="9" />
+                <path d="M12 8v5M12 16h.01" strokeLinecap="round" />
+              </svg>
+              <span>{error}</span>
+            </div>
+          )}
+
           <div className="flex items-center justify-end gap-2 mt-6">
             <button
               onClick={onCancel}
-              className="px-4 py-2 text-[13px] font-medium text-slate-500 dark:text-zinc-500 hover:text-slate-800 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800 rounded-lg transition-colors"
+              disabled={submitting}
+              className="px-4 py-2 text-[13px] font-medium text-slate-500 dark:text-zinc-500 hover:text-slate-800 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800 rounded-lg transition-colors disabled:opacity-50"
             >
               Cancel
             </button>
             <button
-              onClick={onConfirm}
-              className="px-4 py-2 text-[13px] font-semibold text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors"
+              onClick={handleConfirm}
+              disabled={submitting}
+              className="px-4 py-2 text-[13px] font-semibold text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors disabled:opacity-60"
             >
-              Delete User
+              {submitting ? "Deleting…" : "Delete User"}
             </button>
           </div>
         </div>
@@ -543,23 +580,14 @@ export function UsersScreen() {
   // The modal itself performs the real edit (Server Action, via
   // editOrganizationMember — see invite-user-modal.tsx) and only calls this
   // after it actually succeeds — refetch so Users reflects the real
-  // persisted row, never a locally-simulated one. Mirrors handleInviteSent's
-  // pattern. Name/role/weekly capacity are the fields the form persists;
-  // email/project-assignment edits in the same form are still display-only
-  // (no write path for those), unchanged from before.
+  // persisted row, never a locally-simulated one. Name/role/weekly capacity
+  // are the fields the form persists; email/project-assignment edits in the
+  // same form are still display-only (no write path for those), unchanged
+  // from before.
   function handleEdited(updated: User) {
     setEditingUser(null);
     runFetch();
     showToast(`${fullName(updated)} was updated.`);
-  }
-
-  // The modal itself performs the real invite (Server Action) and only
-  // calls this after it actually succeeds — refetch so the new Invited row
-  // comes from Supabase like every other row, never a locally-simulated one.
-  function handleInviteSent(email: string) {
-    setShowInvite(false);
-    runFetch();
-    showToast(`Invitation sent to ${email}.`);
   }
 
   async function copyInvitationLink(u: User) {
@@ -572,9 +600,34 @@ export function UsersScreen() {
     }
   }
 
-  // Lifecycle-appropriate actions only — e.g. an Active user can't be
-  // deleted directly (Disable first), and a Disabled user has no password
-  // to reset.
+  // "Delete User" — the actual server-side eligibility re-check and the
+  // permanent Auth + application-record removal both happen in
+  // deleteUserAction; nothing here decides whether the user is eligible.
+  // Returns the raw result so DeleteUserModal can show the exact rejection
+  // reason (e.g. "...they have 3 assigned tickets.") inline rather than as a
+  // toast the modal would already be closing over. Only on success does this
+  // close both the confirmation modal and (if it happened to be open behind
+  // it) the profile modal, drop the row from the list without a reload, and
+  // show the same toast pattern as every other Users action.
+  async function handleDeleteUser(user: User): Promise<DeleteUserResult> {
+    if (isDevFallback || !organization) {
+      return { status: "error", message: "Deleting users isn't available in this mode." };
+    }
+    const result = await deleteOrganizationMember(organization.id, user.id);
+    if (result.status === "success") {
+      setUsersList((prev) => prev.filter((u) => u.id !== user.id));
+      setProfileTarget((prev) => (prev?.user.id === user.id ? null : prev));
+      setDeleteTarget(null);
+      showToast(`${fullName(user)} was deleted.`);
+    }
+    return result;
+  }
+
+  // Lifecycle-appropriate actions, plus Delete User everywhere — eligibility
+  // (no assigned tickets, no project team membership, not themself, no other
+  // operational records) is a real, server-verified check at delete time,
+  // not a status gate, so it's offered for Active/Invited/Disabled users
+  // alike rather than only after disabling someone first.
   function actionsFor(u: User): RowAction[] {
     const common: RowAction[] = [
       { label: "View Profile", onClick: () => openProfile(u, "profile") },
@@ -586,6 +639,7 @@ export function UsersScreen() {
         ...common,
         { label: "Reset Password", onClick: () => handleGeneratePasswordResetLink(u) },
         { label: "Disable User", onClick: () => handleSetMembershipStatus(u, "Disabled") },
+        { label: "Delete User", danger: true, onClick: () => setDeleteTarget(u) },
       ];
     }
 
@@ -602,6 +656,7 @@ export function UsersScreen() {
       ...common,
       { label: "Resend Invitation", onClick: () => showToast(`Invitation resent to ${u.email}.`) },
       { label: "Copy Invitation Link", onClick: () => copyInvitationLink(u) },
+      { label: "Delete User", danger: true, onClick: () => setDeleteTarget(u) },
     ];
   }
 
@@ -761,7 +816,6 @@ export function UsersScreen() {
       {showInvite && (
         <InviteUserModal
           onClose={() => setShowInvite(false)}
-          onInviteSent={handleInviteSent}
           onLinkGenerated={runFetch}
         />
       )}
@@ -786,11 +840,7 @@ export function UsersScreen() {
         <DeleteUserModal
           user={deleteTarget}
           onCancel={() => setDeleteTarget(null)}
-          onConfirm={() => {
-            setUsersList((prev) => prev.filter((u) => u.id !== deleteTarget.id));
-            showToast(`${fullName(deleteTarget)} was deleted.`);
-            setDeleteTarget(null);
-          }}
+          onDelete={handleDeleteUser}
         />
       )}
 
