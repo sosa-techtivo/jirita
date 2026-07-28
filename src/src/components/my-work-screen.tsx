@@ -243,9 +243,9 @@ function MyWorkLoadingSkeleton({ showMyTime }: { showMyTime: boolean }) {
       </div>
 
       {/* My Hours breakdown */}
-      <div className="mt-3 flex items-center gap-5 rounded-xl border border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900 px-5 py-3.5 shadow-sm shadow-slate-200/40 dark:shadow-black/20">
+      <div className="mt-3 flex items-center gap-5 rounded-xl border border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900 px-5 py-3.5 shadow-sm shadow-slate-200/40 dark:shadow-black/20 overflow-x-auto">
         <SkeletonBlock className="h-[10px] w-16 flex-shrink-0" />
-        <div className="flex items-center gap-6 flex-1">
+        <div className="flex items-center gap-6 flex-1 min-w-0">
           {Array.from({ length: 5 }).map((_, i) => (
             <div key={i} className="flex-shrink-0">
               <SkeletonBlock className="h-[10px] w-12 mb-1" />
@@ -257,9 +257,9 @@ function MyWorkLoadingSkeleton({ showMyTime }: { showMyTime: boolean }) {
 
       {/* My Time (Member only) */}
       {showMyTime && (
-        <div className="mt-3 flex items-center gap-5 rounded-xl border border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900 px-5 py-3.5 shadow-sm shadow-slate-200/40 dark:shadow-black/20">
+        <div className="mt-3 flex items-center gap-5 rounded-xl border border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900 px-5 py-3.5 shadow-sm shadow-slate-200/40 dark:shadow-black/20 overflow-x-auto">
           <SkeletonBlock className="h-[10px] w-14 flex-shrink-0" />
-          <div className="flex items-center gap-6 flex-1">
+          <div className="flex items-center gap-6 flex-1 min-w-0">
             {Array.from({ length: 4 }).map((_, i) => (
               <div key={i} className="flex-shrink-0">
                 <SkeletonBlock className="h-[10px] w-16 mb-1" />
