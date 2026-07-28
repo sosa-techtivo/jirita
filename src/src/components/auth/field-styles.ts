@@ -5,8 +5,13 @@
 export const FIELD_LABEL =
   "block text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600 mb-1.5";
 
+// `text-[16px] sm:text-[13px]` (not a flat 13px) — iOS Safari auto-zooms on
+// focus for any input whose effective font-size is below 16px; 16px on
+// Mobile avoids that without touching the viewport meta, same technique
+// used for this exact issue in Mi Pádel Club. `sm:` keeps Desktop's exact
+// original 13px.
 export const INPUT =
-  "w-full bg-white dark:bg-zinc-900 text-[13px] font-medium text-slate-800 dark:text-zinc-200 " +
+  "w-full bg-white dark:bg-zinc-900 text-[16px] sm:text-[13px] font-medium text-slate-800 dark:text-zinc-200 " +
   "border border-slate-200 dark:border-zinc-700 rounded-lg px-3 py-2 outline-none " +
   "focus:border-brand-500 dark:focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 " +
   "placeholder:text-slate-300 dark:placeholder:text-zinc-600 transition-colors";
