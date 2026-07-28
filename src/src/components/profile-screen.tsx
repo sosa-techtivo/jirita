@@ -5,7 +5,6 @@ import Link from "next/link";
 import { ROLE_LABELS, type CurrentUser } from "@/lib/current-user";
 import { useCurrentUser } from "@/components/current-user-provider";
 import { SettingRow, SettingGroup } from "@/components/settings-ui";
-import { ThemeToggle } from "@/components/theme-toggle";
 import { getDefaultTicketView, setDefaultTicketView, type DefaultTicketView } from "@/lib/user-preferences";
 import { ALLOWED_AVATAR_TYPES, validateAvatarFile } from "@/lib/avatar-upload";
 import { Avatar } from "@/components/ui/avatar";
@@ -295,9 +294,6 @@ function ProfileForm({ user }: { user: CurrentUser }) {
         </SettingGroup>
 
         <SettingGroup title="Preferences">
-          <SettingRow label="Theme" hint="Applies immediately across the app">
-            <ThemeToggle />
-          </SettingRow>
           <SettingRow label="Default Ticket View" hint="Used when you open a project's Tickets tab">
             <TicketViewToggle value={defaultView} onChange={setDefaultViewState} />
           </SettingRow>

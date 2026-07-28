@@ -95,8 +95,8 @@ const emptySubscribe = () => () => {};
 
 // True only once hydrated on the client — lets this render the SSR-safe
 // default (DEFAULT_ROLE, no overrides) on the first pass and switch to the
-// real localStorage-backed values right after, same trick as
-// theme-toggle.tsx's useMounted(), without reaching for setState-in-effect.
+// real localStorage-backed values right after, without reaching for
+// setState-in-effect.
 function useMounted(): boolean {
   return useSyncExternalStore(emptySubscribe, () => true, () => false);
 }

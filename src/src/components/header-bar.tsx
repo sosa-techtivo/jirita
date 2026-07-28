@@ -1,7 +1,6 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { ThemeToggle } from "@/components/theme-toggle";
 import { RoleSwitcher } from "@/components/role-switcher";
 import { AccountMenu } from "@/components/account-menu";
 import { NotificationBell } from "@/components/notification-bell";
@@ -31,7 +30,6 @@ export function HeaderBar({ breadcrumb }: { breadcrumb: ReactNode }) {
             <RoleSwitcher />
           </>
         )}
-        <ThemeToggle />
         <NotificationBell />
         <AccountMenu />
       </div>
