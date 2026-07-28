@@ -1434,7 +1434,7 @@ function AttachmentRow({
         ) : (
           <p className="text-[13px] font-medium text-slate-800 dark:text-zinc-200 truncate">{file.name}</p>
         )}
-        <p className="text-[11px] text-slate-400 dark:text-zinc-600 mt-0.5 flex items-center gap-1.5">
+        <div className="text-[11px] text-slate-400 dark:text-zinc-600 mt-0.5 flex items-center gap-1.5">
           <span>{file.size}</span>
           <span>·</span>
           <MemberTrigger name={file.addedBy} avatar={file.avatar} className="flex items-center gap-1.5">
@@ -1443,7 +1443,7 @@ function AttachmentRow({
           </MemberTrigger>
           <span>·</span>
           <span>{file.uploadedAt}</span>
-        </p>
+        </div>
       </div>
 
       {/* Actions (hidden while renaming) */}
@@ -2244,12 +2244,12 @@ function DevelopmentSection({ slug, ticketCode }: { slug: string; ticketCode: st
                         <span className="font-mono text-slate-400 dark:text-zinc-500 mr-1.5">{commit.shaShort}</span>
                         {displayMessage}
                       </p>
-                      <p className="text-[11px] text-slate-400 dark:text-zinc-600 mt-0.5 flex items-center gap-1.5 flex-wrap">
+                      <div className="text-[11px] text-slate-400 dark:text-zinc-600 mt-0.5 flex items-center gap-1.5 flex-wrap">
                         <Avatar src={commit.authorAvatar ?? FALLBACK_AVATAR} name={commit.authorName} alt="" className="w-3.5 h-3.5 rounded-full flex-shrink-0" />
                         <span className="truncate">{commit.authorName}</span>
                         <span aria-hidden="true">·</span>
                         <span className="flex-shrink-0">{formatRelativeTime(commit.authoredAt)}</span>
-                      </p>
+                      </div>
                     </div>
                   </a>
                 </li>
@@ -2277,7 +2277,7 @@ function DevelopmentSection({ slug, ticketCode }: { slug: string; ticketCode: st
                         <span className="font-mono text-slate-400 dark:text-zinc-500 mr-1.5">#{pr.number}</span>
                         {pr.title}
                       </p>
-                      <p className="text-[11px] text-slate-400 dark:text-zinc-600 mt-0.5 flex items-center gap-1.5 flex-wrap">
+                      <div className="text-[11px] text-slate-400 dark:text-zinc-600 mt-0.5 flex items-center gap-1.5 flex-wrap">
                         <Avatar src={pr.authorAvatar ?? FALLBACK_AVATAR} name={pr.authorName} alt="" className="w-3.5 h-3.5 rounded-full flex-shrink-0" />
                         <span className="truncate">{pr.authorName}</span>
                         <span aria-hidden="true">·</span>
@@ -2288,7 +2288,7 @@ function DevelopmentSection({ slug, ticketCode }: { slug: string; ticketCode: st
                             <span className="font-mono truncate">{pr.headBranch}</span>
                           </>
                         )}
-                      </p>
+                      </div>
                     </div>
                     <span
                       className={`inline-flex items-center flex-shrink-0 px-2 py-0.5 rounded-md text-[11px] font-semibold uppercase tracking-wide ${PR_STATE_BADGE_CLASS[pr.state]}`}
@@ -2905,14 +2905,14 @@ const SIDEBAR_SKELETON_FIELDS = ["Status", "Assignee", "Type", "Priority", "Esti
 function TicketDetailSkeleton() {
   return (
     <div className="min-h-full bg-white dark:bg-zinc-950" aria-busy="true">
-      <div className="max-w-5xl mx-auto px-6 sm:px-10 py-10">
+      <div className="max-w-5xl mx-auto px-4 sm:px-10 py-6 sm:py-10">
         <div className="mb-8">
           {/* Real, already-functional navigation — never blocked while the
               ticket itself is loading. */}
           <BackToTicketsButton />
         </div>
 
-        <div className="flex gap-12 items-start">
+        <div className="flex flex-col sm:flex-row gap-6 sm:gap-12 sm:items-start">
           {/* ── Main content ─────────────────────────────────────────────── */}
           <article className="flex-1 min-w-0">
             {/* Header: ticket code + status, title, updated/due date, Estimated/Logged/Remaining */}
@@ -3266,18 +3266,22 @@ export function TicketDetailScreen({
 
   return (
     <div className="min-h-full bg-white dark:bg-zinc-950">
-      <div className="max-w-5xl mx-auto px-6 sm:px-10 py-10">
+      <div className="max-w-5xl mx-auto px-4 sm:px-10 py-6 sm:py-10">
         <div className="mb-8">
           <BackToTicketsButton />
         </div>
 
-        <div className="flex gap-12 items-start">
+        <div className="flex flex-col sm:flex-row gap-6 sm:gap-12 sm:items-start">
 
           {/* ── Main content ─────────────────────────────────────────────────── */}
-          <article className="flex-1 min-w-0">
+          {/* `contents` on Mobile flattens this into direct children of the
+              row above so each section can be individually repositioned via
+              `order-*` to match the required Mobile sequence; reverts to the
+              exact original single flex-item box at `sm:`, unaffected. */}
+          <article className="contents sm:block sm:flex-1 sm:min-w-0">
 
             {/* Title */}
-            <header>
+            <header className="order-[10]">
               <div className="flex items-center gap-2.5 mb-3">
                 <span className="flex items-center gap-1.5 font-mono text-[12px] font-semibold tracking-wider text-slate-400 dark:text-zinc-500">
                   <TicketTypeIcon type={ticket.type} className="w-3.5 h-3.5" />
@@ -3307,7 +3311,7 @@ export function TicketDetailScreen({
                 )}
               </p>
               {ticket.hours !== undefined && (
-                <div className="mt-2 flex items-center gap-3.5 flex-wrap">
+                <div className="hidden sm:flex mt-2 items-center gap-3.5 flex-wrap">
                   <span className="text-[12px] text-slate-400 dark:text-zinc-600">
                     Estimated{" "}
                     <span className="font-semibold text-slate-600 dark:text-zinc-300">{ticket.hours}h</span>
@@ -3328,6 +3332,35 @@ export function TicketDetailScreen({
               )}
             </header>
 
+            {/* Quick summary — Mobile only (Due date/Estimated/Logged/Remaining
+                as a compact 2-column grid); Desktop keeps showing these same
+                real values inline in the header line above, unchanged. */}
+            {ticket.hours !== undefined && (
+              <div className="order-[20] sm:hidden mt-3 grid grid-cols-2 gap-x-4 gap-y-2.5 rounded-xl border border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900 shadow-sm shadow-slate-200/40 dark:shadow-black/20 px-3.5 py-3">
+                {ticket.dueDate && (
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600 mb-0.5">Due Date</p>
+                    <p className="text-[13px] font-semibold text-slate-700 dark:text-zinc-200">{ticket.dueDate}</p>
+                  </div>
+                )}
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600 mb-0.5">Estimated</p>
+                  <p className="text-[13px] font-semibold text-slate-600 dark:text-zinc-300">{ticket.hours}h</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600 mb-0.5">Logged</p>
+                  <p className="text-[13px] font-semibold text-slate-600 dark:text-zinc-300">{totalLogged}h</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600 mb-0.5">Remaining</p>
+                  <p className={`text-[13px] font-semibold ${remaining <= 0 ? "text-amber-600 dark:text-amber-400" : "text-slate-600 dark:text-zinc-300"}`}>
+                    {formatRemainingHours(remaining)}h
+                  </p>
+                </div>
+              </div>
+            )}
+
+            <div className="order-[40]">
             <CollapsibleSection title="Description" defaultOpen={true}>
               <EditableDescription
                 value={ticket.description}
@@ -3338,27 +3371,37 @@ export function TicketDetailScreen({
                 }}
               />
             </CollapsibleSection>
+            </div>
 
             {ticket.acceptanceCriteria !== undefined && ticket.acceptanceCriteria.length > 0 && (
-              <AcceptanceCriteriaSection
-                criteria={ticket.acceptanceCriteria}
-                doneFlags={ticket.acceptanceCriteriaDone ?? []}
-                onToggle={toggleAcceptanceCriterion}
-              />
+              <div className="order-[45]">
+                <AcceptanceCriteriaSection
+                  criteria={ticket.acceptanceCriteria}
+                  doneFlags={ticket.acceptanceCriteriaDone ?? []}
+                  onToggle={toggleAcceptanceCriterion}
+                />
+              </div>
             )}
 
-            <AttachmentsSection ticketId={ticket.id} isDevFallback={isDevFallback} onUploaded={refreshActivity} onError={showError} />
+            <div className="order-[50]">
+              <AttachmentsSection ticketId={ticket.id} isDevFallback={isDevFallback} onUploaded={refreshActivity} onError={showError} />
+            </div>
 
-            <DevelopmentSection slug={slug} ticketCode={ticketCode} />
+            <div className="order-[70]">
+              <DevelopmentSection slug={slug} ticketCode={ticketCode} />
+            </div>
 
-            <TimeTrackingSection
-              ticketId={ticket.id}
-              entries={loggedEntries}
-              estimatedHours={ticket.hours}
-              onAddEntry={addEntry}
-              onError={showError}
-            />
+            <div className="order-[80]">
+              <TimeTrackingSection
+                ticketId={ticket.id}
+                entries={loggedEntries}
+                estimatedHours={ticket.hours}
+                onAddEntry={addEntry}
+                onError={showError}
+              />
+            </div>
 
+            <div className="order-[90]">
             <CollapsibleSection
               title="Comments"
               badge={ticket.commentCount !== undefined ? `· ${ticket.commentCount} total` : undefined}
@@ -3448,7 +3491,9 @@ export function TicketDetailScreen({
                 )}
               </div>
             </CollapsibleSection>
+            </div>
 
+            <div className="order-[100]">
             <CollapsibleSection
               title="Activity"
               badge={`· ${activityLog.length} updates`}
@@ -3482,11 +3527,30 @@ export function TicketDetailScreen({
               </div>
               )}
             </CollapsibleSection>
+            </div>
 
           </article>
 
           {/* ── Metadata sidebar ─────────────────────────────────────────────── */}
-          <aside className="w-56 flex-shrink-0 sticky top-8">
+          {/* `contents` on Mobile flattens these 8 fields into direct children
+              of the row above. Each gets its `order-*` via an `nth-child`
+              arbitrary selector on `aside` itself (rather than a wrapper div
+              per field) specifically because SidebarField/RelatedTicketsSection
+              rely on `last:border-0` — a wrapper would make every field its
+              own single-child parent, breaking that divider. Fields 1–7
+              (Status…Labels) group right after the header/quick-summary;
+              field 8 (Related Tickets) is repositioned after Attachments.
+              Reverts to the exact original sticky column at `sm:`, where
+              `order` has no effect (these are no longer flex siblings). */}
+          <aside
+            className={
+              "contents sm:block sm:w-56 sm:flex-shrink-0 sm:sticky sm:top-8 " +
+              "[&>*:nth-child(1)]:order-[30] [&>*:nth-child(2)]:order-[30] " +
+              "[&>*:nth-child(3)]:order-[30] [&>*:nth-child(4)]:order-[30] " +
+              "[&>*:nth-child(5)]:order-[30] [&>*:nth-child(6)]:order-[30] " +
+              "[&>*:nth-child(7)]:order-[30] [&>*:nth-child(8)]:order-[60]"
+            }
+          >
 
             <EditableSidebarStatus
               value={ticket.status}
