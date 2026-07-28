@@ -739,12 +739,12 @@ export function ProjectLeadDashboard() {
       <div className="max-w-6xl mx-auto px-6 py-8 pb-16">
 
         {/* ── Header (skeleton) ────────────────────────────────────────────── */}
-        <div className="flex items-start justify-between gap-6 mb-6">
+        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 sm:gap-6 mb-4 sm:mb-6">
           <div>
             <SkeletonBlock className="h-[22px] w-52 mb-1" />
             <SkeletonBlock className="h-[14px] w-32" />
           </div>
-          <div className="flex items-center gap-2 flex-shrink-0">
+          <div className="flex flex-nowrap items-center gap-1 sm:gap-2 sm:flex-shrink-0">
             <SkeletonBlock className="h-8 w-28" />
             <SkeletonBlock className="h-8 w-24" />
             <SkeletonBlock className="h-8 w-24" />
@@ -876,7 +876,7 @@ export function ProjectLeadDashboard() {
     <div className="max-w-6xl mx-auto px-6 py-8 pb-16">
 
       {/* ── Header ─────────────────────────────────────────────────────────── */}
-      <div className="flex items-start justify-between gap-6 mb-6">
+      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 sm:gap-6 mb-4 sm:mb-6">
         <div>
           <h1 className="text-[22px] font-bold text-slate-900 dark:text-zinc-50 tracking-tight leading-none mb-1">
             Good morning, {user.name.split(" ")[0]} 👋
@@ -888,14 +888,14 @@ export function ProjectLeadDashboard() {
             one active project — see leadProjects.length above) + Quick
             Actions, same placement/component pattern as the Admin
             Dashboard's own scope selector. */}
-        <div className="flex items-center gap-2 flex-shrink-0">
+        <div className="flex flex-nowrap items-center gap-1 sm:gap-2 sm:flex-shrink-0">
           {leadProjects.length > 1 && (
-            <div className="relative inline-flex items-center">
+            <div className="relative inline-flex items-center flex-1 min-w-0 sm:flex-initial">
               <select
                 value={activeSlug}
                 onChange={(event) => handleScopeChange(event.target.value)}
                 aria-label="Current project"
-                className="appearance-none text-[13px] font-medium pl-3 pr-7 py-1.5 rounded-lg border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-slate-700 dark:text-zinc-300 hover:bg-slate-50 dark:hover:bg-zinc-800 transition-colors cursor-pointer outline-none focus:ring-2 focus:ring-brand-500/30"
+                className="w-full sm:w-auto truncate appearance-none text-[10px] sm:text-[13px] font-medium pl-2 pr-5 sm:pl-3 sm:pr-7 py-1.5 rounded-lg border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-slate-700 dark:text-zinc-300 hover:bg-slate-50 dark:hover:bg-zinc-800 transition-colors cursor-pointer outline-none focus:ring-2 focus:ring-brand-500/30"
               >
                 {leadProjects.map((p) => (
                   <option key={p.slug} value={p.slug}>{p.name}</option>
@@ -909,7 +909,7 @@ export function ProjectLeadDashboard() {
           <button
             type="button"
             onClick={() => setShowAddMember(true)}
-            className="inline-flex items-center gap-1.5 text-[13px] font-medium px-3.5 py-1.5 rounded-lg border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-slate-700 dark:text-zinc-300 hover:bg-slate-50 dark:hover:bg-zinc-800 transition-colors"
+            className="flex-shrink-0 inline-flex items-center gap-1 sm:gap-1.5 text-[10px] sm:text-[13px] font-medium px-2 sm:px-3.5 py-1.5 rounded-lg border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-slate-700 dark:text-zinc-300 hover:bg-slate-50 dark:hover:bg-zinc-800 transition-colors"
           >
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true">
               <path strokeLinecap="round" d="M15 20v-1.5a3.5 3.5 0 00-3.5-3.5h-4A3.5 3.5 0 004 18.5V20" />
@@ -921,7 +921,7 @@ export function ProjectLeadDashboard() {
           <button
             type="button"
             onClick={() => setShowNewNote(true)}
-            className="inline-flex items-center gap-1.5 text-[13px] font-medium px-3.5 py-1.5 rounded-lg border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-slate-700 dark:text-zinc-300 hover:bg-slate-50 dark:hover:bg-zinc-800 transition-colors"
+            className="flex-shrink-0 inline-flex items-center gap-1 sm:gap-1.5 text-[10px] sm:text-[13px] font-medium px-2 sm:px-3.5 py-1.5 rounded-lg border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-slate-700 dark:text-zinc-300 hover:bg-slate-50 dark:hover:bg-zinc-800 transition-colors"
           >
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true">
               <path strokeLinecap="round" strokeLinejoin="round" d="M9 3h6l5 5v11a2 2 0 01-2 2H9a2 2 0 01-2-2V5a2 2 0 012-2z" />
@@ -932,7 +932,7 @@ export function ProjectLeadDashboard() {
           <button
             type="button"
             onClick={() => setShowNewTicket(true)}
-            className="inline-flex items-center gap-1.5 text-[13px] font-semibold px-3.5 py-1.5 rounded-lg bg-brand-500 hover:bg-brand-600 text-white transition-colors shadow-sm shadow-brand-500/30"
+            className="flex-shrink-0 inline-flex items-center gap-1 sm:gap-1.5 text-[10px] sm:text-[13px] font-semibold px-2 sm:px-3.5 py-1.5 rounded-lg bg-brand-500 hover:bg-brand-600 text-white transition-colors shadow-sm shadow-brand-500/30"
           >
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24" aria-hidden="true">
               <path strokeLinecap="round" d="M12 4v16m8-8H4" />

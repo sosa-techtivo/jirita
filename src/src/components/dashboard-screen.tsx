@@ -200,7 +200,7 @@ function InsightIcon({ level }: { level: OrgHealthInsight["level"] }) {
 
 function InsightsBand({ items }: { items: OrgHealthInsight[] }) {
   return (
-    <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-xl border border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900 px-4 py-3 shadow-sm shadow-slate-200/40 dark:shadow-black/20">
+    <div className="flex flex-wrap items-center gap-x-3 sm:gap-x-5 gap-y-1.5 sm:gap-y-2 rounded-xl border border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900 px-3.5 py-2 sm:px-4 sm:py-3 shadow-sm shadow-slate-200/40 dark:shadow-black/20">
       {items.map((item, i) => {
         const content = (
           <>
@@ -254,7 +254,7 @@ function DashKpiCard({
   href?: string;
 }) {
   const className = [
-    "h-full flex flex-col rounded-xl border shadow-sm shadow-slate-200/40 dark:shadow-black/20 px-5 pt-4 pb-4",
+    "h-full flex flex-col rounded-xl border shadow-sm shadow-slate-200/40 dark:shadow-black/20 px-3.5 pt-3 pb-3 sm:px-5 sm:pt-4 sm:pb-4",
     // Every KPI card shares the same dark card background/border — an
     // Admin overview shouldn't let one metric visually outweigh the
     // others. Accent cards keep their light-mode tint but, in dark
@@ -277,7 +277,7 @@ function DashKpiCard({
         {value}
       </p>
       {sub && <p className="text-xs text-slate-400 dark:text-zinc-600 mt-1">{sub}</p>}
-      <div className="mt-auto pt-3">
+      <div className="mt-auto pt-2 sm:pt-3">
         {progress !== undefined && (
           <div className="h-1 rounded-full bg-slate-100 dark:bg-zinc-800 overflow-hidden">
             <div
@@ -944,15 +944,15 @@ function AdminDashboard() {
 
   if (loadState === "loading") {
     return (
-      <div className="max-w-6xl mx-auto px-6 py-8 pb-16">
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-8 pb-10 sm:pb-16">
 
         {/* ── Header (skeleton) ────────────────────────────────────────────── */}
-        <div className="flex items-start justify-between gap-6 mb-6">
+        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 sm:gap-6 mb-4 sm:mb-6">
           <div>
             <SkeletonBlock className="h-[22px] w-52 mb-1" />
             <SkeletonBlock className="h-[14px] w-32" />
           </div>
-          <div className="flex items-center gap-2 flex-shrink-0">
+          <div className="flex flex-wrap items-center gap-2 sm:flex-nowrap sm:flex-shrink-0">
             <SkeletonBlock className="h-8 w-32" />
             <SkeletonBlock className="h-8 w-28" />
             <SkeletonBlock className="h-8 w-28" />
@@ -961,9 +961,9 @@ function AdminDashboard() {
 
         {/* ── KPI Cards (skeleton) ─────────────────────────────────────────── */}
         <SkeletonBlock className="h-[10px] w-36 mb-2" />
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3 mb-3 sm:mb-4">
           {[0, 1, 2, 3].map((i) => (
-            <div key={i} className="h-full flex flex-col rounded-xl border border-slate-200 dark:border-zinc-700/70 shadow-sm shadow-slate-200/40 dark:shadow-black/20 px-5 pt-4 pb-4">
+            <div key={i} className="h-full flex flex-col rounded-xl border border-slate-200 dark:border-zinc-700/70 shadow-sm shadow-slate-200/40 dark:shadow-black/20 px-3.5 pt-3 pb-3 sm:px-5 sm:pt-4 sm:pb-4">
               <SkeletonBlock className="h-[10px] w-24 mb-1" />
               <SkeletonBlock className="h-6 w-16 mb-1" />
               <SkeletonBlock className="h-3 w-20" />
@@ -972,16 +972,16 @@ function AdminDashboard() {
         </div>
 
         {/* ── Insights band (skeleton) ─────────────────────────────────────── */}
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-xl border border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900 px-4 py-3 shadow-sm shadow-slate-200/40 dark:shadow-black/20">
+        <div className="flex flex-wrap items-center gap-x-3 sm:gap-x-5 gap-y-1.5 sm:gap-y-2 rounded-xl border border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900 px-3.5 py-2 sm:px-4 sm:py-3 shadow-sm shadow-slate-200/40 dark:shadow-black/20">
           {[0, 1, 2].map((i) => (
             <SkeletonBlock key={i} className="h-3 w-40" />
           ))}
         </div>
 
         {/* ── Two-column main content (skeleton) ───────────────────────────── */}
-        <div className="mt-5 grid grid-cols-1 xl:grid-cols-[1fr_320px] gap-5">
+        <div className="mt-4 sm:mt-5 grid grid-cols-1 xl:grid-cols-[1fr_320px] gap-4 sm:gap-5">
 
-          <div className="space-y-5 min-w-0">
+          <div className="space-y-4 sm:space-y-5 min-w-0">
             <section className="rounded-xl border border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900 p-5 shadow-sm shadow-slate-200/40 dark:shadow-black/20">
               <SkeletonBlock className="h-[10px] w-28 mb-4" />
               <div className="space-y-2">
@@ -1004,7 +1004,7 @@ function AdminDashboard() {
             </section>
           </div>
 
-          <div className="space-y-5">
+          <div className="space-y-4 sm:space-y-5">
             <section className="rounded-xl border border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900 p-5 shadow-sm shadow-slate-200/40 dark:shadow-black/20">
               <SkeletonBlock className="h-[10px] w-24 mb-4" />
               <div className="space-y-4">
@@ -1046,7 +1046,7 @@ function AdminDashboard() {
 
   if (loadState === "error") {
     return (
-      <div className="max-w-6xl mx-auto px-6 py-8 pb-16">
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-8 pb-10 sm:pb-16">
         <div className="flex flex-col items-center justify-center text-center px-4 py-20">
           <h3 className="text-sm font-semibold text-slate-700 dark:text-zinc-200">Couldn&apos;t load dashboard</h3>
           <p className="text-sm text-slate-400 mt-1 max-w-xs dark:text-zinc-500">
@@ -1065,10 +1065,10 @@ function AdminDashboard() {
   }
 
   return (
-    <div className="max-w-6xl mx-auto px-6 py-8 pb-16">
+    <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-8 pb-10 sm:pb-16">
 
       {/* ── Header ─────────────────────────────────────────────────────────── */}
-      <div className="flex items-start justify-between gap-6 mb-6">
+      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 sm:gap-6 mb-4 sm:mb-6">
         <div>
           <h1 className="text-[22px] font-bold text-slate-900 dark:text-zinc-50 tracking-tight leading-none mb-1">
             Good morning, {user.name.split(" ")[0]} 👋
@@ -1077,7 +1077,7 @@ function AdminDashboard() {
         </div>
 
         {/* Top actions: project scope selector + Quick Actions */}
-        <div className="flex items-center gap-2 flex-shrink-0">
+        <div className="flex flex-wrap items-center gap-2 sm:flex-nowrap sm:flex-shrink-0">
           <div className="relative inline-flex items-center">
             <select
               value={selectedProjectSlug ?? ""}
@@ -1130,7 +1130,7 @@ function AdminDashboard() {
       <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600 mb-2">
         Organization Health
       </p>
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3 mb-3 sm:mb-4">
         <DashKpiCard
           label="Assigned Tickets"
           value={assignedTicketsCount}
@@ -1169,10 +1169,10 @@ function AdminDashboard() {
       <InsightsBand items={orgHealthInsights} />
 
       {/* ── Two-column main content ─────────────────────────────────────────── */}
-      <div className="mt-5 grid grid-cols-1 xl:grid-cols-[1fr_320px] gap-5">
+      <div className="mt-4 sm:mt-5 grid grid-cols-1 xl:grid-cols-[1fr_320px] gap-4 sm:gap-5">
 
         {/* Left: My Active Work + Recent Activity */}
-        <div className="space-y-5 min-w-0">
+        <div className="space-y-4 sm:space-y-5 min-w-0">
 
           <Card
             title="My Active Work"
@@ -1214,7 +1214,7 @@ function AdminDashboard() {
         </div>
 
         {/* Right: Projects at Risk + Team Workload + Upcoming Deadlines */}
-        <div className="space-y-5">
+        <div className="space-y-4 sm:space-y-5">
 
           <Card
             title="Projects at Risk"
