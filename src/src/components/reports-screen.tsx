@@ -432,8 +432,15 @@ export function PeriodSelector({
   }
 
   return (
-    <div ref={ref} className="relative inline-block">
-      <div className="inline-flex items-center gap-0.5 rounded-lg border border-slate-200 dark:border-zinc-700 bg-slate-50 dark:bg-zinc-800/60 p-1">
+    <div ref={ref} className="relative inline-block w-full sm:w-auto">
+      {/* This Month/Last Month/This Quarter/Custom Range together are wider
+          than a Mobile viewport (each button is `whitespace-nowrap` by
+          design, so labels never break) — `w-full sm:w-auto` above lets this
+          control use its row's full Mobile width instead of shrink-wrapping
+          to its own (overflowing) content, and `overflow-x-auto` here scrolls
+          the pill internally instead of ever widening the page. Unchanged at
+          `sm:`, where it already fits on one line. */}
+      <div className="flex sm:inline-flex w-full sm:w-auto overflow-x-auto items-center gap-0.5 rounded-lg border border-slate-200 dark:border-zinc-700 bg-slate-50 dark:bg-zinc-800/60 p-1">
         {PERIOD_OPTIONS.map((option) => {
           const active = option.key === value;
           const isCustom = option.key === "custom";
