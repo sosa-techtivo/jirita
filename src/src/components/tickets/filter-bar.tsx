@@ -224,8 +224,11 @@ export function FilterBar({
     <div className="flex flex-col gap-3">
       {/* Search + dropdown filters */}
       <div className="flex items-center gap-1 flex-wrap">
-        {/* Search */}
-        <label className="relative block">
+        {/* Search — full width on its own row on Mobile (a `w-full` block is
+            the first flex child, so every filter after it is pushed onto
+            its own wrapped line below); reverts to its original inline
+            auto-width at `sm:` alongside the filters, unchanged. */}
+        <label className="relative block w-full sm:w-auto">
           <svg
             className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 dark:text-zinc-500"
             fill="none"
@@ -242,7 +245,7 @@ export function FilterBar({
             placeholder="Search tickets..."
             value={searchQuery}
             onChange={(e) => onSearchChange(e.target.value)}
-            className="w-64 text-sm bg-slate-100 dark:bg-zinc-900 placeholder:text-slate-400 dark:placeholder:text-zinc-500 text-slate-800 dark:text-zinc-100 rounded-md pl-8 pr-3 py-1.5 outline-none focus:ring-2 focus:ring-brand-500/30 transition-colors"
+            className="w-full sm:w-64 text-sm bg-slate-100 dark:bg-zinc-900 placeholder:text-slate-400 dark:placeholder:text-zinc-500 text-slate-800 dark:text-zinc-100 rounded-md pl-8 pr-3 py-1.5 outline-none focus:ring-2 focus:ring-brand-500/30 transition-colors"
           />
         </label>
 

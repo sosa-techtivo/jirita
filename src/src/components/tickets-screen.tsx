@@ -94,21 +94,29 @@ function TicketsScreenSkeleton({ showNewTicketButton }: { showNewTicketButton: b
   return (
     <div className="h-full flex flex-col" aria-busy="true">
       {/* Page header */}
-      <div className="flex-shrink-0 px-6 pt-5 pb-0">
-        <div className="flex items-start justify-between gap-4 mb-4">
+      <div className="flex-shrink-0 px-4 sm:px-6 pt-4 sm:pt-5 pb-0">
+        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 sm:gap-4 mb-3 sm:mb-4">
           <div>
             <SkeletonBlock className="h-7 w-24 rounded mb-2" />
             <SkeletonBlock className="h-4 w-72 rounded" />
           </div>
-          <div className="flex items-center gap-3 flex-shrink-0 mt-0.5">
+          <div className="hidden sm:flex items-center gap-3 flex-shrink-0 mt-0.5">
             <SkeletonBlock className="h-8 w-40 rounded-lg" />
             {showNewTicketButton && <SkeletonBlock className="h-8 w-28 rounded-lg" />}
+          </div>
+          <div className="flex sm:hidden flex-col gap-3">
+            {showNewTicketButton && (
+              <div className="flex justify-end">
+                <SkeletonBlock className="h-8 w-28 rounded-lg" />
+              </div>
+            )}
+            <SkeletonBlock className="h-8 w-40 rounded-lg" />
           </div>
         </div>
 
         {/* Search + filters */}
         <div className="flex items-center gap-2 flex-wrap">
-          <SkeletonBlock className="h-8 w-64 rounded-md" />
+          <SkeletonBlock className="h-8 w-full sm:w-64 rounded-md" />
           <SkeletonBlock className="h-8 w-24 rounded-md" />
           <SkeletonBlock className="h-8 w-24 rounded-md" />
           <SkeletonBlock className="h-8 w-24 rounded-md" />
@@ -737,8 +745,8 @@ export function TicketsScreen({ slug, projectName }: { slug?: string; projectNam
   return (
     <div className="h-full flex flex-col">
       {/* Page header */}
-      <div className="flex-shrink-0 px-6 pt-5 pb-0">
-        <div className="flex items-start justify-between gap-4 mb-4">
+      <div className="flex-shrink-0 px-4 sm:px-6 pt-4 sm:pt-5 pb-0">
+        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 sm:gap-4 mb-3 sm:mb-4">
           <div>
             <h1 className="text-2xl font-bold text-slate-900 dark:text-zinc-50 tracking-tight leading-none">
               Tickets
@@ -748,7 +756,11 @@ export function TicketsScreen({ slug, projectName }: { slug?: string; projectNam
             </p>
           </div>
 
-          <div className="flex items-center gap-3 flex-shrink-0 mt-0.5">
+          {/* Desktop: Tabs + New Ticket grouped together on the right, exactly
+              as before. Mobile hides this copy — see the stacked mobile-only
+              block below, which reorders New Ticket above the view tabs and
+              gives the tabs their own horizontally-scrollable row instead. */}
+          <div className="hidden sm:flex items-center gap-3 flex-shrink-0 mt-0.5">
             <ViewSwitcher view={view} onChange={setView} />
             {canCreateTicket && (
               <button
@@ -759,6 +771,23 @@ export function TicketsScreen({ slug, projectName }: { slug?: string; projectNam
                 + New Ticket
               </button>
             )}
+          </div>
+        </div>
+
+        <div className="flex sm:hidden flex-col gap-3 mb-3">
+          {canCreateTicket && (
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => setShowNewTicket(true)}
+                className="text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-4 py-2 shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-500 dark:hover:bg-brand-600 dark:shadow-brand-500/20 whitespace-nowrap"
+              >
+                + New Ticket
+              </button>
+            </div>
+          )}
+          <div className="overflow-x-auto">
+            <ViewSwitcher view={view} onChange={setView} />
           </div>
         </div>
 
