@@ -17,7 +17,7 @@ import type { GlobalSearchProject, GlobalSearchResults, GlobalSearchTicket, Glob
 
 // Main nav link content, keyed so `mainNavForRole`'s order (per role) drives
 // what renders where — the sidebar no longer hardcodes link order itself.
-const NAV_LINK: Record<MainNavKey, { href: string; label: string; icon: ReactNode }> = {
+export const NAV_LINK: Record<MainNavKey, { href: string; label: string; icon: ReactNode }> = {
   dashboard: {
     href: "/dashboard",
     label: "Dashboard",
@@ -87,7 +87,7 @@ const NAV_LINK: Record<MainNavKey, { href: string; label: string; icon: ReactNod
 // (e.g. while browsing a project's overview/tickets/notes/team/reports).
 const EXPLICIT_NAV_PAGES: MainNavKey[] = ["dashboard", "my-work", "reports", "time-tracking", "users"];
 
-function isNavActive(key: MainNavKey, activePage?: string): boolean {
+export function isNavActive(key: MainNavKey, activePage?: string): boolean {
   if (key === "projects") return !EXPLICIT_NAV_PAGES.some((page) => page === activePage);
   return activePage === key;
 }

@@ -71,18 +71,24 @@ export function AccountMenu() {
           <p className="text-[12px] text-slate-400 dark:text-zinc-500 truncate">{user.email}</p>
         </div>
         <div className="py-1.5">
-          <Link
-            href="/profile"
-            role="menuitem"
-            onClick={() => setIsOpen(false)}
-            className="w-full flex items-center gap-2.5 px-3.5 py-1.5 text-[13px] text-left text-slate-700 dark:text-zinc-300 hover:bg-slate-50 dark:hover:bg-zinc-800/60 transition-colors"
-          >
-            <svg className="w-4 h-4 text-slate-400 dark:text-zinc-500" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-              <circle cx="12" cy="8" r="4" />
-              <path d="M4 21c0-4 4-6 8-6s8 2 8 6" />
-            </svg>
-            My Profile
-          </Link>
+          {/* Member already has a direct Profile tab in their own mobile
+              tab bar (mobile-tab-bar.tsx) — omitted here only for that role
+              to avoid duplicating it; Admin/Project Lead keep it (no tab bar
+              Profile entry of their own). */}
+          {user.role !== "MEMBER" && (
+            <Link
+              href="/profile"
+              role="menuitem"
+              onClick={() => setIsOpen(false)}
+              className="w-full flex items-center gap-2.5 px-3.5 py-1.5 text-[13px] text-left text-slate-700 dark:text-zinc-300 hover:bg-slate-50 dark:hover:bg-zinc-800/60 transition-colors"
+            >
+              <svg className="w-4 h-4 text-slate-400 dark:text-zinc-500" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                <circle cx="12" cy="8" r="4" />
+                <path d="M4 21c0-4 4-6 8-6s8 2 8 6" />
+              </svg>
+              My Profile
+            </Link>
+          )}
           <Link
             href="/change-password"
             role="menuitem"
