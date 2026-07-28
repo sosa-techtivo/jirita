@@ -236,7 +236,7 @@ const PulseIcon = (
 // with stale data mid-refresh.
 function ProjectLeadReportsLoadingSkeleton() {
   return (
-    <div className="max-w-5xl mx-auto px-6 py-6 pb-16">
+    <div className="max-w-5xl mx-auto px-4 sm:px-6 py-6 pb-16">
       {/* Page header */}
       <div className="mb-3">
         <SkeletonBlock className="h-[21px] w-24 mb-1.5" />
@@ -891,7 +891,7 @@ export function ProjectLeadReportsScreen() {
 
   if (loadState === "error") {
     return (
-      <div className="max-w-5xl mx-auto px-6 py-6 pb-16">
+      <div className="max-w-5xl mx-auto px-4 sm:px-6 py-6 pb-16">
         <div className="flex flex-col items-center justify-center text-center px-4 py-20">
           <h3 className="text-sm font-semibold text-slate-700 dark:text-zinc-200">Couldn&apos;t load reports</h3>
           <p className="text-sm text-slate-400 mt-1 max-w-xs dark:text-zinc-500">
@@ -910,7 +910,7 @@ export function ProjectLeadReportsScreen() {
   }
 
   return (
-    <div className="max-w-5xl mx-auto px-6 py-6 pb-16">
+    <div className="max-w-5xl mx-auto px-4 sm:px-6 py-6 pb-16">
 
       {/* ── Page header ──────────────────────────────────────────────────── */}
       <div className="mb-3">

@@ -218,14 +218,14 @@ const KPI_MODE_LABELS: Record<KpiMode, string> = {
 // content never has to share the screen with stale data mid-refresh.
 function MyWorkLoadingSkeleton({ showMyTime }: { showMyTime: boolean }) {
   return (
-    <div className="max-w-5xl mx-auto px-6 py-6 pb-16">
+    <div className="max-w-5xl mx-auto px-4 sm:px-6 py-6 pb-16">
       {/* Header */}
-      <div className="flex items-start justify-between mb-6 gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 sm:gap-4 mb-4 sm:mb-6">
         <div>
           <SkeletonBlock className="h-[21px] w-56 mb-1.5" />
           <SkeletonBlock className="h-3 w-32" />
         </div>
-        <SkeletonBlock className="h-8 w-28 flex-shrink-0" />
+        <SkeletonBlock className="h-8 w-28 flex-shrink-0 self-end sm:self-auto" />
       </div>
 
       {/* KPI strip */}
@@ -743,7 +743,7 @@ export function MyWorkScreen() {
 
   if (loadState === "error") {
     return (
-      <div className="max-w-5xl mx-auto px-6 py-6 pb-16">
+      <div className="max-w-5xl mx-auto px-4 sm:px-6 py-6 pb-16">
         <div className="flex flex-col items-center justify-center text-center px-4 py-20">
           <h3 className="text-sm font-semibold text-slate-700 dark:text-zinc-200">Couldn&apos;t load your work</h3>
           <p className="text-sm text-slate-400 mt-1 max-w-xs dark:text-zinc-500">
@@ -762,10 +762,10 @@ export function MyWorkScreen() {
   }
 
   return (
-    <div className="max-w-5xl mx-auto px-6 py-6 pb-16">
+    <div className="max-w-5xl mx-auto px-4 sm:px-6 py-6 pb-16">
 
       {/* ── Compact page header ─────────────────────────────────────────────── */}
-      <div className="flex items-start justify-between mb-6 gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 sm:gap-4 mb-4 sm:mb-6">
         <div>
           <div className="flex items-center gap-2 mb-0.5">
             <h1 className="text-xl font-bold text-slate-900 dark:text-zinc-50 tracking-tight leading-none">
@@ -784,7 +784,7 @@ export function MyWorkScreen() {
           type="button"
           onClick={() => setFocusMode((v) => !v)}
           className={[
-            "inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg transition-colors border flex-shrink-0",
+            "inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg transition-colors border flex-shrink-0 self-end sm:self-auto",
             focusMode
               ? "bg-brand-600 text-white border-brand-600 dark:bg-brand-500 dark:border-brand-500 shadow-sm shadow-brand-600/20"
               : "text-slate-600 border-slate-200 hover:bg-slate-50 dark:text-zinc-400 dark:border-zinc-700 dark:hover:bg-zinc-800",
