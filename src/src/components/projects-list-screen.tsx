@@ -11,6 +11,7 @@ import { FilterChip } from "@/components/tickets/filter-chip";
 import { useCurrentUser } from "@/components/current-user-provider";
 import { useOrganizationProjects } from "@/components/organization-projects-provider";
 import { MemberTrigger } from "@/components/member-profile";
+import { Avatar } from "@/components/ui/avatar";
 import { loadOrganizationTickets } from "@/lib/tickets";
 import { loadProjectTeam } from "@/lib/projects";
 import { SkeletonBlock } from "@/components/dashboard-shared";
@@ -837,8 +838,7 @@ function ProjectRow({
             nested
             className="flex items-center gap-1.5 min-w-0"
           >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={project.lead.avatar} alt={project.lead.name} className="w-5 h-5 rounded-full flex-shrink-0" />
+            <Avatar src={project.lead.avatar} name={project.lead.name} className="w-5 h-5 rounded-full flex-shrink-0" />
             <span className="text-slate-600 dark:text-zinc-300 truncate">{project.lead.name}</span>
           </MemberTrigger>
         ) : (

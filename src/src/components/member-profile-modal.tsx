@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { Avatar } from "@/components/ui/avatar";
 import type { AvailabilityStatus, TeamMember } from "@/lib/mock-team";
 import { TEAM_MEMBER_REMOVED_EVENT, TEAM_PROJECT_LEAD_CHANGED_EVENT } from "@/lib/mock-team";
 import { getTicketById, getTicketDisplayKey } from "@/lib/mock-tickets";
@@ -371,8 +372,7 @@ export function MemberProfileModal({
 
           <div className="flex-1 overflow-y-auto px-6 sm:px-8 pb-8">
             <div className="flex items-start gap-4">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={displayAvatar} alt={displayName} className="w-14 h-14 rounded-full flex-shrink-0" />
+              <Avatar src={displayAvatar} name={displayName} className="w-14 h-14 rounded-full flex-shrink-0" />
               <div className="flex-1 min-w-0 pt-0.5">
                 <div className="flex items-center gap-2 flex-wrap">
                   <h1 className="text-2xl font-bold text-slate-900 tracking-tight dark:text-zinc-50">{displayName}</h1>

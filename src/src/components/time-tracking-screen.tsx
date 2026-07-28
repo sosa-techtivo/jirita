@@ -9,6 +9,7 @@ import { SkeletonBlock } from "@/components/dashboard-shared";
 import { useCurrentUser } from "@/components/current-user-provider";
 import { ProjectLeadTimeTrackingScreen } from "@/components/project-lead-time-tracking-screen";
 import { MemberTrigger } from "@/components/member-profile";
+import { Avatar } from "@/components/ui/avatar";
 import { getTodayISO } from "@/components/tickets/ticket-ui";
 import { ROLE_LABELS } from "@/lib/current-user";
 import { periodDisplayLabel } from "@/lib/mock-time-tracking";
@@ -999,8 +1000,7 @@ export function TimeTrackingScreen() {
                     projectSlug={timeTrackingProjectSlug}
                     className="flex items-center gap-2 min-w-0"
                   >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={entry.avatar} alt={entry.name} className="w-6 h-6 rounded-full flex-shrink-0" />
+                    <Avatar src={entry.avatar} name={entry.name} className="w-6 h-6 rounded-full flex-shrink-0" />
                     <div className="min-w-0">
                       <p className="text-[13px] font-medium text-slate-800 dark:text-zinc-200 truncate">{entry.name}</p>
                       <p className="text-[11px] text-slate-400 dark:text-zinc-500">{entry.periodLabel}</p>
@@ -1093,8 +1093,7 @@ function TimesheetTableRow({
           projectSlug={modalProjectSlug}
           className="flex items-center gap-2.5"
         >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={row.avatar} alt={row.name} className="w-7 h-7 rounded-full flex-shrink-0" />
+          <Avatar src={row.avatar} name={row.name} className="w-7 h-7 rounded-full flex-shrink-0" />
           <div className="min-w-0">
             <p className="font-medium text-slate-800 dark:text-zinc-200 truncate">{row.name}</p>
             <p className="text-[11px] text-slate-400 dark:text-zinc-500 truncate">{row.role}</p>

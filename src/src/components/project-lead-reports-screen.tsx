@@ -6,6 +6,7 @@ import type { ProjectHealth } from "@/lib/mock-projects";
 import type { TeamMember } from "@/lib/mock-team";
 import { utilizationOf, capacityBarColor, capacityTextColor, remainingAvailabilityLabel } from "@/components/member-profile-modal";
 import { MemberTrigger, useMemberProfile } from "@/components/member-profile";
+import { Avatar } from "@/components/ui/avatar";
 import { StatusBadge, HealthBadge } from "@/components/status-badge";
 import { ReportStatusBar, Section, KpiCard, BlockCompletion, AnimatedBar } from "@/components/reports-shared";
 import type { StatusItem } from "@/components/reports-shared";
@@ -1150,16 +1151,14 @@ export function ProjectLeadReportsScreen() {
                             projectSlug={projectFilter.length === 1 ? projectFilter[0] : undefined}
                             className="flex items-center gap-2"
                           >
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img src={group.avatar} alt={group.name} className="w-6 h-6 rounded-full flex-shrink-0" />
+                            <Avatar src={group.avatar} name={group.name} className="w-6 h-6 rounded-full flex-shrink-0" />
                             <span className="text-sm font-medium text-slate-900 dark:text-zinc-100 hover:underline">
                               {group.name}
                             </span>
                           </MemberTrigger>
                         ) : (
                           <span className="flex items-center gap-2">
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img src={group.avatar} alt={group.name} className="w-6 h-6 rounded-full flex-shrink-0" />
+                            <Avatar src={group.avatar} name={group.name} className="w-6 h-6 rounded-full flex-shrink-0" />
                             <span className="text-sm font-medium text-slate-700 dark:text-zinc-300">
                               {group.name}
                             </span>
@@ -1288,8 +1287,7 @@ export function ProjectLeadReportsScreen() {
                               projectSlug={member.projectSlugs.length === 1 ? member.projectSlugs[0] : undefined}
                               className="flex items-center gap-2.5"
                             >
-                              {/* eslint-disable-next-line @next/next/no-img-element */}
-                              <img src={member.avatar} alt={member.name} className="w-6 h-6 rounded-full flex-shrink-0" />
+                              <Avatar src={member.avatar} name={member.name} className="w-6 h-6 rounded-full flex-shrink-0" />
                               <span className="font-medium text-slate-800 dark:text-zinc-200">{member.name}</span>
                             </MemberTrigger>
                           </td>
@@ -1334,8 +1332,7 @@ export function ProjectLeadReportsScreen() {
                           projectSlug={member.projectSlugs.length === 1 ? member.projectSlugs[0] : undefined}
                           className="flex items-center gap-2"
                         >
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img src={member.avatar} alt={member.name} className="w-5 h-5 rounded-full flex-shrink-0" />
+                          <Avatar src={member.avatar} name={member.name} className="w-5 h-5 rounded-full flex-shrink-0" />
                           <span className="text-sm font-medium text-slate-700 dark:text-zinc-300">{member.name}</span>
                         </MemberTrigger>
                         <p className="text-sm font-semibold text-slate-700 dark:text-zinc-200 tabular-nums leading-tight">
@@ -1387,8 +1384,7 @@ export function ProjectLeadReportsScreen() {
                             projectSlug={member.projectSlugs.length === 1 ? member.projectSlugs[0] : undefined}
                             className="flex items-center gap-2.5"
                           >
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img src={member.avatar} alt={member.name} className="w-6 h-6 rounded-full flex-shrink-0" />
+                            <Avatar src={member.avatar} name={member.name} className="w-6 h-6 rounded-full flex-shrink-0" />
                             <span className="font-medium text-slate-800 dark:text-zinc-200">{member.name}</span>
                           </MemberTrigger>
                         </td>
@@ -1442,8 +1438,7 @@ export function ProjectLeadReportsScreen() {
                               projectSlug={member.projectSlugs.length === 1 ? member.projectSlugs[0] : undefined}
                               className="flex items-center gap-2.5"
                             >
-                              {/* eslint-disable-next-line @next/next/no-img-element */}
-                              <img src={member.avatar} alt={member.name} className="w-6 h-6 rounded-full flex-shrink-0" />
+                              <Avatar src={member.avatar} name={member.name} className="w-6 h-6 rounded-full flex-shrink-0" />
                               <span className="font-medium text-slate-800 dark:text-zinc-200">{member.name}</span>
                             </MemberTrigger>
                           </td>

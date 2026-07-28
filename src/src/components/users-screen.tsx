@@ -18,6 +18,7 @@ import {
 } from "@/lib/users";
 import { FilterDropdown } from "@/components/tickets/filter-dropdown";
 import type { DropdownGroup } from "@/components/tickets/filter-dropdown";
+import { Avatar } from "@/components/ui/avatar";
 import { MemberProfileModal, UserStatusBadge, useRefreshOnFocusAndVisibility } from "@/components/member-profile-modal";
 import type { ProfileTab } from "@/components/member-profile-modal";
 import { InviteUserModal } from "@/components/invite-user-modal";
@@ -774,8 +775,7 @@ export function UsersScreen() {
                         onClick={() => openProfile(u, "profile")}
                         className="flex items-center gap-2.5 text-left hover:opacity-80 transition-opacity"
                       >
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={u.avatar} alt={fullName(u)} className="w-7 h-7 rounded-full flex-shrink-0" />
+                        <Avatar src={u.avatar} name={fullName(u)} className="w-7 h-7 rounded-full flex-shrink-0" />
                         <span className="font-medium text-slate-800 dark:text-zinc-200 whitespace-nowrap">{fullName(u)}</span>
                       </button>
                     </td>

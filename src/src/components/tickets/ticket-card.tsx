@@ -3,6 +3,7 @@ import type { Ticket, TicketPriority } from "@/lib/mock-tickets";
 import { getTicketDisplayKey } from "@/lib/mock-tickets";
 import { TicketTypeIcon } from "@/components/tickets/ticket-ui";
 import { MemberTrigger } from "@/components/member-profile";
+import { Avatar } from "@/components/ui/avatar";
 
 function PriorityIndicator({ priority }: { priority: TicketPriority }) {
   // Highest reuses High's exact treatment, one shade darker and bolder —
@@ -112,10 +113,9 @@ export function TicketBoardCard({
             nested
             className="rounded-full"
           >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
+            <Avatar
               src={ticket.assignee.avatar}
-              alt={ticket.assignee.name}
+              name={ticket.assignee.name}
               title={ticket.assignee.name}
               className="w-5 h-5 rounded-full ring-1 ring-white dark:ring-zinc-900"
             />
@@ -198,10 +198,9 @@ export function TicketListRow({
           nested
           className="rounded-full"
         >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
+          <Avatar
             src={ticket.assignee.avatar}
-            alt={ticket.assignee.name}
+            name={ticket.assignee.name}
             title={ticket.assignee.name}
             className="w-6 h-6 rounded-full ring-1 ring-white dark:ring-zinc-900"
           />

@@ -6,6 +6,7 @@ import { getTicketDisplayKey } from "@/lib/mock-tickets";
 import type { OnTicketClick } from "@/components/tickets/board-column";
 import { TicketTypeIcon } from "@/components/tickets/ticket-ui";
 import { MemberTrigger } from "@/components/member-profile";
+import { Avatar } from "@/components/ui/avatar";
 
 // ── Date utilities ──────────────────────────────────────────────────────────
 
@@ -203,8 +204,7 @@ function DayPanel({
                   nested
                   className="flex items-center gap-1.5 mt-2"
                 >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={ticket.assignee.avatar} alt={ticket.assignee.name} className="w-4 h-4 rounded-full" />
+                  <Avatar src={ticket.assignee.avatar} name={ticket.assignee.name} className="w-4 h-4 rounded-full" />
                   <span className="text-[11px] text-slate-500 dark:text-zinc-400">{ticket.assignee.name}</span>
                 </MemberTrigger>
               </button>

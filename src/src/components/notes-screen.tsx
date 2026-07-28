@@ -7,6 +7,7 @@ import { useCurrentUser } from "@/components/current-user-provider";
 import { NoteDetailModal } from "@/components/note-detail-modal";
 import { ErrorToast } from "@/components/tickets/ticket-ui";
 import { TAG_OPTIONS, TagBadge, INPUT, FIELD_LABEL } from "@/components/notes-shared";
+import { Avatar } from "@/components/ui/avatar";
 
 // Real replacement for src/lib/mock-notes.ts's hardcoded array — see
 // src/lib/notes.ts's header comment for the full data story (project_notes
@@ -264,8 +265,7 @@ function NoteCard({
 
       <div className="flex items-center justify-between mt-auto pt-3.5">
         <div className="flex items-center gap-1.5 min-w-0">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={note.author.avatar} alt={note.author.name} className="w-5 h-5 rounded-full flex-shrink-0" />
+          <Avatar src={note.author.avatar} name={note.author.name} className="w-5 h-5 rounded-full flex-shrink-0" />
           <span className="text-xs text-slate-500 dark:text-zinc-400 truncate">{note.author.name}</span>
         </div>
         <span className="flex items-center gap-1 text-xs text-slate-400 dark:text-zinc-500 flex-shrink-0">

@@ -8,6 +8,7 @@ import { SettingRow, SettingGroup } from "@/components/settings-ui";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { getDefaultTicketView, setDefaultTicketView, type DefaultTicketView } from "@/lib/user-preferences";
 import { ALLOWED_AVATAR_TYPES, validateAvatarFile } from "@/lib/avatar-upload";
+import { Avatar } from "@/components/ui/avatar";
 
 const NAME_INPUT =
   "text-[13px] text-slate-800 dark:text-zinc-200 bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-700 " +
@@ -145,12 +146,7 @@ function AvatarPicker({ user }: { user: CurrentUser }) {
         onDrop={handleDrop}
         className="relative w-14 h-14 flex-shrink-0 rounded-full cursor-pointer group"
       >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={preview || user.avatar}
-          alt={user.name}
-          className="w-14 h-14 rounded-full flex-shrink-0"
-        />
+        <Avatar src={preview || user.avatar} name={user.name} className="w-14 h-14 rounded-full flex-shrink-0" />
         <div
           className={`absolute inset-0 rounded-full flex items-center justify-center bg-black/50 transition-opacity ${
             uploading || dragOver ? "opacity-100" : "opacity-0 group-hover:opacity-100"

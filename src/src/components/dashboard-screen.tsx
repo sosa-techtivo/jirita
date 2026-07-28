@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { TicketPreviewPanel } from "@/components/tickets/ticket-preview-panel";
+import { Avatar } from "@/components/ui/avatar";
 import type { Ticket, TicketStatus } from "@/lib/mock-tickets";
 import { getTicketDisplayKey } from "@/lib/mock-tickets";
 import { TicketTypeIcon, parseDisplayDate, getTodayISO, formatISODate } from "@/components/tickets/ticket-ui";
@@ -360,8 +361,7 @@ function WorkloadRow({
         projectSlug={projectSlug}
         className="flex items-center gap-2.5 min-w-0"
       >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={avatar} alt={name} className="w-5 h-5 rounded-full flex-shrink-0" />
+        <Avatar src={avatar} name={name} className="w-5 h-5 rounded-full flex-shrink-0" />
         <span className="text-[12px] text-slate-600 dark:text-zinc-400 w-14 flex-shrink-0 truncate text-left">
           {name.split(" ")[0]}
         </span>

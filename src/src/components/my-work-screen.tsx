@@ -21,6 +21,7 @@ import {
   formatISODate,
 } from "@/components/tickets/ticket-ui";
 import { MemberTrigger } from "@/components/member-profile";
+import { Avatar } from "@/components/ui/avatar";
 import { useCurrentUser } from "@/components/current-user-provider";
 import { SkeletonBlock } from "@/components/dashboard-shared";
 import {
@@ -1078,12 +1079,7 @@ export function MyWorkScreen() {
                         {entries.map((entry) => (
                           <li key={entry.id} className="flex items-start gap-3">
                             <MemberTrigger name={entry.name} avatar={entry.avatar} className="flex-shrink-0 mt-0.5 rounded-full">
-                              {/* eslint-disable-next-line @next/next/no-img-element */}
-                              <img
-                                src={entry.avatar}
-                                alt={entry.name}
-                                className="w-6 h-6 rounded-full"
-                              />
+                              <Avatar src={entry.avatar} name={entry.name} className="w-6 h-6 rounded-full" />
                             </MemberTrigger>
                             <div className="text-sm leading-snug min-w-0 flex-1">
                               <p className="text-slate-700 dark:text-zinc-300">

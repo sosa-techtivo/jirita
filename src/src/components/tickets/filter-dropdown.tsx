@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { Avatar } from "@/components/ui/avatar";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -337,12 +338,7 @@ export function FilterDropdown({
 
                     {/* Avatar */}
                     {option.avatar && (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={option.avatar}
-                        alt={option.label}
-                        className="w-5 h-5 rounded-full flex-shrink-0"
-                      />
+                      <Avatar src={option.avatar} name={option.label} className="w-5 h-5 rounded-full flex-shrink-0" />
                     )}
 
                     <span className="truncate">{option.label}</span>

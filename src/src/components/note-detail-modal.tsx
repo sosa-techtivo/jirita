@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ProjectNote } from "@/lib/mock-notes";
 import { TAG_OPTIONS, TagBadge, INPUT, FIELD_LABEL } from "@/components/notes-shared";
+import { Avatar } from "@/components/ui/avatar";
 
 export function NoteDetailModal({
   note,
@@ -119,8 +120,7 @@ export function NoteDetailModal({
                 </h1>
 
                 <div className="flex items-center gap-2 mt-3 text-xs text-slate-400 dark:text-zinc-500">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={note.author.avatar} alt={note.author.name} className="w-6 h-6 rounded-full" />
+                  <Avatar src={note.author.avatar} name={note.author.name} className="w-6 h-6 rounded-full" />
                   <span className="text-slate-600 font-medium dark:text-zinc-300">{note.author.name}</span>
                   <span className="text-slate-300 dark:text-zinc-700">·</span>
                   <span>Updated {note.updatedAt}</span>

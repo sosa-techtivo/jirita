@@ -6,6 +6,7 @@ import { useCurrentUser } from "@/components/current-user-provider";
 import { useRefreshOnFocusAndVisibility } from "@/components/member-profile-modal";
 import { formatRelativeTime } from "@/lib/tickets";
 import { FALLBACK_AVATAR } from "@/lib/current-user";
+import { Avatar } from "@/components/ui/avatar";
 import {
   loadRecentNotifications,
   loadUnreadNotificationCount,
@@ -310,10 +311,9 @@ export function NotificationBell() {
                       : "hover:bg-slate-50 dark:hover:bg-zinc-800/60",
                   ].join(" ")}
                 >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
+                  <Avatar
                     src={n.actor?.avatar ?? FALLBACK_AVATAR}
-                    alt={n.actor?.name ?? ""}
+                    name={n.actor?.name ?? ""}
                     className="w-7 h-7 rounded-full flex-shrink-0"
                   />
                   <div className="flex-1 min-w-0">

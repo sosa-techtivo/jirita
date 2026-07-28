@@ -22,6 +22,7 @@ import type {
 import { StatusBadge as TicketStatusBadge, PriorityBadge, STATUS_LABEL, getTodayISO } from "@/components/tickets/ticket-ui";
 import type { TicketStatus } from "@/lib/mock-tickets";
 import { FALLBACK_AVATAR } from "@/lib/current-user";
+import { Avatar } from "@/components/ui/avatar";
 import { SkeletonBlock } from "@/components/dashboard-shared";
 import { FilterDropdown, type DropdownGroup } from "@/components/tickets/filter-dropdown";
 import { PeriodSelector, getCurrentWeekRange, getCurrentMonthRange } from "@/components/time-tracking-screen";
@@ -402,10 +403,9 @@ export function WorkHistoryScreen({ slug, userId }: { slug?: string; userId: str
     <div className="max-w-4xl mx-auto px-4 sm:px-8 py-10">
       {mode === "project" ? (
         <div className="flex items-center gap-3">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
+          <Avatar
             src={member?.avatar ?? FALLBACK_AVATAR}
-            alt={member?.name ?? "Team member"}
+            name={member?.name ?? "Team member"}
             className="w-10 h-10 rounded-full flex-shrink-0"
           />
           <div>
@@ -418,10 +418,9 @@ export function WorkHistoryScreen({ slug, userId }: { slug?: string; userId: str
       ) : (
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div className="flex items-center gap-3">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
+            <Avatar
               src={member?.avatar ?? FALLBACK_AVATAR}
-              alt={member?.name ?? "Team member"}
+              name={member?.name ?? "Team member"}
               className="w-10 h-10 rounded-full flex-shrink-0"
             />
             <div>

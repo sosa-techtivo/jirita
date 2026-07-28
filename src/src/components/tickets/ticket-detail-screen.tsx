@@ -60,6 +60,7 @@ import {
 import { loadProjectTeam, loadProjectDetail, type OrgMember } from "@/lib/projects";
 import { FALLBACK_AVATAR } from "@/lib/current-user";
 import { MemberTrigger } from "@/components/member-profile";
+import { Avatar } from "@/components/ui/avatar";
 import { useCurrentUser } from "@/components/current-user-provider";
 import { useOrganizationProjects } from "@/components/organization-projects-provider";
 import { getSupabaseBrowserClient } from "@/lib/supabase-client";
@@ -372,8 +373,7 @@ function EditableSidebarAssignee({
             projectSlug={projectSlug}
             className="flex items-center gap-1.5 min-w-0"
           >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={value.avatar} alt={value.name} className="w-5 h-5 rounded-full flex-shrink-0" />
+            <Avatar src={value.avatar} name={value.name} className="w-5 h-5 rounded-full flex-shrink-0" />
             <span className="truncate">{value.name}</span>
           </MemberTrigger>
           <button
@@ -799,12 +799,7 @@ function RelatedTicketCard({
             nested
             className="ml-auto flex-shrink-0 rounded-full"
           >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={ticket.assignee.avatar}
-              alt={ticket.assignee.name}
-              className="w-3.5 h-3.5 rounded-full flex-shrink-0"
-            />
+            <Avatar src={ticket.assignee.avatar} name={ticket.assignee.name} className="w-3.5 h-3.5 rounded-full flex-shrink-0" />
           </MemberTrigger>
         </div>
         <p className="text-[11px] text-slate-700 dark:text-zinc-300 leading-snug line-clamp-2 pr-2">
@@ -1443,8 +1438,7 @@ function AttachmentRow({
           <span>{file.size}</span>
           <span>·</span>
           <MemberTrigger name={file.addedBy} avatar={file.avatar} className="flex items-center gap-1.5">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={file.avatar} alt={file.addedBy} className="w-3.5 h-3.5 rounded-full flex-shrink-0" />
+            <Avatar src={file.avatar} name={file.addedBy} className="w-3.5 h-3.5 rounded-full flex-shrink-0" />
             <span>{file.addedBy}</span>
           </MemberTrigger>
           <span>·</span>
@@ -2251,8 +2245,7 @@ function DevelopmentSection({ slug, ticketCode }: { slug: string; ticketCode: st
                         {displayMessage}
                       </p>
                       <p className="text-[11px] text-slate-400 dark:text-zinc-600 mt-0.5 flex items-center gap-1.5 flex-wrap">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={commit.authorAvatar ?? FALLBACK_AVATAR} alt="" className="w-3.5 h-3.5 rounded-full flex-shrink-0" />
+                        <Avatar src={commit.authorAvatar ?? FALLBACK_AVATAR} name={commit.authorName} alt="" className="w-3.5 h-3.5 rounded-full flex-shrink-0" />
                         <span className="truncate">{commit.authorName}</span>
                         <span aria-hidden="true">·</span>
                         <span className="flex-shrink-0">{formatRelativeTime(commit.authoredAt)}</span>
@@ -2285,8 +2278,7 @@ function DevelopmentSection({ slug, ticketCode }: { slug: string; ticketCode: st
                         {pr.title}
                       </p>
                       <p className="text-[11px] text-slate-400 dark:text-zinc-600 mt-0.5 flex items-center gap-1.5 flex-wrap">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={pr.authorAvatar ?? FALLBACK_AVATAR} alt="" className="w-3.5 h-3.5 rounded-full flex-shrink-0" />
+                        <Avatar src={pr.authorAvatar ?? FALLBACK_AVATAR} name={pr.authorName} alt="" className="w-3.5 h-3.5 rounded-full flex-shrink-0" />
                         <span className="truncate">{pr.authorName}</span>
                         <span aria-hidden="true">·</span>
                         <span className="flex-shrink-0">{formatRelativeTime(pr.updatedAt)}</span>
@@ -3384,10 +3376,9 @@ export function TicketDetailScreen({
                       projectSlug={ticket.projectSlug}
                       className="flex-shrink-0 mt-0.5 rounded-full"
                     >
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
+                      <Avatar
                         src={c.avatar}
-                        alt={c.name}
+                        name={c.name}
                         className="w-7 h-7 rounded-full flex-shrink-0 ring-1 ring-slate-200 dark:ring-zinc-700"
                       />
                     </MemberTrigger>

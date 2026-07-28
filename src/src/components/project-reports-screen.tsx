@@ -23,6 +23,7 @@ import {
   utilizationOf,
 } from "@/components/member-profile-modal";
 import { useMemberProfile } from "@/components/member-profile";
+import { Avatar } from "@/components/ui/avatar";
 
 // Real replacement for this screen's previous org-wide mock ticket list and
 // mock-team.ts roster — every KPI below is scoped to this one project via
@@ -449,8 +450,7 @@ export function ProjectReportsScreen({ slug }: { slug: string }) {
                     onClick={() => openMemberProfile({ name: member.name, avatar: member.avatar, role: member.role, projectSlug: member.projectSlug })}
                     className="w-full flex items-center gap-3 py-2.5 px-2 -mx-2 rounded-lg text-left hover:bg-slate-50 dark:hover:bg-zinc-800/50 transition-colors"
                   >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={member.avatar} alt={member.name} className="w-8 h-8 rounded-full flex-shrink-0" />
+                    <Avatar src={member.avatar} name={member.name} className="w-8 h-8 rounded-full flex-shrink-0" />
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-slate-800 dark:text-zinc-200 truncate">{member.name}</p>
                       <p className="text-xs text-slate-400 dark:text-zinc-500 truncate">{member.role}</p>

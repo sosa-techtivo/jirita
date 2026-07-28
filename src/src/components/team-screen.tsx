@@ -17,6 +17,7 @@ import {
   remainingAvailabilityLabel,
 } from "@/components/member-profile-modal";
 import { useMemberProfile } from "@/components/member-profile";
+import { Avatar } from "@/components/ui/avatar";
 import { loadProjectTeam, loadOrganizationMembers, addProjectMember } from "@/lib/projects";
 import { loadProjectTickets } from "@/lib/tickets";
 import { AddTeamMemberModal } from "@/components/add-team-member-modal";
@@ -377,8 +378,7 @@ function MemberCard({ member, slug, onOpen }: { member: TeamMember; slug: string
       className="flex flex-col rounded-xl border border-slate-200 bg-white p-4 shadow-sm shadow-slate-200/40 cursor-pointer outline-none transition-all duration-150 hover:-translate-y-px hover:bg-slate-50/60 hover:shadow-md focus-visible:ring-2 focus-visible:ring-brand-500/40 dark:border-zinc-700/70 dark:bg-zinc-900 dark:shadow-black/20 dark:hover:bg-zinc-800/40"
     >
       <div className="flex items-start gap-3">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={member.avatar} alt={member.name} className="w-10 h-10 rounded-full flex-shrink-0" />
+        <Avatar src={member.avatar} name={member.name} className="w-10 h-10 rounded-full flex-shrink-0" />
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5 min-w-0">
             <h3 className="text-sm font-semibold text-slate-900 dark:text-zinc-100 truncate">{member.name}</h3>

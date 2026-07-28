@@ -10,6 +10,7 @@ import { loadProjectTeam } from "@/lib/projects";
 import { loadProjectTickets } from "@/lib/tickets";
 import { getTodayISO, parseDisplayDate } from "@/components/tickets/ticket-ui";
 import { FALLBACK_AVATAR } from "@/lib/current-user";
+import { Avatar } from "@/components/ui/avatar";
 
 // A Member doesn't manage projects — they work inside them. So this page
 // never shows org-wide status/priority/health or ticket-volume metrics; it
@@ -222,8 +223,7 @@ function MemberProjectCardRow({ card }: { card: MemberProjectCard }) {
       <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-2">
         <div className="flex items-center gap-2">
           {card.leadAvatar && (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={card.leadAvatar} alt={card.leadName} className="w-6 h-6 rounded-full flex-shrink-0" />
+            <Avatar src={card.leadAvatar} name={card.leadName} className="w-6 h-6 rounded-full flex-shrink-0" />
           )}
           <span className="text-sm text-slate-600 dark:text-zinc-300">
             <span className="text-slate-400 dark:text-zinc-500">Lead:</span> {card.leadName}

@@ -10,6 +10,7 @@ import { useCurrentUser } from "@/components/current-user-provider";
 import { canManage } from "@/lib/current-user";
 import { ProjectCategoryBadge, StatusBadge } from "@/components/status-badge";
 import { TicketPreviewPanel } from "@/components/tickets/ticket-preview-panel";
+import { Avatar } from "@/components/ui/avatar";
 import { MemberTrigger, useMemberProfile } from "@/components/member-profile";
 import { loadProjectDetail, loadProjectTeam } from "@/lib/projects";
 import type { ProjectDetail, ProjectTeamMember } from "@/lib/projects";
@@ -79,12 +80,7 @@ function AttentionRow({
         nested
         className="flex-shrink-0 mt-0.5 rounded-full"
       >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={ticket.assignee.avatar}
-          alt={ticket.assignee.name}
-          className="w-6 h-6 rounded-full flex-shrink-0 mt-0.5"
-        />
+        <Avatar src={ticket.assignee.avatar} name={ticket.assignee.name} className="w-6 h-6 rounded-full flex-shrink-0 mt-0.5" />
       </MemberTrigger>
     </button>
   );
@@ -505,8 +501,7 @@ export function ProjectLeadProjectOverview({ slug = "mobile-banking-app" }: { sl
                       projectSlug={slug}
                       className="flex items-center gap-2.5 w-full text-left"
                     >
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={member.avatar} alt={member.name} className="w-7 h-7 rounded-full" />
+                      <Avatar src={member.avatar} name={member.name} className="w-7 h-7 rounded-full" />
                       <div className="text-sm leading-tight flex-1">
                         <p className="font-medium text-slate-800 dark:text-zinc-200">{member.name}</p>
                         <p className="text-xs text-slate-400 dark:text-zinc-500">{member.role}</p>

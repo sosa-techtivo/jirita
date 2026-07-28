@@ -4,6 +4,7 @@ import { getTicketDisplayKey } from "@/lib/mock-tickets";
 import type { OnTicketClick } from "@/components/tickets/board-column";
 import { TicketTypeIcon, PRIORITY_VALUES } from "@/components/tickets/ticket-ui";
 import { MemberTrigger } from "@/components/member-profile";
+import { Avatar } from "@/components/ui/avatar";
 
 // ── Colours ─────────────────────────────────────────────────────────────────
 
@@ -190,8 +191,7 @@ function AssigneeWorkload({ tickets }: { tickets: Ticket[] }) {
           <div key={name} className="space-y-1.5">
             <div className="flex items-center justify-between gap-2">
               <MemberTrigger name={name} avatar={avatar} projectSlug={projectSlug} className="flex items-center gap-2 min-w-0">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={avatar} alt={name} className="w-5 h-5 rounded-full flex-shrink-0" />
+                <Avatar src={avatar} name={name} className="w-5 h-5 rounded-full flex-shrink-0" />
                 <span className="text-[12px] text-slate-700 dark:text-zinc-300 truncate">{name}</span>
               </MemberTrigger>
               <span className="text-[12px] font-semibold text-slate-800 dark:text-zinc-200 tabular-nums flex-shrink-0">
@@ -399,8 +399,7 @@ function RecentlyCompleted({
                   nested
                   className="rounded-full"
                 >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={t.assignee.avatar} alt={t.assignee.name} className="w-5 h-5 rounded-full" title={t.assignee.name} />
+                  <Avatar src={t.assignee.avatar} name={t.assignee.name} className="w-5 h-5 rounded-full" title={t.assignee.name} />
                 </MemberTrigger>
                 <p className="text-[10px] text-slate-400 dark:text-zinc-600 whitespace-nowrap hidden sm:block">
                   {t.updatedAt.replace("Updated ", "")}

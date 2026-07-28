@@ -12,6 +12,7 @@ import type { MainNavKey } from "@/lib/nav-config";
 import { CreateProjectModal } from "@/components/create-project-modal";
 import { useMemberProfile } from "@/components/member-profile";
 import { searchGlobal } from "@/lib/search";
+import { Avatar } from "@/components/ui/avatar";
 import type { GlobalSearchProject, GlobalSearchResults, GlobalSearchTicket, GlobalSearchUser } from "@/lib/search";
 
 // Main nav link content, keyed so `mainNavForRole`'s order (per role) drives
@@ -455,8 +456,7 @@ export function Sidebar({
                           ].join(" ")}
                         >
                           {result.avatarUrl && (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img src={result.avatarUrl} alt={result.fullName} className="w-6 h-6 rounded-full flex-shrink-0" />
+                            <Avatar src={result.avatarUrl} name={result.fullName} className="w-6 h-6 rounded-full flex-shrink-0" />
                           )}
                           <div className="min-w-0">
                             <p className="text-[13px] text-slate-700 dark:text-zinc-200 truncate">{result.fullName}</p>
@@ -606,8 +606,7 @@ export function Sidebar({
       </div>
 
       <div className="mt-auto border-t border-slate-100 px-3 py-3 flex items-center gap-2 dark:border-zinc-800">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={user.avatar} alt={user.name} className="w-7 h-7 rounded-full" />
+        <Avatar src={user.avatar} name={user.name} className="w-7 h-7 rounded-full" />
         <div className="text-sm leading-tight">
           <p className="font-medium text-slate-800 dark:text-zinc-200">{user.name}</p>
           <p className="text-xs text-slate-400 dark:text-zinc-500">{user.discipline}</p>

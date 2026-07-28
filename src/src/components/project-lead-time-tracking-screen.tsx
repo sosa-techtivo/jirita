@@ -6,6 +6,7 @@ import { FilterDropdown } from "@/components/tickets/filter-dropdown";
 import type { DropdownGroup } from "@/components/tickets/filter-dropdown";
 import { KpiCard, Section } from "@/components/reports-shared";
 import { SkeletonBlock } from "@/components/dashboard-shared";
+import { Avatar } from "@/components/ui/avatar";
 import {
   PeriodSelector,
   StatusPill,
@@ -830,8 +831,7 @@ export function ProjectLeadTimeTrackingScreen() {
                     projectSlug={entry.projectSlug}
                     className="flex items-center gap-2 min-w-0"
                   >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={entry.avatar} alt={entry.name} className="w-6 h-6 rounded-full flex-shrink-0" />
+                    <Avatar src={entry.avatar} name={entry.name} className="w-6 h-6 rounded-full flex-shrink-0" />
                     <div className="min-w-0">
                       <p className="text-[13px] font-medium text-slate-800 dark:text-zinc-200 truncate">{entry.name}</p>
                       <p className="text-[11px] text-slate-400 dark:text-zinc-500">{entry.periodLabel}</p>
@@ -905,8 +905,7 @@ function TimesheetTableRow({ row }: { row: LedTimesheetViewRow }) {
           projectSlug={row.projectSlug}
           className="flex items-center gap-2.5"
         >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={row.avatar} alt={row.name} className="w-7 h-7 rounded-full flex-shrink-0" />
+          <Avatar src={row.avatar} name={row.name} className="w-7 h-7 rounded-full flex-shrink-0" />
           <div className="min-w-0">
             <p className="font-medium text-slate-800 dark:text-zinc-200 truncate">{row.name}</p>
             <p className="text-[11px] text-slate-400 dark:text-zinc-500 truncate">{row.role}</p>

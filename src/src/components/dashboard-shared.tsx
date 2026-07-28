@@ -5,6 +5,7 @@ import { StatusBadge, TicketTypeIcon } from "@/components/tickets/ticket-ui";
 import type { Ticket } from "@/lib/mock-tickets";
 import { getTicketDisplayKey, getTicketById } from "@/lib/mock-tickets";
 import { MemberTrigger } from "@/components/member-profile";
+import { Avatar } from "@/components/ui/avatar";
 
 // Pieces shared between the Admin dashboard (dashboard-screen.tsx) and the
 // Project Lead dashboard (project-lead-dashboard.tsx). Lives in its own module
@@ -294,12 +295,7 @@ export function RecentActivityList({
               projectSlug={entry.projectSlug}
               className="flex-shrink-0 mt-0.5 rounded-full"
             >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={entry.avatar}
-                alt={entry.name}
-                className="w-6 h-6 rounded-full"
-              />
+              <Avatar src={entry.avatar} name={entry.name} className="w-6 h-6 rounded-full" />
             </MemberTrigger>
             <div className="text-[13px] leading-snug min-w-0 flex-1">
               <p className="text-slate-700 dark:text-zinc-300">

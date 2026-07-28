@@ -28,6 +28,7 @@ import {
   type UpdateTicketInput,
 } from "@/lib/tickets";
 import { MemberTrigger } from "@/components/member-profile";
+import { Avatar } from "@/components/ui/avatar";
 import { FALLBACK_AVATAR } from "@/lib/current-user";
 import type { OrgMember } from "@/lib/projects";
 
@@ -175,8 +176,7 @@ function PreviewAssigneeControl({
         projectSlug={projectSlug}
         className="flex items-center gap-1.5 min-w-0"
       >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={value.avatar} alt={value.name} className="w-4 h-4 rounded-full flex-shrink-0" />
+        <Avatar src={value.avatar} name={value.name} className="w-4 h-4 rounded-full flex-shrink-0" />
         <span className="truncate">{value.name}</span>
       </MemberTrigger>
       <button
@@ -698,12 +698,7 @@ export function TicketPreviewPanel({
                     projectSlug={t.projectSlug}
                     className="flex items-center gap-1.5 min-w-0"
                   >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={t.assignee.avatar}
-                      alt={t.assignee.name}
-                      className="w-4 h-4 rounded-full flex-shrink-0"
-                    />
+                    <Avatar src={t.assignee.avatar} name={t.assignee.name} className="w-4 h-4 rounded-full flex-shrink-0" />
                     <span className="truncate">{t.assignee.name}</span>
                   </MemberTrigger>
                 )}
@@ -823,10 +818,9 @@ export function TicketPreviewPanel({
                     projectSlug={t.projectSlug}
                     className="flex-shrink-0 mt-0.5 rounded-full"
                   >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
+                    <Avatar
                       src={c.avatar}
-                      alt={c.name}
+                      name={c.name}
                       className="w-6 h-6 rounded-full flex-shrink-0 ring-1 ring-white dark:ring-zinc-900"
                     />
                   </MemberTrigger>

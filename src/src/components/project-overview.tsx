@@ -8,6 +8,7 @@ import { TicketTypeIcon, getTodayISO, parseDisplayDate } from "@/components/tick
 import { TicketListRow } from "@/components/tickets/ticket-card";
 import { BoardView } from "@/components/tickets/board-view";
 import { MemberTrigger } from "@/components/member-profile";
+import { Avatar } from "@/components/ui/avatar";
 import { useCurrentUser } from "@/components/current-user-provider";
 import { useOrganizationProjects } from "@/components/organization-projects-provider";
 import { ProjectCategoryBadge, StatusBadge } from "@/components/status-badge";
@@ -190,12 +191,7 @@ function AttentionRow({ item, slug, onOpen }: { item: AttentionItem; slug: strin
         nested
         className="flex-shrink-0 mt-0.5 rounded-full"
       >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={item.ticket.assignee.avatar}
-          alt={item.ticket.assignee.name}
-          className="w-6 h-6 rounded-full flex-shrink-0 mt-0.5"
-        />
+        <Avatar src={item.ticket.assignee.avatar} name={item.ticket.assignee.name} className="w-6 h-6 rounded-full flex-shrink-0 mt-0.5" />
       </MemberTrigger>
     </button>
   );
@@ -684,8 +680,7 @@ export function ProjectOverview({ slug = "mobile-banking-app" }: { slug?: string
                 {myActivity.map((entry) => (
                   <li key={entry.id} className="flex items-start gap-3">
                     <MemberTrigger name={entry.name} avatar={entry.avatar} projectSlug={slug} className="flex-shrink-0 mt-0.5 rounded-full">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={entry.avatar} alt={entry.name} className="w-6 h-6 rounded-full" />
+                      <Avatar src={entry.avatar} name={entry.name} className="w-6 h-6 rounded-full" />
                     </MemberTrigger>
                     <div className="text-sm leading-snug min-w-0 flex-1">
                       <p className="text-slate-700 dark:text-zinc-300">
@@ -746,8 +741,7 @@ export function ProjectOverview({ slug = "mobile-banking-app" }: { slug?: string
                       projectSlug={slug}
                       className="flex items-center gap-2.5 w-full text-left"
                     >
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={member.avatar} alt={member.name} className="w-7 h-7 rounded-full" />
+                      <Avatar src={member.avatar} name={member.name} className="w-7 h-7 rounded-full" />
                       <div className="text-sm leading-tight flex-1">
                         <p className="font-medium text-slate-800 dark:text-zinc-200">{member.name}</p>
                         <p className="text-xs text-slate-400 dark:text-zinc-500">{member.role}</p>

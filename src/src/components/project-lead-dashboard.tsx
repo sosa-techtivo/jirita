@@ -7,6 +7,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useCurrentUser } from "@/components/current-user-provider";
 import type { TeamMember } from "@/lib/mock-team";
 import { TicketPreviewPanel } from "@/components/tickets/ticket-preview-panel";
+import { Avatar } from "@/components/ui/avatar";
 import type { Ticket } from "@/lib/mock-tickets";
 import { getTicketDisplayKey } from "@/lib/mock-tickets";
 import { TicketTypeIcon, parseDisplayDate, getTodayISO, formatISODate, PRIORITY_VALUES, ErrorToast } from "@/components/tickets/ticket-ui";
@@ -226,8 +227,7 @@ function TeamCapacityRow({ member, onOpen }: { member: TeamMember; onOpen: (m: T
       onClick={() => onOpen(member)}
       className={`w-full flex items-center gap-3 py-2.5 px-2.5 -mx-2.5 rounded-lg text-left transition-colors hover:bg-slate-50 dark:hover:bg-zinc-800/50 ${isOver ? "bg-red-50/60 dark:bg-red-950/10" : ""}`}
     >
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={member.avatar} alt={member.name} className="w-8 h-8 rounded-full flex-shrink-0" />
+      <Avatar src={member.avatar} name={member.name} className="w-8 h-8 rounded-full flex-shrink-0" />
       <div className="w-28 flex-shrink-0 min-w-0">
         <p className="text-[13px] font-medium text-slate-800 dark:text-zinc-200 truncate">{member.name}</p>
         <p className="text-[11px] text-slate-400 dark:text-zinc-500 truncate">{member.role}</p>

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { logout } from "@/lib/auth";
 import { useCurrentUser } from "@/components/current-user-provider";
+import { Avatar } from "@/components/ui/avatar";
 
 // Header avatar → small account popover with a Logout action. Modeled on
 // FilterDropdown's trigger/popover shell (outside-click + Escape to close)
@@ -48,8 +49,7 @@ export function AccountMenu() {
         aria-label="Account menu"
         className="block rounded-full ring-offset-2 ring-offset-white dark:ring-offset-[var(--background)] focus:outline-none focus:ring-2 focus:ring-brand-500/50"
       >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={user.avatar} alt={user.name} className="w-7 h-7 rounded-full" />
+        <Avatar src={user.avatar} name={user.name} className="w-7 h-7 rounded-full" />
       </button>
 
       <div

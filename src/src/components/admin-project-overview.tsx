@@ -13,6 +13,7 @@ import { canManage } from "@/lib/current-user";
 import { SkeletonBlock } from "@/components/dashboard-shared";
 import { ProjectCategoryBadge, StatusBadge } from "@/components/status-badge";
 import { TicketPreviewPanel } from "@/components/tickets/ticket-preview-panel";
+import { Avatar } from "@/components/ui/avatar";
 import { presetTicketsFilter } from "@/components/tickets-screen";
 import { loadProjectDetail, loadProjectTeam } from "@/lib/projects";
 import type { ProjectDetail, ProjectTeamMember } from "@/lib/projects";
@@ -197,12 +198,7 @@ export function TicketRow({
         nested
         className="flex-shrink-0 rounded-full"
       >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={ticket.assignee.avatar}
-          alt={ticket.assignee.name}
-          className="w-6 h-6 rounded-full flex-shrink-0"
-        />
+        <Avatar src={ticket.assignee.avatar} name={ticket.assignee.name} className="w-6 h-6 rounded-full flex-shrink-0" />
       </MemberTrigger>
     </button>
   );
@@ -832,8 +828,7 @@ export function AdminProjectOverview({ slug = "mobile-banking-app" }: { slug?: s
                 {visibleActivity.map((entry) => (
                   <li key={entry.id} className="flex items-start gap-3">
                     <MemberTrigger name={entry.name} avatar={entry.avatar} projectSlug={slug} className="flex-shrink-0 mt-0.5 rounded-full">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={entry.avatar} alt={entry.name} className="w-6 h-6 rounded-full" />
+                      <Avatar src={entry.avatar} name={entry.name} className="w-6 h-6 rounded-full" />
                     </MemberTrigger>
                     <div className="text-sm leading-snug min-w-0 flex-1">
                       <p className="text-slate-700 dark:text-zinc-300">
@@ -903,8 +898,7 @@ export function AdminProjectOverview({ slug = "mobile-banking-app" }: { slug?: s
                       projectSlug={slug}
                       className="flex items-center gap-2.5 w-full text-left"
                     >
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={member.avatar} alt={member.name} className="w-7 h-7 rounded-full" />
+                      <Avatar src={member.avatar} name={member.name} className="w-7 h-7 rounded-full" />
                       <div className="text-sm leading-tight flex-1">
                         <p className="font-medium text-slate-800 dark:text-zinc-200">{member.name}</p>
                         <p className="text-xs text-slate-400 dark:text-zinc-500">{member.role}</p>
