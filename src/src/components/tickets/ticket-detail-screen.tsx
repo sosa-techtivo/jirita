@@ -1215,6 +1215,14 @@ type UploadingItem = {
   progress: number;
 };
 
+// A file picked in the comment composer, staged locally before the
+// comment (and therefore its comment_id) exists — see PendingCommentFileRow
+// and submitComment.
+type PendingCommentFile = {
+  id: string;
+  file: File;
+};
+
 const EXT_COLOR: Record<string, string> = {
   fig:  "bg-purple-100 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400",
   pdf:  "bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400",
@@ -1522,6 +1530,84 @@ function AttachmentRow({
         document.body
       )}
     </li>
+  );
+}
+
+// ── CommentAttachmentRow ─────────────────────────────────────────────────────
+// Read-only by design: comment attachments are view/preview/download only in
+// this feature (no rename, delete, or upload-from-comment) — see the
+// Comments section below. Reuses the same AttachmentPreviewModal, ext badge,
+// and downloadTicketAttachment as the general AttachmentsSection so preview
+// and download behavior stay identical.
+
+function CommentAttachmentRow({ file }: { file: AttachmentItem }) {
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const previewKind = getPreviewKind(file.ext);
+  const extColor = EXT_COLOR[file.ext] ?? "bg-slate-100 text-slate-500 dark:bg-zinc-800 dark:text-zinc-400";
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => {
+          if (previewKind) {
+            setPreviewOpen(true);
+            return;
+          }
+          downloadTicketAttachment(file.storagePath, file.name).then((result) => {
+            if (result.status === "error") {
+              console.warn("[ticket-detail] comment attachment download failed:", result.message);
+            }
+          });
+        }}
+        className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg border border-slate-100 dark:border-zinc-800 bg-white dark:bg-zinc-950/40 hover:border-slate-200 dark:hover:border-zinc-700 transition-colors text-left"
+      >
+        <span className={"w-5 h-5 rounded flex items-center justify-center flex-shrink-0 text-[7px] font-bold uppercase tracking-wide " + extColor}>
+          {file.ext}
+        </span>
+        <span className="flex-1 min-w-0 text-[12px] font-medium text-slate-700 dark:text-zinc-300 truncate">
+          {file.name}
+        </span>
+        <span className="text-[11px] text-slate-400 dark:text-zinc-600 flex-shrink-0">{file.size}</span>
+      </button>
+
+      {previewOpen && previewKind && createPortal(
+        <AttachmentPreviewModal file={file} kind={previewKind} onClose={() => setPreviewOpen(false)} />,
+        document.body
+      )}
+    </>
+  );
+}
+
+// ── PendingCommentFileRow ────────────────────────────────────────────────────
+// Staged, not-yet-uploaded file in the comment composer — same ext badge and
+// size formatting as CommentAttachmentRow/AttachmentRow, but with a Remove
+// action instead of preview/download since there's nothing to open yet.
+
+function PendingCommentFileRow({ file, onRemove }: { file: File; onRemove: () => void }) {
+  const ext = getExt(file.name);
+  const extColor = EXT_COLOR[ext] ?? "bg-slate-100 text-slate-500 dark:bg-zinc-800 dark:text-zinc-400";
+
+  return (
+    <div className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg border border-slate-100 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-900/60">
+      <span className={"w-5 h-5 rounded flex items-center justify-center flex-shrink-0 text-[7px] font-bold uppercase tracking-wide " + extColor}>
+        {ext}
+      </span>
+      <span className="flex-1 min-w-0 text-[12px] font-medium text-slate-700 dark:text-zinc-300 truncate">
+        {file.name}
+      </span>
+      <span className="text-[11px] text-slate-400 dark:text-zinc-600 flex-shrink-0">{formatBytes(file.size)}</span>
+      <button
+        type="button"
+        aria-label={`Remove ${file.name}`}
+        onClick={onRemove}
+        className="p-1 rounded text-slate-400 dark:text-zinc-600 hover:text-slate-600 dark:hover:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors flex-shrink-0"
+      >
+        <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+          <path strokeLinecap="round" d="M18 6L6 18M6 6l12 12" />
+        </svg>
+      </button>
+    </div>
   );
 }
 
@@ -3027,6 +3113,10 @@ export function TicketDetailScreen({
   const [commentDraft, setCommentDraft] = useState("");
   const [submittingComment, setSubmittingComment] = useState(false);
   const commentTextareaRef = useRef<HTMLTextAreaElement>(null);
+  // Files picked via the composer's Attach button — local only, no upload
+  // starts until the comment itself is created (see submitComment below).
+  const [pendingCommentFiles, setPendingCommentFiles] = useState<PendingCommentFile[]>([]);
+  const commentFileInputRef = useRef<HTMLInputElement>(null);
   const [loggedEntries, setLoggedEntries] = useState<TimeEntry[]>([]);
   const [members, setMembers] = useState<OrgMember[]>([]);
   // Real, per-organization label catalog — starts empty; merged with the
@@ -3234,8 +3324,16 @@ export function TicketDetailScreen({
   function cancelComment() {
     setCommentDraft("");
     setAddingComment(false);
+    setPendingCommentFiles([]);
   }
 
+  // Attachments only ever start uploading after the comment itself exists —
+  // never before "Comment" is pressed, and never at all if the comment
+  // insert fails (see the early return on result.status === "error" below).
+  // Each upload targets the same ticket_id/uploaded_by-default path as a
+  // direct ticket upload, just with the freshly created comment's id
+  // attached (see uploadTicketAttachment's commentId param) — so a comment
+  // attachment can never reference a comment_id that doesn't exist.
   async function submitComment() {
     const trimmed = commentDraft.trim();
     if (!trimmed || submittingComment) return;
@@ -3247,12 +3345,59 @@ export function TicketDetailScreen({
         showError(result.message);
         return;
       }
-      setComments((prev) => [result.comment, ...prev]);
+      const newComment = result.comment;
+      setComments((prev) => [newComment, ...prev]);
       setCommentDraft("");
       setAddingComment(false);
       // A database trigger already created the matching "<name> added a
       // comment" ticket_activity row as part of the same insert.
       refreshActivity();
+
+      const filesToUpload = pendingCommentFiles;
+      setPendingCommentFiles([]);
+
+      if (filesToUpload.length > 0) {
+        const uploads = await Promise.all(
+          filesToUpload.map(async (item) => {
+            try {
+              return { name: item.file.name, result: await uploadTicketAttachment(ticketId, item.file, newComment.id) };
+            } catch (err) {
+              return {
+                name: item.file.name,
+                result: { status: "error" as const, message: err instanceof Error ? err.message : "Something went wrong. Please try again." },
+              };
+            }
+          })
+        );
+
+        const failedNames: string[] = [];
+        let anySucceeded = false;
+        for (const upload of uploads) {
+          if (upload.result.status === "error") {
+            console.warn("[ticket-detail] comment attachment upload failed:", upload.name, upload.result.message);
+            failedNames.push(upload.name);
+            continue;
+          }
+          anySucceeded = true;
+          const uploadedAttachment = upload.result.attachment;
+          setComments((prev) =>
+            prev.map((c) =>
+              c.id === newComment.id ? { ...c, attachments: [...c.attachments, uploadedAttachment] } : c
+            )
+          );
+        }
+        // Each successful upload already logged its own real
+        // "attachment_uploaded" activity row (same trigger as a direct
+        // ticket upload) — refetch once instead of inventing local entries.
+        if (anySucceeded) refreshActivity();
+        if (failedNames.length > 0) {
+          showError(
+            failedNames.length === 1
+              ? `Comment posted, but "${failedNames[0]}" failed to attach.`
+              : `Comment posted, but these files failed to attach: ${failedNames.join(", ")}.`
+          );
+        }
+      }
     } catch (err) {
       console.warn("[ticket-detail] failed to post comment:", err);
       showError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
@@ -3439,6 +3584,13 @@ export function TicketDetailScreen({
                           {c.text}
                         </p>
                       </div>
+                      {c.attachments.length > 0 && (
+                        <div className="mt-2 space-y-1.5">
+                          {c.attachments.map((a) => (
+                            <CommentAttachmentRow key={a.id} file={toAttachmentItem(a)} />
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -3457,27 +3609,66 @@ export function TicketDetailScreen({
                       onChange={(e) => setCommentDraft(e.target.value)}
                       className="w-full resize-none text-[13px] text-slate-700 dark:text-zinc-300 leading-relaxed bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-700 rounded-lg px-3 py-2.5 outline-none focus:border-brand-500 dark:focus:border-brand-500 focus:ring-1 focus:ring-brand-500/30 placeholder:text-slate-300 dark:placeholder:text-zinc-700"
                     />
-                    <div className="flex items-center justify-end gap-2 mt-2">
+
+                    <input
+                      ref={commentFileInputRef}
+                      type="file"
+                      multiple
+                      className="hidden"
+                      onChange={(e) => {
+                        if (e.target.files?.length) {
+                          const items = Array.from(e.target.files).map((file) => ({ id: newId(), file }));
+                          setPendingCommentFiles((prev) => [...prev, ...items]);
+                          e.target.value = "";
+                        }
+                      }}
+                    />
+
+                    {pendingCommentFiles.length > 0 && (
+                      <div className="mt-2 space-y-1.5">
+                        {pendingCommentFiles.map((item) => (
+                          <PendingCommentFileRow
+                            key={item.id}
+                            file={item.file}
+                            onRemove={() => setPendingCommentFiles((prev) => prev.filter((p) => p.id !== item.id))}
+                          />
+                        ))}
+                      </div>
+                    )}
+
+                    <div className="flex items-center justify-between gap-2 mt-2">
                       <button
                         type="button"
-                        onClick={cancelComment}
-                        className="px-3.5 py-1.5 text-[13px] font-medium text-slate-600 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800 rounded-lg transition-colors"
+                        aria-label="Attach files"
+                        onClick={() => commentFileInputRef.current?.click()}
+                        className="p-1.5 rounded-md text-slate-400 dark:text-zinc-600 hover:text-slate-600 dark:hover:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors"
                       >
-                        Cancel
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                          <path d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.372L8.552 18.32m.009-.01l-.01.01m5.699-9.941l-7.81 7.81a1.5 1.5 0 002.112 2.13" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
                       </button>
-                      <button
-                        type="button"
-                        onClick={submitComment}
-                        disabled={commentDraft.trim().length === 0 || submittingComment}
-                        className={[
-                          "px-3.5 py-1.5 text-[13px] font-semibold rounded-lg transition-all",
-                          commentDraft.trim().length === 0 || submittingComment
-                            ? "bg-slate-100 dark:bg-zinc-800 text-slate-400 dark:text-zinc-600 cursor-not-allowed"
-                            : "bg-brand-500 hover:bg-brand-600 text-white shadow-sm shadow-brand-500/30 cursor-pointer",
-                        ].join(" ")}
-                      >
-                        Comment
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={cancelComment}
+                          className="px-3.5 py-1.5 text-[13px] font-medium text-slate-600 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800 rounded-lg transition-colors"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          onClick={submitComment}
+                          disabled={commentDraft.trim().length === 0 || submittingComment}
+                          className={[
+                            "px-3.5 py-1.5 text-[13px] font-semibold rounded-lg transition-all",
+                            commentDraft.trim().length === 0 || submittingComment
+                              ? "bg-slate-100 dark:bg-zinc-800 text-slate-400 dark:text-zinc-600 cursor-not-allowed"
+                              : "bg-brand-500 hover:bg-brand-600 text-white shadow-sm shadow-brand-500/30 cursor-pointer",
+                          ].join(" ")}
+                        >
+                          Comment
+                        </button>
+                      </div>
                     </div>
                   </div>
                 ) : (

@@ -757,6 +757,8 @@ export interface TicketComment {
   avatar: string;
   timeAgo: string;
   text: string;
+  /** Comment-level attachments only (ticket_attachments.comment_id = this comment's id) — read-only here, see loadTicketComments. */
+  attachments: TicketAttachment[];
 }
 
 export interface TicketActivityEvent {
@@ -945,6 +947,36 @@ export async function loadTicketComments(ticketId: string): Promise<TicketCommen
   );
   const authorsById = await loadProfilesByIds(supabase, authorIds);
 
+  // Comment-level attachments only (comment_id IS NOT NULL) — ticket-level
+  // attachments (comment_id IS NULL) belong to loadTicketAttachments'
+  // general section instead and must never show up here too. Fetched once
+  // for the whole ticket and grouped in memory below (ascending, to
+  // preserve historical order within a comment), so this stays a single
+  // extra query no matter how many comments there are.
+  const { data: attachmentRows, error: attachmentsError } = await supabase
+    .from("ticket_attachments")
+    .select("id, filename, storage_path, size_bytes, mime_type, uploaded_by, created_at, comment_id")
+    .eq("ticket_id", ticketId)
+    .not("comment_id", "is", null)
+    .order("created_at", { ascending: true })
+    .returns<(AttachmentRow & { comment_id: string })[]>();
+
+  if (attachmentsError) {
+    logDev("ticket comment attachments query failed", attachmentsError);
+  }
+
+  const uploaderIds = Array.from(
+    new Set((attachmentRows ?? []).map((row) => row.uploaded_by).filter((id): id is string => Boolean(id)))
+  );
+  const uploadersById = await loadProfilesByIds(supabase, uploaderIds);
+
+  const attachmentsByCommentId = new Map<string, TicketAttachment[]>();
+  for (const row of attachmentRows ?? []) {
+    const list = attachmentsByCommentId.get(row.comment_id) ?? [];
+    list.push(rowToAttachment(row, row.uploaded_by ? uploadersById.get(row.uploaded_by) : undefined));
+    attachmentsByCommentId.set(row.comment_id, list);
+  }
+
   const comments: TicketComment[] = (rows ?? []).map((row) => {
     const author = row.author_profile_id ? authorsById.get(row.author_profile_id) : undefined;
     return {
@@ -953,6 +985,7 @@ export async function loadTicketComments(ticketId: string): Promise<TicketCommen
       avatar: (author ? resolveAvatarUrl(author.avatar_url, author.updated_at) : null) ?? FALLBACK_AVATAR,
       timeAgo: formatRelativeTime(row.created_at),
       text: row.body,
+      attachments: attachmentsByCommentId.get(row.id) ?? [],
     };
   });
 
@@ -1022,6 +1055,7 @@ export async function createTicketComment(ticketId: string, body: string): Promi
       avatar: (authorRow ? resolveAvatarUrl(authorRow.avatar_url, authorRow.updated_at) : null) ?? FALLBACK_AVATAR,
       timeAgo: formatRelativeTime(row.created_at),
       text: row.body,
+      attachments: [],
     },
   };
 }
@@ -1904,6 +1938,9 @@ export type TicketAttachmentsResult =
 
 // Newest first — matches the section's existing "most recent upload on
 // top" convention (see AttachmentsSection's setAttachments prepend logic).
+// Ticket-level only (comment_id IS NULL) — attachments posted on a comment
+// belong to that comment's own display inside loadTicketComments instead,
+// so they're excluded here to avoid showing (or counting) them twice.
 export async function loadTicketAttachments(ticketId: string): Promise<TicketAttachmentsResult> {
   const supabase = getSupabaseBrowserClient();
 
@@ -1911,6 +1948,7 @@ export async function loadTicketAttachments(ticketId: string): Promise<TicketAtt
     .from("ticket_attachments")
     .select("id, filename, storage_path, size_bytes, mime_type, uploaded_by, created_at")
     .eq("ticket_id", ticketId)
+    .is("comment_id", null)
     .order("created_at", { ascending: false })
     .returns<AttachmentRow[]>();
 
@@ -1940,7 +1978,18 @@ export type UploadTicketAttachmentResult =
 // storage.foldername(name), so the path and the policies stay in lockstep.
 // uploaded_by is never sent here — the column defaults to auth.uid() at
 // the database level, so it can't be spoofed from the client.
-export async function uploadTicketAttachment(ticketId: string, file: File): Promise<UploadTicketAttachmentResult> {
+//
+// commentId is optional and only ever passed by the comment composer (see
+// createTicketComment's caller in ticket-detail-screen.tsx) — omitting it
+// (the general AttachmentsSection's call site) keeps comment_id null,
+// i.e. a ticket-level attachment, exactly as before. Same insert, same
+// RLS policy, same "attachment_uploaded" activity trigger either way —
+// comment_id is just another column on the same row.
+export async function uploadTicketAttachment(
+  ticketId: string,
+  file: File,
+  commentId?: string
+): Promise<UploadTicketAttachmentResult> {
   const supabase = getSupabaseBrowserClient();
 
   const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
@@ -1957,6 +2006,7 @@ export async function uploadTicketAttachment(ticketId: string, file: File): Prom
     .from("ticket_attachments")
     .insert({
       ticket_id: ticketId,
+      comment_id: commentId ?? null,
       storage_path: storagePath,
       filename: file.name,
       size_bytes: file.size,

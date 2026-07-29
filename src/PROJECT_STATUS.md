@@ -1,4 +1,4 @@
-> Last Updated: July 23, 2026
+> Last Updated: July 28, 2026
 
 ---
 
@@ -68,6 +68,16 @@ Most recently, Admin → Users gained a real, permanent **Delete User** action �
 
 Most recently, a real, production-reported bug in invitation acceptance (`/accept-invite?token_hash=...&type=invite`) was audited and fixed in two passes. The first fixed a straightforward duplicate-verification hazard: the page's own effect could call `verifyOtp` more than once for the same single-use token (React Strict Mode's dev double-invoke, or any rerender), and readiness was derived from a secondary `getSession()` poll rather than `verifyOtp`'s own returned session — a `useRef` guard now ensures the exchange only ever runs once, `token_hash`/`type` are validated (`type` must be exactly `"invite"`) before it's even attempted, and a literal "Auth session missing!" is now mapped to the existing friendly "invitation link is invalid or expired" message rather than shown verbatim. That fix surfaced a second, deeper bug on the very next report: `CurrentUserProvider` — mounted globally at the root layout — reacts to the invite session's own `SIGNED_IN` event by fetching membership, which only ever matches `status='active'`; a freshly invited user is still `'invited'` at that exact moment (`accept_own_invitation` is what flips it, and hadn't run yet), so this read as "no-membership" and triggered `CurrentUserProvider`'s own auto-sign-out safety net (there to catch, e.g., a disabled-while-tab-open account), destroying the very session `verifyOtp` had just established seconds before the user could submit their password. The fix skips that auto-sign-out specifically on `/accept-invite` (every other page's protection is unchanged) and makes `retry()` clear the stale fetch result immediately rather than leaving it live until the fresh one resolves, closing the same gap right after acceptance succeeds; the one-time token is now also stripped from the visible URL once verification succeeds. Both the root cause and the fix were confirmed against the real Supabase project via direct API-level testing (minting a real invite, verifying once, updating the password, running `accept_own_invitation`, confirming the membership row flips `invited` → `active`, confirming the original token can't be reused, and logging in with the new password) — not yet a live-browser click-through. See Architecture Status → "Accept Invite → invitation acceptance fixed" for the full detail.
 
+Most recently, the Admin Dashboard header's date display and one KPI label were corrected: the header previously showed a hardcoded "Tuesday, June 30" instead of the real current date (now a `formatFullDate(todayISO)` helper, matching the pattern the Member/Project Lead/My Work dashboards already used), and the "Assigned Tickets" KPI's subtext read as if it were scoped to the signed-in Admin's own assignments — colliding with "My Active Work" directly below it — even though it's a legitimate org-wide open-ticket count (Organization Health section); the subtext now reads "X active · across all projects" and its active count is derived directly from `assignedTickets`, so the two numbers can no longer drift apart.
+
+Most recently, every place in the app that renders a user's avatar gained a real fallback for people with no `avatar_url`: instead of a generic gray silhouette, a new shared `Avatar` component (`components/ui/avatar.tsx`) renders the person's initials on a deterministic pastel-colored circle (same convention already used in a sibling Techtivo product, Mi Pádel Club) — the color is derived from the person's own id/name (`lib/avatar.ts`), so the same person always gets the same color everywhere they appear. Every existing avatar `<img>` site across the app now goes through this one component; sizing/layout at each call site is unchanged. See Architecture Status → "Avatar fallback" for the full detail.
+
+Most recently, dark mode was removed outright, by explicit product decision: JIRITA now force-locks to a single, consistent Light theme via `next-themes`' `forcedTheme="light"` (`app/layout.tsx`), so neither a previously-stored `localStorage` preference nor the OS-level dark-mode setting can flip it, and the now-unused theme switcher (`theme-toggle.tsx`, previously in the header and on Profile) was deleted outright rather than left unreachable. See Architecture Status → "Theme — Dark Mode removed" for the full detail, and Design Decisions / Definition of Done below (both updated to match — neither still lists dark mode as a goal or a completion requirement).
+
+Most recently, JIRITA gained a real Mobile-only bottom tab bar and its own avatar menu, for all three roles — `mobile-tab-bar.tsx` reuses the Desktop Sidebar's own `NAV_LINK` routes/icons and `isNavActive` logic rather than a second navigation model, with each role (Admin/Project Lead/Member) getting its own required set of direct tabs, a shared "More" bottom sheet (`mobile-more-sheet.tsx`) for whatever doesn't fit as a direct tab, and a dynamic fifth/sixth slot that shows a Project Lead's or Member's own project name directly when they're scoped to exactly one project. The header avatar's existing `AccountMenu` is reused as-is on Mobile; Member no longer sees a redundant Profile entry there, since Profile is now a direct tab for that role. Desktop's own Sidebar is completely untouched. See Architecture Status → "Mobile Experience" for the full detail.
+
+Most recently, a nine-commit pass fixed real Mobile layout and horizontal-overflow bugs across most of the app's already-real screens — none of it touched Desktop layout (every fix is scoped behind a `sm:`/`lg:` breakpoint revert) and none of it touched any Supabase query or data path. In order: the Admin/Project Lead Dashboard headers and KPI/insight bands now stack and compact correctly instead of overflowing, and the Project Lead's action bar (project selector + Add Member/New Note/New Ticket) stays on one row via `flex-1`/`min-w-0`/`truncate` on the selector; the Project Lead Project Overview's two-column split collapses to one column below `lg:` and its KPI strip becomes a 2×2 grid; the Tickets header's title, view tabs, "New Ticket", search field, and filter/chip rows now stack into clear vertical blocks instead of competing for one row; Ticket Detail's own two-column split flattens to a single Mobile column via `contents` + `order-*` (reordering sections without duplicating any stateful field component) and gained a compact quick-summary card, alongside a real hydration-error fix (three spots wrapped an `Avatar` — which can render a `<div>` for a user with no photo — inside an invalid `<p>`, now a `<div>`); every auth input (login, forgot/reset/change password, accept-invite — all built on the shared `AuthTextField`/`AuthPasswordField`) grew to 16px on Mobile only, the exact threshold below which iOS Safari auto-zooms on focus (a fix already used for the same problem in Mi Pádel Club); My Work's own loading-skeleton rows were missing the same `overflow-x-auto`/`min-w-0` pair their real, loaded rows already had, so the placeholder alone forced the page wider than the viewport during every load; both Reports' and Time Tracking's `PeriodSelector` (This Month/Last Month/This Quarter/Custom Range) had no wrap/scroll escape valve on its own `whitespace-nowrap` button row, wide enough on its own to widen the whole page on Mobile — now scrolls within itself; and, last, the shared `FilterDropdown` popover (used by every ticket filter) had two real bugs — a closed popover stayed mounted (only `opacity`/`pointer-events` toggled) so its absolutely-positioned box kept counting toward the page's scrollable width even while invisible, and a `transition-all` regression let the JS-computed `left` position itself animate, visibly sliding the panel past the viewport edge for the first ~150ms of every open — fixed by truly unmounting the panel ~150ms after close and computing/clamping its horizontal position from measured rects (recalculated on open and on resize while open, verified via Playwright measurement). See Architecture Status → "Mobile Experience" for the full per-screen detail.
+
 ---
 
 # Repository Structure
@@ -106,9 +116,9 @@ Role comes from a real Supabase `organization_membership` when the signed-in use
 
 - Next.js application configured (in `/src/`)
 - Light Mode
-- Dark Mode
+- ~~Dark Mode~~ — removed outright by explicit product decision; JIRITA now force-locks to a single Light theme via `next-themes`' `forcedTheme="light"` and the theme switcher was deleted — see Architecture Status → "Theme — Dark Mode removed"
 - Global layout (`AppShell` component)
-- Responsive navigation (`Sidebar` component)
+- Responsive navigation (`Sidebar` component, Desktop) + a real Mobile-only bottom tab bar (`mobile-tab-bar.tsx`) with its own "More" sheet — see Architecture Status → "Mobile Experience"
 - Design system foundation
 
 ### Projects
@@ -1658,6 +1668,15 @@ way).
 - No new migrations — pure application-layer query/rendering work on top of
   already-real tables.
 
+**Most recently**: two real, pre-existing bugs fixed on the Admin
+Dashboard header — the date shown was a hardcoded "Tuesday, June 30",
+now `formatFullDate(todayISO)` (matching Member/Project Lead/My Work);
+and the "Assigned Tickets" KPI's subtext read as if scoped to the
+Admin's own assignments (colliding with "My Active Work" directly
+below it) even though it's a real org-wide open-ticket count — the
+subtext now reads "X active · across all projects", with the active
+count derived directly from `assignedTickets`.
+
 ## Confirmed working (Member Profile Modal — real data source)
 
 **Scoped narrowly on purpose — this is not an app-wide migration.** An
@@ -2955,6 +2974,153 @@ the invited user's own session and via a service-role read — the same
 source `/users` uses), confirmed the original `token_hash` can no longer
 be redeemed, and logged in with the new password.
 
+## Mobile Experience (bottom tab bar, responsive layouts, iOS input fix)
+
+A dedicated Mobile pass — the first systematic one this app has had —
+covering real navigation, layout, and input-handling bugs across most
+already-real screens. None of it touches Desktop (every change is scoped
+behind an `sm:`/`lg:` breakpoint revert) and none of it touches any
+Supabase query or data path — this is presentation-layer only.
+
+**Bottom tab bar + "More" sheet** (`components/mobile-tab-bar.tsx`,
+`components/mobile-more-sheet.tsx`)
+
+- Mobile-only (hidden at `sm:` and above), fixed to the bottom of the
+  viewport, role-aware: Admin, Project Lead, and Member each get their own
+  required set of direct tabs, reusing the Desktop Sidebar's own
+  `NAV_LINK` route/icon list and `isNavActive` logic rather than a second
+  navigation model — a route added to the Sidebar is automatically
+  tab-eligible.
+- A shared "More" bottom sheet holds whatever doesn't fit as a direct tab,
+  opened from the tab bar's own "More" entry.
+- A dynamic fifth/sixth slot shows a Project Lead's or Member's own
+  project name directly, in place of a generic "Projects" tab, whenever
+  that role is currently scoped to exactly one project (mirrors the same
+  "only render a project selector when scoped to more than one" rule the
+  Dashboards already use).
+- The header avatar's existing `AccountMenu` is reused as-is on Mobile;
+  Member no longer sees a redundant Profile entry in that menu, since
+  Profile is now a direct tab for that role.
+- Desktop's `Sidebar` component itself is completely untouched — this is
+  a parallel, Mobile-only navigation surface, not a responsive rework of
+  the existing one.
+
+**Systematic horizontal-overflow / layout fixes**, screen by screen:
+
+- **Auth inputs** (`components/auth/field-styles.ts`) — every input built
+  on the shared `AuthTextField`/`AuthPasswordField` (login,
+  forgot/reset/change password, accept-invite) was a flat 13px at every
+  width, below the 16px iOS Safari uses to decide whether to auto-zoom a
+  focused input; now 16px on Mobile only (`sm:` reverts to 13px), the same
+  fix already used for this in Mi Pádel Club.
+- **Admin/Project Lead Dashboard** (`dashboard-screen.tsx`,
+  `project-lead-dashboard.tsx`) — the header's greeting+actions row and
+  the KPI/insight bands now stack and compact via `flex-col`/`flex-wrap`
+  (`sm:` reverts to the exact current Desktop layout); the Project Lead's
+  action bar (project selector + Add Member/New Note/New Ticket) stays on
+  one row via `flex-1`/`min-w-0`/`truncate` on the selector plus
+  `flex-shrink-0` on the buttons, so none of the four actions ever forces
+  the row to overflow.
+- **Project Lead Project Overview** (`project-lead-project-overview.tsx`)
+  — the Desktop two-column split (Active Work/Needs Your Attention vs.
+  Team/Project Health) collapses to one full-width column below `lg:`;
+  the KPI strip becomes a 2×2 grid instead of fragmenting labels like
+  "Closed This Month"; the header reflows so "New Ticket" never
+  compresses the project name/description.
+- **Tickets header** (`tickets-screen.tsx`) — title/description, the view
+  tabs, "New Ticket", the search field, and the filter/chip rows now
+  stack into clear vertical blocks instead of competing for one row: New
+  Ticket moves above the tabs (which get their own
+  horizontally-scrollable container), and the search field goes full
+  width instead of sharing a cramped row with
+  Assigned/Priority/Status/Add Filter. Desktop keeps the exact original
+  single-row layout.
+- **Ticket Detail** (`tickets/ticket-detail-screen.tsx`) — the two-column
+  split (main content vs. the Status/Assignee/.../Related Tickets
+  sidebar) flattens to a single Mobile column via `contents` + `order-*`,
+  reordering sections without duplicating any stateful field component,
+  plus a new compact Mobile-only quick-summary card (Due
+  date/Estimated/Logged/Remaining). Also fixes a real hydration error
+  found along the way: three spots (Attachments' file row, commit/PR
+  author rows in Development) wrapped an `Avatar` — which can render a
+  `<div>` for a user with no photo, see Avatar fallback below — inside a
+  `<p>`, invalid HTML Next.js flags at hydration; swapped to `<div>`
+  (same classes/layout).
+- **My Work loading skeleton** (`my-work-screen.tsx`) — the "My
+  Hours"/"My Time" placeholder rows in `MyWorkLoadingSkeleton` were
+  missing the `overflow-x-auto`/`min-w-0` pair the real, loaded rows
+  already used for the same rows, so the `flex-shrink-0` placeholders
+  alone forced the whole page wider than the viewport during every load.
+- **Reports / Time Tracking Period selector** (`reports-screen.tsx`,
+  `time-tracking-screen.tsx`) — the shared `PeriodSelector` (This
+  Month/Last Month/This Quarter/Custom Range) sat in an inline-flex row
+  of `whitespace-nowrap` buttons with no wrap/scroll escape valve, wide
+  enough on its own to widen the whole page on Mobile; now scrolls within
+  itself on Mobile only. Covers Admin Reports, Project Lead Reports, Time
+  Tracking (Admin + Project Lead), and Work History. My Work's and
+  Project Lead Time Tracking's own page headers also gained the same
+  `flex-col`/`sm:flex-row` treatment already used elsewhere, and all four
+  screens' outer container padding was brought in line with the rest of
+  the app (`px-6` → `px-4 sm:px-6`).
+- **Filter Dropdown popover** (`tickets/filter-dropdown.tsx`) — two real
+  bugs: a closed popover stayed permanently mounted (only
+  `opacity`/`pointer-events` toggled), so its absolutely-positioned box
+  kept counting toward the container's scrollable width even while
+  invisible; and a `transition-all` regression animated the JS-computed
+  `left` position itself, letting the open panel visibly slide past the
+  viewport edge for the first ~150ms of every open (found via Playwright
+  measurement). Fixed by truly unmounting the panel ~150ms after close
+  (matching its own exit transition) and computing/clamping its
+  horizontal position from measured rects, kept ≥16px from both viewport
+  edges, recalculated on open and on resize while open.
+
+Scope: presentation-layer only across all of the above — no Supabase
+query, RLS policy, or migration changed.
+
+## Theme — Dark Mode removed (single light theme)
+
+By explicit product decision, JIRITA no longer supports dark mode — it
+now force-locks to a single, consistent Light theme.
+
+- `src/app/layout.tsx` — `next-themes`' `<ThemeProvider>` now sets
+  `forcedTheme="light"`, so neither a previously-stored `localStorage`
+  preference nor the OS-level `prefers-color-scheme: dark` setting can
+  flip the app into dark mode.
+- `theme-toggle.tsx` (previously rendered in the header bar and on the
+  Profile screen) was deleted outright, not just hidden — there is no
+  unreachable dark-mode code path left in the UI.
+- This supersedes the "Excellent dark mode" UI-Inspiration goal and the
+  "Dark Mode supported" Definition-of-Done checklist item elsewhere in
+  this file (both updated to match — see Design Decisions and Definition
+  of Done). Any dark-mode-specific styling left on individual components
+  (e.g. `dark:` Tailwind classes) is now simply unreachable, not actively
+  removed component-by-component — a future cleanup, not a functional
+  issue, since `forcedTheme` prevents dark mode from ever activating
+  regardless.
+
+## Avatar fallback (initials + deterministic pastel)
+
+Every place in the app that renders a user's avatar now has a real
+fallback for a person with no `avatar_url`, replacing the previous
+generic gray silhouette.
+
+- `components/ui/avatar.tsx` — a new shared `Avatar` component: renders
+  the real photo when `avatar_url` resolves to one, otherwise the
+  person's initials on a deterministic pastel-colored circle (same
+  convention already used in a sibling Techtivo product, Mi Pádel Club).
+- `lib/avatar.ts` — the small color/initials utility `Avatar` calls: the
+  background color is derived deterministically from the person's own
+  id/name, so the same person always gets the same color everywhere they
+  appear, never a random one that shifts between renders.
+- Every existing avatar `<img>` call site across the app was switched to
+  render through this one component instead of its own ad hoc fallback
+  logic; sizing/layout at each site is unchanged.
+- Surfaced (and fixed, see Mobile Experience above) a real hydration bug:
+  `Avatar` can render either an `<img>` or a `<div>` depending on whether
+  a photo exists, so any call site that assumed it was always an inline
+  element and wrapped it in a `<p>` produced invalid HTML for a user with
+  no photo.
+
 ## Still mock
 
 - **Resolved, differently than planned**: the workspace-wide Settings screen
@@ -3074,7 +3240,7 @@ Goals:
 - Clean
 - Dense information
 - High productivity
-- Excellent dark mode
+- ~~Excellent dark mode~~ — superseded: dark mode was removed outright by explicit product decision, JIRITA now ships a single, polished Light theme only (see Architecture Status → "Theme — Dark Mode removed")
 
 ---
 
@@ -3109,7 +3275,7 @@ Never break navigation.
 
 Prefer extending existing components instead of replacing them.
 
-Maintain visual consistency across Light and Dark modes.
+Maintain visual consistency across JIRITA's single Light theme (dark mode is intentionally not supported — see Architecture Status → "Theme — Dark Mode removed").
 
 Favor reusable components over duplicated implementations.
 
@@ -3192,9 +3358,8 @@ Remaining priority order:
 A feature is considered complete when:
 
 - UI implemented
-- Responsive
-- Light Mode supported
-- Dark Mode supported
+- Responsive (Desktop and Mobile — see Architecture Status → "Mobile Experience")
+- Light Mode supported (JIRITA's only theme — dark mode is intentionally not supported, see Architecture Status → "Theme — Dark Mode removed")
 - Connected to application navigation
 - Uses realistic mock data
 - Matches JIRITA design language
