@@ -1,7 +1,15 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Avatar } from "@/components/ui/avatar";
+
+// Horizontal clearance the open panel must always keep from either edge of
+// the viewport (see the positioning effect below).
+const PANEL_VIEWPORT_MARGIN = 16;
+// Matches the panel's own `duration-150` exit transition — the panel stays
+// mounted exactly this long after closing so the fade/scale-out can still
+// play, then unmounts for real.
+const PANEL_CLOSE_ANIMATION_MS = 150;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -107,9 +115,73 @@ export function FilterDropdown({
   variant = "default",
 }: FilterDropdownProps) {
   const [isOpen, setIsOpen] = useState(false);
+  // Whether the panel <div> exists in the DOM at all right now. Stays true
+  // for `PANEL_CLOSE_ANIMATION_MS` after `isOpen` goes false so the exit
+  // transition can still play, then flips off — actually removing the node
+  // (not just hiding it), so a closed filter never contributes to layout,
+  // paint, hit-testing, or scrollable overflow. Starts false: unlike the
+  // previous always-mounted panel, nothing here exists before first open.
+  const [mounted, setMounted] = useState(false);
+  // Horizontal offset (relative to the trigger, i.e. `rootRef`) computed by
+  // the positioning effect below, so the panel never renders past 16px from
+  // either edge of the viewport. Unset only for the sub-frame before that
+  // effect first runs (see the `useLayoutEffect` below for why that's never
+  // actually visible).
+  const [panelLeft, setPanelLeft] = useState<number | undefined>(undefined);
   const [search, setSearch] = useState("");
   const rootRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+
+  // Mount the instant it opens; on close, keep it mounted only long enough
+  // for the exit transition, then unmount for real.
+  useEffect(() => {
+    if (isOpen) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: mounts the panel the instant it's asked to open, mirroring the same mount-on-open pattern this app's own modals already use (e.g. invite-user-modal.tsx)
+      setMounted(true);
+      return;
+    }
+    if (!mounted) return;
+    const timer = setTimeout(() => setMounted(false), PANEL_CLOSE_ANIMATION_MS);
+    return () => clearTimeout(timer);
+  }, [isOpen, mounted]);
+
+  // Keep the open panel fully inside the viewport horizontally — computed
+  // from real, measured rects (not a static `left-0`/`right-0` class, which
+  // can't know how close the trigger sits to either edge). Runs in
+  // `useLayoutEffect` so the corrected position is already in place at
+  // first paint, before the browser shows anything (no visible jump), and
+  // recalculates on resize while open per the spec above ("si el viewport
+  // cambia de tamaño mientras está abierto").
+  useLayoutEffect(() => {
+    if (!mounted || !isOpen) return;
+
+    function reposition() {
+      const root = rootRef.current;
+      const panel = panelRef.current;
+      if (!root || !panel) return;
+      const rootRect = root.getBoundingClientRect();
+      const panelWidth = panel.getBoundingClientRect().width;
+      const viewportWidth = window.innerWidth;
+
+      // Preferred anchor first (same as the original static classes: hug
+      // the trigger's left edge, or — for `align="right"` — its right
+      // edge), then clamp into [margin, viewportWidth - margin - width].
+      // `max-w-[min(280px,calc(100vw-2rem))]` on the panel already
+      // guarantees panelWidth <= viewportWidth - 2*margin, so this range is
+      // never inverted.
+      let left = align === "right" ? rootRect.right - panelWidth : rootRect.left;
+      const minLeft = PANEL_VIEWPORT_MARGIN;
+      const maxLeft = viewportWidth - PANEL_VIEWPORT_MARGIN - panelWidth;
+      left = Math.min(Math.max(left, minLeft), maxLeft);
+
+      setPanelLeft(left - rootRect.left);
+    }
+
+    reposition();
+    window.addEventListener("resize", reposition);
+    return () => window.removeEventListener("resize", reposition);
+  }, [mounted, isOpen, align]);
 
   // Close on outside click
   useEffect(() => {
@@ -254,44 +326,67 @@ export function FilterDropdown({
         )}
       </button>
 
-      {/* Popover */}
-      <div
-        role="dialog"
-        aria-label={`${label} filter`}
-        className={[
-          "absolute top-full mt-1.5 z-50 w-max min-w-[200px] max-w-[280px]",
-          "rounded-xl border bg-white dark:bg-zinc-900",
-          "shadow-lg shadow-black/10 dark:shadow-black/40",
-          "border-slate-200 dark:border-zinc-700/60",
-          "transition-all duration-150 origin-top",
-          align === "right" ? "right-0" : "left-0",
-          isOpen
-            ? "opacity-100 scale-100 pointer-events-auto"
-            : "opacity-0 scale-95 pointer-events-none",
-        ].join(" ")}
-      >
-        {/* Search field */}
-        {searchable && (
-          <div className="px-2 pt-2 pb-1">
-            <input
-              ref={searchRef}
-              type="text"
-              placeholder="Search…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="w-full text-sm bg-slate-100 dark:bg-zinc-800 placeholder:text-slate-400 dark:placeholder:text-zinc-600 text-slate-800 dark:text-zinc-100 rounded-md px-2.5 py-1.5 outline-none focus:ring-2 focus:ring-brand-500/30 transition-colors"
-            />
-          </div>
-        )}
+      {/* Popover — unmounted whenever `mounted` is false (see the effects
+          above), so a closed filter contributes nothing to layout, paint,
+          hit-testing, or scrollable overflow: not opacity/pointer-events
+          tricks, an actual absent DOM node. Horizontal position comes from
+          `panelLeft` (computed in the layout effect above from real,
+          measured rects) instead of a static `left-0`/`right-0` class, so it
+          can never render past `PANEL_VIEWPORT_MARGIN` from either edge of
+          the viewport regardless of where its trigger sits. */}
+      {mounted && (
+        <div
+          ref={panelRef}
+          role="dialog"
+          aria-label={`${label} filter`}
+          style={panelLeft === undefined ? undefined : { left: panelLeft, right: "auto" }}
+          className={[
+            // `max-w-[280px]` alone can still be wider than a Mobile viewport
+            // once its own left offset is added — capping it to whichever is
+            // smaller between 280px and the viewport minus a safe margin is
+            // a no-op at Desktop widths (100vw-2rem is always far bigger
+            // than 280px there).
+            "absolute top-full mt-1.5 z-50 w-max min-w-[200px] max-w-[min(280px,calc(100vw-2rem))]",
+            "rounded-xl border bg-white dark:bg-zinc-900",
+            "shadow-lg shadow-black/10 dark:shadow-black/40",
+            "border-slate-200 dark:border-zinc-700/60",
+            // Only opacity/transform animate — `left` is set from JS
+            // (positioning effect above) and must apply instantly. Letting
+            // `transition-all` catch it too made the panel visibly slide
+            // from its unclamped fallback position to the clamped one over
+            // the full 150ms, overflowing the viewport for the whole slide.
+            "transition-[opacity,transform] duration-150 origin-top",
+            // Fallback for the one sub-frame before the layout effect above
+            // has run (never actually visible — see its own comment); once
+            // `panelLeft` is set, the inline `left`/`right` above take over.
+            align === "right" ? "right-0" : "left-0",
+            isOpen
+              ? "opacity-100 scale-100 pointer-events-auto"
+              : "opacity-0 scale-95 pointer-events-none",
+          ].join(" ")}
+        >
+          {/* Search field */}
+          {searchable && (
+            <div className="px-2 pt-2 pb-1">
+              <input
+                ref={searchRef}
+                type="text"
+                placeholder="Search…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="w-full text-sm bg-slate-100 dark:bg-zinc-800 placeholder:text-slate-400 dark:placeholder:text-zinc-600 text-slate-800 dark:text-zinc-100 rounded-md px-2.5 py-1.5 outline-none focus:ring-2 focus:ring-brand-500/30 transition-colors"
+              />
+            </div>
+          )}
 
-        {/* Options */}
-        <div className="py-1.5">
-          {filteredGroups.map((group, gi) => (
-            <div key={gi}>
-              {group.divider && gi > 0 && (
-                <div className="my-1 mx-2 border-t border-slate-100 dark:border-zinc-800" />
-              )}
-              {group.options.map((option) => {
+          {/* Options */}
+          <div className="py-1.5">
+            {filteredGroups.map((group, gi) => (
+              <div key={gi}>
+                {group.divider && gi > 0 && (
+                  <div className="my-1 mx-2 border-t border-slate-100 dark:border-zinc-800" />
+                )}
+                {group.options.map((option) => {
                 const isAnyone = option.value === ANYONE;
                 const isSelected =
                   mode !== "menu" &&
@@ -354,7 +449,8 @@ export function FilterDropdown({
             </p>
           )}
         </div>
-      </div>
+        </div>
+      )}
     </div>
   );
 }
