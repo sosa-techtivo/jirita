@@ -78,11 +78,17 @@ export function AcceptInviteScreen() {
       const type = searchParams.get("type");
 
       // "Generate invite link" URL shape — the only case this page ever
-      // needs to actively exchange a token for a session. A type that isn't
-      // this page's own "invite" (malformed, or some other otp type) is
-      // treated as an invalid link and never passed to verifyOtp.
+      // needs to actively exchange a token for a session. type is "invite"
+      // for a brand-new invite and "magiclink" for a re-generated one
+      // (regenerateInviteLinkAction falls back to magiclink because GoTrue's
+      // "invite" type can't relink an account it already knows about — see
+      // src/lib/server/invite-user-action.ts) — both are legitimate here.
+      // Anything else (malformed, or some unrelated otp type) is treated as
+      // an invalid link and never passed to verifyOtp. type is passed
+      // through as received rather than hardcoded, since verifyOtp only
+      // accepts the token against the same type it was minted with.
       if (tokenHash) {
-        if (type !== "invite") {
+        if (type !== "invite" && type !== "magiclink") {
           if (!cancelled) {
             setHasSession(false);
             setChecking(false);
@@ -90,7 +96,7 @@ export function AcceptInviteScreen() {
           return;
         }
 
-        const { data, error } = await supabase.auth.verifyOtp({ token_hash: tokenHash, type: "invite" });
+        const { data, error } = await supabase.auth.verifyOtp({ token_hash: tokenHash, type });
         if (cancelled) return;
         const verified = !error && data.session !== null;
         setHasSession(verified);
