@@ -14,7 +14,10 @@
     "import:phase4": "tsx src/lib/unfuddle-import/runner/phase4-run.ts",
     "import:phase5": "tsx src/lib/unfuddle-import/runner/phase5-run.ts",
     "import:phase6": "tsx src/lib/unfuddle-import/runner/phase6-run.ts",
-    "import:phase7": "tsx src/lib/unfuddle-import/runner/phase7-run.ts"
+    "import:phase7": "tsx src/lib/unfuddle-import/runner/phase7-run.ts",
+    "repair:due-dates": "tsx src/lib/unfuddle-import/runner/repair-due-dates-run.ts",
+    "repair:orphan-user-153": "tsx src/lib/unfuddle-import/runner/repair-orphan-user-153-run.ts",
+    "repair:orphan-user-150": "tsx src/lib/unfuddle-import/runner/repair-orphan-user-150-run.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.110.1",

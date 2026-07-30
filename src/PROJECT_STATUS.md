@@ -3305,9 +3305,68 @@ Resolved **exclusively by email**, never by name/initials, never invented:
   martine@techtivo.com — 2 of these are flagged `is-removed` in Unfuddle
   but still resolve to a real, active JIRITA profile).
 - 2 orphans (Unfuddle person ids 150, 153) — referenced by 36 and 34
-  comments respectively, but absent from the backup's own People list.
-  Never resolved, never assigned to a fallback account: `author_profile_id`
-  is `null` on all 70 affected comments (confirmed live).
+  comments respectively, plus (153 only) as final assignee+reporter on 3
+  tickets — absent from the backup's own People list (a genuinely purged
+  account, not just `is-removed`-flagged), so `resolveTargetUsers` could
+  never have resolved either by email. A later, deeper audit (triggered by
+  KTV-1052 showing "Unknown" as a commenter) confirmed these are the *only*
+  two unresolved participants across every comment/time-entry/assignee/
+  reporter reference in all 170 tickets (0 additional hidden users found).
+  **Id 153 was subsequently identified and fixed**: a follow-up audit
+  (triggered by KTV-1893 visibly showing Micaela Levinsonas as
+  creator/commenter in Unfuddle) found 850 self-referential audit-trail
+  events ("Ticket reassigned from *Micaela L.*", performed by person-id 153
+  itself — a ~19x majority over any other name in that position) plus two
+  independent, second-level time-correlated ticket histories (KTV-1893,
+  KTV-1925: a "smoke test" comment by 153 immediately followed by 153
+  reassigning the ticket away from "Micaela L."). Conclusion: id 153 is an
+  old, fully-retired Unfuddle account belonging to Micaela Levinsonas — the
+  same real person already migrated under her newer account (id 155,
+  itself not yet linked to `profiles.unfuddle_id` — a separate, still-open
+  finding, out of scope for this fix). All 40 affected references (34
+  comment `author_profile_id`, 3 `tickets.assignee_profile_id`, 3
+  `tickets.created_by`) were repaired via
+  `src/lib/unfuddle-import/runner/repair-orphan-user-153-run.ts`
+  (PREVIEW/APPLY, idempotent — a second `--apply` reports 0 updates) to
+  point at her existing `profiles` row directly — no new `auth.users`/
+  `profiles` row created, `profiles.unfuddle_id` deliberately left
+  untouched (reserved for her current id 155, not this retired alias).
+  Post-fix (id 153): 0 unresolved references remained for it; the 36
+  remaining `author_profile_id is null` comments in KTVibe were exclusively
+  id 150's. Id 150 is very likely "Luis L." — inferred only from a
+  self-referential audit-trail description ("Ticket reassigned from *Luis
+  L.*", performed by person-id 150 himself, 79 occurrences vs. 0 for
+  "Micaela L." — confirmed a distinct person from 153, zero ticket overlap
+  between the two) — audit-trails were never imported (§4 above), so this
+  name is provenance context only, never written anywhere. Unlike 153, id
+  150 has no email or any structured identity anywhere in the backup, so it
+  could never be resolved automatically — that gap is real and permanent in
+  the source system, not this migration's own logic.
+
+  **Id 150 was subsequently completed by an explicit, out-of-band product
+  decision** (not automatic resolution): a `profiles` row for "Luis L."
+  (luisl@techtivo.com) was created manually ahead of time to represent this
+  historical participant, specifically because no email/identity could ever
+  be recovered from Unfuddle itself. All 36 affected comment
+  `author_profile_id` references (the only entity type id 150 ever touches
+  in KTVibe — never an assignee, reporter, or time-entry logger) were
+  repaired via `src/lib/unfuddle-import/runner/repair-orphan-user-150-run.ts`
+  (same PREVIEW/APPLY shape as the 153 repair, reusing the same
+  `repair-orphan-user-alias/` classifier — idempotent, a second `--apply`
+  reports 0 updates) to point at that existing profile — no new
+  `auth.users` row, no new `profiles` row created by the script itself,
+  `profiles.unfuddle_id` left untouched (consistent with the 153 repair).
+  Post-fix: 0 `author_profile_id is null` comments remain anywhere in
+  KTVibe — both known orphans (150, 153) are now fully resolved.
+
+  **Summary of the two manually-recovered historical aliases**: person-id
+  153 → Micaela Levinsonas, resolved from *technical evidence* (850
+  self-referential audit-trail events + independent per-ticket
+  time-correlation, reusing her pre-existing profile); person-id 150 → Luis
+  L., resolved from an *explicit migration decision* using a profile
+  created specifically for this purpose, since Unfuddle itself never
+  preserved enough identity data (no email, no `<person>` record) to
+  resolve it any other way.
 - All 250 attachments have `uploaded_by = null` — Unfuddle's own
   `<attachment>` elements carry no creator/person/uploader field at all,
   for any of the 250, so this is an honest absence, not a resolution
@@ -3325,15 +3384,36 @@ Unfuddle attachment ids (e.g. the same screenshot pasted into two
 comments) — preserved as independent rows/objects, never merged or
 deduplicated.
 
-## Known drift
+## Known drift — found root cause and repaired
 
-**Ticket #651 (unfuddle_id 11697)** — its `due_date` and `updated_at` no
-longer match the backup. Root cause: a real JIRITA user edited this ticket
-*after* Phase 3 ran (not a migration defect). Detected by Phase 3's own
-reconciliation, reported as a conflict, and **deliberately never
-overwritten** — every other one of its 169 sibling tickets matches exactly.
-No other drift exists anywhere in the migrated data (0 conflicts across
-comments/time entries/attachments/relations).
+**Ticket #651 (unfuddle_id 11697)** — its `due_date` briefly no longer
+matched the backup (`2026-06-01` instead of `2018-06-01`). Originally
+recorded here as "a real JIRITA user edited this ticket after Phase 3 ran
+(not a migration defect)" — correct that the importer wasn't at fault, but
+wrong about intent. The actual root cause (confirmed against code, schema,
+and the live `ticket_activity` row): `ticket-ui.tsx`'s `parseDisplayDate`
+hardcoded the current year when reconstructing an ISO date from the
+then-yearless "Jun 1" due-date display, and both Due Date editors
+(`EditableSidebarDueDate`/`PreviewDueDateControl`) auto-save `onBlur` —
+so merely opening the Due Date field and clicking away (no intentional
+change needed) silently persisted the corrupted year through the ordinary
+`updateTicket()` path, which is why a real, authenticated
+`due_date_changed` activity row exists (actor = whoever's session made the
+call), even though no one intentionally chose 2026. `parseDisplayDate` was
+already fixed (now parses the real year, since the display format gained
+one) as part of an unrelated date-formatting task, which independently
+closes this hole for every ticket going forward. The bad value was then
+repaired via `src/lib/unfuddle-import/runner/repair-due-dates-run.ts`
+(PREVIEW/APPLY, source of truth = `backup.xml`, not the activity log):
+KTV-651 now reads `due_date = 2018-06-01`, confirmed idempotent (a second
+`--apply` run reports 0 updates), and a full re-comparison of all 170
+KTVibe tickets against the backup shows 0 remaining differences. The
+original (buggy) and corrective `due_date_changed` activity rows were both
+left in place — a real, honest record of the incident and its fix — the
+corrective one has `actor_profile_id = null` (service-role write, no
+session), never re-attributed to a person. No other drift exists anywhere
+in the migrated data (0 conflicts across comments/time entries/attachments/
+relations).
 
 ## Schema changes
 
@@ -3373,7 +3453,7 @@ escalation — the real table constraints, including the new
 
 | Phase | New | Already imported | Conflicts |
 |---|---|---|---|
-| 3 (Tickets) | 0 | 169 | 1 (ticket #651 drift — reported, not overwritten) |
+| 3 (Tickets) | 0 | 170 | 0 (ticket #651 drift found + repaired — see "Known drift" above) |
 | 4 (Comments) | 0 | 412 | 0 |
 | 5 (Time Entries) | 0 | 221 | 0 |
 | 6 (Attachments) | 0 | 250 (DB) / 250 (Storage) | 0 |

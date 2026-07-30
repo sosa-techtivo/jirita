@@ -2199,14 +2199,14 @@ function DevelopmentSection({ slug, ticketCode }: { slug: string; ticketCode: st
         });
       });
     });
-    // Re-checks whenever the ticket/project identity changes, and also on
-    // window-focus/tab-visibility regain (current-user-provider.tsx's own
-    // existing mechanism hands back a new `organization` reference then,
-    // the same trigger several other real screens already piggyback on) —
-    // never polling. The Server Action's own 5-minute cache means a regain
-    // this soon after the last real check is just a fast cache hit, not a
-    // fresh GitHub call.
-  }, [isDevFallback, organization, slug, ticketCode]);
+    // Re-checks only when the ticket/project identity actually changes, or
+    // the signed-in org actually changes (organization?.id) — no longer on
+    // window-focus/tab-visibility regain. Ticket Detail no longer
+    // auto-refreshes on focus at all; the manual "Refresh" button below is
+    // now the only way to see new branches/commits/PRs before the Server
+    // Action's own 5-minute cache naturally expires.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDevFallback, organization?.id, slug, ticketCode]);
 
   // Manual "Refresh" — the only way to see new branches/commits/PRs before
   // the 5-minute cache naturally expires, without polling or reloading the
@@ -2932,7 +2932,13 @@ export function TicketDetailBreadcrumb({ slug, ticketCode }: { slug: string; tic
     return () => {
       cancelled = true;
     };
-  }, [isDevFallback, organization, slug, ticketCode]);
+    // organization?.id (not the object) — the object gets a new reference on
+    // every window-focus regain (current-user-provider.tsx's own session
+    // revalidation), which used to re-run this on focus alone. Ticket Detail
+    // (this breadcrumb included) only refetches on a real navigation
+    // (slug/ticketCode change) or an actual org switch (id change) now.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDevFallback, organization?.id, slug, ticketCode]);
 
   const displayText = (isDevFallback ? resolveDevTicket(slug, ticketCode)?.title : loadedTitle) ?? ticketCode;
 
@@ -3162,8 +3168,13 @@ export function TicketDetailScreen({
     if (isDevFallback) return; // handled synchronously above
     // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: runFetchTicket also runs from the Retry button, and must show "Loading…" immediately either way
     runFetchTicket();
+    // organization?.id (not the object) — the object gets a new reference on
+    // every window-focus regain (current-user-provider.tsx's own session
+    // revalidation). Ticket Detail must not refetch (or re-show the
+    // skeleton) just from switching tabs and back — only a real navigation
+    // (slug/ticketCode change) or an actual org switch (id change) should.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isDevFallback, organization, slug, ticketCode]);
+  }, [isDevFallback, organization?.id, slug, ticketCode]);
 
   useEffect(() => {
     if (isDevFallback || !organization) return; // dev fallback: no mock members either
@@ -3172,14 +3183,18 @@ export function TicketDetailScreen({
     loadProjectTeam(organization.id, slug).then((result) => {
       if (result.status === "ready") setMembers(result.members);
     });
-  }, [isDevFallback, organization, slug]);
+    // organization?.id, not the object — see the main ticket-load effect above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDevFallback, organization?.id, slug]);
 
   useEffect(() => {
     if (isDevFallback || !organization) return;
     loadOrganizationLabels(organization.id).then((result) => {
       if (result.status === "ready") setOrgLabels(result.labels.map((l) => l.name));
     });
-  }, [isDevFallback, organization]);
+    // organization?.id, not the object — see the main ticket-load effect above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDevFallback, organization?.id]);
 
   useEffect(() => {
     if (addingComment) commentTextareaRef.current?.focus();
