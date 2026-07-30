@@ -113,9 +113,8 @@ function UsersLoadingSkeleton() {
 }
 
 // ── Toast ─────────────────────────────────────────────────────────────────────
-// Resend Invitation is still mock (no real backend to call), so this is the
-// only feedback surface for it — a brief, dismissable
-// confirmation rather than a silent no-op.
+// Real backend actions (Resend/Copy Invitation Link, etc.) still need a
+// brief, dismissable confirmation surface rather than a silent success.
 
 interface ToastState {
   message: string;
@@ -593,7 +592,15 @@ export function UsersScreen() {
     showToast(`${fullName(updated)} was updated.`);
   }
 
-  async function copyInvitationLink(u: User) {
+  // Shared by "Resend Invitation" and "Copy Invitation Link" — JIRITA never
+  // sends invitation email (no SMTP/mailer is wired up), so both actions
+  // mean the same real thing: mint a fresh single-use link via
+  // regenerateInvitationLink (which supersedes/invalidates whatever
+  // unused token existed before, per Supabase Auth's own one-token-per-type
+  // behavior) and put it in the admin's clipboard so they can hand it to
+  // the invited person themselves. Only the confirmation toast differs, so
+  // an admin who clicks "Resend" can tell a new link was actually minted.
+  async function regenerateAndCopyInvitationLink(u: User, confirmationMessage: string) {
     if (isDevFallback || !organization) return;
     const result = await regenerateInvitationLink(organization.id, u.id);
     if (result.status === "error") {
@@ -602,10 +609,18 @@ export function UsersScreen() {
     }
     try {
       await navigator.clipboard.writeText(result.inviteLink);
-      showToast("Invitation link copied to clipboard.");
+      showToast(confirmationMessage);
     } catch {
       showToast(result.inviteLink);
     }
+  }
+
+  async function copyInvitationLink(u: User) {
+    await regenerateAndCopyInvitationLink(u, "Invitation link copied to clipboard.");
+  }
+
+  async function resendInvitation(u: User) {
+    await regenerateAndCopyInvitationLink(u, "New invitation link copied to clipboard.");
   }
 
   // "Delete User" — the actual server-side eligibility re-check and the
@@ -662,7 +677,7 @@ export function UsersScreen() {
     // Invited
     return [
       ...common,
-      { label: "Resend Invitation", onClick: () => showToast(`Invitation resent to ${u.email}.`) },
+      { label: "Resend Invitation", onClick: () => resendInvitation(u) },
       { label: "Copy Invitation Link", onClick: () => copyInvitationLink(u) },
       { label: "Disable User", onClick: () => handleSetMembershipStatus(u, "Disabled") },
       { label: "Delete User", danger: true, onClick: () => setDeleteTarget(u) },
