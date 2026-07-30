@@ -1,4 +1,4 @@
-> Last Updated: July 28, 2026
+> Last Updated: July 30, 2026
 
 ---
 
@@ -77,6 +77,10 @@ Most recently, dark mode was removed outright, by explicit product decision: JIR
 Most recently, JIRITA gained a real Mobile-only bottom tab bar and its own avatar menu, for all three roles — `mobile-tab-bar.tsx` reuses the Desktop Sidebar's own `NAV_LINK` routes/icons and `isNavActive` logic rather than a second navigation model, with each role (Admin/Project Lead/Member) getting its own required set of direct tabs, a shared "More" bottom sheet (`mobile-more-sheet.tsx`) for whatever doesn't fit as a direct tab, and a dynamic fifth/sixth slot that shows a Project Lead's or Member's own project name directly when they're scoped to exactly one project. The header avatar's existing `AccountMenu` is reused as-is on Mobile; Member no longer sees a redundant Profile entry there, since Profile is now a direct tab for that role. Desktop's own Sidebar is completely untouched. See Architecture Status → "Mobile Experience" for the full detail.
 
 Most recently, a nine-commit pass fixed real Mobile layout and horizontal-overflow bugs across most of the app's already-real screens — none of it touched Desktop layout (every fix is scoped behind a `sm:`/`lg:` breakpoint revert) and none of it touched any Supabase query or data path. In order: the Admin/Project Lead Dashboard headers and KPI/insight bands now stack and compact correctly instead of overflowing, and the Project Lead's action bar (project selector + Add Member/New Note/New Ticket) stays on one row via `flex-1`/`min-w-0`/`truncate` on the selector; the Project Lead Project Overview's two-column split collapses to one column below `lg:` and its KPI strip becomes a 2×2 grid; the Tickets header's title, view tabs, "New Ticket", search field, and filter/chip rows now stack into clear vertical blocks instead of competing for one row; Ticket Detail's own two-column split flattens to a single Mobile column via `contents` + `order-*` (reordering sections without duplicating any stateful field component) and gained a compact quick-summary card, alongside a real hydration-error fix (three spots wrapped an `Avatar` — which can render a `<div>` for a user with no photo — inside an invalid `<p>`, now a `<div>`); every auth input (login, forgot/reset/change password, accept-invite — all built on the shared `AuthTextField`/`AuthPasswordField`) grew to 16px on Mobile only, the exact threshold below which iOS Safari auto-zooms on focus (a fix already used for the same problem in Mi Pádel Club); My Work's own loading-skeleton rows were missing the same `overflow-x-auto`/`min-w-0` pair their real, loaded rows already had, so the placeholder alone forced the page wider than the viewport during every load; both Reports' and Time Tracking's `PeriodSelector` (This Month/Last Month/This Quarter/Custom Range) had no wrap/scroll escape valve on its own `whitespace-nowrap` button row, wide enough on its own to widen the whole page on Mobile — now scrolls within itself; and, last, the shared `FilterDropdown` popover (used by every ticket filter) had two real bugs — a closed popover stayed mounted (only `opacity`/`pointer-events` toggled) so its absolutely-positioned box kept counting toward the page's scrollable width even while invisible, and a `transition-all` regression let the JS-computed `left` position itself animate, visibly sliding the panel past the viewport edge for the first ~150ms of every open — fixed by truly unmounting the panel ~150ms after close and computing/clamping its horizontal position from measured rects (recalculated on open and on resize while open, verified via Playwright measurement). See Architecture Status → "Mobile Experience" for the full per-screen detail.
+
+Most recently, Ticket Detail's Comments gained real attachment support, in two parts. First, read: comment-level attachments (`ticket_attachments.comment_id` — already real, but previously mixed into the general Attachments section with no filter) now render read-only underneath their own comment, reusing the exact same preview/download/signed-URL infrastructure and ext-badge styling as the general section, just sized down for the comment layout; the general Attachments section was fixed to filter `comment_id IS NULL`, so a ticket's own direct attachments and its comments' attachments never appear in both places or get double-counted. Second, write: the comment composer gained a real Attach button — files are staged locally (name/size shown, individually removable) and only actually uploaded, via the same `uploadTicketAttachment` (now accepting an optional `commentId`, unused by the general section's own call site), after the comment itself has been successfully created — never before, and never at all if comment creation fails. A failed upload never rolls back the comment or the other files in the same batch; it's reported by filename via the existing error toast while the comment and every other successful upload stay. See Architecture Status → "Ticket Detail → Comments → Attachments" for the full detail.
+
+Most recently, the offline Unfuddle → JIRITA importer (`src/lib/unfuddle-import/`) was completed for the KTVibe project (Unfuddle Project 152 / Milestone 183) — all 7 phases are now `implemented`, and a final, read-only audit certified the migration COMPLETE. See "Unfuddle Import — KTVibe Migration" below for the full certification (entity counts, exclusions, drift, user resolution, Storage/hash verification, idempotency, and the one open, out-of-scope technical debt item).
 
 ---
 
@@ -629,7 +633,7 @@ See Architecture Status for the full list of applied migrations.
 
 # In Progress
 
-Nothing currently in progress. Auth/profile/avatar, Projects (Sidebar, `/projects`, per-project Settings — now without a "Project Lead" field, see Current Sprint → Completed → Projects → Project Settings), Tickets (five list views with real filtering, New Ticket, full Ticket Detail, Related Tickets, the editable Quick Ticket Preview, real write-path error handling, a real URL-persisted status/alert filter, the Backlog creation default, and inline Description editing), Team (roster, project-scoped Lead/Member role, Make Project Lead, Add/Remove Member, Work History), Project Notes (list, search, create, edit, Duplicate, delete), the Admin + Project Lead + Member Dashboards, and company-wide Reports (Admin role, Delivery and Finance tabs) backend integration are all done and confirmed working against a live Supabase project — see Current Sprint → Completed → Authentication & Profile / Projects / Project Settings / Tickets / Team / Project Notes / Dashboard / Reports. The **Admin** Project Overview (including its new Project Activity history page), per-project Reports (see Current Sprint → Completed → Project Overview / Project Reports), Time Tracking for the Admin/Member roles (real KPIs/filters/Timesheets/Billing by Client, plus the "Missing Hours" rename and its own Member Profile Modal trigger fixes — see Current Sprint → Completed → Hours & Time Tracking), and the Dashboard's new "View all activity →" action and org-wide Activity History page (see Current Sprint → Completed → Dashboard) are also now implemented and build/type-checked, along with Users backend integration (see Current Sprint → Completed → Users) — all of these still need to be exercised against a live Supabase project and clicked through in a browser before they can be called confirmed; that verification pass is the immediate next step, ahead of any new feature. After that, the next candidate is one of the remaining mock-to-real seams — see Next Recommended Feature. The Unfuddle → Jirita import is specified (`docs/UNFUDDLE_IMPORT_SPECIFICATION.md`) but no importer code exists yet.
+Nothing currently in progress. Auth/profile/avatar, Projects (Sidebar, `/projects`, per-project Settings — now without a "Project Lead" field, see Current Sprint → Completed → Projects → Project Settings), Tickets (five list views with real filtering, New Ticket, full Ticket Detail, Related Tickets, the editable Quick Ticket Preview, real write-path error handling, a real URL-persisted status/alert filter, the Backlog creation default, and inline Description editing), Team (roster, project-scoped Lead/Member role, Make Project Lead, Add/Remove Member, Work History), Project Notes (list, search, create, edit, Duplicate, delete), the Admin + Project Lead + Member Dashboards, and company-wide Reports (Admin role, Delivery and Finance tabs) backend integration are all done and confirmed working against a live Supabase project — see Current Sprint → Completed → Authentication & Profile / Projects / Project Settings / Tickets / Team / Project Notes / Dashboard / Reports. The **Admin** Project Overview (including its new Project Activity history page), per-project Reports (see Current Sprint → Completed → Project Overview / Project Reports), Time Tracking for the Admin/Member roles (real KPIs/filters/Timesheets/Billing by Client, plus the "Missing Hours" rename and its own Member Profile Modal trigger fixes — see Current Sprint → Completed → Hours & Time Tracking), and the Dashboard's new "View all activity →" action and org-wide Activity History page (see Current Sprint → Completed → Dashboard) are also now implemented and build/type-checked, along with Users backend integration (see Current Sprint → Completed → Users) — all of these still need to be exercised against a live Supabase project and clicked through in a browser before they can be called confirmed; that verification pass is the immediate next step, ahead of any new feature. After that, the next candidate is one of the remaining mock-to-real seams — see Next Recommended Feature. The Unfuddle → Jirita import (`docs/UNFUDDLE_IMPORT_SPECIFICATION.md`) is now complete for the KTVibe project — see "Unfuddle Import — KTVibe Migration" below.
 
 ---
 
@@ -745,7 +749,7 @@ Backend integration, connected and confirmed working:
 - `src/app/projects/[slug]/tickets/[ticketCode]/page.tsx` (renamed from `[ticketId]`) + `src/components/tickets/ticket-detail-screen.tsx` — the visible ticket code is now the only thing that ever appears in a ticket URL, fixing a real bug where the route navigated on the internal uuid
 - Activity Log is real and driven almost entirely by database triggers, so ticket creation, field changes, attachment uploads/renames/deletes, time entries, and related-ticket add/remove are all logged automatically with the real authenticated actor — no existing write path had to change to get this
 - Applied migrations, in order: `20260708000000_mvp_schema.sql` (base schema + RLS), `20260708010000_grant_authenticated_membership_read.sql` (SELECT grants — RLS alone doesn't grant table privileges), `20260709000000_profile_self_service_updates.sql` (self-service name/capacity writes), `20260710000000_avatars_storage.sql` + `20260711000000_fix_avatars_storage_policies.sql` (the `avatars` bucket and its RLS policies — first pass had a policy bug blocking uploads, fixed in the second file), `20260712000000_grant_authenticated_projects_read.sql`, `20260713000000_grant_authenticated_projects_insert.sql`, `20260714000000_fix_projects_select_rls_self_reference.sql` (real bug fix — `projects_select`'s helper function re-queried `projects` from within its own policy, which broke `INSERT`/`UPDATE ... RETURNING` specifically because Postgres evaluates the RETURNING-time SELECT check against the row being written in the same command and that self-reference doesn't reliably see it yet; rewritten to check the row's own columns directly), `20260715000000_grant_authenticated_projects_update.sql`, `20260716000000_add_clients_table.sql` (new `clients` table — not a foreign key on `projects`; `client_name` stays free text), `20260717000000_grant_authenticated_tickets_read.sql`, `20260718000000_grant_authenticated_tickets_insert.sql`, `20260719000000_fix_tickets_insert_rls_admin_lead.sql` (real bug fix — the base schema's ticket-related insert policies only allowed a real `project_memberships` row, but that table is still empty since no staffing UI exists yet, so every insert was blocked for everyone; fixed by also allowing an org admin/lead), `20260720000000_grant_authenticated_ticket_comments_activity_read.sql`, `20260721000000_grant_authenticated_tickets_update.sql`, `20260722000000_add_labels_table.sql`, `20260723000000_add_tickets_acceptance_criteria_done.sql` (parallel `boolean[]` aligned by index with `acceptance_criteria`), `20260724000000_add_ticket_attachments.sql` (private `ticket-attachments` Storage bucket), `20260725000000_fix_ticket_attachments_storage_insert_policy.sql` (real bug fix — an unqualified `storage.foldername(name)` reference silently resolved to the *project's* `name` column instead of the uploaded object's own path, blocking every real upload until qualified as `objects.name`), `20260726000000_add_ticket_time_entries.sql`, `20260727000000_enable_real_ticket_comments.sql` (fixes the same `project_memberships`-only gap for comments, adds the first Activity-logging trigger), `20260728000000_real_ticket_activity_log.sql` (`tickets.created_by`, and the creation/field-change/attachment/time-entry Activity triggers), `20260729000000_add_ticket_attachments_rename.sql` (RLS UPDATE policy, column-scoped to `filename` only), `20260730000000_add_ticket_attachments_delete.sql` (RLS DELETE policy on the metadata table and the Storage bucket — no delete permission existed anywhere before this), `20260731000000_log_attachment_rename_delete_activity.sql` (the matching Activity triggers), `20260801000000_unify_ticket_priority_scale.sql` (swaps the `ticket_priority` enum from `high`/`normal`/`low` to `highest`/`high`/`medium`/`low`, migrating existing `normal` rows to `medium` in the same step and dropping the old enum type), `20260802000000_add_ticket_relations.sql` (the `ticket_relations` table, its RLS policies, and the relation-added/removed Activity triggers). See `docs/SUPABASE_SETUP.md` for how to apply migrations to a new project.
-- `docs/UNFUDDLE_IMPORT_SPECIFICATION.md` — how the Techtivo Unfuddle backup will map onto the schema; no importer code exists yet
+- `docs/UNFUDDLE_IMPORT_SPECIFICATION.md` — how the Techtivo Unfuddle backup maps onto the schema; the importer built from it (`src/lib/unfuddle-import/`) has completed the KTVibe migration — see "Unfuddle Import — KTVibe Migration"
 - `src/lib/projects.ts` — `loadProjectTeam` (real roster: name/email/avatar/real-org-role-title/weekly capacity, falling back to the member's real org-level weekly capacity when the project-level value is unset, never overriding an explicit 0), `addProjectMember`/`removeProjectMember`/`hasProjectMemberHistory` (the real Team roster-write functions), `setProjectLead` (Make Project Lead — clears any existing lead first, since only one is allowed per project), `loadLeadProjects` (the Project Lead Dashboard's real Current Project list, by `project_role = 'lead'`), `loadOrganizationWorkloadMembers` (Admin Dashboard Team Workload)
 - `src/components/team-screen.tsx`, `add-team-member-modal.tsx`, `work-history-screen.tsx`, `member-profile-modal.tsx` (project-mode `MemberMenu`) — the real Team screen, its Add Member picker, the dedicated server-side-paginated Work History page, Remove from Project (DB-enforced history guard), and Make Project Lead
 - `src/lib/tickets.ts` — `loadUserActivity` (the Users Activity tab's grouped feed), `loadProjectMemberWorkHistorySummary`/`loadProjectMemberWorkHistoryPage` (the two Work History RPC wrappers), `loadOrganizationTickets`/`loadOrganizationLoggedMinutes`/`loadOrganizationActivity` (the org-wide loaders the Admin Dashboard uses, and — scoped to one project — the Project Lead Dashboard reuses for the same widgets)
@@ -2809,6 +2813,61 @@ neither trigger changed; only what gets rendered while `loadState ===
   `ticket-development-actions.ts`, GitHub OAuth, Project Settings, or
   any migration.
 
+## Ticket Detail → Comments → Attachments
+
+Comments gained real attachment support, split into a read-only display
+pass and a write-enabled upload pass, in two separate tasks.
+
+**Display (read-only).** Cause: `loadTicketAttachments` (the general
+Attachments section's loader) queried `ticket_attachments` by `ticket_id`
+alone, with no `comment_id` filter — comment-level attachments (imported
+historically from Unfuddle, `comment_id` set) rendered mixed into the
+general section, and nothing rendered them under their own comment at all.
+
+- `loadTicketAttachments` now filters `comment_id IS NULL` — ticket-level
+  attachments only, matching the section's own "Attachments · N files"
+  count exactly to direct uploads.
+- `loadTicketComments` now also fetches every comment-level attachment for
+  the ticket in one extra query (never one per comment — grouped in memory
+  by `comment_id`), attaching each to its `TicketComment.attachments`.
+- A new, deliberately minimal `CommentAttachmentRow` (not the full
+  `AttachmentRow` used by the general section — no rename/delete menu,
+  read-only by design) renders under each comment's body only when it has
+  attachments; reuses `AttachmentPreviewModal`/`downloadTicketAttachment`
+  as-is. A comment with no attachments renders byte-identical to before —
+  no empty state, no zero-count badge.
+- Validated against real KTVibe data (post-Unfuddle-import): a ticket with
+  both direct and comment attachments, a ticket with comment-only
+  attachments (including 3 files all literally named `image.png`, split
+  across 2 different comments — grouped correctly by `comment_id`/`id`,
+  never by filename), a direct-only ticket, and a ticket with none.
+
+**Write (comment composer).** Adds a small "Attach" icon button next to
+Cancel/Comment. Selected files are staged client-side only
+(`PendingCommentFileRow` — name/size, individually removable via ✕) — no
+upload starts on selection. On submit: the comment is created first; only
+on success are the staged files uploaded, each via `uploadTicketAttachment`
+extended with an optional third `commentId` parameter (the general
+section's own call site never passes it, so its behavior is byte-for-byte
+unchanged — `comment_id` stays `null`). Uploads run in parallel
+(`Promise.all`); each successful one is merged into that comment's
+`attachments` in local state as it resolves. If comment creation itself
+fails, no upload is ever attempted. If one or more uploads fail after the
+comment succeeded, the comment and every successful upload stay — the
+failure is reported by exact filename via the existing shared error toast,
+never a silent drop and never a rollback of siblings.
+
+- Scope: `src/lib/tickets.ts` (`loadTicketAttachments`, `loadTicketComments`,
+  `createTicketComment`, `uploadTicketAttachment`) and
+  `ticket-detail-screen.tsx` only. No schema, Storage policy, or migration
+  change — reuses the `ticket_attachments.comment_id` column and
+  Storage/signed-URL path Phase 6 of the Unfuddle importer already
+  populated historically (see "Unfuddle Import — KTVibe Migration" below).
+- `ticket-preview-panel.tsx` (the Quick Ticket Preview) was audited and
+  deliberately left unchanged — it renders comments but has no Attachments
+  section of any kind (general or comment-level), so adding comment
+  attachments there would be new scope, not a fix.
+
 ## Metadata — Open Graph / Twitter previews (reset-password, accept-invite)
 
 Fixes a real, reported bug: sharing a `/reset-password` or `/accept-invite`
@@ -3166,8 +3225,11 @@ generic gray silhouette.
   the Tag field (interactive, never persisted); `project_note_activity` is
   written by real triggers but no screen reads it yet.
 - `docs/UNFUDDLE_IMPORT_SPECIFICATION.md` defines how Techtivo's Unfuddle
-  backup maps onto the schema for the eventual data migration. No importer
-  code exists yet.
+  backup maps onto the schema. The importer built from it has completed
+  the KTVibe migration — see "Unfuddle Import — KTVibe Migration" below.
+  Nothing left mock here; the *app's* eventual self-service bulk-user-
+  provisioning path this doc also describes is still unbuilt, but that's a
+  separate, not-yet-started feature, not part of the completed migration.
 
 Note also that Projects' own real rows still don't populate
 `openTickets`/`blockedTickets`/`overdueTickets`/`progress`/
@@ -3183,6 +3245,165 @@ Completed → Projects) instead of relying on those stored-but-unpopulated
 fields. Only `awaitingReviewTickets`/`dueThisWeekTickets`/`activeMilestones`
 remain genuinely unpopulated/`0` anywhere in the app — still read by the
 Projects list's own Project Lead info chips/summary cells.
+
+---
+
+# Unfuddle Import — KTVibe Migration (Complete)
+
+A one-time, offline CLI migration (`src/lib/unfuddle-import/`, spec'd in
+`docs/UNFUDDLE_IMPORT_SPECIFICATION.md`), separate from the live
+application above — it reads Techtivo's real Unfuddle backup export
+(`backup.xml` + `media/`, outside this repo) and writes historical rows
+directly to the same live Supabase project via `service_role`, never
+through the app's own RLS-gated client paths. Scoped to exactly one
+Unfuddle Project (152) / Milestone (183), imported as the single JIRITA
+project **KTVibe**. All 7 phases are `implemented` and idempotent — a
+PREVIEW re-run of any phase reports 0 new / N already-imported / 0
+conflicts.
+
+## Phases
+
+1. **Dry Run** — streams `backup.xml` (sax, never loaded fully into
+   memory), builds typed models, validates, writes nothing.
+2. **Project** — 1 project (KTVibe).
+3. **Tickets** — 170.
+4. **Comments** — 412.
+5. **Time Entries** — 221 (4,434 minutes / 73.90 hours — matches
+   `tickets.hours` exactly, 0 tickets differ).
+6. **Attachments** — 250 (70 ticket-level, 180 comment-level) — DB rows
+   and real Storage objects, `<ticket_id>/att-<unfuddle_id>-<filename>`,
+   deterministic and collision-free. 250/250 SHA-256-verified against
+   Storage.
+7. **Relations** — 39 raw `<relationship>` XML records (each historical
+   relation is written twice by Unfuddle, once per ticket side) → 38
+   internal + 1 external → 19 unique internal relations imported,
+   canonicalized by a new deterministic `unfuddle_relation_key`
+   (`unfuddle:related:<min>:<max>` / `unfuddle:sibling:<min>:<max>` /
+   `unfuddle:parent_child:<parent>:<child>`, since Unfuddle assigns a
+   `<relationship>` element no id of its own). 1 relation excluded (see
+   below).
+
+Every phase after Tickets resolves its parent(s) **exclusively** by
+`tickets.unfuddle_id`/`unfuddle_relation_key` — never by ticket number,
+title, position, or any other content-based match.
+
+## Excluded (deliberate)
+
+**KTV-1581 (unfuddle 15446) → unfuddle 15457** — 15457 is a real ticket in
+the backup, but belongs to a different Unfuddle Milestone (180), outside
+KTVibe's scope. Never imported: ticket 15457 does not exist in JIRITA, no
+relation row references it, and the milestone boundary was never widened
+to accommodate it. Reported by Phase 7 as `excluded_external`, not as an
+error or a conflict.
+
+## Users
+
+Resolved **exclusively by email**, never by name/initials, never invented:
+
+- 6 real profiles matched (alejo@techtivo.com, majo@techtivo.com,
+  mex@techtivo.com, micalev45@gmail.com, carolina@pixelgroup.net,
+  martine@techtivo.com — 2 of these are flagged `is-removed` in Unfuddle
+  but still resolve to a real, active JIRITA profile).
+- 2 orphans (Unfuddle person ids 150, 153) — referenced by 36 and 34
+  comments respectively, but absent from the backup's own People list.
+  Never resolved, never assigned to a fallback account: `author_profile_id`
+  is `null` on all 70 affected comments (confirmed live).
+- All 250 attachments have `uploaded_by = null` — Unfuddle's own
+  `<attachment>` elements carry no creator/person/uploader field at all,
+  for any of the 250, so this is an honest absence, not a resolution
+  failure.
+- All 221 time entries resolved to a real `logged_by` — 0 null.
+
+## Storage
+
+Bucket `ticket-attachments` (private). 250/250 objects exist and match the
+physical reference file by size **and SHA-256 content hash** (not just
+existence/path) — reconfirmed by a fresh PREVIEW after the fact, not only
+during the original write. 196.28 MB total, 0 missing, 0 path collisions,
+0 empty files. 5 groups of byte-identical content across different
+Unfuddle attachment ids (e.g. the same screenshot pasted into two
+comments) — preserved as independent rows/objects, never merged or
+deduplicated.
+
+## Known drift
+
+**Ticket #651 (unfuddle_id 11697)** — its `due_date` and `updated_at` no
+longer match the backup. Root cause: a real JIRITA user edited this ticket
+*after* Phase 3 ran (not a migration defect). Detected by Phase 3's own
+reconciliation, reported as a conflict, and **deliberately never
+overwritten** — every other one of its 169 sibling tickets matches exactly.
+No other drift exists anywhere in the migrated data (0 conflicts across
+comments/time entries/attachments/relations).
+
+## Schema changes
+
+Four additive migrations, all reviewed and applied — no existing column,
+constraint, or RLS policy touched:
+
+- `20260822000000`/`20260823000000`/`20260824000000`/`20260825000000` —
+  add `unfuddle_id` (tickets already had it; added to comments, time
+  entries, attachments) plus a shared, transaction-local GUC
+  (`jirita.import_bypass_activity_log`) and one `insert_*_bypassing_activity_log`
+  RPC per table, so a historical insert never generates a synthetic,
+  present-dated `ticket_activity` row. `ticket_time_entries` also gained
+  `updated_at` (previously absent); `ticket_attachments` also gained
+  `comment_id` (see "Ticket Detail → Comments → Attachments" above).
+- `20260826000000` — adds `ticket_relations.unfuddle_relation_key` (text,
+  nullable, unique, no default — the 2 pre-existing native relations stay
+  `null`, never backfilled) and `insert_ticket_relations_bypassing_activity_log`,
+  same GUC-bypass pattern. Does not accept `created_at`: Unfuddle provides
+  no relation-level timestamp, so every historical relation row honestly
+  gets the table's own `now()` default (the import moment), never a
+  fabricated or ticket-borrowed date.
+- `20260827000000`/`20260828000000` — found live, by this migration's own
+  controlled empirical testing: the relations RPC's only same-project
+  guarantee was an RLS policy, which `service_role` (the RPC's sole caller)
+  bypasses entirely (`BYPASSRLS`) — a cross-project relation was briefly,
+  actually insertable. Fixed with an explicit in-function guard (20260827),
+  which itself had a real bug (a PL/pgSQL variable name collided with a
+  query alias, "ambiguous column reference", breaking every call including
+  valid ones) fixed by 20260828. Both re-verified live before use.
+
+Every RPC above: `EXECUTE` revoked from `PUBLIC`/`anon`/`authenticated`,
+granted only to `service_role`; `security invoker` (no privilege
+escalation — the real table constraints, including the new
+`unfuddle_relation_key`/`unfuddle_id` uniqueness, still apply in full).
+
+## Idempotency (all phases, PREVIEW-confirmed)
+
+| Phase | New | Already imported | Conflicts |
+|---|---|---|---|
+| 3 (Tickets) | 0 | 169 | 1 (ticket #651 drift — reported, not overwritten) |
+| 4 (Comments) | 0 | 412 | 0 |
+| 5 (Time Entries) | 0 | 221 | 0 |
+| 6 (Attachments) | 0 | 250 (DB) / 250 (Storage) | 0 |
+| 7 (Relations) | 0 | 19 (by `unfuddle_relation_key`) | 0 |
+
+A re-run of any phase, at any time, would not modify existing data.
+
+## Technical debt (open, out of scope)
+
+`ticket_relations_log_removed` (pre-existing trigger, migration
+`20260802000000`, not introduced by this migration) can raise a Postgres
+`23503` when a ticket that still has an active relation is deleted via
+cascade — its `AFTER DELETE` insert into `ticket_activity` races the
+same-statement removal of that ticket row. Impact today is low: no "delete
+ticket" feature exists anywhere in the app's UI; found only during this
+migration's own manual test cleanup (temporary, disposable tickets). Not
+fixed — out of scope for a migration limited to `unfuddle_relation_key` +
+insert-time bypass RPCs, and the trigger it lives on governs DELETE, not
+the INSERT path this migration needed.
+
+## Certification
+
+A final, read-only audit (fresh PREVIEW on every phase + direct
+read-only Supabase queries, no writes) certified the migration
+**COMPLETE**: 170 tickets / 412 comments / 221 time entries / 250
+attachments / 19 relations all present and reconciled field-by-field
+against the backup; 1 relation correctly excluded; 1 legitimate
+post-import drift correctly left alone; zero invented identities, zero
+duplicated entities, zero synthetic historical activity, zero data loss
+within the approved scope.
 
 ---
 
@@ -3326,7 +3547,7 @@ Planned future work:
 - Real drag & drop (Kanban)
 - Real-time updates (including Supabase Realtime delivery for the now-real Notifications system, currently refresh-on-demand only)
 - File uploads
-- Unfuddle data import (spec complete — see `docs/UNFUDDLE_IMPORT_SPECIFICATION.md`; importer not yet built)
+- ~~Unfuddle data import~~ — **done**, KTVibe migrated; see "Unfuddle Import — KTVibe Migration" above. A future pass covering additional Unfuddle projects/milestones would reuse the same importer with new config, not rebuild it.
 
 ---
 

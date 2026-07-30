@@ -307,6 +307,13 @@ loading skeleton — is implemented and passes `tsc`/`eslint`/`next build`,
 but has not yet been clicked through in a live browser — treat it as
 "should work, not yet verified."
 
+The offline Unfuddle → JIRITA historical importer (`src/lib/unfuddle-import/`)
+has completed its migration of the KTVibe project — all 7 phases are
+`implemented`, and a final read-only audit certified the result. This is a
+one-time CLI migration, separate from the live app above; see
+`PROJECT_STATUS.md` → "Unfuddle Import — KTVibe Migration" for the full
+certification.
+
 The workspace-wide Settings screen (`/settings/*`) was retired outright —
 JIRITA is single-tenant, so that configuration isn't meant to be
 Admin-editable through the UI. "Settings" no longer appears in the
