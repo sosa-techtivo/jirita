@@ -392,7 +392,20 @@ function FocusTicketRow({ ticket, todayISO, onOpen }: { ticket: Ticket; todayISO
     <button
       type="button"
       onClick={() => onOpen(ticket)}
-      className="w-full flex items-center gap-3 py-2 px-3 -mx-3 rounded-lg hover:bg-slate-50 dark:hover:bg-zinc-800/50 transition-colors text-left"
+      // flex-wrap (not present before): unlike TicketListRow (its sibling
+      // row component, tickets/ticket-card.tsx), this row's StatusBadge,
+      // hours, and due date badges are all `flex-shrink-0`/unshrinkable and
+      // must stay visible (never `hidden sm:` on Mobile, unlike
+      // TicketListRow's). The due date text grew to "MMM D, YYYY" (see the
+      // date-formatting task) — on narrow Mobile widths the combined
+      // minimum width of StatusBadge + hours + due date no longer fits on
+      // one line even with the title (flex-1 min-w-0) fully collapsed,
+      // which is what forced this whole row — and with it the whole page,
+      // since nothing upstream clips horizontal overflow — wider than the
+      // viewport. Wrapping lets the secondary badges drop to a second line
+      // instead, with every value still visible, nothing hidden or
+      // truncated beyond the title's own existing `truncate`.
+      className="w-full flex flex-wrap items-center gap-x-3 gap-y-1 py-2 px-3 -mx-3 rounded-lg hover:bg-slate-50 dark:hover:bg-zinc-800/50 transition-colors text-left"
     >
       <StatusBadge status={ticket.status} />
 

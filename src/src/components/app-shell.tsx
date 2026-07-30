@@ -35,7 +35,16 @@ export function AppShell({
         <div className="flex-1 flex flex-col overflow-hidden">
           <HeaderBar breadcrumb={breadcrumb} />
           <main
-            className={`flex-1 overflow-y-auto ${
+            // overflow-x-hidden: `overflow-y-auto` alone leaves overflow-x
+            // computed as `auto` per spec, so any leftover per-screen excess
+            // width (a real bug, always fixed at its own source first —
+            // e.g. my-work-screen.tsx's FocusTicketRow) surfaces as page-wide
+            // horizontal scroll instead of being contained. This is a final
+            // safety net on top of that, not a substitute for it — nothing
+            // legitimate is expected to need horizontal scroll at the page
+            // level (Kanban board columns etc. already scroll within their
+            // own bounded container).
+            className={`flex-1 overflow-y-auto overflow-x-hidden ${
               hasMobileTabBar ? "pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-0" : ""
             }`}
           >

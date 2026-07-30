@@ -234,7 +234,7 @@ export function ProjectOverviewBreadcrumb({ slug }: { slug: string }) {
 // ADMIN/PROJECT_LEAD returns above), so ADMIN/PROJECT_LEAD never render it.
 function MemberProjectOverviewSkeleton() {
   return (
-    <div className="max-w-4xl mx-auto px-8 py-10">
+    <div className="max-w-4xl mx-auto px-4 sm:px-8 py-6 sm:py-10">
       {/* ===== Project Header ===== */}
       <div className="flex items-start justify-between">
         <div className="flex items-start gap-4">
@@ -254,19 +254,24 @@ function MemberProjectOverviewSkeleton() {
       <SkeletonBlock className="h-9 w-full rounded-md mt-5" />
 
       {/* ===== KPI strip ===== */}
-      <div className="mt-6 flex items-stretch divide-x divide-slate-100 dark:divide-zinc-800 rounded-xl border border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900 shadow-sm shadow-slate-200/40 dark:shadow-black/20 overflow-hidden">
+      <div className="mt-4 sm:mt-6 grid grid-cols-2 sm:flex sm:items-stretch gap-px sm:gap-0 sm:divide-x divide-slate-100 dark:divide-zinc-800 bg-slate-200 dark:bg-zinc-800 sm:bg-white dark:sm:bg-zinc-900 rounded-xl border border-slate-200 dark:border-zinc-700/70 shadow-sm shadow-slate-200/40 dark:shadow-black/20 overflow-hidden">
         {[0, 1, 2, 3].map((i) => (
-          <div key={i} className="flex-1 px-5 py-4">
+          <div key={i} className="sm:flex-1 bg-white dark:bg-zinc-900 px-4 sm:px-5 py-3 sm:py-4">
             <SkeletonBlock className="h-2.5 w-20 rounded mb-2" />
             <SkeletonBlock className="h-6 w-10 rounded" />
           </div>
         ))}
       </div>
 
-      {/* ===== My Project Work + My Activity, Needs My Attention + Team + Quick Links ===== */}
-      <div className="mt-10 grid grid-cols-3 gap-8 items-start">
+      {/* ===== My Project Work + My Activity, Needs My Attention + Team + Quick Links =====
+          Mobile: single column, DOM order (My Project Work → My Activity →
+          Needs My Attention → Team → Quick Links) reads top-to-bottom — the
+          two-column split only takes over at `lg:` (same breakpoint already
+          approved for project-lead-project-overview.tsx's own equivalent
+          grid). ===== */}
+      <div className="mt-6 sm:mt-10 grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-8 items-start">
         {/* Left column */}
-        <div className="col-span-2 space-y-6">
+        <div className="lg:col-span-2 space-y-4 sm:space-y-6">
           <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/40 dark:border-zinc-700/70 dark:bg-zinc-900 dark:shadow-black/20">
             <div className="flex items-center justify-between gap-3 mb-3">
               <SkeletonBlock className="h-3 w-28 rounded" />
@@ -296,7 +301,7 @@ function MemberProjectOverviewSkeleton() {
         </div>
 
         {/* Right column */}
-        <div className="space-y-6">
+        <div className="space-y-4 sm:space-y-6">
           <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/40 dark:border-zinc-700/70 dark:bg-zinc-900 dark:shadow-black/20">
             <SkeletonBlock className="h-3 w-32 rounded mb-3" />
             <div className="space-y-3">
@@ -446,7 +451,7 @@ export function ProjectOverview({ slug = "mobile-banking-app" }: { slug?: string
 
   if (loadState === "error" || !project) {
     return (
-      <div className="max-w-4xl mx-auto px-8 py-10">
+      <div className="max-w-4xl mx-auto px-4 sm:px-8 py-6 sm:py-10">
         <div className="flex flex-col items-center justify-center text-center px-4 py-20">
           <h3 className="text-sm font-semibold text-slate-700 dark:text-zinc-200">Couldn&apos;t load project</h3>
           <p className="text-sm text-slate-400 mt-1 max-w-xs dark:text-zinc-500">
@@ -534,7 +539,7 @@ export function ProjectOverview({ slug = "mobile-banking-app" }: { slug?: string
   );
 
   return (
-    <div className="max-w-4xl mx-auto px-8 py-10">
+    <div className="max-w-4xl mx-auto px-4 sm:px-8 py-6 sm:py-10">
       {/* ===== Project Header ===== */}
       <div className="flex items-start justify-between">
         <div className="flex items-start gap-4">
@@ -586,30 +591,39 @@ export function ProjectOverview({ slug = "mobile-banking-app" }: { slug?: string
         </Link>
       )}
 
-      {/* ===== KPI strip — member-focused only ===== */}
-      <div className="mt-6 flex items-stretch divide-x divide-slate-100 dark:divide-zinc-800 rounded-xl border border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900 shadow-sm shadow-slate-200/40 dark:shadow-black/20 overflow-hidden">
-        <div className="flex-1 px-5 py-4">
+      {/* ===== KPI strip — member-focused only =====
+          Mobile: 2×2 grid via the `gap-px` + gray-wrapper "seam" trick —
+          each cell gets its own opaque background so the 1px gap reads as
+          a thin divider (same pattern as project-lead-project-overview.tsx's
+          own KPI strip). Desktop: unchanged single-row flex + divide-x. ===== */}
+      <div className="mt-4 sm:mt-6 grid grid-cols-2 sm:flex sm:items-stretch gap-px sm:gap-0 sm:divide-x divide-slate-100 dark:divide-zinc-800 bg-slate-200 dark:bg-zinc-800 sm:bg-white dark:sm:bg-zinc-900 rounded-xl border border-slate-200 dark:border-zinc-700/70 shadow-sm shadow-slate-200/40 dark:shadow-black/20 overflow-hidden">
+        <div className="sm:flex-1 bg-white dark:bg-zinc-900 px-4 sm:px-5 py-3 sm:py-4">
           <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600">My Open Tickets</p>
           <p className="text-2xl font-bold text-slate-900 dark:text-zinc-50 mt-1 leading-none">{myOpenTickets.length}</p>
         </div>
-        <div className="flex-1 px-5 py-4">
+        <div className="sm:flex-1 bg-white dark:bg-zinc-900 px-4 sm:px-5 py-3 sm:py-4">
           <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600">Due This Week</p>
           <p className="text-2xl font-bold text-slate-900 dark:text-zinc-50 mt-1 leading-none">{dueThisWeekCount}</p>
         </div>
-        <div className="flex-1 px-5 py-4">
+        <div className="sm:flex-1 bg-white dark:bg-zinc-900 px-4 sm:px-5 py-3 sm:py-4">
           <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600">My Blocked Tickets</p>
           <p className="text-2xl font-bold text-red-600 dark:text-red-400 mt-1 leading-none">{myBlockedTickets.length}</p>
         </div>
-        <div className="flex-1 px-5 py-4">
+        <div className="sm:flex-1 bg-white dark:bg-zinc-900 px-4 sm:px-5 py-3 sm:py-4">
           <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600">Completed This Month</p>
           <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400 mt-1 leading-none">{myCompletedThisMonth}</p>
         </div>
       </div>
 
-      {/* ===== My Work + My Activity, Team + Quick Links ===== */}
-      <div className="mt-10 grid grid-cols-3 gap-8 items-start">
+      {/* ===== My Work + My Activity, Team + Quick Links =====
+          Mobile: single column, DOM order (My Project Work → My Activity →
+          Needs My Attention → Team → Quick Links) reads top-to-bottom — the
+          two-column split only takes over at `lg:` (same breakpoint already
+          approved for project-lead-project-overview.tsx's own equivalent
+          grid). ===== */}
+      <div className="mt-6 sm:mt-10 grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-8 items-start">
         {/* Left column: primary content */}
-        <div className="col-span-2 space-y-6 min-w-0">
+        <div className="lg:col-span-2 space-y-4 sm:space-y-6 min-w-0">
           <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/40 dark:border-zinc-700/70 dark:bg-zinc-900 dark:shadow-black/20">
             <div className="flex items-center justify-between gap-3 mb-1 flex-wrap">
               <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-zinc-400">My Project Work</h2>
@@ -711,7 +725,7 @@ export function ProjectOverview({ slug = "mobile-banking-app" }: { slug?: string
         </div>
 
         {/* Right column: actionable content first, informational content after */}
-        <div className="space-y-6">
+        <div className="space-y-4 sm:space-y-6">
           {attentionItems.length > 0 && (
             <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/40 dark:border-zinc-700/70 dark:bg-zinc-900 dark:shadow-black/20">
               <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-1 dark:text-zinc-400">Needs My Attention</h2>
@@ -741,8 +755,8 @@ export function ProjectOverview({ slug = "mobile-banking-app" }: { slug?: string
                       projectSlug={slug}
                       className="flex items-center gap-2.5 w-full text-left"
                     >
-                      <Avatar src={member.avatar} name={member.name} className="w-7 h-7 rounded-full" />
-                      <div className="text-sm leading-tight flex-1">
+                      <Avatar src={member.avatar} name={member.name} className="w-7 h-7 rounded-full flex-shrink-0" />
+                      <div className="text-sm leading-tight flex-1 min-w-0">
                         <p className="font-medium text-slate-800 dark:text-zinc-200">{member.name}</p>
                         <p className="text-xs text-slate-400 dark:text-zinc-500">{member.role}</p>
                       </div>
