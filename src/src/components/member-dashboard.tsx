@@ -790,7 +790,7 @@ export function MemberDashboard() {
         <div className="flex items-center justify-between gap-2 mb-4">
           <div className="flex items-baseline gap-2">
             <h1 className="text-[15px] font-semibold text-slate-800 dark:text-zinc-100 tracking-tight leading-none">
-              Good morning, {user.name.split(" ")[0]} 👋
+              Hello, {user.name.split(" ")[0]} 👋
             </h1>
             <span className="text-slate-300 dark:text-zinc-700" aria-hidden="true">·</span>
             <p className="text-xs text-slate-400 dark:text-zinc-500">{formatFullDate(todayISO)}</p>

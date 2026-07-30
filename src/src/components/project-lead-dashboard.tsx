@@ -860,7 +860,7 @@ export function ProjectLeadDashboard() {
     return (
       <div className="max-w-6xl mx-auto px-6 py-8 pb-16">
         <h1 className="text-[22px] font-bold text-slate-900 dark:text-zinc-50 tracking-tight leading-none mb-6">
-          Good morning, {user.name.split(" ")[0]} 👋
+          Hello, {user.name.split(" ")[0]} 👋
         </h1>
         <div className="flex flex-col items-center justify-center text-center px-4 py-20">
           <h3 className="text-sm font-semibold text-slate-700 dark:text-zinc-200">No projects assigned</h3>
@@ -879,7 +879,7 @@ export function ProjectLeadDashboard() {
       <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 sm:gap-6 mb-4 sm:mb-6">
         <div>
           <h1 className="text-[22px] font-bold text-slate-900 dark:text-zinc-50 tracking-tight leading-none mb-1">
-            Good morning, {user.name.split(" ")[0]} 👋
+            Hello, {user.name.split(" ")[0]} 👋
           </h1>
           <p className="text-sm text-slate-400 dark:text-zinc-500">{formatISODate(todayISO)}</p>
         </div>

@@ -335,7 +335,7 @@ export function ExpandableDescription({ text }: { text: string }) {
 // project — not a minor background refresh).
 export function ProjectOverviewSkeleton({ canManageProject }: { canManageProject: boolean }) {
   return (
-    <div className="max-w-4xl mx-auto px-8 py-10">
+    <div className="max-w-4xl mx-auto px-4 sm:px-8 py-6 sm:py-10">
       {/* ===== Project Header ===== */}
       <div className="flex items-start justify-between">
         <div className="flex items-start gap-4">
@@ -356,19 +356,22 @@ export function ProjectOverviewSkeleton({ canManageProject }: { canManageProject
       <SkeletonBlock className="h-9 w-full rounded-md mt-5" />
 
       {/* ===== KPI strip ===== */}
-      <div className="mt-6 flex items-stretch divide-x divide-slate-100 dark:divide-zinc-800 rounded-xl border border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900 shadow-sm shadow-slate-200/40 dark:shadow-black/20 overflow-hidden">
+      <div className="mt-4 sm:mt-6 grid grid-cols-2 sm:flex sm:items-stretch gap-px sm:gap-0 sm:divide-x divide-slate-100 dark:divide-zinc-800 bg-slate-200 dark:bg-zinc-800 sm:bg-white dark:sm:bg-zinc-900 rounded-xl border border-slate-200 dark:border-zinc-700/70 shadow-sm shadow-slate-200/40 dark:shadow-black/20 overflow-hidden">
         {[0, 1, 2, 3].map((i) => (
-          <div key={i} className="flex-1 px-5 py-4">
+          <div key={i} className="sm:flex-1 bg-white dark:bg-zinc-900 px-4 sm:px-5 py-3 sm:py-4">
             <SkeletonBlock className="h-2.5 w-20 rounded mb-2" />
             <SkeletonBlock className="h-6 w-10 rounded" />
           </div>
         ))}
       </div>
 
-      {/* ===== Active Work + Team, Project Activity + Project Health ===== */}
-      <div className="mt-10 grid grid-cols-3 gap-8 items-start">
+      {/* ===== Active Work + Team, Project Activity + Project Health =====
+          Mobile: single column, DOM order preserved — the two-column split
+          only takes over at `lg:` (same breakpoint already approved for
+          project-lead-project-overview.tsx's own equivalent grid). ===== */}
+      <div className="mt-6 sm:mt-10 grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-8 items-start">
         {/* Left column */}
-        <div className="col-span-2 space-y-6">
+        <div className="lg:col-span-2 space-y-4 sm:space-y-6">
           <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/40 dark:border-zinc-700/70 dark:bg-zinc-900 dark:shadow-black/20">
             <div className="flex items-baseline justify-between mb-3">
               <SkeletonBlock className="h-3 w-24 rounded" />
@@ -398,7 +401,7 @@ export function ProjectOverviewSkeleton({ canManageProject }: { canManageProject
         </div>
 
         {/* Right column */}
-        <div className="space-y-6">
+        <div className="space-y-4 sm:space-y-6">
           <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/40 dark:border-zinc-700/70 dark:bg-zinc-900 dark:shadow-black/20">
             <div className="mb-3 space-y-1.5">
               <SkeletonBlock className="h-3 w-12 rounded" />
@@ -536,7 +539,7 @@ export function AdminProjectOverview({ slug = "mobile-banking-app" }: { slug?: s
 
   if (loadState === "error" || !project) {
     return (
-      <div className="max-w-4xl mx-auto px-8 py-10">
+      <div className="max-w-4xl mx-auto px-4 sm:px-8 py-6 sm:py-10">
         <div className="flex flex-col items-center justify-center text-center px-4 py-20">
           <h3 className="text-sm font-semibold text-slate-700 dark:text-zinc-200">Couldn&apos;t load project</h3>
           <p className="text-sm text-slate-400 mt-1 max-w-xs dark:text-zinc-500">
@@ -676,20 +679,30 @@ export function AdminProjectOverview({ slug = "mobile-banking-app" }: { slug?: s
   const visibleActivity = activity.slice(0, PROJECT_ACTIVITY_PREVIEW_LIMIT);
 
   return (
-    <div className="max-w-4xl mx-auto px-8 py-10">
-      {/* ===== Project Header ===== */}
-      <div className="flex items-start justify-between">
-        <div className="flex items-start gap-4">
+    <div className="max-w-4xl mx-auto px-4 sm:px-8 py-6 sm:py-10">
+      {/* ===== Project Header =====
+          Mobile: identity (avatar/name/badges/date) + "New Ticket" share one
+          compact first line; the description drops to its own full-width
+          line below (see the `sm:hidden` copy at the end of this block) so
+          it's never squeezed into the narrow column next to the avatar.
+          Desktop is untouched — same nesting/classes as before, just now
+          wrapped in `hidden sm:block` since the mobile-only copy below
+          already covers < sm. Same pattern as
+          project-lead-project-overview.tsx's own header. ===== */}
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-start gap-4 min-w-0">
           <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 flex items-center justify-center text-white font-bold text-base flex-shrink-0">
             {project.shortName}
           </div>
-          <div>
-            <div className="flex items-center gap-2.5">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2.5 flex-wrap">
               <h1 className="text-xl font-bold text-slate-900 tracking-tight dark:text-zinc-50">{project.name}</h1>
               <StatusBadge status={project.status} />
               <ProjectCategoryBadge category={project.category} />
             </div>
-            <ExpandableDescription text={project.description} />
+            <div className="hidden sm:block">
+              <ExpandableDescription text={project.description} />
+            </div>
             <div className="flex items-center gap-2 mt-2 text-xs text-slate-400 dark:text-zinc-500">
               <span>Started {project.createdAt}</span>
             </div>
@@ -705,6 +718,9 @@ export function AdminProjectOverview({ slug = "mobile-banking-app" }: { slug?: s
             </button>
           </div>
         )}
+      </div>
+      <div className="sm:hidden mt-2">
+        <ExpandableDescription text={project.description} />
       </div>
 
       {/* ===== Slim attention line (not a hero) — real Health Alerts, same
@@ -744,13 +760,17 @@ export function AdminProjectOverview({ slug = "mobile-banking-app" }: { slug?: s
         </div>
       ))}
 
-      {/* ===== KPI strip ===== */}
-      <div className="mt-6 flex items-stretch divide-x divide-slate-100 dark:divide-zinc-800 rounded-xl border border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900 shadow-sm shadow-slate-200/40 dark:shadow-black/20 overflow-hidden">
-        <div className="flex-1 px-5 py-4">
+      {/* ===== KPI strip =====
+          Mobile: 2×2 grid via the `gap-px` + gray-wrapper "seam" trick —
+          each cell gets its own opaque background so the 1px gap reads as
+          a thin divider (same pattern as project-lead-project-overview.tsx's
+          own KPI strip). Desktop: unchanged single-row flex + divide-x. ===== */}
+      <div className="mt-4 sm:mt-6 grid grid-cols-2 sm:flex sm:items-stretch gap-px sm:gap-0 sm:divide-x divide-slate-100 dark:divide-zinc-800 bg-slate-200 dark:bg-zinc-800 sm:bg-white dark:sm:bg-zinc-900 rounded-xl border border-slate-200 dark:border-zinc-700/70 shadow-sm shadow-slate-200/40 dark:shadow-black/20 overflow-hidden">
+        <div className="sm:flex-1 bg-white dark:bg-zinc-900 px-4 sm:px-5 py-3 sm:py-4">
           <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600">Open Tickets</p>
           <p className="text-2xl font-bold text-slate-900 dark:text-zinc-50 mt-1 leading-none">{openTickets.length}</p>
         </div>
-        <div className="flex-1 px-5 py-4 bg-brand-50/30 dark:bg-brand-950/10">
+        <div className="sm:flex-1 bg-brand-50/30 dark:bg-brand-950/10 px-4 sm:px-5 py-3 sm:py-4">
           <p className="text-[10px] font-bold uppercase tracking-widest text-brand-500 dark:text-brand-400">Progress</p>
           <p className="text-2xl font-bold text-brand-700 dark:text-brand-300 mt-1 leading-none">
             {progressPct}
@@ -760,11 +780,11 @@ export function AdminProjectOverview({ slug = "mobile-banking-app" }: { slug?: s
             <div className="h-full rounded-full bg-brand-500 transition-all duration-500" style={{ width: `${progressPct}%` }} />
           </div>
         </div>
-        <div className="flex-1 px-5 py-4">
+        <div className="sm:flex-1 bg-white dark:bg-zinc-900 px-4 sm:px-5 py-3 sm:py-4">
           <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600">Blocked</p>
           <p className="text-2xl font-bold text-red-600 dark:text-red-400 mt-1 leading-none">{blocked.length}</p>
         </div>
-        <div className="flex-1 px-5 py-4">
+        <div className="sm:flex-1 bg-white dark:bg-zinc-900 px-4 sm:px-5 py-3 sm:py-4">
           <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600">Closed This Month</p>
           <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400 mt-1 leading-none">
             {closedThisMonth}
@@ -772,10 +792,18 @@ export function AdminProjectOverview({ slug = "mobile-banking-app" }: { slug?: s
         </div>
       </div>
 
-      {/* ===== Active Work + Team, Recent Activity + Project Health ===== */}
-      <div className="mt-10 grid grid-cols-3 gap-8 items-start">
+      {/* ===== Active Work + Team, Recent Activity + Project Health =====
+          Mobile: single column, DOM order preserved: Active Work → Project
+          Activity (both already in the left-column wrapper) → Team →
+          Project Health (both already in the right-column wrapper). The
+          two-column split only takes over at `lg:` (same breakpoint already
+          approved for project-lead-project-overview.tsx's own equivalent
+          grid) — reusing the existing left/right wrapper structure rather
+          than flattening it into a single ordered grid, which would need a
+          bigger structural change than this fix calls for. ===== */}
+      <div className="mt-6 sm:mt-10 grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-8 items-start">
         {/* Left column: primary content */}
-        <div className="col-span-2 space-y-6">
+        <div className="lg:col-span-2 space-y-4 sm:space-y-6">
           <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/40 dark:border-zinc-700/70 dark:bg-zinc-900 dark:shadow-black/20">
             <div className="flex items-baseline justify-between mb-1">
               <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-zinc-400">Active Work</h2>
@@ -869,7 +897,7 @@ export function AdminProjectOverview({ slug = "mobile-banking-app" }: { slug?: s
         </div>
 
         {/* Right column: secondary content, kept above the fold */}
-        <div className="space-y-6">
+        <div className="space-y-4 sm:space-y-6">
           <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/40 dark:border-zinc-700/70 dark:bg-zinc-900 dark:shadow-black/20">
             <div className="flex items-start justify-between mb-3">
               <div>
@@ -898,8 +926,8 @@ export function AdminProjectOverview({ slug = "mobile-banking-app" }: { slug?: s
                       projectSlug={slug}
                       className="flex items-center gap-2.5 w-full text-left"
                     >
-                      <Avatar src={member.avatar} name={member.name} className="w-7 h-7 rounded-full" />
-                      <div className="text-sm leading-tight flex-1">
+                      <Avatar src={member.avatar} name={member.name} className="w-7 h-7 rounded-full flex-shrink-0" />
+                      <div className="text-sm leading-tight flex-1 min-w-0">
                         <p className="font-medium text-slate-800 dark:text-zinc-200">{member.name}</p>
                         <p className="text-xs text-slate-400 dark:text-zinc-500">{member.role}</p>
                       </div>

@@ -1071,7 +1071,7 @@ function AdminDashboard() {
       <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 sm:gap-6 mb-4 sm:mb-6">
         <div>
           <h1 className="text-[22px] font-bold text-slate-900 dark:text-zinc-50 tracking-tight leading-none mb-1">
-            Good morning, {user.name.split(" ")[0]} 👋
+            Hello, {user.name.split(" ")[0]} 👋
           </h1>
           <p className="text-sm text-slate-400 dark:text-zinc-500">{formatFullDate(todayISO)}</p>
         </div>
