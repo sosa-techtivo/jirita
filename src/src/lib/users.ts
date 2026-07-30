@@ -22,6 +22,7 @@ import type { User, UserStatus } from "./mock-users";
 import {
   inviteUserAction,
   generateInviteLinkAction,
+  regenerateInviteLinkAction,
   generatePasswordResetLinkAction,
   type InviteUserResult,
   type GenerateInviteLinkResult,
@@ -446,6 +447,31 @@ export async function generatePasswordResetLink(
   }
 
   return generatePasswordResetLinkAction({
+    accessToken: session.access_token,
+    organizationId,
+    targetProfileId: profileId,
+  });
+}
+
+// "Copy Invitation Link" (Users row menu, Invited users only) — same
+// session/access-token wrapping as generatePasswordResetLink above, around
+// regenerateInviteLinkAction instead, so a re-copied link is built from the
+// same NEXT_PUBLIC_APP_URL + token_hash mechanism the invite already used
+// to create this pending membership, never a hardcoded domain.
+export async function regenerateInvitationLink(
+  organizationId: string,
+  profileId: string
+): Promise<GenerateInviteLinkResult> {
+  const supabase = getSupabaseBrowserClient();
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+
+  if (!session) {
+    return { status: "error", message: "Your session has expired. Please sign in again." };
+  }
+
+  return regenerateInviteLinkAction({
     accessToken: session.access_token,
     organizationId,
     targetProfileId: profileId,

@@ -670,3 +670,115 @@ export async function generatePasswordResetLinkAction(params: {
   const resetLink = `${appUrl}/reset-password?token_hash=${encodeURIComponent(hashed_token)}&type=${encodeURIComponent(verification_type)}`;
   return { status: "success", resetLink };
 }
+
+// "Copy Invitation Link" (Users → row menu, Invited users only) — mints a
+// fresh single-use link for a profile that was *already* invited, the same
+// generateLink + requireAppUrl() + token_hash mechanics as
+// generateInviteLinkAction above. Deliberately doesn't go through
+// prepareInvite: that function's job is rejecting a *new* invite that would
+// collide with an existing membership, which is exactly the case here (the
+// target already has an "invited" organization_memberships row) — so this
+// follows generatePasswordResetLinkAction's shape instead (caller-is-active-
+// admin + target-belongs-to-this-org, no idempotency check). Uses
+// type: "magiclink" unconditionally rather than "invite" — the target's
+// auth.users account already exists from the original invite (email or
+// link), and generateLink's "invite" type is only for creating a brand new
+// account (see the already-registered fallback in generateInviteLinkAction).
+export async function regenerateInviteLinkAction(params: {
+  accessToken: string;
+  organizationId: string;
+  targetProfileId: string;
+}): Promise<GenerateInviteLinkResult> {
+  if (!params.organizationId || !params.targetProfileId) {
+    logServerError("missing-params");
+    return { status: "error", message: "Could not verify your permissions." };
+  }
+
+  let caller: SupabaseClient;
+  try {
+    caller = getCallerClient(params.accessToken);
+  } catch (err) {
+    logServerError("caller-client-init-failed", err);
+    return { status: "error", message: "Could not verify your permissions." };
+  }
+
+  const { data: callerData, error: callerAuthError } = await caller.auth.getUser(params.accessToken);
+  if (callerAuthError || !callerData.user) {
+    logServerError("no-session", callerAuthError);
+    return { status: "error", message: "Your session has expired. Please sign in again." };
+  }
+
+  const { data: callerMembership, error: callerMembershipError } = await caller
+    .from("organization_memberships")
+    .select("role, status")
+    .eq("organization_id", params.organizationId)
+    .eq("profile_id", callerData.user.id)
+    .maybeSingle();
+
+  if (callerMembershipError) {
+    logServerError("caller-membership-lookup", callerMembershipError);
+    return { status: "error", message: "Could not verify your permissions." };
+  }
+  if (!callerMembership || callerMembership.role !== "admin" || callerMembership.status !== "active") {
+    logServerError("role-not-authorized");
+    return { status: "error", message: "Only active organization admins can generate an invitation link." };
+  }
+
+  let admin: SupabaseClient;
+  try {
+    admin = getAdminClient();
+  } catch (err) {
+    logServerError("admin-client-init-failed", err);
+    return { status: "error", message: "Server configuration error." };
+  }
+
+  const { data: targetMembership, error: targetLookupError } = await admin
+    .from("organization_memberships")
+    .select("profile_id")
+    .eq("organization_id", params.organizationId)
+    .eq("profile_id", params.targetProfileId)
+    .maybeSingle();
+
+  if (targetLookupError) {
+    logServerError("target-membership-lookup", targetLookupError);
+    return { status: "error", message: "Could not verify this user's membership." };
+  }
+  if (!targetMembership) {
+    logServerError("target-not-in-org");
+    return { status: "error", message: "This user does not belong to your organization." };
+  }
+
+  const { data: targetProfile, error: targetProfileError } = await admin
+    .from("profiles")
+    .select("email")
+    .eq("id", params.targetProfileId)
+    .maybeSingle();
+
+  if (targetProfileError || !targetProfile?.email) {
+    logServerError("target-profile-lookup", targetProfileError);
+    return { status: "error", message: "Could not find this user's account." };
+  }
+
+  let appUrl: string;
+  try {
+    appUrl = requireAppUrl();
+  } catch (err) {
+    logServerError("app-url-missing", err);
+    return { status: "error", message: "Server configuration error." };
+  }
+
+  const { data, error } = await admin.auth.admin.generateLink({
+    type: "magiclink",
+    email: targetProfile.email,
+    options: { redirectTo: `${appUrl}/accept-invite` },
+  });
+
+  if (error || !data?.properties) {
+    logServerError("generate-link:magiclink", error ?? undefined);
+    return { status: "error", message: "Could not generate the invitation link. Please try again." };
+  }
+
+  const { hashed_token, verification_type } = data.properties;
+  const inviteLink = `${appUrl}/accept-invite?token_hash=${encodeURIComponent(hashed_token)}&type=${encodeURIComponent(verification_type)}`;
+  return { status: "success", inviteLink };
+}

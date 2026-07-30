@@ -13,6 +13,7 @@ import {
   disableOrganizationMember,
   enableOrganizationMember,
   generatePasswordResetLink,
+  regenerateInvitationLink,
   deleteOrganizationMember,
   type DeleteUserResult,
 } from "@/lib/users";
@@ -593,12 +594,17 @@ export function UsersScreen() {
   }
 
   async function copyInvitationLink(u: User) {
-    const link = `https://app.jirita.com/invite/${u.id}`;
+    if (isDevFallback || !organization) return;
+    const result = await regenerateInvitationLink(organization.id, u.id);
+    if (result.status === "error") {
+      showToast(result.message, "error");
+      return;
+    }
     try {
-      await navigator.clipboard.writeText(link);
+      await navigator.clipboard.writeText(result.inviteLink);
       showToast("Invitation link copied to clipboard.");
     } catch {
-      showToast(link);
+      showToast(result.inviteLink);
     }
   }
 
