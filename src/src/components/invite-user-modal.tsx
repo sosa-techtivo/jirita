@@ -5,7 +5,7 @@ import type { Role } from "@/lib/current-user";
 import { ROLE_LABELS } from "@/lib/current-user";
 import type { User } from "@/lib/mock-users";
 import { useCurrentUser } from "@/components/current-user-provider";
-import { generateOrganizationInviteLink, editOrganizationMember } from "@/lib/users";
+import { generateOrganizationInviteLink, regenerateInvitationLink, editOrganizationMember } from "@/lib/users";
 
 // Modeled on the New Ticket modal's shell (backdrop, centered dialog,
 // scrollable body, sticky footer) — see tickets/new-ticket-modal.tsx.
@@ -56,13 +56,23 @@ function CopyFeedback({ message, onDismiss }: { message: string; onDismiss: () =
 // (see src/lib/server/invite-user-action.ts / src/lib/users.ts's
 // inviteOrganizationUser) in case it's restored later; this modal simply no
 // longer calls it or offers a way to choose it.
+//
+// Also reused for "Re-generate Invitation Link" (row Actions menu, Invited
+// users only) via `regeneratingUser` — same success view an invite's own
+// "Generate Invite Link" ends on (same read-only field, same Copy Link
+// button), just reached without the name/email/role form: the profile
+// already exists, so this skips straight to minting a fresh token via
+// regenerateInvitationLink (never inviteUserByEmail — no email is ever
+// sent) and shows the result. Never touches role/weeklyCapacity/projects.
 export function InviteUserModal({
   editingUser,
+  regeneratingUser,
   onClose,
   onEdited,
   onLinkGenerated,
 }: {
   editingUser?: User;
+  regeneratingUser?: User;
   onClose: () => void;
   /** Edit mode only — called after the real edit succeeds, so the parent can refetch the list. */
   onEdited?: (user: User) => void;
@@ -71,6 +81,7 @@ export function InviteUserModal({
 }) {
   const { organization, isDevFallback } = useCurrentUser();
   const isEditing = editingUser !== undefined;
+  const isRegenerating = regeneratingUser !== undefined;
   const [visible, setVisible] = useState(false);
   const [firstName, setFirstName] = useState(editingUser?.firstName ?? "");
   const [lastName, setLastName] = useState(editingUser?.lastName ?? "");
@@ -95,8 +106,10 @@ export function InviteUserModal({
   const [formError, setFormError] = useState<string | null>(null);
   const [inviteLink, setInviteLink] = useState<string | null>(null);
   const [linkCopied, setLinkCopied] = useState(false);
+  const [regenerating, setRegenerating] = useState(isRegenerating);
 
   const firstNameRef = useRef<HTMLInputElement>(null);
+  const regenerateRanRef = useRef(false);
 
   useEffect(() => {
     const id = requestAnimationFrame(() => requestAnimationFrame(() => setVisible(true)));
@@ -108,6 +121,35 @@ export function InviteUserModal({
   useEffect(() => {
     document.body.style.overflow = "hidden";
     return () => { document.body.style.overflow = ""; };
+  }, []);
+
+  // Regenerate-mode's whole job: no form, just mint a fresh token for the
+  // already-existing profile the moment the modal opens, landing on the
+  // exact same success view (read-only field + Copy Link button) an invite
+  // ends on. regenerateRanRef guards against React 18 Strict Mode's dev-only
+  // double-invoke minting two tokens (the second would just supersede the
+  // first, but there's no reason to burn an extra one).
+  useEffect(() => {
+    if (!regeneratingUser || regenerateRanRef.current) return;
+    regenerateRanRef.current = true;
+
+    if (isDevFallback || !organization) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: this mode has no form to fall back to, so the dev-fallback/no-organization case has to resolve straight to the same error view a real regenerate failure below would
+      setFormError("Regenerating an invitation link isn't available in this mode.");
+      setRegenerating(false);
+      return;
+    }
+
+    regenerateInvitationLink(organization.id, regeneratingUser.id).then((result) => {
+      setRegenerating(false);
+      if (result.status === "error") {
+        setFormError(result.message);
+        return;
+      }
+      setInviteLink(result.inviteLink);
+      onLinkGenerated?.();
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: regenerateRanRef already makes this a true "once, on mount" effect; re-running it on an organization/regeneratingUser identity change would just be a second, redundant token mint
   }, []);
 
   function handleClose() {
@@ -222,7 +264,7 @@ export function InviteUserModal({
         <div
           role="dialog"
           aria-modal
-          aria-label={isEditing ? "Edit User" : "Generate Invite Link"}
+          aria-label={isEditing ? "Edit User" : isRegenerating ? "Re-generate Invitation Link" : "Generate Invite Link"}
           className={
             "pointer-events-auto w-full max-w-lg flex flex-col " +
             "max-h-[calc(100dvh-3rem)] bg-white dark:bg-zinc-950 " +
@@ -234,7 +276,7 @@ export function InviteUserModal({
         >
           {/* Header */}
           <div className="flex items-center justify-between px-6 pt-5 pb-4 flex-shrink-0">
-            <h2 className="text-[15px] font-semibold text-slate-900 dark:text-zinc-50">{isEditing ? "Edit User" : "Generate Invite Link"}</h2>
+            <h2 className="text-[15px] font-semibold text-slate-900 dark:text-zinc-50">{isEditing ? "Edit User" : isRegenerating ? "Re-generate Invitation Link" : "Generate Invite Link"}</h2>
             <button
               onClick={handleClose}
               aria-label="Close"
@@ -284,6 +326,10 @@ export function InviteUserModal({
                   className={INPUT}
                 />
               </div>
+            ) : isRegenerating ? (
+              regenerating && (
+                <p className="text-[13px] text-slate-500 dark:text-zinc-400">Generating a new invitation link…</p>
+              )
             ) : (
               <>
                 <div className="grid grid-cols-2 gap-3">
@@ -372,6 +418,13 @@ export function InviteUserModal({
                   Done
                 </button>
               </>
+            ) : isRegenerating ? (
+              <button
+                onClick={handleClose}
+                className="ml-auto px-4 py-2 text-[13px] font-medium text-slate-500 dark:text-zinc-500 hover:text-slate-800 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800 rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
             ) : (
               <>
                 <button
