@@ -9,6 +9,7 @@ import { createTicket } from "@/lib/tickets";
 import { useCurrentUser } from "@/components/current-user-provider";
 import { FALLBACK_AVATAR } from "@/lib/current-user";
 import type { OrgMember } from "@/lib/projects";
+import { formatAbsoluteDate } from "@/lib/date-format";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -39,8 +40,7 @@ function getDuplicates(title: string, projectTickets: Ticket[]): Ticket[] {
 
 function formatDueDate(iso: string): string {
   if (!iso) return "";
-  const d = new Date(`${iso}T00:00:00`);
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  return formatAbsoluteDate(iso);
 }
 
 // ── Shared styles ─────────────────────────────────────────────────────────────

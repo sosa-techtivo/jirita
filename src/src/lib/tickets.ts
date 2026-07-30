@@ -18,6 +18,7 @@ import type { Ticket, TicketPriority, TicketStatus, TicketType } from "./mock-ti
 import { loadOrganizationProjects } from "./projects";
 import type { ProjectStatus } from "./mock-projects";
 import { roundLoggedMinutesUp } from "./time-rounding";
+import { formatAbsoluteDate, formatAbsoluteDateTime } from "./date-format";
 import { createNotification } from "./notifications";
 
 export type TicketsResult =
@@ -122,40 +123,29 @@ interface AssigneeProfileRow {
 const TICKET_COLUMNS =
   "id, project_id, ticket_number, title, description, status, priority, type, assignee_profile_id, milestone, labels, acceptance_criteria, acceptance_criteria_done, story_points, hours, due_date, updated_at, created_by, created_at";
 
-// Mirrors formatTargetDate in lib/projects.ts exactly ("MMM D", no year) —
-// every date-parsing helper across the ticket views (Calendar/Timeline/
-// Insights) assumes this exact shape and a 2026 calendar year.
+// Absolute, year-inclusive date — every date-parsing helper across the
+// ticket views (Calendar/Timeline/Insights) parses this exact "MMM D, YYYY"
+// shape back to ISO, so it must stay byte-for-byte the same as
+// formatAbsoluteDate's output.
 function formatDueDate(isoDate: string | null): string | undefined {
   if (!isoDate) return undefined;
-  return new Date(`${isoDate}T00:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  return formatAbsoluteDate(isoDate);
 }
 
-// Same shape as lib/projects.ts's formatUpdatedAt, plus the "Updated "
-// prefix every mock ticket string already carries — board-column.tsx's
-// "last activity" subtitle strips that exact prefix back off
-// (`.replace("Updated ", "")`), so the prefix has to be there verbatim.
+// Absolute date+time, plus the "Updated " prefix every ticket string already
+// carries — board-column.tsx's "last activity" subtitle strips that exact
+// prefix back off (`.replace("Updated ", "")`), so the prefix has to be
+// there verbatim. Named/kept as "UpdatedAt" rather than renamed to avoid
+// touching its many call sites; it no longer computes a relative diff.
 function formatTicketUpdatedAt(isoTimestamp: string): string {
-  const diffMinutes = (Date.now() - new Date(isoTimestamp).getTime()) / (1000 * 60);
-  if (diffMinutes < 1) return "Updated just now";
-  if (diffMinutes < 60) {
-    const minutes = Math.floor(diffMinutes);
-    return `Updated ${minutes} minute${minutes === 1 ? "" : "s"} ago`;
-  }
-  const diffHours = diffMinutes / 60;
-  if (diffHours < 24) return `Updated ${Math.floor(diffHours)}h ago`;
-  const diffDays = Math.floor(diffHours / 24);
-  if (diffDays === 1) return "Updated yesterday";
-  if (diffDays < 7) return `Updated ${diffDays} days ago`;
-  const diffWeeks = Math.floor(diffDays / 7);
-  if (diffWeeks < 5) return `Updated ${diffWeeks} week${diffWeeks === 1 ? "" : "s"} ago`;
-  const diffMonths = Math.floor(diffDays / 30);
-  return `Updated ${diffMonths} month${diffMonths === 1 ? "" : "s"} ago`;
+  return `Updated ${formatAbsoluteDateTime(isoTimestamp)}`;
 }
 
-// Same relative-time buckets as formatTicketUpdatedAt, minus the "Updated "
-// prefix — used for Comments/Activity in the Ticket Preview Drawer (and,
-// exported, for Admin Reports' Recent Changes) which render their own
-// leading text ("· 3 days ago") instead of that prefix.
+// Absolute date+time, minus the "Updated " prefix — used for
+// Comments/Activity (Ticket Detail, Ticket Preview Drawer, Activity Log,
+// notifications) which render their own leading text ("· Jul 30, 2026 at
+// 7:42 AM") instead of that prefix. Kept its original (now misleading) name
+// to avoid churning its many import sites.
 export function formatRelativeTime(isoTimestamp: string): string {
   return formatTicketUpdatedAt(isoTimestamp).replace(/^Updated /, "");
 }

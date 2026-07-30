@@ -58,6 +58,7 @@ import {
   type TicketRelationKind,
 } from "@/lib/tickets";
 import { loadProjectTeam, loadProjectDetail, type OrgMember } from "@/lib/projects";
+import { formatAbsoluteDate } from "@/lib/date-format";
 import { FALLBACK_AVATAR } from "@/lib/current-user";
 import { MemberTrigger } from "@/components/member-profile";
 import { Avatar } from "@/components/ui/avatar";
@@ -2404,16 +2405,12 @@ interface TimeEntry {
 }
 
 
-// The user's real local "today" — never a fixed/mock date. Built from local
-// getters (not toISOString(), which is UTC and can show the wrong calendar
-// day near midnight in the user's own timezone).
+// workDate is a date-only column (the calendar day work was logged against,
+// not a real moment in time) — always shown as an absolute calendar date,
+// never "Today"/"Yesterday" or relative text, so historical entries stay
+// traceable and every entry always includes its year.
 function formatDateDisplay(iso: string): string {
-  const today = new Date(`${getTodayISO()}T00:00:00`);
-  const d     = new Date(`${iso}T00:00:00`);
-  const diff  = Math.round((today.getTime() - d.getTime()) / 86_400_000);
-  if (diff === 0) return "Today";
-  if (diff === 1) return "Yesterday";
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  return formatAbsoluteDate(iso);
 }
 
 function toTimeEntry(record: TimeEntryRecord): TimeEntry {

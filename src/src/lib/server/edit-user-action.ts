@@ -106,8 +106,8 @@ export async function editUserAction(params: {
   // everywhere else weekly capacity is accepted.
   const weeklyCapacity = Math.min(168, Math.max(0, Math.round(params.weeklyCapacity)));
 
-  if (!firstName || !lastName) {
-    return { status: "error", message: "First name and last name are required." };
+  if (!firstName) {
+    return { status: "error", message: "First name is required." };
   }
   // Never trusts the role string the client sent beyond checking it's one
   // of the three real values — no arbitrary role can reach the write below.

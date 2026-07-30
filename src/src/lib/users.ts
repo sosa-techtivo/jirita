@@ -225,7 +225,11 @@ export async function loadOrganizationUsers(organizationId: string): Promise<Org
       };
     })
     .filter((u): u is User => u !== null)
-    .sort((a, b) => `${a.firstName} ${a.lastName}`.localeCompare(`${b.firstName} ${b.lastName}`));
+    .sort((a, b) =>
+      [a.firstName, a.lastName].filter(Boolean).join(" ").localeCompare(
+        [b.firstName, b.lastName].filter(Boolean).join(" ")
+      )
+    );
 
   return { status: "ready", users };
 }

@@ -184,8 +184,8 @@ async function prepareInvite(params: {
   const email = params.email.trim().toLowerCase();
   const weeklyCapacity = Math.min(168, Math.max(0, Math.round(params.weeklyCapacity)));
 
-  if (!firstName || !lastName || !email) {
-    return { status: "error", message: "First name, last name, and email are required." };
+  if (!firstName || !email) {
+    return { status: "error", message: "First name and email are required." };
   }
   if (!isValidEmail(email)) {
     return { status: "error", message: "Enter a valid email address." };

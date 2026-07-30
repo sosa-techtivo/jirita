@@ -119,7 +119,7 @@ export function InviteUserModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const canSubmit = firstName.trim().length > 0 && lastName.trim().length > 0 && email.trim().length > 0;
+  const canSubmit = firstName.trim().length > 0 && email.trim().length > 0;
 
   // The invite itself only ever creates a workspace membership — never a
   // project assignment. editingUser's own projectSlugs pass through
@@ -298,9 +298,7 @@ export function InviteUserModal({
                     />
                   </div>
                   <div>
-                    <label className={FIELD_LABEL}>
-                      Last Name<span className="ml-1.5 text-brand-500 dark:text-brand-400">*</span>
-                    </label>
+                    <label className={FIELD_LABEL}>Last Name</label>
                     <input
                       type="text"
                       value={lastName}

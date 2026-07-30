@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import type { Ticket, TicketStatus, TicketPriority, TicketType } from "@/lib/mock-tickets";
 import { TICKET_TYPE_LABEL } from "@/lib/mock-tickets";
+import { formatAbsoluteDate } from "@/lib/date-format";
 
 // ── Error toast ───────────────────────────────────────────────────────────────
 // The Tickets module's write paths (inline edits, comments, time entries,
@@ -153,9 +154,10 @@ export function CalendarIcon() {
 }
 
 // ── Due date display ↔ ISO conversion ────────────────────────────────────────
-// The app displays due dates as "Jul 16" (see formatDueDate in lib/tickets.ts)
-// but persists/edits them as an ISO yyyy-mm-dd — these two convert between the
-// two only where an editor needs to seed/read a native <input type="date">.
+// The app displays due dates as "Jul 16, 2026" (see formatDueDate in
+// lib/tickets.ts) but persists/edits them as an ISO yyyy-mm-dd — these two
+// convert between the two only where an editor needs to seed/read a native
+// <input type="date">.
 
 const MONTH_MAP: Record<string, string> = {
   Jan: "01", Feb: "02", Mar: "03", Apr: "04", May: "05", Jun: "06",
@@ -164,16 +166,17 @@ const MONTH_MAP: Record<string, string> = {
 
 export function parseDisplayDate(display: string): string {
   const parts = display.trim().split(/\s+/);
-  if (parts.length !== 2) return "";
+  if (parts.length !== 3) return "";
   const month = MONTH_MAP[parts[0]];
-  const day = parts[1].padStart(2, "0");
-  return month ? `2026-${month}-${day}` : "";
+  const day = parts[1].replace(",", "").padStart(2, "0");
+  const year = parts[2];
+  if (!month || !/^\d{4}$/.test(year)) return "";
+  return `${year}-${month}-${day}`;
 }
 
 export function formatISODate(iso: string): string {
   if (!iso) return "";
-  const d = new Date(`${iso}T00:00:00`);
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  return formatAbsoluteDate(iso);
 }
 
 // The user's real local "today" (optionally offset by N days) — never a

@@ -420,7 +420,7 @@ export function UsersScreen() {
   const [usersList, setUsersList] = useState<User[]>([]);
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState<string[]>([]);
-  const [statusFilter, setStatusFilter] = useState<string[]>([]);
+  const [statusFilter, setStatusFilter] = useState<string[]>(["Active"]);
   const [projectFilter, setProjectFilter] = useState<string[]>([]);
 
   const [showInvite, setShowInvite] = useState(false);
@@ -657,6 +657,7 @@ export function UsersScreen() {
       ...common,
       { label: "Resend Invitation", onClick: () => showToast(`Invitation resent to ${u.email}.`) },
       { label: "Copy Invitation Link", onClick: () => copyInvitationLink(u) },
+      { label: "Disable User", onClick: () => handleSetMembershipStatus(u, "Disabled") },
       { label: "Delete User", danger: true, onClick: () => setDeleteTarget(u) },
     ];
   }

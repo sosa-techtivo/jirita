@@ -15,11 +15,12 @@ const MONTH_MAP: Record<string, number> = {
 };
 
 function parseDate(s: string): Date | null {
-  const [mon, dayStr] = s.trim().split(" ");
+  const [mon, dayStr, yearStr] = s.trim().split(" ");
   const month = MONTH_MAP[mon];
-  const day = parseInt(dayStr);
-  if (month === undefined || isNaN(day)) return null;
-  return new Date(2026, month, day);
+  const day = parseInt(dayStr, 10);
+  const year = parseInt(yearStr, 10);
+  if (month === undefined || isNaN(day) || isNaN(year)) return null;
+  return new Date(year, month, day);
 }
 
 function addDays(d: Date, n: number): Date {

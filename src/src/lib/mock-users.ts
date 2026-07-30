@@ -41,5 +41,5 @@ export interface User {
 }
 
 export function fullName(user: User): string {
-  return `${user.firstName} ${user.lastName}`;
+  return [user.firstName, user.lastName].filter(Boolean).join(" ");
 }

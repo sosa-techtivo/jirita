@@ -13,12 +13,14 @@ export type OnTicketClick = (ticket: Ticket) => void;
 
 function getLastActivity(tickets: Ticket[]): string | null {
   if (tickets.length === 0) return null;
-  // Prefer the most recently sounding update, in order of recency
-  for (const keyword of ["minutes", "hours", "today", "ago"]) {
-    const match = tickets.find((t) => t.updatedAt.toLowerCase().includes(keyword));
-    if (match) return match.updatedAt.replace("Updated ", "");
-  }
-  return tickets[0].updatedAt.replace("Updated ", "");
+  // ticket.updatedAt is now an absolute date/time string ("Updated Jul 30,
+  // 2026 at 7:42 AM"), so the most-recent ticket can no longer be found by
+  // sniffing relative-time keywords — compare the real ISO timestamps
+  // instead (updatedAtISO is always populated for real, non-mock tickets).
+  const mostRecent = tickets.reduce((latest, t) =>
+    (t.updatedAtISO ?? "") > (latest.updatedAtISO ?? "") ? t : latest
+  );
+  return mostRecent.updatedAt.replace("Updated ", "");
 }
 
 export function BoardColumn({
