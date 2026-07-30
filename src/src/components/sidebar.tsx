@@ -361,7 +361,15 @@ export function Sidebar({
             onFocus={() => setSearchOpen(true)}
             onKeyDown={handleSearchInputKeyDown}
             placeholder="Search"
-            className="flex-1 min-w-0 bg-transparent outline-none text-slate-700 placeholder:text-slate-400 dark:text-zinc-200 dark:placeholder:text-zinc-500"
+            // `lg:` (not `sm:`) on purpose: this field only ever renders at
+            // all above `md:` (768px, this sidebar's own `hidden md:flex`
+            // breakpoint), so `sm:` (640px) would already be active the
+            // instant it becomes visible and the 16px anti-zoom value would
+            // never actually be seen. `lg:` (1024px) leaves a real 768-1023px
+            // window — large phones in landscape — where the field is both
+            // visible and at 16px, before restoring 14px on genuine
+            // tablets/desktops.
+            className="flex-1 min-w-0 bg-transparent outline-none text-[16px] lg:text-sm text-slate-700 placeholder:text-slate-400 dark:text-zinc-200 dark:placeholder:text-zinc-500"
           />
           <span className="ml-auto flex-shrink-0 text-[10px] font-medium text-slate-400 bg-white border border-slate-200 rounded px-1 py-0.5 dark:text-zinc-500 dark:bg-zinc-800 dark:border-zinc-700">
             ⌘K

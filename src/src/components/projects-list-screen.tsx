@@ -682,7 +682,7 @@ function ManagedProjectsScreen() {
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             placeholder="Search projects, leads or keywords..."
-            className="w-full text-sm bg-slate-100 placeholder:text-slate-400 rounded-md pl-8 pr-3 py-1.5 outline-none focus:ring-2 focus:ring-brand-500/30 transition-colors dark:bg-zinc-900 dark:placeholder:text-zinc-500 dark:text-zinc-100"
+            className="w-full text-[16px] sm:text-sm bg-slate-100 placeholder:text-slate-400 rounded-md pl-8 pr-3 py-1.5 outline-none focus:ring-2 focus:ring-brand-500/30 transition-colors dark:bg-zinc-900 dark:placeholder:text-zinc-500 dark:text-zinc-100"
           />
         </label>
 

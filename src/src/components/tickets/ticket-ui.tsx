@@ -116,8 +116,11 @@ export const EDIT_BTN =
   "text-slate-300 hover:text-slate-500 dark:text-zinc-600 dark:hover:text-zinc-400 " +
   "hover:bg-slate-100 dark:hover:bg-zinc-800 flex-shrink-0 focus:outline-none focus:opacity-100";
 
+// `text-[16px] sm:text-[13px]` — prevents iOS Safari's autozoom-on-focus
+// (triggered below 16px) on Mobile, while `sm:` keeps Desktop/Tablet's
+// original 13px. Same technique as components/auth/field-styles.ts's INPUT.
 export const INPUT_BASE =
-  "bg-white dark:bg-zinc-950 text-[13px] font-medium text-slate-800 dark:text-zinc-200 " +
+  "bg-white dark:bg-zinc-950 text-[16px] sm:text-[13px] font-medium text-slate-800 dark:text-zinc-200 " +
   "border border-slate-200 dark:border-zinc-700 rounded-md px-2 py-1 outline-none " +
   "focus:border-brand-500 dark:focus:border-brand-500 focus:ring-1 focus:ring-brand-500/30 w-full";
 
@@ -230,7 +233,7 @@ export function EditableStatusBadge({ value, onChange }: { value: TicketStatus; 
       <select
         ref={selectRef}
         className={
-          `text-[11px] font-semibold rounded-md px-2 py-0.5 outline-none cursor-pointer ` +
+          `text-[16px] sm:text-[11px] font-semibold rounded-md px-2 py-0.5 outline-none cursor-pointer ` +
           `border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 ` +
           `text-slate-800 dark:text-zinc-200`
         }

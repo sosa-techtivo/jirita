@@ -191,7 +191,7 @@ function EditableDescription({ value, onSave }: { value: string; onSave: (v: str
         <textarea
           ref={ref}
           className={
-            "w-full text-[14px] text-slate-700 dark:text-zinc-300 leading-relaxed " +
+            "w-full text-[16px] sm:text-[14px] text-slate-700 dark:text-zinc-300 leading-relaxed " +
             "bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-700 " +
             "rounded-lg px-3 py-2.5 outline-none resize-none overflow-hidden " +
             "focus:border-brand-500 dark:focus:border-brand-500 focus:ring-1 focus:ring-brand-500/30"
@@ -258,7 +258,7 @@ function EditableSidebarStatus({ value, onChange }: { value: TicketStatus; onCha
       {editing ? (
         <select
           ref={ref}
-          className={INPUT_BASE + " py-0.5 text-[12px]"}
+          className={INPUT_BASE + " py-0.5 text-[16px] sm:text-[12px]"}
           value={value}
           onChange={(e) => { onChange(e.target.value as TicketStatus); setEditing(false); }}
           onBlur={() => setEditing(false)}
@@ -290,7 +290,7 @@ function EditableSidebarPriority({ value, onChange }: { value: TicketPriority; o
       {editing ? (
         <select
           ref={ref}
-          className={INPUT_BASE + " py-0.5 text-[12px]"}
+          className={INPUT_BASE + " py-0.5 text-[16px] sm:text-[12px]"}
           value={value}
           onChange={(e) => { onChange(e.target.value as TicketPriority); setEditing(false); }}
           onBlur={() => setEditing(false)}
@@ -355,7 +355,7 @@ function EditableSidebarAssignee({
       {editing ? (
         <select
           ref={ref}
-          className={INPUT_BASE + " py-0.5 text-[12px]"}
+          className={INPUT_BASE + " py-0.5 text-[16px] sm:text-[12px]"}
           value={value.name}
           onChange={(e) => handleChange(e.target.value)}
           onBlur={() => setEditing(false)}
@@ -403,7 +403,7 @@ function EditableSidebarMilestone({ value, onChange }: { value: string; onChange
       {editing ? (
         <select
           ref={ref}
-          className={INPUT_BASE + " py-0.5 text-[12px]"}
+          className={INPUT_BASE + " py-0.5 text-[16px] sm:text-[12px]"}
           value={value}
           onChange={(e) => { onChange(e.target.value); setEditing(false); }}
           onBlur={() => setEditing(false)}
@@ -678,7 +678,7 @@ function EditableSidebarLabels({
                 placeholder="Search or create…"
                 value={search}
                 onChange={(e) => { setSearch(e.target.value); setCreateError(null); }}
-                className="flex-1 min-w-0 bg-transparent text-[12px] text-slate-800 dark:text-zinc-200 outline-none placeholder:text-slate-400 dark:placeholder:text-zinc-600"
+                className="flex-1 min-w-0 bg-transparent text-[16px] sm:text-[12px] text-slate-800 dark:text-zinc-200 outline-none placeholder:text-slate-400 dark:placeholder:text-zinc-600"
               />
             </div>
 
@@ -963,7 +963,7 @@ function RelatedTicketsSection({
             <select
               value={linkKind}
               onChange={(e) => setLinkKind(e.target.value as TicketRelationKind)}
-              className="text-[10px] font-medium bg-slate-50 dark:bg-zinc-800/80 text-slate-600 dark:text-zinc-400 border-r border-slate-100 dark:border-zinc-800 px-1.5 outline-none flex-shrink-0 cursor-pointer"
+              className="text-[16px] sm:text-[10px] font-medium bg-slate-50 dark:bg-zinc-800/80 text-slate-600 dark:text-zinc-400 border-r border-slate-100 dark:border-zinc-800 px-1.5 outline-none flex-shrink-0 cursor-pointer"
             >
               {(Object.keys(RELATION_LABEL) as TicketRelationKind[]).map((k) => (
                 <option key={k} value={k}>{RELATION_LABEL[k]}</option>
@@ -975,7 +975,7 @@ function RelatedTicketsSection({
               placeholder="Search…"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="flex-1 min-w-0 text-[11px] px-2 py-1.5 outline-none bg-transparent text-slate-700 dark:text-zinc-300 placeholder:text-slate-300 dark:placeholder:text-zinc-700"
+              className="flex-1 min-w-0 text-[16px] sm:text-[11px] px-2 py-1.5 outline-none bg-transparent text-slate-700 dark:text-zinc-300 placeholder:text-slate-300 dark:placeholder:text-zinc-700"
               onKeyDown={(e) => {
                 if (e.key === "Escape") { setLinking(false); setSearchQuery(""); }
               }}
@@ -1428,7 +1428,7 @@ function AttachmentRow({
           <input
             ref={renameRef}
             className={
-              "text-[13px] font-medium text-slate-800 dark:text-zinc-200 w-full " +
+              "text-[16px] sm:text-[13px] font-medium text-slate-800 dark:text-zinc-200 w-full " +
               "bg-white dark:bg-zinc-900 border border-brand-500 dark:border-brand-500 " +
               "rounded px-1.5 py-0.5 outline-none focus:ring-1 focus:ring-brand-500/30"
             }
@@ -2518,7 +2518,7 @@ function LogTimeModal({
                   value={hrsStr}
                   onChange={(e) => setHrsStr(e.target.value)}
                   onKeyDown={(e: KeyboardEvent<HTMLInputElement>) => { if (e.key === "Enter") handleSubmit(); }}
-                  className="bg-white dark:bg-zinc-950 text-[13px] font-medium text-slate-800 dark:text-zinc-200 border border-slate-200 dark:border-zinc-700 rounded-md px-2 py-1 outline-none focus:border-brand-500 dark:focus:border-brand-500 focus:ring-1 focus:ring-brand-500/30 w-16 text-center"
+                  className="bg-white dark:bg-zinc-950 text-[16px] sm:text-[13px] font-medium text-slate-800 dark:text-zinc-200 border border-slate-200 dark:border-zinc-700 rounded-md px-2 py-1 outline-none focus:border-brand-500 dark:focus:border-brand-500 focus:ring-1 focus:ring-brand-500/30 w-16 text-center"
                 />
                 <span className="text-[13px] text-slate-500 dark:text-zinc-400 font-medium">h</span>
               </div>
@@ -2531,7 +2531,7 @@ function LogTimeModal({
                   value={minsStr}
                   onChange={(e) => setMinsStr(e.target.value)}
                   onKeyDown={(e: KeyboardEvent<HTMLInputElement>) => { if (e.key === "Enter") handleSubmit(); }}
-                  className="bg-white dark:bg-zinc-950 text-[13px] font-medium text-slate-800 dark:text-zinc-200 border border-slate-200 dark:border-zinc-700 rounded-md px-2 py-1 outline-none focus:border-brand-500 dark:focus:border-brand-500 focus:ring-1 focus:ring-brand-500/30 w-16 text-center"
+                  className="bg-white dark:bg-zinc-950 text-[16px] sm:text-[13px] font-medium text-slate-800 dark:text-zinc-200 border border-slate-200 dark:border-zinc-700 rounded-md px-2 py-1 outline-none focus:border-brand-500 dark:focus:border-brand-500 focus:ring-1 focus:ring-brand-500/30 w-16 text-center"
                 />
                 <span className="text-[13px] text-slate-500 dark:text-zinc-400 font-medium">min</span>
               </div>
@@ -2566,7 +2566,7 @@ function LogTimeModal({
               value={comment}
               onChange={(e) => setComment(e.target.value)}
               className={
-                "w-full resize-none text-[13px] font-medium text-slate-800 dark:text-zinc-200 " +
+                "w-full resize-none text-[16px] sm:text-[13px] font-medium text-slate-800 dark:text-zinc-200 " +
                 "bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-700 rounded-md px-2.5 py-2 outline-none " +
                 "focus:border-brand-500 dark:focus:border-brand-500 focus:ring-1 focus:ring-brand-500/30 " +
                 "placeholder:text-slate-300 dark:placeholder:text-zinc-700"
@@ -3619,7 +3619,7 @@ export function TicketDetailScreen({
                       placeholder="Write a comment…"
                       value={commentDraft}
                       onChange={(e) => setCommentDraft(e.target.value)}
-                      className="w-full resize-none text-[13px] text-slate-700 dark:text-zinc-300 leading-relaxed bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-700 rounded-lg px-3 py-2.5 outline-none focus:border-brand-500 dark:focus:border-brand-500 focus:ring-1 focus:ring-brand-500/30 placeholder:text-slate-300 dark:placeholder:text-zinc-700"
+                      className="w-full resize-none text-[16px] sm:text-[13px] text-slate-700 dark:text-zinc-300 leading-relaxed bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-700 rounded-lg px-3 py-2.5 outline-none focus:border-brand-500 dark:focus:border-brand-500 focus:ring-1 focus:ring-brand-500/30 placeholder:text-slate-300 dark:placeholder:text-zinc-700"
                     />
 
                     <input

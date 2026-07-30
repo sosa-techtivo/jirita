@@ -104,7 +104,7 @@ function PreviewPriorityControl({ value, onChange }: { value: TicketPriority; on
     return (
       <select
         ref={ref}
-        className={INPUT_BASE + " py-0.5 text-[12px]"}
+        className={INPUT_BASE + " py-0.5 text-[16px] sm:text-[12px]"}
         value={value}
         onChange={(e) => { onChange(e.target.value as TicketPriority); setEditing(false); }}
         onBlur={() => setEditing(false)}
@@ -154,7 +154,7 @@ function PreviewAssigneeControl({
     return (
       <select
         ref={ref}
-        className={INPUT_BASE + " py-0.5 text-[12px]"}
+        className={INPUT_BASE + " py-0.5 text-[16px] sm:text-[12px]"}
         value={value.name}
         onChange={(e) => handleChange(e.target.value)}
         onBlur={() => setEditing(false)}
@@ -367,7 +367,7 @@ function PreviewLabelsControl({
               placeholder="Search or create…"
               value={search}
               onChange={(e) => { setSearch(e.target.value); setCreateError(null); }}
-              className="flex-1 min-w-0 bg-transparent text-[12px] text-slate-800 dark:text-zinc-200 outline-none placeholder:text-slate-400 dark:placeholder:text-zinc-600"
+              className="flex-1 min-w-0 bg-transparent text-[16px] sm:text-[12px] text-slate-800 dark:text-zinc-200 outline-none placeholder:text-slate-400 dark:placeholder:text-zinc-600"
             />
           </div>
 

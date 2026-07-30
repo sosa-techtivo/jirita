@@ -9,8 +9,11 @@ import { getDefaultTicketView, setDefaultTicketView, type DefaultTicketView } fr
 import { ALLOWED_AVATAR_TYPES, validateAvatarFile } from "@/lib/avatar-upload";
 import { Avatar } from "@/components/ui/avatar";
 
+// `text-[16px] sm:text-[13px]` — prevents iOS Safari's autozoom-on-focus
+// (triggered below 16px) on Mobile; `sm:` keeps Desktop/Tablet's original
+// 13px. Same technique as components/auth/field-styles.ts's INPUT.
 const NAME_INPUT =
-  "text-[13px] text-slate-800 dark:text-zinc-200 bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-700 " +
+  "text-[16px] sm:text-[13px] text-slate-800 dark:text-zinc-200 bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-700 " +
   "rounded-lg px-2.5 py-1.5 outline-none focus:border-brand-500 dark:focus:border-brand-400 transition-colors w-44";
 
 const CHANGE_PASSWORD_LINK =

@@ -45,8 +45,11 @@ function formatDueDate(iso: string): string {
 
 // ── Shared styles ─────────────────────────────────────────────────────────────
 
+// `text-[16px] sm:text-[13px]` — prevents iOS Safari's autozoom-on-focus
+// (triggered below 16px) on Mobile; `sm:` keeps Desktop/Tablet's original
+// 13px. Same technique as components/auth/field-styles.ts's INPUT.
 const INPUT =
-  "w-full bg-white dark:bg-zinc-900 text-[13px] font-medium text-slate-800 dark:text-zinc-200 " +
+  "w-full bg-white dark:bg-zinc-900 text-[16px] sm:text-[13px] font-medium text-slate-800 dark:text-zinc-200 " +
   "border border-slate-200 dark:border-zinc-700 rounded-lg px-3 py-2 outline-none " +
   "focus:border-brand-500 dark:focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 " +
   "placeholder:text-slate-300 dark:placeholder:text-zinc-600 transition-colors";
@@ -141,7 +144,7 @@ function LabelPicker({
               onKeyDown={(e) => {
                 if (e.key === "Escape") { e.stopPropagation(); setOpen(false); setSearch(""); }
               }}
-              className="flex-1 bg-transparent text-[12px] text-slate-800 dark:text-zinc-200 outline-none placeholder:text-slate-400 dark:placeholder:text-zinc-600"
+              className="flex-1 bg-transparent text-[16px] sm:text-[12px] text-slate-800 dark:text-zinc-200 outline-none placeholder:text-slate-400 dark:placeholder:text-zinc-600"
             />
           </div>
 
@@ -429,7 +432,7 @@ export function NewTicketModal({
                 onKeyDown={(e) => {
                   if (e.key === "Enter") { e.preventDefault(); submitRef.current(); }
                 }}
-                className={INPUT + " text-[15px] font-medium py-2.5"}
+                className={INPUT + " text-[16px] sm:text-[15px] font-medium py-2.5"}
               />
             </div>
 
@@ -487,7 +490,7 @@ export function NewTicketModal({
                             criteriaRefs.current[i - 1]?.focus();
                           }
                         }}
-                        className="flex-1 bg-transparent text-[13px] text-slate-800 dark:text-zinc-200 outline-none placeholder:text-slate-300 dark:placeholder:text-zinc-600 min-w-0"
+                        className="flex-1 bg-transparent text-[16px] sm:text-[13px] text-slate-800 dark:text-zinc-200 outline-none placeholder:text-slate-300 dark:placeholder:text-zinc-600 min-w-0"
                       />
                       {/* Remove */}
                       <button

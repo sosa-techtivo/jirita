@@ -502,7 +502,7 @@ export function PeriodSelector({
                 type="date"
                 value={draftRange.from}
                 onChange={(e) => setDraftRange((r) => ({ ...r, from: e.target.value }))}
-                className="w-full text-sm bg-slate-50 dark:bg-zinc-800 text-slate-800 dark:text-zinc-100 rounded-md border border-slate-200 dark:border-zinc-700 px-2.5 py-1.5 outline-none focus:ring-2 focus:ring-brand-500/30 transition-colors"
+                className="w-full text-[16px] sm:text-sm bg-slate-50 dark:bg-zinc-800 text-slate-800 dark:text-zinc-100 rounded-md border border-slate-200 dark:border-zinc-700 px-2.5 py-1.5 outline-none focus:ring-2 focus:ring-brand-500/30 transition-colors"
               />
             </label>
             <label className="block">
@@ -511,7 +511,7 @@ export function PeriodSelector({
                 type="date"
                 value={draftRange.to}
                 onChange={(e) => setDraftRange((r) => ({ ...r, to: e.target.value }))}
-                className="w-full text-sm bg-slate-50 dark:bg-zinc-800 text-slate-800 dark:text-zinc-100 rounded-md border border-slate-200 dark:border-zinc-700 px-2.5 py-1.5 outline-none focus:ring-2 focus:ring-brand-500/30 transition-colors"
+                className="w-full text-[16px] sm:text-sm bg-slate-50 dark:bg-zinc-800 text-slate-800 dark:text-zinc-100 rounded-md border border-slate-200 dark:border-zinc-700 px-2.5 py-1.5 outline-none focus:ring-2 focus:ring-brand-500/30 transition-colors"
               />
             </label>
           </div>

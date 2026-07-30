@@ -156,7 +156,7 @@ export function DateRangeFilterDropdown({
               value={value.from}
               max={value.to || undefined}
               onChange={(e) => onChange({ ...value, from: e.target.value })}
-              className="w-full text-sm bg-slate-100 dark:bg-zinc-800 text-slate-800 dark:text-zinc-100 rounded-md px-2.5 py-1.5 outline-none focus:ring-2 focus:ring-brand-500/30 transition-colors"
+              className="w-full text-[16px] sm:text-sm bg-slate-100 dark:bg-zinc-800 text-slate-800 dark:text-zinc-100 rounded-md px-2.5 py-1.5 outline-none focus:ring-2 focus:ring-brand-500/30 transition-colors"
             />
           </label>
           <label className="block">
@@ -166,7 +166,7 @@ export function DateRangeFilterDropdown({
               value={value.to}
               min={value.from || undefined}
               onChange={(e) => onChange({ ...value, to: e.target.value })}
-              className="w-full text-sm bg-slate-100 dark:bg-zinc-800 text-slate-800 dark:text-zinc-100 rounded-md px-2.5 py-1.5 outline-none focus:ring-2 focus:ring-brand-500/30 transition-colors"
+              className="w-full text-[16px] sm:text-sm bg-slate-100 dark:bg-zinc-800 text-slate-800 dark:text-zinc-100 rounded-md px-2.5 py-1.5 outline-none focus:ring-2 focus:ring-brand-500/30 transition-colors"
             />
           </label>
         </div>

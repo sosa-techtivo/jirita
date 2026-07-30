@@ -374,7 +374,7 @@ export function FilterDropdown({
                 placeholder="Search…"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="w-full text-sm bg-slate-100 dark:bg-zinc-800 placeholder:text-slate-400 dark:placeholder:text-zinc-600 text-slate-800 dark:text-zinc-100 rounded-md px-2.5 py-1.5 outline-none focus:ring-2 focus:ring-brand-500/30 transition-colors"
+                className="w-full text-[16px] sm:text-sm bg-slate-100 dark:bg-zinc-800 placeholder:text-slate-400 dark:placeholder:text-zinc-600 text-slate-800 dark:text-zinc-100 rounded-md px-2.5 py-1.5 outline-none focus:ring-2 focus:ring-brand-500/30 transition-colors"
               />
             </div>
           )}

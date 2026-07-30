@@ -151,7 +151,7 @@ export function NoteDetailModal({
                     type="text"
                     value={title}
                     onChange={(e) => setTitle(e.target.value)}
-                    className={INPUT + " text-[15px] py-2.5"}
+                    className={INPUT + " text-[16px] sm:text-[15px] py-2.5"}
                   />
                 </div>
 

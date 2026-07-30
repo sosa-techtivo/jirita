@@ -385,7 +385,7 @@ function CapacityCell({ user, onSave }: { user: User; onSave: (hours: number) =>
         if (e.key === "Enter") { e.preventDefault(); commit(); }
         if (e.key === "Escape") { e.preventDefault(); cancel(); }
       }}
-      className="w-16 text-right tabular-nums bg-white dark:bg-zinc-900 border border-brand-400 dark:border-brand-500 rounded px-1.5 py-0.5 text-sm outline-none focus:ring-2 focus:ring-brand-500/30"
+      className="w-16 text-right tabular-nums bg-white dark:bg-zinc-900 border border-brand-400 dark:border-brand-500 rounded px-1.5 py-0.5 text-[16px] sm:text-sm outline-none focus:ring-2 focus:ring-brand-500/30"
     />
   );
 }
@@ -734,7 +734,7 @@ export function UsersScreen() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search users..."
-            className="w-full text-sm bg-slate-100 placeholder:text-slate-400 rounded-md pl-8 pr-3 py-1.5 outline-none focus:ring-2 focus:ring-brand-500/30 transition-colors dark:bg-zinc-900 dark:placeholder:text-zinc-500 dark:text-zinc-100"
+            className="w-full text-[16px] sm:text-sm bg-slate-100 placeholder:text-slate-400 rounded-md pl-8 pr-3 py-1.5 outline-none focus:ring-2 focus:ring-brand-500/30 transition-colors dark:bg-zinc-900 dark:placeholder:text-zinc-500 dark:text-zinc-100"
           />
         </label>
 

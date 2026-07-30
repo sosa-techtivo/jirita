@@ -17,7 +17,7 @@ export function RoleSwitcher() {
         value={user.role}
         onChange={(event) => setRole(event.target.value as Role)}
         aria-label="Switch mock user role"
-        className="rounded-md border border-slate-200 bg-slate-50 text-slate-600 text-xs font-medium px-2 py-1 outline-none focus:ring-2 focus:ring-brand-500/30 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
+        className="rounded-md border border-slate-200 bg-slate-50 text-slate-600 text-[16px] sm:text-xs font-medium px-2 py-1 outline-none focus:ring-2 focus:ring-brand-500/30 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
       >
         {ROLES.map((role) => (
           <option key={role} value={role}>

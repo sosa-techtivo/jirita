@@ -245,7 +245,7 @@ export function FilterBar({
             placeholder="Search tickets..."
             value={searchQuery}
             onChange={(e) => onSearchChange(e.target.value)}
-            className="w-full sm:w-64 text-sm bg-slate-100 dark:bg-zinc-900 placeholder:text-slate-400 dark:placeholder:text-zinc-500 text-slate-800 dark:text-zinc-100 rounded-md pl-8 pr-3 py-1.5 outline-none focus:ring-2 focus:ring-brand-500/30 transition-colors"
+            className="w-full sm:w-64 text-[16px] sm:text-sm bg-slate-100 dark:bg-zinc-900 placeholder:text-slate-400 dark:placeholder:text-zinc-500 text-slate-800 dark:text-zinc-100 rounded-md pl-8 pr-3 py-1.5 outline-none focus:ring-2 focus:ring-brand-500/30 transition-colors"
           />
         </label>
 

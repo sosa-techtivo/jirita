@@ -805,7 +805,7 @@ export function MemberDashboard() {
                 value={resolvedProjectSlug ?? ""}
                 onChange={(event) => handleScopeChange(event.target.value)}
                 aria-label="Current project"
-                className="appearance-none text-[13px] font-medium pl-3 pr-7 py-1.5 rounded-lg border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-slate-700 dark:text-zinc-300 hover:bg-slate-50 dark:hover:bg-zinc-800 transition-colors cursor-pointer outline-none focus:ring-2 focus:ring-brand-500/30"
+                className="appearance-none text-[16px] sm:text-[13px] font-medium pl-3 pr-7 py-1.5 rounded-lg border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-slate-700 dark:text-zinc-300 hover:bg-slate-50 dark:hover:bg-zinc-800 transition-colors cursor-pointer outline-none focus:ring-2 focus:ring-brand-500/30"
               >
                 {memberProjects.map((p) => (
                   <option key={p.slug} value={p.slug}>{p.name}</option>
