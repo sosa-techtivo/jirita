@@ -190,7 +190,8 @@ function toDetail(project: ProjectDetail | null): DetailState {
 }
 
 export function ProjectSettingsScreen({ slug }: { slug: string }) {
-  const { organization, isDevFallback } = useCurrentUser();
+  const { user, organization, isDevFallback } = useCurrentUser();
+  const isProjectLead = user.role === "PROJECT_LEAD";
   const { projects: sharedProjects, updateProjectSettings, restoreProject } = useOrganizationProjects();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -412,6 +413,21 @@ export function ProjectSettingsScreen({ slug }: { slug: string }) {
   // cache lives inside the Server Action itself, so this can never turn
   // into polling or hammer GitHub on every tab switch.
   useRefreshOnFocusAndVisibility(refreshGithubStatus);
+
+  // Project Lead lost access to this screen (Admin-only now, see
+  // nav-config.ts) — this is real route protection, not just a hidden
+  // sidebar link, so a Project Lead who navigates here directly (typed URL,
+  // bookmark, back button) gets bounced to the project Overview instead of
+  // ever seeing settings content.
+  useEffect(() => {
+    if (isProjectLead) {
+      router.replace(`/projects/${slug}`);
+    }
+  }, [isProjectLead, router, slug]);
+
+  if (isProjectLead) {
+    return null;
+  }
 
   if (detail.status === "loading") {
     return (

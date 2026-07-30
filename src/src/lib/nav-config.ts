@@ -17,10 +17,11 @@ const MAIN_NAV_BY_ROLE: Record<Role, MainNavKey[]> = {
 };
 
 // Per-project Settings (billing/category, archive, Repository Integration)
-// is Admin/Project Lead only — a Member never sees it.
+// is Admin-only — Project Lead lost access to it (previously listed here in
+// error) and a Member never had it.
 const PROJECT_NAV_BY_ROLE: Record<Role, ProjectNavKey[]> = {
   ADMIN: ["overview", "tickets", "notes", "team", "reports", "settings"],
-  PROJECT_LEAD: ["overview", "tickets", "notes", "team", "reports", "settings"],
+  PROJECT_LEAD: ["overview", "tickets", "notes", "team", "reports"],
   MEMBER: ["overview", "tickets", "notes"],
 };
 
