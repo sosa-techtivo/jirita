@@ -172,7 +172,7 @@ export function MobileTabBar({ activePage }: { activePage?: string }) {
     <>
       <nav
         aria-label="Primary"
-        className={`md:hidden fixed bottom-0 inset-x-0 z-40 bg-white dark:bg-zinc-950 border-t border-slate-200 dark:border-zinc-800 pb-[env(safe-area-inset-bottom)]`}
+        className={`md:hidden fixed bottom-0 inset-x-0 z-40 bg-[#e4e1ff] border-t border-slate-200 dark:border-zinc-800 pb-[env(safe-area-inset-bottom)]`}
       >
         <div className={`grid ${gridColsClass}`}>
           {tabs.map(({ key, shortLabel }) => {
