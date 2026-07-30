@@ -33,7 +33,7 @@ import {
 } from "@/lib/tickets";
 import type { OrganizationActivityEvent, ProfileTimeEntryRecord } from "@/lib/tickets";
 import { loadMemberWeeklyCapacity } from "@/lib/projects";
-import { CapacityCell, formatHours } from "@/components/time-tracking-screen";
+import { CapacityCell, formatHours, formatHoursMaybe } from "@/components/time-tracking-screen";
 import { PersonalTimesheetPanel } from "@/components/personal-timesheet-panel";
 import type { PersonalTimesheetEntry } from "@/components/personal-timesheet-panel";
 
@@ -93,7 +93,7 @@ function activityEventToEntry(
     return { ...base, action: <>moved to <span className="text-emerald-600 dark:text-emerald-400 font-medium">Done</span></> };
   }
   if (event.type === "hours") {
-    return { ...base, action: <>changed Hours — <span className="font-medium">{event.oldHours}h → {event.newHours}h</span></> };
+    return { ...base, action: <>changed Hours — <span className="font-medium">{formatHoursMaybe(event.oldHours)} → {formatHoursMaybe(event.newHours)}</span></> };
   }
   if (event.type === "assigned") {
     return { ...base, action: <>reassigned to <span className="font-medium">{event.newAssigneeName}</span></> };
@@ -424,7 +424,7 @@ function FocusTicketRow({ ticket, todayISO, onOpen }: { ticket: Ticket; todayISO
           <svg className="w-2.5 h-2.5 opacity-50" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
             <circle cx="12" cy="12" r="10" /><path d="M12 6v6l4 2" />
           </svg>
-          {ticket.hours}h
+          {formatHours(ticket.hours)}
         </span>
       )}
 
@@ -823,7 +823,7 @@ export function MyWorkScreen() {
           />
           <KpiCard
             label="Estimated Hours"
-            value={<>{totalHours}<span className="text-base font-medium ml-0.5">h</span></>}
+            value={<>{round1(totalHours)}<span className="text-base font-medium ml-0.5">h</span></>}
             sub="assigned"
             accent
             active={kpiMode === "hours"}
@@ -863,7 +863,7 @@ export function MyWorkScreen() {
             ] as const).map(({ label, value, cls }) => (
               <div key={label} className="flex-shrink-0">
                 <p className="text-[10px] text-slate-400 dark:text-zinc-600">{label}</p>
-                <p className={`text-sm font-bold ${cls}`}>{value}h</p>
+                <p className={`text-sm font-bold ${cls}`}>{formatHours(value)}</p>
               </div>
             ))}
           </div>
@@ -890,7 +890,7 @@ export function MyWorkScreen() {
             </div>
             <div className="flex-shrink-0">
               <p className="text-[10px] text-slate-400 dark:text-zinc-600">Remaining Estimated</p>
-              <p className="text-sm font-bold text-slate-900 dark:text-zinc-50 tabular-nums">{remainingEstimatedHours}h</p>
+              <p className="text-sm font-bold text-slate-900 dark:text-zinc-50 tabular-nums">{formatHours(remainingEstimatedHours)}</p>
             </div>
             <div className="flex-shrink-0">
               <p className="text-[10px] text-slate-400 dark:text-zinc-600 mb-0.5">Personal Capacity</p>
@@ -919,7 +919,7 @@ export function MyWorkScreen() {
               {displayedTickets.length}
             </span>
             <span className="hidden sm:block text-xs text-slate-300 dark:text-zinc-700">
-              · {totalHours}h estimated
+              · {formatHours(totalHours)} estimated
             </span>
 
             {/* Active KPI filter chip */}

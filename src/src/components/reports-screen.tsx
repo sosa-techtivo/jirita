@@ -1477,8 +1477,8 @@ function buildDeliveryExportSections(data: DeliveryExportData): ExportSection[] 
     headers: ["Person", "Assigned Hours", "Weekly Capacity", "Utilization", "Change This Week"],
     rows: data.workloadRows.map((r) => [
       r.name,
-      `${r.assignedHours}h`,
-      `${r.weeklyCapacity}h`,
+      `${round1(r.assignedHours)}h`,
+      `${round1(r.weeklyCapacity)}h`,
       `${r.utilizationPct}%`,
       r.weekDelta === null ? "No data this week" : `${r.weekDelta > 0 ? "+" : ""}${r.weekDelta}h this week`,
     ]),
@@ -2831,7 +2831,7 @@ function AdminReportsScreen() {
                           <p className="text-sm font-semibold text-slate-700 dark:text-zinc-200 tabular-nums leading-tight">
                             {entry.assignedHours}h
                             <span className="font-normal text-slate-400 dark:text-zinc-600">
-                              {" / "}{entry.weeklyCapacity}h
+                              {" / "}{round1(entry.weeklyCapacity)}h
                             </span>
                           </p>
                           <p className={`text-xs font-semibold tabular-nums leading-tight mt-0.5 ${pctColor}`}>

@@ -17,6 +17,7 @@ import {
   type DeleteUserResult,
 } from "@/lib/users";
 import { FilterDropdown } from "@/components/tickets/filter-dropdown";
+import { formatHours } from "@/components/time-tracking-screen";
 import type { DropdownGroup } from "@/components/tickets/filter-dropdown";
 import { Avatar } from "@/components/ui/avatar";
 import { MemberProfileModal, UserStatusBadge, useRefreshOnFocusAndVisibility } from "@/components/member-profile-modal";
@@ -367,7 +368,7 @@ function CapacityCell({ user, onSave }: { user: User; onSave: (hours: number) =>
         onClick={startEditing}
         className="tabular-nums text-slate-600 dark:text-zinc-400 hover:text-brand-600 dark:hover:text-brand-400 hover:underline underline-offset-2 transition-colors"
       >
-        {user.weeklyCapacity}h
+        {formatHours(user.weeklyCapacity)}
       </button>
     );
   }

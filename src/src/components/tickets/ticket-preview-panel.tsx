@@ -28,6 +28,7 @@ import {
   type UpdateTicketInput,
 } from "@/lib/tickets";
 import { MemberTrigger } from "@/components/member-profile";
+import { round1 } from "@/components/time-tracking-screen";
 import { Avatar } from "@/components/ui/avatar";
 import { FALLBACK_AVATAR } from "@/lib/current-user";
 import type { OrgMember } from "@/lib/projects";
@@ -232,7 +233,7 @@ function PreviewHoursControl({ value, onChange }: { value: number | undefined; o
       className="group flex items-center gap-1.5 cursor-pointer"
       onClick={() => { setDraft(value?.toString() ?? ""); setEditing(true); }}
     >
-      <span>{value !== undefined ? `${value} h` : "—"}</span>
+      <span>{value !== undefined ? `${round1(value)} h` : "—"}</span>
       <button className={EDIT_BTN} aria-label="Edit hours"><PencilIcon /></button>
     </div>
   );
@@ -717,7 +718,7 @@ export function TicketPreviewPanel({
                       onChange={(v) => persistPatch({ hours: v ?? null }, (prev) => ({ ...prev, hours: v }))}
                     />
                   ) : (
-                    <p>{t.hours} h</p>
+                    <p>{round1(t.hours)} h</p>
                   )}
                 </div>
               </div>

@@ -7,6 +7,7 @@ import { NewTicketModal } from "@/components/tickets/new-ticket-modal";
 import { getTicketDisplayKey } from "@/lib/mock-tickets";
 import type { Ticket } from "@/lib/mock-tickets";
 import { TicketTypeIcon, getTodayISO, parseDisplayDate } from "@/components/tickets/ticket-ui";
+import { formatHoursMaybe } from "@/components/time-tracking-screen";
 import { MemberTrigger, useMemberProfile } from "@/components/member-profile";
 import { useCurrentUser } from "@/components/current-user-provider";
 import { canManage } from "@/lib/current-user";
@@ -257,7 +258,7 @@ export function activityEventToEntry(event: OrganizationActivityEvent, ticket: T
   if (event.type === "hours") {
     return {
       ...base,
-      message: <>updated the estimate to <span className="font-medium">{event.newHours}h</span> on</>,
+      message: <>updated the estimate to <span className="font-medium">{formatHoursMaybe(event.newHours)}</span> on</>,
     };
   }
   if (event.type === "assigned") {

@@ -16,6 +16,7 @@ import {
   CapacityBar,
   remainingAvailabilityLabel,
 } from "@/components/member-profile-modal";
+import { formatHours, round1 } from "@/components/time-tracking-screen";
 import { useMemberProfile } from "@/components/member-profile";
 import { Avatar } from "@/components/ui/avatar";
 import { loadProjectTeam, loadOrganizationMembers, addProjectMember } from "@/lib/projects";
@@ -271,14 +272,14 @@ export function TeamScreen({ slug }: { slug: string }) {
         <div className="flex-1 px-5 py-4">
           <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600">Weekly Capacity</p>
           <p className="text-2xl font-bold text-slate-900 dark:text-zinc-50 mt-1 leading-none">
-            {totalWeeklyCapacity}
+            {round1(totalWeeklyCapacity)}
             <span className="text-base font-medium text-slate-400 dark:text-zinc-600 ml-0.5">h</span>
           </p>
         </div>
         <div className="flex-1 px-5 py-4 bg-brand-50/30 dark:bg-brand-950/10">
           <p className="text-[10px] font-bold uppercase tracking-widest text-brand-500 dark:text-brand-400">Assigned Hours</p>
           <p className="text-2xl font-bold text-brand-700 dark:text-brand-300 mt-1 leading-none">
-            {totalAssignedHours}
+            {round1(totalAssignedHours)}
             <span className="text-base font-medium text-brand-400 dark:text-brand-500 ml-0.5">h</span>
           </p>
         </div>
@@ -397,7 +398,7 @@ function MemberCard({ member, slug, onOpen }: { member: TeamMember; slug: string
         <div className="flex items-center justify-between text-xs">
           <span className="text-slate-400 dark:text-zinc-500">This Week</span>
           <span className="font-semibold text-slate-700 dark:text-zinc-200 tabular-nums">
-            {member.assignedHours}h <span className="font-normal text-slate-400 dark:text-zinc-600">/ {member.weeklyCapacity}h</span>
+            {formatHours(member.assignedHours)} <span className="font-normal text-slate-400 dark:text-zinc-600">/ {formatHours(member.weeklyCapacity)}</span>
           </span>
         </div>
         <div className="mt-1.5">

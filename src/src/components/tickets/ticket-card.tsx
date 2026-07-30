@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import type { Ticket, TicketPriority } from "@/lib/mock-tickets";
 import { getTicketDisplayKey } from "@/lib/mock-tickets";
 import { TicketTypeIcon } from "@/components/tickets/ticket-ui";
+import { formatHours } from "@/components/time-tracking-screen";
 import { MemberTrigger } from "@/components/member-profile";
 import { Avatar } from "@/components/ui/avatar";
 
@@ -103,7 +104,7 @@ export function TicketBoardCard({
         <div className="flex items-center gap-1.5 flex-shrink-0">
           {ticket.hours !== undefined && (
             <span className="text-[11px] font-medium text-slate-400 dark:text-zinc-500">
-              {ticket.hours}h
+              {formatHours(ticket.hours)}
             </span>
           )}
           <MemberTrigger
@@ -186,7 +187,7 @@ export function TicketListRow({
 
         {ticket.hours !== undefined && (
           <span className="hidden sm:block text-xs font-medium text-slate-400 dark:text-zinc-500">
-            {ticket.hours}h
+            {formatHours(ticket.hours)}
           </span>
         )}
 

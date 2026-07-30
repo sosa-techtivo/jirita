@@ -19,6 +19,7 @@ import { ROLE_LABELS } from "@/lib/current-user";
 import { loadProjectTickets, loadOrganizationTickets, loadUserActivity } from "@/lib/tickets";
 import type { UserActivityEvent } from "@/lib/tickets";
 import { generatePasswordResetLink } from "@/lib/users";
+import { formatHours, round1 } from "@/components/time-tracking-screen";
 import {
   hasProjectMemberHistory,
   removeProjectMember,
@@ -150,7 +151,7 @@ export function CapacityBar({ pct }: { pct: number }) {
 export function remainingAvailabilityLabel(member: TeamMember): string {
   const weeklyCapacity = normalizeHours(member.weeklyCapacity);
   const assignedHours = normalizeHours(member.assignedHours);
-  const remaining = weeklyCapacity - assignedHours;
+  const remaining = round1(weeklyCapacity - assignedHours);
   return remaining >= 0 ? `${remaining}h available` : `${Math.abs(remaining)}h over capacity`;
 }
 
@@ -424,11 +425,11 @@ export function MemberProfileModal({
                 <div className="mt-6 flex items-stretch divide-x divide-slate-100 dark:divide-zinc-800 rounded-xl border border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900 shadow-sm shadow-slate-200/40 dark:shadow-black/20 overflow-hidden">
                   <div className="flex-1 px-4 py-3">
                     <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600">Weekly Capacity</p>
-                    <p className="text-lg font-bold text-slate-900 dark:text-zinc-50 mt-0.5 leading-none">{effectiveMember!.weeklyCapacity}h</p>
+                    <p className="text-lg font-bold text-slate-900 dark:text-zinc-50 mt-0.5 leading-none">{formatHours(effectiveMember!.weeklyCapacity)}</p>
                   </div>
                   <div className="flex-1 px-4 py-3">
                     <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600">Assigned Hours</p>
-                    <p className="text-lg font-bold text-slate-900 dark:text-zinc-50 mt-0.5 leading-none">{effectiveMember!.assignedHours}h</p>
+                    <p className="text-lg font-bold text-slate-900 dark:text-zinc-50 mt-0.5 leading-none">{formatHours(effectiveMember!.assignedHours)}</p>
                   </div>
                   <div className="flex-1 px-4 py-3">
                     <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600">Utilization</p>
@@ -715,7 +716,7 @@ function ProfileTabContent({ user }: { user: User }) {
       <div className="flex items-stretch divide-x divide-slate-100 dark:divide-zinc-800 rounded-xl border border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900 shadow-sm shadow-slate-200/40 dark:shadow-black/20 overflow-hidden">
         <div className="flex-1 px-4 py-3">
           <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600">Weekly Capacity</p>
-          <p className="text-lg font-bold text-slate-900 dark:text-zinc-50 mt-0.5 leading-none">{user.weeklyCapacity}h</p>
+          <p className="text-lg font-bold text-slate-900 dark:text-zinc-50 mt-0.5 leading-none">{formatHours(user.weeklyCapacity)}</p>
         </div>
         <div className="flex-1 px-4 py-3">
           <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600">Projects</p>
@@ -890,7 +891,7 @@ function ProjectsTabContent({ user }: { user: User }) {
               <span className="mx-1.5 text-slate-300 dark:text-zinc-700">•</span>
               {activeTickets.length} active ticket{activeTickets.length === 1 ? "" : "s"}
               <span className="mx-1.5 text-slate-300 dark:text-zinc-700">•</span>
-              {assignedHours}h assigned
+              {formatHours(assignedHours)} assigned
             </p>
           </div>
         );

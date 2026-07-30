@@ -11,6 +11,7 @@ import { Avatar } from "@/components/ui/avatar";
 import type { Ticket } from "@/lib/mock-tickets";
 import { getTicketDisplayKey } from "@/lib/mock-tickets";
 import { TicketTypeIcon, parseDisplayDate, getTodayISO, formatISODate, PRIORITY_VALUES, ErrorToast } from "@/components/tickets/ticket-ui";
+import { formatHours, formatHoursMaybe } from "@/components/time-tracking-screen";
 import {
   Card,
   ActiveTicketRow,
@@ -243,7 +244,7 @@ function TeamCapacityRow({ member, onOpen }: { member: TeamMember; onOpen: (m: T
           {remainingAvailabilityLabel(member)}
         </p>
         <p className="text-[11px] text-slate-400 dark:text-zinc-500 tabular-nums">
-          {member.assignedHours}h / {member.weeklyCapacity}h · {pct}%
+          {formatHours(member.assignedHours)} / {formatHours(member.weeklyCapacity)} · {pct}%
         </p>
       </div>
     </button>
@@ -630,7 +631,7 @@ export function ProjectLeadDashboard() {
             ...base,
             type: "hours" as const,
             verb: "updated the estimate on",
-            detail: <span className="font-medium">{event.oldHours}h → {event.newHours}h</span>,
+            detail: <span className="font-medium">{formatHoursMaybe(event.oldHours)} → {formatHoursMaybe(event.newHours)}</span>,
           };
         }
         if (event.type === "assigned") {

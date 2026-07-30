@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import type { ProjectHealth } from "@/lib/mock-projects";
 import type { TeamMember } from "@/lib/mock-team";
 import { utilizationOf, capacityBarColor, capacityTextColor, remainingAvailabilityLabel } from "@/components/member-profile-modal";
+import { formatHours, round1 } from "@/components/time-tracking-screen";
 import { MemberTrigger, useMemberProfile } from "@/components/member-profile";
 import { Avatar } from "@/components/ui/avatar";
 import { StatusBadge, HealthBadge } from "@/components/status-badge";
@@ -1230,8 +1231,8 @@ export function ProjectLeadReportsScreen() {
           {/* ── Team Capacity + Team Utilization ────────────────────────── */}
           <Section title="Team Capacity" icon={PeopleIcon}>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <KpiCard label="Total Capacity" value={<>{teamStats.totalCapacityHours}<span className="text-base font-medium ml-0.5">h</span></>} sub="per week" />
-              <KpiCard label="Assigned" value={<>{teamStats.totalAssignedHours}<span className="text-base font-medium ml-0.5">h</span></>} sub="this week" />
+              <KpiCard label="Total Capacity" value={<>{round1(teamStats.totalCapacityHours)}<span className="text-base font-medium ml-0.5">h</span></>} sub="per week" />
+              <KpiCard label="Assigned" value={<>{round1(teamStats.totalAssignedHours)}<span className="text-base font-medium ml-0.5">h</span></>} sub="this week" />
               <KpiCard
                 label="Team Utilization"
                 value={`${teamStats.utilizationPct}%`}
@@ -1292,10 +1293,10 @@ export function ProjectLeadReportsScreen() {
                             </MemberTrigger>
                           </td>
                           <td className="py-2.5 text-right font-semibold text-slate-800 dark:text-zinc-200 tabular-nums">
-                            {member.assignedHours}h
+                            {formatHours(member.assignedHours)}
                           </td>
                           <td className="py-2.5 text-right text-slate-500 dark:text-zinc-400 tabular-nums">
-                            {member.weeklyCapacity}h
+                            {formatHours(member.weeklyCapacity)}
                           </td>
                           <td className="py-2.5 text-right">
                             <span className={`font-semibold tabular-nums ${capacityTextColor(pct)}`}>{pct}%</span>
@@ -1336,8 +1337,8 @@ export function ProjectLeadReportsScreen() {
                           <span className="text-sm font-medium text-slate-700 dark:text-zinc-300">{member.name}</span>
                         </MemberTrigger>
                         <p className="text-sm font-semibold text-slate-700 dark:text-zinc-200 tabular-nums leading-tight">
-                          {member.assignedHours}h
-                          <span className="font-normal text-slate-400 dark:text-zinc-600">{" / "}{member.weeklyCapacity}h</span>
+                          {formatHours(member.assignedHours)}
+                          <span className="font-normal text-slate-400 dark:text-zinc-600">{" / "}{formatHours(member.weeklyCapacity)}</span>
                           <span className={`ml-2 font-semibold ${capacityTextColor(pct)}`}>{pct}%</span>
                         </p>
                       </div>
@@ -1390,7 +1391,7 @@ export function ProjectLeadReportsScreen() {
                         </td>
                         <td className="py-2.5 text-right tabular-nums">
                           {member.blockedHours > 0 ? (
-                            <span className="font-medium text-red-600 dark:text-red-400">{member.blockedHours}h</span>
+                            <span className="font-medium text-red-600 dark:text-red-400">{formatHours(member.blockedHours)}</span>
                           ) : (
                             <span className="text-slate-300 dark:text-zinc-600">—</span>
                           )}

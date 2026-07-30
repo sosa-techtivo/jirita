@@ -60,6 +60,7 @@ import {
 import { loadProjectTeam, loadProjectDetail, type OrgMember } from "@/lib/projects";
 import { formatAbsoluteDate } from "@/lib/date-format";
 import { FALLBACK_AVATAR } from "@/lib/current-user";
+import { formatHours } from "@/components/time-tracking-screen";
 import { MemberTrigger } from "@/components/member-profile";
 import { Avatar } from "@/components/ui/avatar";
 import { useCurrentUser } from "@/components/current-user-provider";
@@ -2650,14 +2651,14 @@ function TimeHistoryModal({
           <div className="flex items-center gap-6">
             <div>
               <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600 mb-0.5">Logged</p>
-              <p className="text-[18px] font-bold text-slate-800 dark:text-zinc-100 tabular-nums leading-none">{totalLogged}h</p>
+              <p className="text-[18px] font-bold text-slate-800 dark:text-zinc-100 tabular-nums leading-none">{formatHours(totalLogged)}</p>
             </div>
             {estimatedHours !== undefined && (
               <>
                 <div className="w-px h-8 bg-slate-200 dark:bg-zinc-800 flex-shrink-0" />
                 <div>
                   <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600 mb-0.5">Estimated</p>
-                  <p className="text-[18px] font-bold text-slate-500 dark:text-zinc-400 tabular-nums leading-none">{estimatedHours}h</p>
+                  <p className="text-[18px] font-bold text-slate-500 dark:text-zinc-400 tabular-nums leading-none">{formatHours(estimatedHours)}</p>
                 </div>
                 {remaining !== undefined && (
                   <>
@@ -2789,12 +2790,12 @@ function TimeTrackingSection({
       >
         {/* Single summary line: "11h logged / 8h estimated" */}
         <p className="text-[13px] mb-1.5">
-          <span className="font-semibold text-slate-700 dark:text-zinc-200 tabular-nums">{totalLogged}h</span>
+          <span className="font-semibold text-slate-700 dark:text-zinc-200 tabular-nums">{formatHours(totalLogged)}</span>
           <span className="text-slate-400 dark:text-zinc-600"> logged</span>
           {estimatedHours !== undefined && (
             <>
               <span className="text-slate-300 dark:text-zinc-700 mx-1.5">/</span>
-              <span className="font-semibold text-slate-500 dark:text-zinc-400 tabular-nums">{estimatedHours}h</span>
+              <span className="font-semibold text-slate-500 dark:text-zinc-400 tabular-nums">{formatHours(estimatedHours)}</span>
               <span className="text-slate-400 dark:text-zinc-600"> estimated</span>
             </>
           )}
@@ -2803,7 +2804,7 @@ function TimeTrackingSection({
         {/* Over-estimate label — only shown when over */}
         {isOver && variance !== null && (
           <p className="text-[11px] font-medium text-amber-600 dark:text-amber-400 mb-2">
-            +{variance}h over estimate
+            +{formatHours(variance)} over estimate
           </p>
         )}
 
@@ -3471,12 +3472,12 @@ export function TicketDetailScreen({
                 <div className="hidden sm:flex mt-2 items-center gap-3.5 flex-wrap">
                   <span className="text-[12px] text-slate-400 dark:text-zinc-600">
                     Estimated{" "}
-                    <span className="font-semibold text-slate-600 dark:text-zinc-300">{ticket.hours}h</span>
+                    <span className="font-semibold text-slate-600 dark:text-zinc-300">{formatHours(ticket.hours)}</span>
                   </span>
                   <span className="text-slate-200 dark:text-zinc-800 select-none" aria-hidden="true">·</span>
                   <span className="text-[12px] text-slate-400 dark:text-zinc-600">
                     Logged{" "}
-                    <span className="font-semibold text-slate-600 dark:text-zinc-300">{totalLogged}h</span>
+                    <span className="font-semibold text-slate-600 dark:text-zinc-300">{formatHours(totalLogged)}</span>
                   </span>
                   <span className="text-slate-200 dark:text-zinc-800 select-none" aria-hidden="true">·</span>
                   <span className="text-[12px] text-slate-400 dark:text-zinc-600">
@@ -3502,11 +3503,11 @@ export function TicketDetailScreen({
                 )}
                 <div>
                   <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600 mb-0.5">Estimated</p>
-                  <p className="text-[13px] font-semibold text-slate-600 dark:text-zinc-300">{ticket.hours}h</p>
+                  <p className="text-[13px] font-semibold text-slate-600 dark:text-zinc-300">{formatHours(ticket.hours ?? 0)}</p>
                 </div>
                 <div>
                   <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600 mb-0.5">Logged</p>
-                  <p className="text-[13px] font-semibold text-slate-600 dark:text-zinc-300">{totalLogged}h</p>
+                  <p className="text-[13px] font-semibold text-slate-600 dark:text-zinc-300">{formatHours(totalLogged)}</p>
                 </div>
                 <div>
                   <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600 mb-0.5">Remaining</p>

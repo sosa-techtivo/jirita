@@ -14,6 +14,7 @@ import type { ProjectDetail, ProjectTeamMember } from "@/lib/projects";
 import { loadProjectTickets, loadOrganizationLoggedTimeForRange, loadTicketsCompletedInRange } from "@/lib/tickets";
 import type { OrganizationTimeEntry } from "@/lib/tickets";
 import { getTodayISO, formatISODate } from "@/components/tickets/ticket-ui";
+import { formatHours, round1 } from "@/components/time-tracking-screen";
 import { HealthBadge } from "@/components/status-badge";
 import { buildProjectHealthRows } from "@/components/reports-screen";
 import {
@@ -384,14 +385,14 @@ export function ProjectReportsScreen({ slug }: { slug: string }) {
         <div className="flex-1 px-5 py-4">
           <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600">Weekly Capacity</p>
           <p className="text-2xl font-bold text-slate-900 dark:text-zinc-50 mt-1 leading-none">
-            {totalWeeklyCapacity}
+            {round1(totalWeeklyCapacity)}
             <span className="text-base font-medium text-slate-400 dark:text-zinc-600 ml-0.5">h</span>
           </p>
         </div>
         <div className="flex-1 px-5 py-4 bg-brand-50/30 dark:bg-brand-950/10">
           <p className="text-[10px] font-bold uppercase tracking-widest text-brand-500 dark:text-brand-400">Assigned Hours</p>
           <p className="text-2xl font-bold text-brand-700 dark:text-brand-300 mt-1 leading-none">
-            {totalAssignedHours}
+            {round1(totalAssignedHours)}
             <span className="text-base font-medium text-brand-400 dark:text-brand-500 ml-0.5">h</span>
           </p>
         </div>
@@ -417,9 +418,9 @@ export function ProjectReportsScreen({ slug }: { slug: string }) {
           }
         >
           <div className="grid grid-cols-3 gap-4 mb-4">
-            <Stat label="Estimated Hours" value={`${estimatedHours}h`} />
-            <Stat label="Logged Hours" value={`${loggedHours}h`} valueClass="text-emerald-600 dark:text-emerald-400" />
-            <Stat label="Remaining Hours" value={`${remainingHours}h`} valueClass="text-slate-500 dark:text-zinc-400" />
+            <Stat label="Estimated Hours" value={formatHours(estimatedHours)} />
+            <Stat label="Logged Hours" value={formatHours(loggedHours)} valueClass="text-emerald-600 dark:text-emerald-400" />
+            <Stat label="Remaining Hours" value={formatHours(remainingHours)} valueClass="text-slate-500 dark:text-zinc-400" />
           </div>
           <div className="h-2 rounded-full bg-slate-100 dark:bg-zinc-800 overflow-hidden">
             <div className="h-full rounded-full bg-brand-500" style={{ width: `${loggedPct}%` }} />
@@ -459,7 +460,7 @@ export function ProjectReportsScreen({ slug }: { slug: string }) {
                     <div className="w-36 flex-shrink-0">
                       <div className="flex items-center justify-between text-xs mb-1">
                         <span className="font-medium text-slate-600 dark:text-zinc-300 tabular-nums">
-                          {member.assignedHours}h <span className="font-normal text-slate-400 dark:text-zinc-600">/ {member.weeklyCapacity}h</span>
+                          {formatHours(member.assignedHours)} <span className="font-normal text-slate-400 dark:text-zinc-600">/ {formatHours(member.weeklyCapacity)}</span>
                         </span>
                         <span className={`font-semibold tabular-nums ${capacityTextColor(pct)}`}>{pct}%</span>
                       </div>
@@ -524,7 +525,7 @@ export function ProjectReportsScreen({ slug }: { slug: string }) {
             <Stat label="Reporting Period" value={<span className="text-sm">{reportingPeriodLabel}</span>} />
             <Stat label="Completed Tickets" value={completedThisMonthCount} />
             <Stat label="Completed Hours" value={`${completedThisMonthHours}h`} />
-            <Stat label="Remaining Hours" value={`${remainingHours}h`} />
+            <Stat label="Remaining Hours" value={formatHours(remainingHours)} />
           </div>
         </Section>
       </div>

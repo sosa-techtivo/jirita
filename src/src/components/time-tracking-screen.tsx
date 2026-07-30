@@ -246,6 +246,15 @@ export function formatHours(h: number): string {
   return `${Math.round(h * 10) / 10}h`;
 }
 
+// For ticket_activity's `old_value`/`new_value` (hours::text on the "hours
+// changed" event — a plain text cast of whatever numeric value was written,
+// so it can carry the same excess-decimal noise formatHours guards
+// against). `undefined` (no value recorded for this event) passes through
+// unchanged rather than becoming "NaNh".
+export function formatHoursMaybe(h: string | undefined): string | undefined {
+  return h === undefined ? undefined : formatHours(Number(h));
+}
+
 function formatCurrency(amount: number): string {
   return `$${amount.toLocaleString("en-US")}`;
 }

@@ -9,6 +9,7 @@ import { Avatar } from "@/components/ui/avatar";
 import type { Ticket, TicketStatus } from "@/lib/mock-tickets";
 import { getTicketDisplayKey } from "@/lib/mock-tickets";
 import { TicketTypeIcon, parseDisplayDate, getTodayISO, formatISODate } from "@/components/tickets/ticket-ui";
+import { formatHours, formatHoursMaybe } from "@/components/time-tracking-screen";
 import { MemberTrigger } from "@/components/member-profile";
 import { useCurrentUser } from "@/components/current-user-provider";
 import { canManage } from "@/lib/current-user";
@@ -373,7 +374,7 @@ function WorkloadRow({
         />
       </div>
       <span className={`text-[11px] font-semibold tabular-nums flex-shrink-0 w-8 text-right ${isOver ? "text-amber-600 dark:text-amber-400" : "text-slate-500 dark:text-zinc-400"}`}>
-        {hours}h
+        {formatHours(hours)}
       </span>
     </div>
   );
@@ -921,7 +922,7 @@ function AdminDashboard() {
             ...base,
             type: "hours" as const,
             verb: "updated the estimate on",
-            detail: <span className="font-medium">{event.oldHours}h → {event.newHours}h</span>,
+            detail: <span className="font-medium">{formatHoursMaybe(event.oldHours)} → {formatHoursMaybe(event.newHours)}</span>,
           };
         }
         if (event.type === "assigned") {

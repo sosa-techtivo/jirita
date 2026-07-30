@@ -7,6 +7,7 @@ import { useCurrentUser } from "@/components/current-user-provider";
 import { TicketListRow } from "@/components/tickets/ticket-card";
 import { TicketPreviewPanel } from "@/components/tickets/ticket-preview-panel";
 import { StatusBadge, PriorityBadge, TicketTypeIcon, getTodayISO, parseDisplayDate } from "@/components/tickets/ticket-ui";
+import { formatHours, formatHoursMaybe } from "@/components/time-tracking-screen";
 import { statusMeta } from "@/components/status-badge";
 import type { Ticket } from "@/lib/mock-tickets";
 import { getTicketDisplayKey } from "@/lib/mock-tickets";
@@ -208,7 +209,7 @@ function attentionItemFromEvent(event: MemberAttentionEvent): AttentionItem {
   return {
     id: event.id, type: "estimate", time: event.time, ticketId: event.ticketId,
     verb: "Estimate changed",
-    detail: <span className="font-medium">{event.oldHours}h → {event.newHours}h</span>,
+    detail: <span className="font-medium">{formatHoursMaybe(event.oldHours)} → {formatHoursMaybe(event.newHours)}</span>,
   };
 }
 
@@ -830,7 +831,7 @@ export function MemberDashboard() {
           ) : (
             <HeroStat label="Assigned Tickets" value={activeWork.length} />
           )}
-          <HeroStat label="Weekly Capacity" value={`${weeklyCapacity}h`} />
+          <HeroStat label="Weekly Capacity" value={formatHours(weeklyCapacity)} />
           <HeroStat label="Logged Today" value={`${loggedTodayHours}h`} />
           {dueTodayCount > 0 ? (
             <button
@@ -878,7 +879,7 @@ export function MemberDashboard() {
               </h2>
               <div className="flex items-center gap-4 mt-3 text-sm text-slate-600 dark:text-zinc-400">
                 {recommended.hours !== undefined && (
-                  <span className="font-medium">{recommended.hours}h remaining</span>
+                  <span className="font-medium">{formatHours(recommended.hours)} remaining</span>
                 )}
                 {recommended.dueDate && (
                   <span className={isUrgentDue(recommended.dueDate, todayISO) ? "font-semibold text-red-600 dark:text-red-400" : "font-medium"}>
@@ -978,7 +979,7 @@ export function MemberDashboard() {
               </div>
               <div>
                 <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600 mb-1">Weekly Capacity</p>
-                <p className="text-lg font-bold text-slate-900 dark:text-zinc-50 tabular-nums leading-none">{weeklyCapacity}h</p>
+                <p className="text-lg font-bold text-slate-900 dark:text-zinc-50 tabular-nums leading-none">{formatHours(weeklyCapacity)}</p>
               </div>
               <div>
                 <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600 mb-1">Remaining This Week</p>

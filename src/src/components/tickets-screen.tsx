@@ -14,6 +14,7 @@ import {
   type OrgMember,
 } from "@/lib/projects";
 import { buildLabelCatalog, parseDisplayDate, getTodayISO } from "@/components/tickets/ticket-ui";
+import { formatHours } from "@/components/time-tracking-screen";
 import { NewTicketModal } from "@/components/tickets/new-ticket-modal";
 import { ViewSwitcher, type ViewMode } from "@/components/tickets/view-switcher";
 import { FilterBar, type AddFilterKind } from "@/components/tickets/filter-bar";
@@ -830,7 +831,7 @@ export function TicketsScreen({ slug, projectName }: { slug?: string; projectNam
           <span>Tickets</span>
           <span className="mx-1 text-slate-200 dark:text-zinc-700">·</span>
           <span className="font-semibold text-slate-700 dark:text-zinc-300">
-            {filteredTickets.reduce((s, t) => s + (t.hours ?? 0), 0)}h
+            {formatHours(filteredTickets.reduce((s, t) => s + (t.hours ?? 0), 0))}
           </span>
           <span>Estimated</span>
           <span className="mx-1 text-slate-200 dark:text-zinc-700">·</span>
