@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { tickets as MOCK_TICKETS, getTicketDisplayKey } from "@/lib/mock-tickets";
 import type { Ticket } from "@/lib/mock-tickets";
@@ -26,7 +27,7 @@ import { TimelineView } from "@/components/tickets/timeline-view";
 import { InsightsView } from "@/components/tickets/insights-view";
 import { TicketPreviewPanel } from "@/components/tickets/ticket-preview-panel";
 import { useCurrentUser } from "@/components/current-user-provider";
-import { canManage } from "@/lib/current-user";
+import { useOrganizationProjects } from "@/components/organization-projects-provider";
 import { getDefaultTicketView } from "@/lib/user-preferences";
 import { SkeletonBlock } from "@/components/dashboard-shared";
 import { useRefreshOnFocusAndVisibility } from "@/components/member-profile-modal";
@@ -164,6 +165,33 @@ function TicketsScreenSkeleton({ showNewTicketButton }: { showNewTicketButton: b
   );
 }
 
+// Same "server page, client breadcrumb" split as ProjectReportsBreadcrumb/
+// ProjectSettingsBreadcrumb — the real project name comes from the org's
+// already-loaded project list (OrganizationProjectsProvider), not the old
+// mock-projects.ts lookup app/projects/[slug]/tickets/page.tsx used to do
+// (which fell back to a hardcoded "Mobile Banking App" for any real,
+// non-mock project — e.g. KTVibe — it couldn't find).
+export function TicketsBreadcrumb({ slug }: { slug: string }) {
+  const { projects } = useOrganizationProjects();
+  const projectName = projects.find((p) => p.slug === slug)?.name ?? slug;
+  return (
+    <>
+      <Link href="/projects" className="text-slate-400 hover:text-slate-600 dark:text-zinc-500 dark:hover:text-zinc-300">
+        Projects
+      </Link>
+      <span className="text-slate-300 dark:text-zinc-700">/</span>
+      <Link
+        href={`/projects/${slug}`}
+        className="text-slate-400 hover:text-slate-600 dark:text-zinc-500 dark:hover:text-zinc-300"
+      >
+        {projectName}
+      </Link>
+      <span className="text-slate-300 dark:text-zinc-700">/</span>
+      <span className="text-slate-800 font-medium dark:text-zinc-200">Tickets</span>
+    </>
+  );
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 // `slug` is omitted for the org-wide "all projects" mode (the Admin
@@ -173,7 +201,16 @@ function TicketsScreenSkeleton({ showNewTicketButton }: { showNewTicketButton: b
 // component before this change; left as-is.
 export function TicketsScreen({ slug, projectName }: { slug?: string; projectName?: string }) {
   const { user, userId, organization, isDevFallback } = useCurrentUser();
-  const canCreateTicket = canManage(user.role) && Boolean(slug);
+  // Any role, as long as there's a single real project to create into
+  // (never in "all projects" mode, where slug is undefined) — this used to
+  // require canManage(role) (Admin/Project Lead only), but the real
+  // authorization boundary is the tickets_insert RLS policy itself
+  // (is_org_admin_or_lead(...) OR is_project_member(project_id) — see
+  // supabase/migrations/20260719000000_fix_tickets_insert_rls_admin_lead.sql),
+  // which already allows a Member with a real project_memberships row on
+  // this project. Excluding Member here was stale UI-only gating, not a
+  // deliberate restriction.
+  const canCreateTicket = Boolean(slug);
   // Stable storage/session key for the "all projects" mode, kept distinct
   // from any real project slug so it can never collide with one.
   const scopeKey = slug ?? "__all__";
