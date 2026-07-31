@@ -9,6 +9,7 @@ import { useCurrentUser } from "@/components/current-user-provider";
 import { useOrganizationProjects } from "@/components/organization-projects-provider";
 import { mainNavForRole, projectNavForRole } from "@/lib/nav-config";
 import type { MainNavKey } from "@/lib/nav-config";
+import { canManage } from "@/lib/current-user";
 import { CreateProjectModal } from "@/components/create-project-modal";
 import { useMemberProfile } from "@/components/member-profile";
 import { searchGlobal } from "@/lib/search";
@@ -159,6 +160,13 @@ export function Sidebar({
   const mainNav     = mainNavForRole(user.role);
   const projectNav  = projectNavForRole(user.role);
   const pinnedProjects = projects.filter((project) => project.status !== "archived").slice(0, 3);
+  // Member never creates projects (same rule projects-list-screen.tsx and
+  // dashboard-screen.tsx's own "New Project" buttons already enforce) — this
+  // quick-create "+" next to the pinned Projects list had no such check.
+  // Gates both the button (so it never renders for a Member) and the modal
+  // itself (so even a stray/forced setShowCreateModal(true) can never
+  // actually open CreateProjectModal for one).
+  const canCreateProject = canManage(user.role);
   const [showCreateModal, setShowCreateModal] = useState(false);
 
   // ── Global Search ─────────────────────────────────────────────────────────
@@ -510,16 +518,18 @@ export function Sidebar({
       <div className="mt-5 px-3">
         <div className="flex items-center justify-between px-1 mb-1.5">
           <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-zinc-400">Projects</span>
-          <button
-            type="button"
-            onClick={() => setShowCreateModal(true)}
-            aria-label="Create Project"
-            className="text-slate-400 hover:text-slate-600 dark:text-zinc-500 dark:hover:text-zinc-300"
-          >
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-              <path d="M12 5v14M5 12h14" />
-            </svg>
-          </button>
+          {canCreateProject && (
+            <button
+              type="button"
+              onClick={() => setShowCreateModal(true)}
+              aria-label="Create Project"
+              className="text-slate-400 hover:text-slate-600 dark:text-zinc-500 dark:hover:text-zinc-300"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+            </button>
+          )}
         </div>
         <div className="space-y-0.5 text-sm">
           {pinnedProjects.map((project) => {
@@ -621,7 +631,7 @@ export function Sidebar({
         </div>
       </div>
     </aside>
-    {showCreateModal && <CreateProjectModal onClose={() => setShowCreateModal(false)} />}
+    {showCreateModal && canCreateProject && <CreateProjectModal onClose={() => setShowCreateModal(false)} />}
     </>
   );
 }
