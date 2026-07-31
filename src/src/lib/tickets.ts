@@ -457,53 +457,12 @@ export type UpdateTicketResult =
   | { status: "success"; ticket: Ticket }
   | { status: "error"; message: string };
 
-// Fixed product rule (never configurable): a ticket must carry a real
-// estimate greater than 0 before it can move into any of these three
-// statuses. Backlog/To Do/Blocked never require one, and a ticket already
-// sitting in one of these three without an estimate (e.g. from before this
-// rule existed) is never retroactively flagged — the check below only ever
-// runs when `input.status` is actively being set to one of these values.
-const ESTIMATE_REQUIRED_STATUSES: TicketStatus[] = ["in-progress", "review", "done"];
-
 export async function updateTicket(
   ticketId: string,
   slug: string,
   input: UpdateTicketInput
 ): Promise<UpdateTicketResult> {
   const supabase = getSupabaseBrowserClient();
-
-  // Estimate-required-before-transition — the one real gateway every status
-  // change in the app goes through (Ticket Detail's EditableSidebarStatus,
-  // Ticket Preview's EditableStatusBadge; Board has no status-change UI of
-  // its own, only these two), so this single check is the authoritative,
-  // unbypassable backend enforcement of the rule — both callers' own
-  // existing persist()/persistPatch() wrappers already show a rejection's
-  // message via the shared error toast and never apply the optimistic
-  // status change on failure, so no UI change was needed to get that
-  // behavior. Uses `input.hours` when the same call also sets it (e.g. a
-  // future combined edit), otherwise reads the ticket's current real value
-  // — never assumes an unrelated edit implicitly clears/keeps the estimate.
-  if (input.status !== undefined && ESTIMATE_REQUIRED_STATUSES.includes(input.status)) {
-    let effectiveHours = input.hours;
-    if (effectiveHours === undefined) {
-      const { data: currentRow, error: currentError } = await supabase
-        .from("tickets")
-        .select("hours")
-        .eq("id", ticketId)
-        .maybeSingle<{ hours: number | null }>();
-      if (currentError) {
-        logDev("ticket hours lookup for status-change validation failed", currentError);
-        return { status: "error", message: currentError.message };
-      }
-      effectiveHours = currentRow?.hours ?? undefined;
-    }
-    if (!(effectiveHours !== null && effectiveHours !== undefined && effectiveHours > 0)) {
-      return {
-        status: "error",
-        message: "An estimate greater than 0 is required before moving this ticket to In Progress, In Review, or Done.",
-      };
-    }
-  }
 
   // Real "before" snapshot of the fields a notification could care about —
   // needed both for the existing assignee-membership check below and to
