@@ -1346,6 +1346,24 @@ function AttachmentRow({
   // Never offered for an unavailable file — there is no physical object
   // in Storage to preview, so a preview attempt would only ever fail.
   const previewKind = file.isAvailable ? getPreviewKind(file.ext) : null;
+  // Same detection this section's own "Preview" menu action already uses
+  // (previewKind === "image") — an inline thumbnail replaces the plain row
+  // for these instead of duplicating a second image/extension allowlist.
+  const isImage = previewKind === "image";
+
+  const [inlineImageUrl, setInlineImageUrl] = useState<string | null>(null);
+  const [inlineImageFailed, setInlineImageFailed] = useState(false);
+
+  useEffect(() => {
+    if (!isImage) return;
+    let cancelled = false;
+    getTicketAttachmentPreviewUrl(file.storagePath).then((result) => {
+      if (cancelled) return;
+      if (result.status === "error") { setInlineImageFailed(true); return; }
+      setInlineImageUrl(result.url);
+    });
+    return () => { cancelled = true; };
+  }, [isImage, file.storagePath]);
   // Screen-space position for the portaled menu panel below — computed from
   // the trigger button at the moment the menu opens (see toggleMenu) so it
   // tracks the button correctly even though it's no longer a DOM descendant
@@ -1437,129 +1455,183 @@ function AttachmentRow({
     );
   }
 
-  return (
-    <li className="group flex items-center gap-3 px-3 py-2.5 rounded-lg border transition-colors border-slate-100 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-900/60 hover:border-slate-200 dark:hover:border-zinc-700">
-      {/* Extension badge */}
-      <span className={"w-8 h-8 rounded-md flex items-center justify-center flex-shrink-0 text-[9px] font-bold uppercase tracking-wide " + extColor}>
-        {file.ext}
-      </span>
+  // Shared between both layouts below — name (+ rename input)/size/author/
+  // date, and the download+"more options" actions — so the image and
+  // non-image cases never drift into two different implementations of the
+  // same info/actions, just two different containers around them.
+  const nameAndMeta = (
+    <div className="flex-1 min-w-0">
+      {renaming ? (
+        <input
+          ref={renameRef}
+          className={
+            "text-[16px] sm:text-[13px] font-medium text-slate-800 dark:text-zinc-200 w-full " +
+            "bg-white dark:bg-zinc-900 border border-brand-500 dark:border-brand-500 " +
+            "rounded px-1.5 py-0.5 outline-none focus:ring-1 focus:ring-brand-500/30"
+          }
+          value={renameDraft}
+          onChange={(e) => setRenameDraft(e.target.value)}
+          onBlur={saveRename}
+          onKeyDown={(e: KeyboardEvent<HTMLInputElement>) => {
+            if (e.key === "Enter") { e.preventDefault(); saveRename(); }
+            if (e.key === "Escape") { setRenameDraft(file.name); setRenaming(false); }
+          }}
+        />
+      ) : (
+        <p className="text-[13px] font-medium text-slate-800 dark:text-zinc-200 truncate">{file.name}</p>
+      )}
+      <div className="text-[11px] text-slate-400 dark:text-zinc-600 mt-0.5 flex items-center gap-1.5">
+        <span>{file.size}</span>
+        <span>·</span>
+        <MemberTrigger name={file.addedBy} avatar={file.avatar} profileId={file.profileId ?? undefined} projectSlug={projectSlug} nested className="flex items-center gap-1.5">
+          <Avatar src={file.avatar} name={file.addedBy} className="w-3.5 h-3.5 rounded-full flex-shrink-0" />
+          <span>{file.addedBy}</span>
+        </MemberTrigger>
+        <span>·</span>
+        <span>{file.uploadedAt}</span>
+      </div>
+      {!file.isAvailable && (
+        <p className="text-[11px] font-medium text-amber-600 dark:text-amber-400 mt-1">
+          File not included in this backup
+        </p>
+      )}
+    </div>
+  );
 
-      {/* File info */}
-      <div className="flex-1 min-w-0">
-        {renaming ? (
-          <input
-            ref={renameRef}
-            className={
-              "text-[16px] sm:text-[13px] font-medium text-slate-800 dark:text-zinc-200 w-full " +
-              "bg-white dark:bg-zinc-900 border border-brand-500 dark:border-brand-500 " +
-              "rounded px-1.5 py-0.5 outline-none focus:ring-1 focus:ring-brand-500/30"
-            }
-            value={renameDraft}
-            onChange={(e) => setRenameDraft(e.target.value)}
-            onBlur={saveRename}
-            onKeyDown={(e: KeyboardEvent<HTMLInputElement>) => {
-              if (e.key === "Enter") { e.preventDefault(); saveRename(); }
-              if (e.key === "Escape") { setRenameDraft(file.name); setRenaming(false); }
-            }}
-          />
-        ) : (
-          <p className="text-[13px] font-medium text-slate-800 dark:text-zinc-200 truncate">{file.name}</p>
-        )}
-        <div className="text-[11px] text-slate-400 dark:text-zinc-600 mt-0.5 flex items-center gap-1.5">
-          <span>{file.size}</span>
-          <span>·</span>
-          <MemberTrigger name={file.addedBy} avatar={file.avatar} profileId={file.profileId ?? undefined} projectSlug={projectSlug} className="flex items-center gap-1.5">
-            <Avatar src={file.avatar} name={file.addedBy} className="w-3.5 h-3.5 rounded-full flex-shrink-0" />
-            <span>{file.addedBy}</span>
-          </MemberTrigger>
-          <span>·</span>
-          <span>{file.uploadedAt}</span>
-        </div>
-        {!file.isAvailable && (
-          <p className="text-[11px] font-medium text-amber-600 dark:text-amber-400 mt-1">
-            File not included in this backup
-          </p>
+  const actions = !renaming && (
+    <div className="flex items-center gap-0.5 flex-shrink-0">
+      {file.isAvailable && (
+        <button
+          aria-label={`Download ${file.name}`}
+          onClick={(e) => { e.stopPropagation(); onDownload(); }}
+          className="p-1.5 rounded-md text-slate-400 dark:text-zinc-600 hover:text-slate-600 dark:hover:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
+        >
+          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+            <path d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5 5-5M12 15V3" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+      )}
+
+      <div ref={menuRef} className="relative">
+        <button
+          aria-label="More options"
+          onClick={(e) => { e.stopPropagation(); toggleMenu(); }}
+          className="p-1.5 rounded-md text-slate-400 dark:text-zinc-600 hover:text-slate-600 dark:hover:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
+        >
+          <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 16 16" aria-hidden="true">
+            <circle cx="3"  cy="8" r="1.25" />
+            <circle cx="8"  cy="8" r="1.25" />
+            <circle cx="13" cy="8" r="1.25" />
+          </svg>
+        </button>
+
+        {menuOpen && menuPos && createPortal(
+          <div
+            ref={menuPanelRef}
+            style={{ position: "fixed", top: menuPos.top, right: menuPos.right }}
+            className="w-36 rounded-lg border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 shadow-lg shadow-slate-200/50 dark:shadow-black/40 z-20 py-1"
+          >
+            {previewKind && (
+              <button
+                className="w-full text-left px-3 py-1.5 text-[12px] text-slate-700 dark:text-zinc-300 hover:bg-slate-50 dark:hover:bg-zinc-800 flex items-center gap-2.5 transition-colors"
+                onClick={() => { setMenuOpen(false); setPreviewOpen(true); }}
+              >
+                <svg className="w-3 h-3 text-slate-400 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                  <path d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" strokeLinecap="round" strokeLinejoin="round" />
+                  <path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                Preview
+              </button>
+            )}
+            <button
+              className="w-full text-left px-3 py-1.5 text-[12px] text-slate-700 dark:text-zinc-300 hover:bg-slate-50 dark:hover:bg-zinc-800 flex items-center gap-2.5 transition-colors"
+              onClick={() => { setMenuOpen(false); setRenameDraft(file.name); setRenaming(true); }}
+            >
+              <svg className="w-3 h-3 text-slate-400 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                <path d="M15.232 5.232l3.536 3.536M9 13l6.586-6.586a2 2 0 012.828 2.828L11.828 15.828a2 2 0 01-2.828 0L7 14l2-1z" />
+                <path d="M3 21h18" strokeLinecap="round" />
+              </svg>
+              Rename
+            </button>
+            <div className="my-1 h-px bg-slate-100 dark:bg-zinc-800" />
+            <button
+              className="w-full text-left px-3 py-1.5 text-[12px] text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 flex items-center gap-2.5 transition-colors"
+              onClick={() => { setMenuOpen(false); setConfirming(true); }}
+            >
+              <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                <path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              Delete
+            </button>
+          </div>,
+          document.body
         )}
       </div>
+    </div>
+  );
 
-      {/* Actions (hidden while renaming) */}
-      {!renaming && (
-        <div className="flex items-center gap-0.5 flex-shrink-0">
-          {file.isAvailable && (
-            <button
-              aria-label={`Download ${file.name}`}
-              onClick={onDownload}
-              className="p-1.5 rounded-md text-slate-400 dark:text-zinc-600 hover:text-slate-600 dark:hover:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
-            >
-              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                <path d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5 5-5M12 15V3" strokeLinecap="round" strokeLinejoin="round" />
+  const previewModal = previewOpen && previewKind && createPortal(
+    <AttachmentPreviewModal file={file} kind={previewKind} onClose={() => setPreviewOpen(false)} />,
+    document.body
+  );
+
+  // Image attachments get an inline thumbnail (fit to width, aspect ratio
+  // preserved via object-contain inside a capped-height box, so it can
+  // never overflow the section) instead of the plain ext-badge row below —
+  // same image-detection criterion (previewKind === "image") the ticket
+  // preview panel's own real-attachment rows already use.
+  if (isImage) {
+    return (
+      <>
+        <li className="group rounded-lg border transition-colors border-slate-100 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-900/60 hover:border-slate-200 dark:hover:border-zinc-700 overflow-hidden">
+          <div className="w-full h-48 flex items-center justify-center bg-slate-100 dark:bg-zinc-900">
+            {inlineImageUrl && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={inlineImageUrl} alt={file.name} className="max-w-full max-h-full object-contain" />
+            )}
+            {!inlineImageUrl && !inlineImageFailed && (
+              <svg className="w-4 h-4 animate-spin text-slate-300 dark:text-zinc-700" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
               </svg>
-            </button>
-          )}
-
-          <div ref={menuRef} className="relative">
-            <button
-              aria-label="More options"
-              onClick={toggleMenu}
-              className="p-1.5 rounded-md text-slate-400 dark:text-zinc-600 hover:text-slate-600 dark:hover:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
-            >
-              <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 16 16" aria-hidden="true">
-                <circle cx="3"  cy="8" r="1.25" />
-                <circle cx="8"  cy="8" r="1.25" />
-                <circle cx="13" cy="8" r="1.25" />
-              </svg>
-            </button>
-
-            {menuOpen && menuPos && createPortal(
-              <div
-                ref={menuPanelRef}
-                style={{ position: "fixed", top: menuPos.top, right: menuPos.right }}
-                className="w-36 rounded-lg border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 shadow-lg shadow-slate-200/50 dark:shadow-black/40 z-20 py-1"
-              >
-                {previewKind && (
-                  <button
-                    className="w-full text-left px-3 py-1.5 text-[12px] text-slate-700 dark:text-zinc-300 hover:bg-slate-50 dark:hover:bg-zinc-800 flex items-center gap-2.5 transition-colors"
-                    onClick={() => { setMenuOpen(false); setPreviewOpen(true); }}
-                  >
-                    <svg className="w-3 h-3 text-slate-400 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                      <path d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" strokeLinecap="round" strokeLinejoin="round" />
-                      <path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
-                    Preview
-                  </button>
-                )}
-                <button
-                  className="w-full text-left px-3 py-1.5 text-[12px] text-slate-700 dark:text-zinc-300 hover:bg-slate-50 dark:hover:bg-zinc-800 flex items-center gap-2.5 transition-colors"
-                  onClick={() => { setMenuOpen(false); setRenameDraft(file.name); setRenaming(true); }}
-                >
-                  <svg className="w-3 h-3 text-slate-400 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                    <path d="M15.232 5.232l3.536 3.536M9 13l6.586-6.586a2 2 0 012.828 2.828L11.828 15.828a2 2 0 01-2.828 0L7 14l2-1z" />
-                    <path d="M3 21h18" strokeLinecap="round" />
-                  </svg>
-                  Rename
-                </button>
-                <div className="my-1 h-px bg-slate-100 dark:bg-zinc-800" />
-                <button
-                  className="w-full text-left px-3 py-1.5 text-[12px] text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 flex items-center gap-2.5 transition-colors"
-                  onClick={() => { setMenuOpen(false); setConfirming(true); }}
-                >
-                  <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                    <path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                  Delete
-                </button>
-              </div>,
-              document.body
+            )}
+            {inlineImageFailed && (
+              <p className="text-[11px] text-slate-400 dark:text-zinc-600">Couldn&apos;t load preview.</p>
             )}
           </div>
-        </div>
-      )}
+          <div className="flex items-center gap-3 px-3 py-2.5 border-t border-slate-100 dark:border-zinc-800">
+            {nameAndMeta}
+            {actions}
+          </div>
+        </li>
+        {previewModal}
+      </>
+    );
+  }
 
-      {previewOpen && previewKind && createPortal(
-        <AttachmentPreviewModal file={file} kind={previewKind} onClose={() => setPreviewOpen(false)} />,
-        document.body
-      )}
-    </li>
+  return (
+    <>
+      <li
+        className={
+          "group flex items-center gap-3 px-3 py-2.5 rounded-lg border transition-colors " +
+          "border-slate-100 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-900/60 hover:border-slate-200 dark:hover:border-zinc-700 " +
+          (file.isAvailable ? "cursor-pointer" : "")
+        }
+        onClick={() => {
+          if (!file.isAvailable || renaming) return;
+          onDownload();
+        }}
+      >
+        {/* Extension badge */}
+        <span className={"w-8 h-8 rounded-md flex items-center justify-center flex-shrink-0 text-[9px] font-bold uppercase tracking-wide " + extColor}>
+          {file.ext}
+        </span>
+
+        {nameAndMeta}
+        {actions}
+      </li>
+      {previewModal}
+    </>
   );
 }
 
@@ -1575,25 +1647,87 @@ function CommentAttachmentRow({ file }: { file: AttachmentItem }) {
   // Never offered for an unavailable file — no physical object exists in
   // Storage to preview.
   const previewKind = file.isAvailable ? getPreviewKind(file.ext) : null;
+  // Same detection this section's own AttachmentRow already uses
+  // (previewKind === "image") — an inline thumbnail replaces the plain row
+  // for these instead of duplicating a second image/extension allowlist.
+  const isImage = previewKind === "image";
   const extColor = EXT_COLOR[file.ext] ?? "bg-slate-100 text-slate-500 dark:bg-zinc-800 dark:text-zinc-400";
+
+  const [inlineImageUrl, setInlineImageUrl] = useState<string | null>(null);
+  const [inlineImageFailed, setInlineImageFailed] = useState(false);
+
+  useEffect(() => {
+    if (!isImage) return;
+    let cancelled = false;
+    getTicketAttachmentPreviewUrl(file.storagePath).then((result) => {
+      if (cancelled) return;
+      if (result.status === "error") { setInlineImageFailed(true); return; }
+      setInlineImageUrl(result.url);
+    });
+    return () => { cancelled = true; };
+  }, [isImage, file.storagePath]);
+
+  // Same behavior as before, just reused by both the image thumbnail and
+  // the plain row below: opens the existing preview modal when available,
+  // otherwise downloads via the same authenticated fetch either way used.
+  const handleClick = () => {
+    if (!file.isAvailable) return;
+    if (previewKind) {
+      setPreviewOpen(true);
+      return;
+    }
+    downloadTicketAttachment(file.storagePath, file.name).then((result) => {
+      if (result.status === "error") {
+        console.warn("[ticket-detail] comment attachment download failed:", result.message);
+      }
+    });
+  };
+
+  if (isImage) {
+    return (
+      <>
+        <button
+          type="button"
+          onClick={handleClick}
+          className="w-full rounded-lg border border-slate-100 dark:border-zinc-800 bg-white dark:bg-zinc-950/40 hover:border-slate-200 dark:hover:border-zinc-700 transition-colors overflow-hidden text-left"
+        >
+          <div className="w-full h-48 flex items-center justify-center bg-slate-50 dark:bg-zinc-900">
+            {inlineImageUrl && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={inlineImageUrl} alt={file.name} className="max-w-full max-h-full object-contain" />
+            )}
+            {!inlineImageUrl && !inlineImageFailed && (
+              <svg className="w-4 h-4 animate-spin text-slate-300 dark:text-zinc-700" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+            )}
+            {inlineImageFailed && (
+              <p className="text-[11px] text-slate-400 dark:text-zinc-600">Couldn&apos;t load preview.</p>
+            )}
+          </div>
+          <div className="flex items-center gap-2 px-2.5 py-1.5 border-t border-slate-100 dark:border-zinc-800">
+            <span className="flex-1 min-w-0 text-[12px] font-medium text-slate-700 dark:text-zinc-300 truncate">
+              {file.name}
+            </span>
+            <span className="text-[11px] text-slate-400 dark:text-zinc-600 flex-shrink-0">{file.size}</span>
+          </div>
+        </button>
+
+        {previewOpen && previewKind && createPortal(
+          <AttachmentPreviewModal file={file} kind={previewKind} onClose={() => setPreviewOpen(false)} />,
+          document.body
+        )}
+      </>
+    );
+  }
 
   return (
     <>
       <button
         type="button"
         disabled={!file.isAvailable}
-        onClick={() => {
-          if (!file.isAvailable) return;
-          if (previewKind) {
-            setPreviewOpen(true);
-            return;
-          }
-          downloadTicketAttachment(file.storagePath, file.name).then((result) => {
-            if (result.status === "error") {
-              console.warn("[ticket-detail] comment attachment download failed:", result.message);
-            }
-          });
-        }}
+        onClick={handleClick}
         className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg border border-slate-100 dark:border-zinc-800 bg-white dark:bg-zinc-950/40 hover:border-slate-200 dark:hover:border-zinc-700 transition-colors text-left disabled:cursor-default disabled:hover:border-slate-100 dark:disabled:hover:border-zinc-800"
       >
         <span className={"w-5 h-5 rounded flex items-center justify-center flex-shrink-0 text-[7px] font-bold uppercase tracking-wide " + extColor}>
