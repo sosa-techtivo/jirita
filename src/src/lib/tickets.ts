@@ -161,7 +161,12 @@ function logDev(...args: unknown[]): void {
   if (process.env.NODE_ENV !== "production") console.warn("[tickets]", ...args);
 }
 
-function rowToTicket(row: TicketRow, projectSlug: string, assigneeRow: AssigneeProfileRow | undefined): Ticket {
+function rowToTicket(
+  row: TicketRow,
+  projectSlug: string,
+  assigneeRow: AssigneeProfileRow | undefined,
+  creatorRow?: AssigneeProfileRow
+): Ticket {
   const assigneeName = assigneeRow
     ? [assigneeRow.first_name, assigneeRow.last_name].filter(Boolean).join(" ") || "Unnamed"
     : "Unassigned";
@@ -191,6 +196,12 @@ function rowToTicket(row: TicketRow, projectSlug: string, assigneeRow: AssigneeP
     updatedAtISO: row.updated_at,
     createdByProfileId: row.created_by,
     createdAtISO: row.created_at,
+    creator: creatorRow
+      ? {
+          name: [creatorRow.first_name, creatorRow.last_name].filter(Boolean).join(" ") || "Unnamed",
+          avatar: resolveAvatarUrl(creatorRow.avatar_url, creatorRow.updated_at) ?? FALLBACK_AVATAR,
+        }
+      : undefined,
   };
 }
 
@@ -321,7 +332,29 @@ export async function loadTicketByCode(
     }
   }
 
-  return { status: "ready", ticket: rowToTicket(row, slug, assigneeRow) };
+  // Real creator ("Created by"), for Ticket Detail's sidebar only — every
+  // other real ticket loader never resolves this. Reuses the assignee's
+  // own already-fetched row when they're the same real person, rather than
+  // a second, redundant profiles query for identical data.
+  let creatorRow: AssigneeProfileRow | undefined;
+  if (row.created_by) {
+    if (row.created_by === row.assignee_profile_id) {
+      creatorRow = assigneeRow;
+    } else {
+      const { data: profileRow, error: profileError } = await supabase
+        .from("profiles")
+        .select("id, first_name, last_name, avatar_url, updated_at")
+        .eq("id", row.created_by)
+        .maybeSingle<AssigneeProfileRow>();
+      if (profileError) {
+        logDev("creator profile lookup failed", profileError);
+      } else {
+        creatorRow = profileRow ?? undefined;
+      }
+    }
+  }
+
+  return { status: "ready", ticket: rowToTicket(row, slug, assigneeRow, creatorRow) };
 }
 
 // Creates a ticket for the currently-open project only. Ticket Number is

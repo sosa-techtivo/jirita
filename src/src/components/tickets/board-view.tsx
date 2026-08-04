@@ -1,5 +1,9 @@
-import type { Ticket } from "@/lib/mock-tickets";
+"use client";
+
+import { useState } from "react";
+import type { Ticket, TicketStatus } from "@/lib/mock-tickets";
 import { BoardColumn, type ColumnDefinition, type OnTicketClick } from "@/components/tickets/board-column";
+import { TicketStatusChangeModal } from "@/components/tickets/ticket-status-change-modal";
 
 const COLUMNS: ColumnDefinition[] = [
   {
@@ -54,14 +58,68 @@ function groupByColumn(tickets: Ticket[]): Record<string, Ticket[]> {
   return groups;
 }
 
+function columnForStatus(status: TicketStatus): ColumnDefinition | undefined {
+  return COLUMNS.find((col) => (col.statuses as string[]).includes(status));
+}
+
+export interface BoardDragAndDropOptions {
+  /** The real save — the exact same updateTicket() action Ticket
+   *  Detail's/the List view's own status editors already go through (see
+   *  ticket-preview-panel.tsx's persistPatch), so permissions/RLS and the
+   *  Activity Log trigger it fires are identical, never a second path.
+   *  Resolves to the {success, message?} shape this app's other
+   *  confirm-then-save modals already use (see archive-project-modal.tsx). */
+  onMoveTicket: (ticket: Ticket, nextStatus: TicketStatus) => Promise<{ success: boolean; message?: string }>;
+}
+
 export function BoardView({
   tickets,
   onTicketClick,
+  dragAndDrop,
 }: {
   tickets: Ticket[];
   onTicketClick: OnTicketClick;
+  /** Enables dragging a card between columns to change its status —
+   *  omitted entirely (the default) leaves the Board exactly as it was.
+   *  Only the main Tickets screen's Board tab passes this; the other,
+   *  read-only "preview" mounts of this same component (My Work, Project
+   *  Overview) are unaffected. */
+  dragAndDrop?: BoardDragAndDropOptions;
 }) {
   const byColumn = groupByColumn(tickets);
+  const dragAndDropEnabled = dragAndDrop !== undefined;
+
+  // Which real ticket is currently mid-drag — drives both the dragged
+  // card's own dimmed "in motion" look (BoardColumn) and resolving
+  // fromColumn on drop. Never touches `tickets` itself: the card only
+  // ever actually moves column once a confirmed save succeeds (below),
+  // so a cancelled or failed drag needs no explicit "revert" — nothing
+  // was changed to revert.
+  const [draggingTicket, setDraggingTicket] = useState<Ticket | null>(null);
+  const [pendingMove, setPendingMove] = useState<{
+    ticket: Ticket;
+    fromColumn: ColumnDefinition;
+    toColumn: ColumnDefinition;
+  } | null>(null);
+
+  function handleCardDragStart(ticket: Ticket) {
+    setDraggingTicket(ticket);
+  }
+
+  function handleCardDragEnd() {
+    setDraggingTicket(null);
+  }
+
+  function handleDropOnColumn(toColumn: ColumnDefinition) {
+    const ticket = draggingTicket;
+    setDraggingTicket(null);
+    if (!ticket) return;
+    const fromColumn = columnForStatus(ticket.status);
+    // Dropped back on its own column (or a column that already covers this
+    // ticket's current status) — a real no-op, never a confirmation.
+    if (!fromColumn || fromColumn.id === toColumn.id) return;
+    setPendingMove({ ticket, fromColumn, toColumn });
+  }
 
   return (
     <div className="flex-1 min-h-0 overflow-x-auto">
@@ -72,9 +130,29 @@ export function BoardView({
             column={col}
             tickets={byColumn[col.id]}
             onTicketClick={onTicketClick}
+            dragAndDropEnabled={dragAndDropEnabled}
+            draggingTicketId={draggingTicket?.id ?? null}
+            onCardDragStart={handleCardDragStart}
+            onCardDragEnd={handleCardDragEnd}
+            onDropTicket={() => handleDropOnColumn(col)}
           />
         ))}
       </div>
+
+      {pendingMove && dragAndDrop && (
+        <TicketStatusChangeModal
+          ticket={pendingMove.ticket}
+          fromLabel={pendingMove.fromColumn.label}
+          toLabel={pendingMove.toColumn.label}
+          onCancel={() => setPendingMove(null)}
+          onConfirm={async () => {
+            const nextStatus = pendingMove.toColumn.statuses[0];
+            const result = await dragAndDrop.onMoveTicket(pendingMove.ticket, nextStatus);
+            if (result.success) setPendingMove(null);
+            return result;
+          }}
+        />
+      )}
     </div>
   );
 }

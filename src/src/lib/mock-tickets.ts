@@ -45,8 +45,15 @@ export interface Ticket {
   updatedAtISO?: string;
   /** Real profiles.id of whoever created the ticket ("Reporter") — null/undefined
    *  when genuinely unknown (a pre-existing ticket with no created_by, or a mock
-   *  ticket). Never displayed; only for id-based filtering (a "Reporter" filter). */
+   *  ticket). Also used for id-based filtering (a "Reporter" filter). */
   createdByProfileId?: string | null;
+  /** Real name+avatar of whoever created the ticket, resolved once by
+   *  loadTicketByCode (lib/tickets.ts) for Ticket Detail's "Created by"
+   *  sidebar field — undefined whenever that resolution wasn't attempted
+   *  (every other real ticket loader, which never needs this) or genuinely
+   *  failed (no created_by recorded, or that profile no longer exists);
+   *  the sidebar falls back to "Unknown user" in either case. */
+  creator?: { name: string; avatar: string };
   /** Real ISO creation timestamp, for a "Created Date" range filter — same
    *  reasoning as updatedAtISO above. Undefined on mock tickets. */
   createdAtISO?: string;

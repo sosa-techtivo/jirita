@@ -1,3 +1,4 @@
+import { useRef, useState } from "react";
 import type { Ticket } from "@/lib/mock-tickets";
 import { TicketBoardCard } from "@/components/tickets/ticket-card";
 
@@ -27,16 +28,47 @@ export function BoardColumn({
   column,
   tickets,
   onTicketClick,
+  dragAndDropEnabled = false,
+  draggingTicketId = null,
+  onCardDragStart,
+  onCardDragEnd,
+  onDropTicket,
 }: {
   column: ColumnDefinition;
   tickets: Ticket[];
   onTicketClick: OnTicketClick;
+  /** Board's own drag-and-drop between status columns — see
+   *  board-view.tsx's own `dragAndDrop` prop; false (the default) renders
+   *  this column exactly as before, with no drag affordance at all. */
+  dragAndDropEnabled?: boolean;
+  /** Real ticket.id currently mid-drag (from anywhere on the board, not
+   *  just this column) — lets this column's own card dim itself if it's
+   *  the one being dragged. */
+  draggingTicketId?: string | null;
+  onCardDragStart?: (ticket: Ticket) => void;
+  onCardDragEnd?: () => void;
+  /** Fired on a real drop inside this column — board-view.tsx decides
+   *  whether that's a genuine cross-column move (confirmation) or a
+   *  same-column no-op. */
+  onDropTicket?: () => void;
 }) {
   const lastActivity = getLastActivity(tickets);
 
+  // Same dragCounter-based enter/leave tracking every other real drop zone
+  // in this app already uses (see ticket-detail-screen.tsx's
+  // AttachmentsSection/CommentDropZone) — dragenter/dragleave otherwise
+  // flicker as the pointer crosses child card elements within the column.
+  const [dropActive, setDropActive] = useState(false);
+  const dragCounter = useRef(0);
+
   return (
     <div
-      className="flex-1 min-w-[170px] flex flex-col min-h-0 rounded-xl bg-slate-100/60 dark:bg-zinc-800/40 border border-slate-200/80 dark:border-zinc-700/30"
+      className={
+        "flex-1 min-w-[170px] flex flex-col min-h-0 rounded-xl bg-slate-100/60 dark:bg-zinc-800/40 border transition-colors " +
+        (dropActive
+          ? "border-brand-400 dark:border-brand-500 ring-2 ring-brand-400/40 dark:ring-brand-500/30"
+          : "border-slate-200/80 dark:border-zinc-700/30")
+      }
       data-column-id={column.id}
     >
       {/* Column header — lives outside the scroll container, so it stays put */}
@@ -65,6 +97,37 @@ export function BoardColumn({
       <div
         className="flex-1 min-h-0 overflow-y-auto px-3 pb-3 space-y-1.5"
         data-droppable-id={column.id}
+        onDragEnter={
+          dragAndDropEnabled
+            ? (e) => {
+                e.preventDefault();
+                dragCounter.current++;
+                setDropActive(true);
+              }
+            : undefined
+        }
+        onDragOver={dragAndDropEnabled ? (e) => e.preventDefault() : undefined}
+        onDragLeave={
+          dragAndDropEnabled
+            ? () => {
+                dragCounter.current--;
+                if (dragCounter.current <= 0) {
+                  dragCounter.current = 0;
+                  setDropActive(false);
+                }
+              }
+            : undefined
+        }
+        onDrop={
+          dragAndDropEnabled
+            ? (e) => {
+                e.preventDefault();
+                dragCounter.current = 0;
+                setDropActive(false);
+                onDropTicket?.();
+              }
+            : undefined
+        }
       >
         {tickets.length === 0 ? (
           <div className="flex items-center justify-center py-10">
@@ -72,7 +135,15 @@ export function BoardColumn({
           </div>
         ) : (
           tickets.map((ticket) => (
-            <TicketBoardCard key={ticket.id} ticket={ticket} onTicketClick={onTicketClick} />
+            <TicketBoardCard
+              key={ticket.id}
+              ticket={ticket}
+              onTicketClick={onTicketClick}
+              draggable={dragAndDropEnabled}
+              isDragging={draggingTicketId === ticket.id}
+              onDragStart={() => onCardDragStart?.(ticket)}
+              onDragEnd={() => onCardDragEnd?.()}
+            />
           ))
         )}
       </div>

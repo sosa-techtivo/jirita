@@ -400,6 +400,53 @@ function EditableSidebarAssignee({
   );
 }
 
+// ── Read-only: Sidebar Created By ─────────────────────────────────────────────
+// Purely informational — never editable, unlike every other sidebar field
+// above/below it. `creator` is already resolved (name+avatar) by
+// loadTicketByCode (lib/tickets.ts) as part of the same ticket load, same
+// as `ticket.assignee` — no separate fetch happens here. Undefined only
+// when the creator genuinely can't be resolved (no created_by recorded, or
+// that profile no longer exists), in which case this renders a plain,
+// non-interactive "Unknown user" row (same layout, no MemberTrigger —
+// there's no real profile to open), mirroring MemberTrigger's own
+// "Unassigned" convention rather than opening a broken profile lookup.
+
+function SidebarCreatedBy({
+  creator,
+  createdByProfileId,
+  projectSlug,
+}: {
+  creator?: { name: string; avatar: string };
+  createdByProfileId?: string | null;
+  projectSlug?: string;
+}) {
+  if (!creator) {
+    return (
+      <SidebarField label="Created by">
+        <div className="flex items-center gap-1.5 text-slate-400 dark:text-zinc-600">
+          <Avatar src={FALLBACK_AVATAR} name="Unknown user" className="w-5 h-5 rounded-full flex-shrink-0" />
+          <span className="truncate">Unknown user</span>
+        </div>
+      </SidebarField>
+    );
+  }
+
+  return (
+    <SidebarField label="Created by">
+      <MemberTrigger
+        name={creator.name}
+        avatar={creator.avatar}
+        profileId={createdByProfileId ?? undefined}
+        projectSlug={projectSlug}
+        className="flex items-center gap-1.5 min-w-0"
+      >
+        <Avatar src={creator.avatar} name={creator.name} className="w-5 h-5 rounded-full flex-shrink-0" />
+        <span className="truncate">{creator.name}</span>
+      </MemberTrigger>
+    </SidebarField>
+  );
+}
+
 // ── Editable: Sidebar Milestone ───────────────────────────────────────────────
 
 function EditableSidebarMilestone({ value, onChange }: { value: string; onChange: (v: string) => void }) {
@@ -4409,14 +4456,14 @@ export function TicketDetailScreen({
           </article>
 
           {/* ── Metadata sidebar ─────────────────────────────────────────────── */}
-          {/* `contents` on Mobile flattens these 8 fields into direct children
+          {/* `contents` on Mobile flattens these 9 fields into direct children
               of the row above. Each gets its `order-*` via an `nth-child`
               arbitrary selector on `aside` itself (rather than a wrapper div
               per field) specifically because SidebarField/RelatedTicketsSection
               rely on `last:border-0` — a wrapper would make every field its
-              own single-child parent, breaking that divider. Fields 1–7
+              own single-child parent, breaking that divider. Fields 1–8
               (Status…Labels) group right after the header/quick-summary;
-              field 8 (Related Tickets) is repositioned after Attachments.
+              field 9 (Related Tickets) is repositioned after Attachments.
               Reverts to the exact original sticky column at `sm:`, where
               `order` has no effect (these are no longer flex siblings). */}
           <aside
@@ -4425,7 +4472,8 @@ export function TicketDetailScreen({
               "[&>*:nth-child(1)]:order-[30] [&>*:nth-child(2)]:order-[30] " +
               "[&>*:nth-child(3)]:order-[30] [&>*:nth-child(4)]:order-[30] " +
               "[&>*:nth-child(5)]:order-[30] [&>*:nth-child(6)]:order-[30] " +
-              "[&>*:nth-child(7)]:order-[30] [&>*:nth-child(8)]:order-[60]"
+              "[&>*:nth-child(7)]:order-[30] [&>*:nth-child(8)]:order-[30] " +
+              "[&>*:nth-child(9)]:order-[60]"
             }
           >
 
@@ -4444,6 +4492,12 @@ export function TicketDetailScreen({
               }}
               projectSlug={ticket.projectSlug}
               members={members}
+            />
+
+            <SidebarCreatedBy
+              creator={ticket.creator}
+              createdByProfileId={ticket.createdByProfileId}
+              projectSlug={ticket.projectSlug}
             />
 
             <EditableSidebarType

@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { tickets as MOCK_TICKETS, getTicketDisplayKey } from "@/lib/mock-tickets";
 import type { Ticket } from "@/lib/mock-tickets";
-import { loadProjectTickets, loadOrganizationTickets, loadOrganizationLabels, createOrganizationLabel } from "@/lib/tickets";
+import { loadProjectTickets, loadOrganizationTickets, loadOrganizationLabels, createOrganizationLabel, updateTicket } from "@/lib/tickets";
 import {
   loadOrganizationMembers,
   loadProjectTeam,
@@ -744,6 +744,29 @@ export function TicketsScreen({ slug, projectName }: { slug?: string; projectNam
     setPreviewTicket((prev) => (prev && prev.id === updated.id ? updated : prev));
   }
 
+  // Board's drag-and-drop status change — the exact same updateTicket()
+  // action Ticket Detail's/the List view's own status editors already use
+  // (see ticket-preview-panel.tsx's persistPatch), so permissions/RLS and
+  // the Activity Log trigger it fires are identical, never a second path.
+  // Uses ticket.projectSlug rather than this screen's own `slug`, since
+  // this screen can also show every project's tickets at once (no `slug`
+  // at all, e.g. a cross-project queue) — each ticket still knows its own.
+  async function handleBoardMoveTicket(
+    ticket: Ticket,
+    nextStatus: Ticket["status"]
+  ): Promise<{ success: boolean; message?: string }> {
+    if (isDevFallback) {
+      handleTicketUpdated({ ...ticket, status: nextStatus });
+      return { success: true };
+    }
+    const result = await updateTicket(ticket.id, ticket.projectSlug, { status: nextStatus });
+    if (result.status === "error") {
+      return { success: false, message: result.message };
+    }
+    handleTicketUpdated(result.ticket);
+    return { success: true };
+  }
+
   const createLabel = async (name: string): Promise<{ status: "success"; name: string } | { status: "error"; message: string }> => {
     if (isDevFallback || !organization) {
       return { status: "error", message: "Not available in this mode." };
@@ -883,7 +906,11 @@ export function TicketsScreen({ slug, projectName }: { slug?: string; projectNam
 
       {/* Content area — every view reads the same filteredTickets, so Board/List/Calendar/Timeline/Insights always agree */}
       {view === "board" ? (
-        <BoardView tickets={filteredTickets} onTicketClick={openPreview} />
+        <BoardView
+          tickets={filteredTickets}
+          onTicketClick={openPreview}
+          dragAndDrop={{ onMoveTicket: handleBoardMoveTicket }}
+        />
       ) : view === "calendar" ? (
         <CalendarView tickets={filteredTickets} onTicketClick={openPreview} />
       ) : view === "timeline" ? (

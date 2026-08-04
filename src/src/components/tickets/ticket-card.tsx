@@ -46,15 +46,39 @@ function PriorityIndicator({ priority }: { priority: TicketPriority }) {
 export function TicketBoardCard({
   ticket,
   onTicketClick,
+  draggable = false,
+  isDragging = false,
+  onDragStart,
+  onDragEnd,
 }: {
   ticket: Ticket;
   onTicketClick: (ticket: Ticket) => void;
+  /** Board's own drag-and-drop between status columns — false (the
+   *  default) everywhere this card is used outside the main Board view,
+   *  which renders and behaves exactly as before. A genuine drag never
+   *  fires this button's own onClick below — the browser itself never
+   *  dispatches click after a real dragstart on a draggable element, so
+   *  no separate "was this a drag, not a click" guard is needed. */
+  draggable?: boolean;
+  isDragging?: boolean;
+  onDragStart?: () => void;
+  onDragEnd?: () => void;
 }) {
   const isBlocked = ticket.status === "blocked";
 
   return (
     <button
       type="button"
+      draggable={draggable}
+      onDragStart={
+        draggable
+          ? (e) => {
+              e.dataTransfer.effectAllowed = "move";
+              onDragStart?.();
+            }
+          : undefined
+      }
+      onDragEnd={draggable ? () => onDragEnd?.() : undefined}
       data-ticket-id={ticket.id}
       data-ticket-status={ticket.status}
       onClick={() => onTicketClick(ticket)}
@@ -65,6 +89,8 @@ export function TicketBoardCard({
           ? "border-red-200 dark:border-red-900/60"
           : "border-slate-200 dark:border-zinc-700/70",
         "dark:bg-zinc-900 dark:shadow-black/30",
+        draggable ? "cursor-grab active:cursor-grabbing" : "",
+        isDragging ? "opacity-40" : "",
       ].join(" ")}
     >
       {/* Blocked indicator */}
