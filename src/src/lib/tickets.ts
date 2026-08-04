@@ -395,7 +395,9 @@ export async function createTicket(
       status: input.status ? STATUS_TO_DB[input.status] : "backlog",
       priority: input.priority ?? "medium",
       type: input.type ? TYPE_TO_DB[input.type] : "task",
-      labels: input.labels && input.labels.length > 0 ? input.labels : null,
+      // NOT NULL column — must always be an array, never null/undefined,
+      // even when no labels were selected.
+      labels: input.labels ?? [],
       acceptance_criteria: acceptanceCriteria,
       hours: input.hours ?? null,
       due_date: input.dueDate ?? null,
@@ -874,6 +876,37 @@ async function loadProfilesByIds(
 function resolveProfileName(row: AssigneeProfileRow | undefined): string | null {
   if (!row) return null;
   return [row.first_name, row.last_name].filter(Boolean).join(" ") || "Unnamed";
+}
+
+export type ProfileSummaryResult =
+  | { status: "ready"; name: string; avatar: string }
+  | { status: "not-found" }
+  | { status: "error"; message: string };
+
+// Resolves a single real profile's display name/avatar by id — same
+// "profiles" columns and name/avatar resolution every other lookup in this
+// file already uses (assignee, comment/attachment author, activity actor).
+// Used by the Ticket Preview panel's "Created by" field, which only ever
+// has a bare profiles.id (Ticket.createdByProfileId) to work with.
+export async function loadProfileSummary(profileId: string): Promise<ProfileSummaryResult> {
+  const supabase = getSupabaseBrowserClient();
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("id, first_name, last_name, avatar_url, updated_at")
+    .eq("id", profileId)
+    .maybeSingle<AssigneeProfileRow>();
+
+  if (error) {
+    logDev("profile summary lookup failed", error);
+    return { status: "error", message: error.message };
+  }
+  if (!data) return { status: "not-found" };
+
+  return {
+    status: "ready",
+    name: resolveProfileName(data) ?? "Unnamed",
+    avatar: resolveAvatarUrl(data.avatar_url, data.updated_at) ?? FALLBACK_AVATAR,
+  };
 }
 
 // Newest first — the new comment goes to the top of the list immediately

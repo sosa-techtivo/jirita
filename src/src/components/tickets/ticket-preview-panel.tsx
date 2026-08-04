@@ -7,7 +7,6 @@ import { getTicketDisplayKey } from "@/lib/mock-tickets";
 import {
   StatusBadge,
   PriorityBadge,
-  LabelTag,
   TicketTypeIcon,
   EditableStatusBadge,
   PRIORITY_LABEL,
@@ -24,6 +23,7 @@ import {
   loadTicketAttachments,
   getTicketAttachmentPreviewUrl,
   downloadTicketAttachment,
+  loadProfileSummary,
   updateTicket,
   type TicketComment,
   type TicketAttachment,
@@ -407,157 +407,6 @@ function PreviewDueDateControl({ value, onChange }: { value: string | undefined;
   );
 }
 
-function PreviewLabelsControl({
-  value,
-  onChange,
-  allLabels,
-  onCreateLabel,
-}: {
-  value: string[];
-  onChange: (v: string[]) => void;
-  allLabels: string[];
-  onCreateLabel?: (name: string) => Promise<{ status: "success"; name: string } | { status: "error"; message: string }>;
-}) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState<string[]>(value);
-  const [search, setSearch] = useState("");
-  const [creating, setCreating] = useState(false);
-  const [createError, setCreateError] = useState<string | null>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  const toggle = (label: string) => {
-    setDraft((prev) => (prev.includes(label) ? prev.filter((l) => l !== label) : [...prev, label]));
-  };
-
-  const resetPicker = () => { setSearch(""); setCreateError(null); };
-  const save = () => { onChange(draft); setEditing(false); resetPicker(); };
-  const cancel = () => { setDraft(value); setEditing(false); resetPicker(); };
-
-  useEffect(() => {
-    if (!editing) return;
-    const handle = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) save();
-    };
-    document.addEventListener("mousedown", handle);
-    return () => document.removeEventListener("mousedown", handle);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editing, draft]);
-
-  const trimmedSearch = search.trim();
-  const filteredLabels = trimmedSearch
-    ? allLabels.filter((l) => l.toLowerCase().includes(trimmedSearch.toLowerCase()))
-    : allLabels;
-  const exactMatch = allLabels.some((l) => l.toLowerCase() === trimmedSearch.toLowerCase());
-  const showCreateOption = Boolean(onCreateLabel) && trimmedSearch.length > 0 && trimmedSearch.length <= 40 && !exactMatch;
-
-  const handleCreate = async () => {
-    if (!showCreateOption || !onCreateLabel || creating) return;
-    setCreating(true);
-    setCreateError(null);
-    const result = await onCreateLabel(trimmedSearch);
-    setCreating(false);
-    if (result.status === "error") {
-      setCreateError(result.message);
-      return;
-    }
-    setDraft((prev) => (prev.includes(result.name) ? prev : [...prev, result.name]));
-    setSearch("");
-  };
-
-  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
-    if (e.key === "Escape") cancel();
-    if (e.key === "Enter") {
-      if (showCreateOption) {
-        e.preventDefault();
-        handleCreate();
-      } else {
-        save();
-      }
-    }
-  };
-
-  return (
-    <div ref={containerRef}>
-      {editing ? (
-        <div onKeyDown={onKeyDown} tabIndex={-1} className="outline-none">
-          <div className="flex items-center gap-1.5 px-2 py-1 mb-2 rounded-md border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900">
-            <svg className="w-3 h-3 text-slate-400 dark:text-zinc-600 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-              <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
-            </svg>
-            <input
-              type="text"
-              placeholder="Search or create…"
-              value={search}
-              onChange={(e) => { setSearch(e.target.value); setCreateError(null); }}
-              className="flex-1 min-w-0 bg-transparent text-[16px] sm:text-[12px] text-slate-800 dark:text-zinc-200 outline-none placeholder:text-slate-400 dark:placeholder:text-zinc-600"
-            />
-          </div>
-
-          <div className="flex flex-wrap gap-1 mb-2">
-            {filteredLabels.map((label) => {
-              const active = draft.includes(label);
-              return (
-                <button
-                  key={label}
-                  onClick={() => toggle(label)}
-                  className={
-                    `px-1.5 py-0.5 rounded text-[10px] font-medium transition-colors cursor-pointer ` +
-                    (active
-                      ? "bg-brand-500 text-white dark:bg-brand-600"
-                      : "bg-slate-100 dark:bg-zinc-800 text-slate-500 dark:text-zinc-400 hover:bg-slate-200 dark:hover:bg-zinc-700")
-                  }
-                >
-                  {label}
-                </button>
-              );
-            })}
-            {showCreateOption && (
-              <button
-                onClick={handleCreate}
-                disabled={creating}
-                className="px-1.5 py-0.5 rounded text-[10px] font-medium border border-dashed border-brand-300 dark:border-brand-700 text-brand-600 dark:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-950/40 transition-colors cursor-pointer disabled:opacity-50"
-              >
-                {creating ? "Creating…" : `➕ Create "${trimmedSearch}"`}
-              </button>
-            )}
-          </div>
-
-          {createError && (
-            <p className="text-[10px] text-red-600 dark:text-red-400 mb-2">{createError}</p>
-          )}
-
-          <div className="flex gap-2">
-            <button
-              onClick={save}
-              className="text-[10px] font-medium text-brand-600 dark:text-brand-500 hover:underline"
-            >
-              Done
-            </button>
-            <button
-              onClick={cancel}
-              className="text-[10px] font-medium text-slate-400 dark:text-zinc-600 hover:underline"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      ) : (
-        <div
-          className="group flex items-start gap-1.5 cursor-pointer"
-          onClick={() => { setDraft(value); setEditing(true); }}
-        >
-          <div className="flex flex-wrap gap-1 mt-0.5 flex-1">
-            {value.length > 0
-              ? value.map((l) => <LabelTag key={l} label={l} />)
-              : <span className="text-slate-400 dark:text-zinc-600">None</span>}
-          </div>
-          <button className={EDIT_BTN + " mt-0.5"} aria-label="Edit labels"><PencilIcon /></button>
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function TicketPreviewPanel({
@@ -577,18 +426,19 @@ export function TicketPreviewPanel({
   onClose: () => void;
   onBeforeNavigate?: () => void;
   /**
-   * Enables inline editing of Title/Status/Priority/Assignee/Hours/Due Date/
-   * Labels — reusing the exact same updateTicket() action and value domains
-   * as Ticket Detail's own inline edits (see persistPatch below). Only
-   * screens with real backing data (currently the Tickets board) pass this;
-   * every other caller omits it and keeps the original read-only panel,
-   * unchanged.
+   * Enables inline editing of Title/Status/Priority/Assignee/Due Date —
+   * reusing the exact same updateTicket() action and value domains as
+   * Ticket Detail's own inline edits (see persistPatch below). Only screens
+   * with real backing data (currently the Tickets board) pass this; every
+   * other caller omits it and keeps the original read-only panel, unchanged.
    */
   editable?: boolean;
   isDevFallback?: boolean;
   /** Real organization members for the Assignee editor — no mock names. */
   members?: OrgMember[];
-  /** Real per-org label catalog (merged with the static seed list by the caller via buildLabelCatalog) for the Labels editor. */
+  /** Unused since Labels was removed from this compact preview — kept only
+   *  so its many existing callers don't need updating just to stop passing
+   *  it. */
   allLabels?: string[];
   onCreateLabel?: (name: string) => Promise<{ status: "success"; name: string } | { status: "error"; message: string }>;
   /** Called after every successful edit with the fresh ticket, so the caller can keep its own list/board state (and this panel) in sync without a page reload. */
@@ -647,6 +497,11 @@ export function TicketPreviewPanel({
   // no comment-creation or attachment-upload UI, both are read-only here.
   const [comments, setComments] = useState<TicketComment[]>([]);
   const [attachments, setAttachments] = useState<TicketAttachment[]>([]);
+  // Real creator name/avatar for "Created by" — Ticket only ever carries a
+  // bare createdByProfileId, never a resolved name/avatar (unlike assignee,
+  // which the ticket loader already resolves server-side), so this is looked
+  // up here the same way Comments/Attachments are.
+  const [creator, setCreator] = useState<{ name: string; avatar: string } | null>(null);
   // Surfaces a failed inline edit (see persistPatch below) — previously only
   // logged to the console, with no indication the change didn't save.
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -661,10 +516,15 @@ export function TicketPreviewPanel({
       if (cancelled) return;
       setAttachments(result.status === "ready" ? result.attachments : []);
     });
+    const creatorId = displayedTicket.createdByProfileId;
+    (creatorId ? loadProfileSummary(creatorId) : Promise.resolve({ status: "not-found" as const })).then((result) => {
+      if (cancelled) return;
+      setCreator(result.status === "ready" ? { name: result.name, avatar: result.avatar } : null);
+    });
     return () => {
       cancelled = true;
     };
-  }, [displayedTicket.id]);
+  }, [displayedTicket.id, displayedTicket.createdByProfileId]);
 
   const t = displayedTicket;
 
@@ -774,113 +634,121 @@ export function TicketPreviewPanel({
             contentFaded ? "opacity-0" : "opacity-100",
           ].join(" ")}
         >
-          {/* ── Compact two-column metadata grid ────────────────────────────── */}
-          <div className="px-5 pt-4 pb-5 grid grid-cols-2 gap-x-6 gap-y-4">
+          {/* ── Main info section ───────────────────────────────────────────────
+              Row 1 (always 3 columns): Assignee / Created by / Priority.
+              Row 2: Due Date / Hours, each only when the ticket actually has
+              one — omitted entirely when neither exists, and down to a single
+              full-width column (never a blank slot) when only one does. */}
+          <div className="px-5 pt-4 pb-5 space-y-4">
 
-            <div>
-              <p className={FIELD_LABEL}>Priority</p>
-              <div className={FIELD_VALUE}>
-                {editable ? (
-                  <PreviewPriorityControl
-                    value={t.priority}
-                    onChange={(v) => persistPatch({ priority: v }, (prev) => ({ ...prev, priority: v }))}
-                  />
-                ) : (
-                  <PriorityBadge priority={t.priority} />
-                )}
-              </div>
-            </div>
+            <div className="grid grid-cols-3 gap-x-6 gap-y-4">
 
-            <div className="min-w-0">
-              <p className={FIELD_LABEL}>Assignee</p>
-              <div className={FIELD_VALUE}>
-                {editable ? (
-                  <PreviewAssigneeControl
-                    value={t.assignee}
-                    projectSlug={t.projectSlug}
-                    members={members}
-                    onChange={(v) => {
-                      const member = members.find((m) => m.name === v.name);
-                      persistPatch(
-                        { assigneeProfileId: member ? member.id : null },
-                        (prev) => ({ ...prev, assignee: v })
-                      );
-                    }}
-                  />
-                ) : (
-                  <MemberTrigger
-                    name={t.assignee.name}
-                    avatar={t.assignee.avatar}
-                    projectSlug={t.projectSlug}
-                    className="flex items-center gap-1.5 min-w-0"
-                  >
-                    <Avatar src={t.assignee.avatar} name={t.assignee.name} className="w-4 h-4 rounded-full flex-shrink-0" />
-                    <span className="truncate">{t.assignee.name}</span>
-                  </MemberTrigger>
-                )}
-              </div>
-            </div>
-
-            {/* Estimated Hours — always visible when set (fixed product
-                rule; unchanged from before showTicketEstimates existed). */}
-            {t.hours !== undefined && (
-              <div>
-                <p className={FIELD_LABEL}>Hours</p>
+              <div className="min-w-0">
+                <p className={FIELD_LABEL}>Assignee</p>
                 <div className={FIELD_VALUE}>
                   {editable ? (
-                    <PreviewHoursControl
-                      value={t.hours}
-                      onChange={(v) => persistPatch({ hours: v ?? null }, (prev) => ({ ...prev, hours: v }))}
+                    <PreviewAssigneeControl
+                      value={t.assignee}
+                      projectSlug={t.projectSlug}
+                      members={members}
+                      onChange={(v) => {
+                        const member = members.find((m) => m.name === v.name);
+                        persistPatch(
+                          { assigneeProfileId: member ? member.id : null },
+                          (prev) => ({ ...prev, assignee: v })
+                        );
+                      }}
                     />
                   ) : (
-                    <p>{round1(t.hours)} h</p>
+                    <MemberTrigger
+                      name={t.assignee.name}
+                      avatar={t.assignee.avatar}
+                      projectSlug={t.projectSlug}
+                      className="flex items-center gap-1.5 min-w-0"
+                    >
+                      <Avatar src={t.assignee.avatar} name={t.assignee.name} className="w-4 h-4 rounded-full flex-shrink-0" />
+                      <span className="truncate">{t.assignee.name}</span>
+                    </MemberTrigger>
                   )}
                 </div>
               </div>
-            )}
 
-            {t.dueDate && (
+              <div className="min-w-0">
+                <p className={FIELD_LABEL}>Created by</p>
+                <div className={FIELD_VALUE}>
+                  {creator ? (
+                    <MemberTrigger
+                      name={creator.name}
+                      avatar={creator.avatar}
+                      projectSlug={t.projectSlug}
+                      className="flex items-center gap-1.5 min-w-0"
+                    >
+                      <Avatar src={creator.avatar} name={creator.name} className="w-4 h-4 rounded-full flex-shrink-0" />
+                      <span className="truncate">{creator.name}</span>
+                    </MemberTrigger>
+                  ) : (
+                    <span className="text-slate-400 dark:text-zinc-600">—</span>
+                  )}
+                </div>
+              </div>
+
               <div>
-                <p className={FIELD_LABEL}>Due date</p>
+                <p className={FIELD_LABEL}>Priority</p>
                 <div className={FIELD_VALUE}>
                   {editable ? (
-                    <PreviewDueDateControl
-                      value={t.dueDate}
-                      onChange={(v) => persistPatch(
-                        { dueDate: v ? parseDisplayDate(v) : null },
-                        (prev) => ({ ...prev, dueDate: v })
+                    <PreviewPriorityControl
+                      value={t.priority}
+                      onChange={(v) => persistPatch({ priority: v }, (prev) => ({ ...prev, priority: v }))}
+                    />
+                  ) : (
+                    <PriorityBadge priority={t.priority} />
+                  )}
+                </div>
+              </div>
+
+            </div>
+
+            {(t.dueDate || t.hours !== undefined) && (
+              <div
+                className={`grid gap-x-6 gap-y-4 ${
+                  t.dueDate && t.hours !== undefined ? "grid-cols-2" : "grid-cols-1"
+                }`}
+              >
+                {t.dueDate && (
+                  <div>
+                    <p className={FIELD_LABEL}>Due date</p>
+                    <div className={FIELD_VALUE}>
+                      {editable ? (
+                        <PreviewDueDateControl
+                          value={t.dueDate}
+                          onChange={(v) => persistPatch(
+                            { dueDate: v ? parseDisplayDate(v) : null },
+                            (prev) => ({ ...prev, dueDate: v })
+                          )}
+                        />
+                      ) : (
+                        <div className="flex items-center gap-1">
+                          <CalendarIcon />
+                          {t.dueDate}
+                        </div>
                       )}
-                    />
-                  ) : (
-                    <div className="flex items-center gap-1">
-                      <CalendarIcon />
-                      {t.dueDate}
                     </div>
-                  )}
-                </div>
-              </div>
-            )}
+                  </div>
+                )}
 
-            {t.labels.length > 0 && (
-              <div>
-                <p className={FIELD_LABEL}>Labels</p>
-                {editable ? (
-                  <PreviewLabelsControl
-                    value={t.labels}
-                    allLabels={allLabels}
-                    onCreateLabel={onCreateLabel}
-                    onChange={(v) => persistPatch({ labels: v }, (prev) => ({ ...prev, labels: v }))}
-                  />
-                ) : (
-                  <div className="flex flex-wrap gap-1 mt-0.5">
-                    {t.labels.map((l) => (
-                      <span
-                        key={l}
-                        className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-zinc-800 text-[10px] font-medium text-slate-600 dark:text-zinc-400"
-                      >
-                        {l}
-                      </span>
-                    ))}
+                {t.hours !== undefined && (
+                  <div>
+                    <p className={FIELD_LABEL}>Hours</p>
+                    <div className={FIELD_VALUE}>
+                      {editable ? (
+                        <PreviewHoursControl
+                          value={t.hours}
+                          onChange={(v) => persistPatch({ hours: v ?? null }, (prev) => ({ ...prev, hours: v }))}
+                        />
+                      ) : (
+                        <p>{round1(t.hours)} h</p>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
@@ -911,8 +779,24 @@ export function TicketPreviewPanel({
             </div>
           )}
 
+          {/* ── Attachments ──────────────────────────────────────────────────── */}
+          {attachments.length > 0 && (
+            <div className="px-5 pt-4 pb-5 border-t border-slate-100 dark:border-zinc-800">
+              <p className={`${FIELD_LABEL} mb-3`}>Attachments</p>
+              <div className="space-y-2">
+                {attachments.map((a) =>
+                  isPreviewableImage(a) ? (
+                    <PreviewAttachmentImageRow key={a.id} attachment={a} />
+                  ) : (
+                    <PreviewAttachmentFileRow key={a.id} attachment={a} />
+                  )
+                )}
+              </div>
+            </div>
+          )}
+
           {/* ── Comments ─────────────────────────────────────────────────────── */}
-          <div className="px-5 pt-4 pb-5 border-t border-slate-100 dark:border-zinc-800">
+          <div className="px-5 pt-4 pb-6 border-t border-slate-100 dark:border-zinc-800">
             <p className={`${FIELD_LABEL} mb-3`}>
               Comments
               {t.commentCount !== undefined && t.commentCount > 2 && (
@@ -959,22 +843,6 @@ export function TicketPreviewPanel({
             </div>
             )}
           </div>
-
-          {/* ── Attachments ──────────────────────────────────────────────────── */}
-          {attachments.length > 0 && (
-            <div className="px-5 pt-4 pb-6 border-t border-slate-100 dark:border-zinc-800">
-              <p className={`${FIELD_LABEL} mb-3`}>Attachments</p>
-              <div className="space-y-2">
-                {attachments.map((a) =>
-                  isPreviewableImage(a) ? (
-                    <PreviewAttachmentImageRow key={a.id} attachment={a} />
-                  ) : (
-                    <PreviewAttachmentFileRow key={a.id} attachment={a} />
-                  )
-                )}
-              </div>
-            </div>
-          )}
         </div>
 
         {/* ── Footer: always visible, outside scroll container ─────────────── */}
