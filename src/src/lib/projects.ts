@@ -23,6 +23,7 @@ import { getSupabaseBrowserClient } from "./supabase-client";
 import { resolveAvatarUrl } from "./membership";
 import { FALLBACK_AVATAR } from "./current-user";
 import { createNotification } from "./notifications";
+import { deleteProjectAction, type DeleteProjectResult } from "./server/delete-project-action";
 import type { ClientName, ProjectCategory, ProjectHealth, ProjectStatus, ProjectSummary } from "./mock-projects";
 
 export type ProjectsResult =
@@ -507,6 +508,29 @@ export async function restoreProject(params: { organizationId: string; slug: str
   }
 
   return { status: "success", project: rowToProjectSummary(data, undefined) };
+}
+
+// "Delete Project" (Project Settings → Danger Zone) — permanent removal,
+// never a direct client-side delete: this feature's own Admin-only
+// requirement is stricter than projects_delete's own RLS policy (which
+// also allows Project Lead), so it has to be re-verified server-side
+// regardless of what this screen's own role check shows. See
+// src/lib/server/delete-project-action.ts.
+export async function deleteProjectPermanently(organizationId: string, projectId: string): Promise<DeleteProjectResult> {
+  const supabase = getSupabaseBrowserClient();
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+
+  if (!session) {
+    return { status: "error", message: "Your session has expired. Please sign in again." };
+  }
+
+  return deleteProjectAction({
+    accessToken: session.access_token,
+    organizationId,
+    projectId,
+  });
 }
 
 // Single-project read for Project Settings — same PROJECT_COLUMNS as the

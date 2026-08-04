@@ -19,7 +19,10 @@ import {
   type GitHubConnectionStatus,
 } from "@/lib/server/github-repository-connection-actions";
 import { ArchiveProjectModal } from "@/components/archive-project-modal";
+import { DeleteProjectModal } from "@/components/delete-project-modal";
 import { AddClientModal } from "@/components/add-client-modal";
+import { RestoreProjectPreviewModal } from "@/components/restore-project-preview-modal";
+import { ErrorToast } from "@/components/tickets/ticket-ui";
 
 // Breadcrumb for /projects/[slug]/settings — a client component (rather
 // than the page.tsx Server Component computing it) so it reads the same
@@ -179,6 +182,17 @@ const GITHUB_INTEGRATION_ERROR_MESSAGES: Record<string, string> = {
 // still has something to pick from.
 const DEV_CLIENTS: Client[] = CLIENT_NAMES.map((name) => ({ id: name, name }));
 
+// How long Export Project's own reentry lock (exportingBackup) stays true
+// after a click, before the button and the Full/Data Only radios become
+// interactive again. This is NOT progress, NOT a completion signal, and
+// NOT a guarantee the download has finished by then — the native <a>
+// download this triggers gives this component no way to observe either
+// of those. It exists purely to keep a second click from firing a second
+// download of the same backup while the server is still generating a
+// large one (KTVibe's real Full Backup takes ~13-15s end to end) — chosen
+// comfortably above that, not tuned to it exactly.
+const EXPORT_DOWNLOAD_GUARD_MS = 20_000;
+
 type DetailState =
   | { status: "loading" }
   | { status: "ready"; project: ProjectDetail }
@@ -192,7 +206,12 @@ function toDetail(project: ProjectDetail | null): DetailState {
 export function ProjectSettingsScreen({ slug }: { slug: string }) {
   const { user, organization, isDevFallback } = useCurrentUser();
   const isProjectLead = user.role === "PROJECT_LEAD";
-  const { projects: sharedProjects, updateProjectSettings, restoreProject } = useOrganizationProjects();
+  const {
+    projects: sharedProjects,
+    updateProjectSettings,
+    restoreProject,
+    retry: retryOrganizationProjects,
+  } = useOrganizationProjects();
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -255,11 +274,51 @@ export function ProjectSettingsScreen({ slug }: { slug: string }) {
   const githubStatusRequestIdRef = useRef(0);
 
   const [showArchiveModal, setShowArchiveModal] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  // Set right before redirecting to /projects, so the Admin sees an
+  // explicit confirmation while that navigation is in flight — cleared
+  // automatically by the navigation itself (this screen unmounts).
+  const [deletedProjectName, setDeletedProjectName] = useState<string | null>(null);
   const [showAddClientModal, setShowAddClientModal] = useState(false);
   const [restoring, setRestoring] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+
+  // Backup & Restore — Export Project (see the /api/projects/backup Route
+  // Handler) and Restore Project's upload-and-preview step (see
+  // /api/projects/restore/preview) share one error state, shown via the
+  // shared ErrorToast (same component ticket-detail-screen.tsx already
+  // uses for failed writes) rather than the inline red text the Save row
+  // above uses, per this feature's own requirement to reuse the app's
+  // existing toast pattern. Restore itself isn't implemented yet — only
+  // uploading a backup and showing its preview is.
+  const [exportingBackup, setExportingBackup] = useState(false);
+  // The pending EXPORT_DOWNLOAD_GUARD_MS timeout that flips exportingBackup
+  // back to false — tracked so it can be cleared on unmount (a slow
+  // navigation away mid-guard must never call setState on a gone
+  // component) and so a second click can never stack a second timeout.
+  const exportGuardTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Cleans up a still-pending guard timeout on unmount (navigating away
+  // from Project Settings mid-guard) — without this, that timeout's
+  // setExportingBackup(false) would fire against an already-unmounted
+  // component. Declared here, unconditionally, alongside every other hook
+  // in this component — not down next to handleExportProject, which sits
+  // after this component's own early-return guards (loading/error/not-
+  // found) and would violate the Rules of Hooks.
+  useEffect(() => {
+    return () => {
+      if (exportGuardTimeoutRef.current !== null) {
+        clearTimeout(exportGuardTimeoutRef.current);
+      }
+    };
+  }, []);
+  const [backupActionError, setBackupActionError] = useState<string | null>(null);
+  const [showRestoreModal, setShowRestoreModal] = useState(false);
+  // Full Backup remains the default per this feature's own requirement —
+  // Data Only exists only as an opt-in for when a smaller backup is
+  // wanted (e.g. to stay under Restore preview's upload size limit).
+  const [backupType, setBackupType] = useState<"full" | "data-only">("full");
 
   // The connect/callback API routes redirect back with ?integration=
   // connected|error&reason=... — a transient banner only, cleared from the
@@ -518,6 +577,83 @@ export function ProjectSettingsScreen({ slug }: { slug: string }) {
       return;
     }
     setGithubStatus({ state: "not-connected" });
+  }
+
+  // Runs the already-built export pipeline (exportProject ->
+  // collectProjectBackupAttachmentFiles -> serializeExportedProject ->
+  // buildProjectBackupZip) via the /api/projects/backup Route Handler —
+  // none of those functions, nor the Route Handler itself, is
+  // reimplemented or modified here.
+  //
+  // Deliberately NOT fetch()+response.blob()+URL.createObjectURL() (an
+  // earlier version of this function): that pattern requires the entire
+  // ZIP to be held in this tab's JavaScript memory before a single byte
+  // reaches disk. For KTVibe's real Full Backup (~192MB of physical
+  // attachment bytes) that reproduced as a bare "Failed to fetch" in the
+  // browser even on localhost, while curl and Node's own fetch()+blob()
+  // against the exact same Route Handler both succeeded — the Route
+  // Handler and the whole export pipeline were never the problem, only
+  // this component's own in-memory handling of the response.
+  //
+  // Also NOT a hidden <iframe> (a second, since-reverted attempt): setting
+  // iframe.src and appending it to the document, then tearing the iframe
+  // down again on a timer, ties the download's lifetime to that iframe's
+  // presence in the DOM — removing it (the timer in that version fired at
+  // 1.5s, far short of the ~13-15s KTVibe's real Full Backup actually
+  // takes to stream) aborts whatever request is still in flight inside
+  // it. That's exactly what Network showed: two identical requests, red,
+  // no status code, no response headers, 0 bytes transferred — a request
+  // killed before it ever got far enough to receive headers, not one that
+  // ran and failed.
+  //
+  // Fixed with the standard, minimal pattern for a same-origin file
+  // download: a real, temporary <a> element — href set to the export URL,
+  // an *empty* `download` attribute (forces "save, don't navigate"
+  // without supplying a filename of its own, so the browser keeps using
+  // the real one from this response's own Content-Disposition header,
+  // exactly as before), appended to the document, clicked once, and
+  // removed immediately afterward. Once `.click()` has been dispatched,
+  // the browser's own download manager owns the request from that point
+  // on — it is not tied to the anchor node's continued presence in the
+  // DOM the way the iframe's download was tied to *its* node, so removing
+  // the anchor right away cannot abort anything. One synchronous click on
+  // one anchor is also, by construction, exactly one request — there is
+  // no timer, no async step, and nothing else in this function that could
+  // fire a second one.
+  //
+  // There is still no `response` to inspect here — the browser owns the
+  // outcome of the request, not this component — so this function only
+  // ever confirms the download was *requested*, never that it finished or
+  // succeeded. There is no "Export completed"/"Download finished" message
+  // anywhere in this flow, on purpose: nothing here could tell whether
+  // that were actually true.
+  //
+  // exportingBackup stays true for EXPORT_DOWNLOAD_GUARD_MS after a click
+  // — long enough to comfortably outlast KTVibe's real Full Backup
+  // (~13-15s end to end), so a second click can't fire a second download
+  // of the same backup while the server is still generating a large one.
+  // That duration is a guessed upper bound, not a measurement of this
+  // request — it doesn't shrink for a fast Data Only export, and it
+  // doesn't mean the download has finished (or even succeeded) once it
+  // elapses, only that another click is allowed again. The Full/Data Only
+  // radios are disabled for the same window (see the JSX below) so the
+  // type can't change out from under a preparation that already started.
+  function handleExportProject() {
+    if (exportingBackup || isDevFallback) return;
+    setExportingBackup(true);
+
+    const url = `/api/projects/backup?projectId=${encodeURIComponent(project.id)}&type=${encodeURIComponent(backupType)}`;
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+
+    exportGuardTimeoutRef.current = setTimeout(() => {
+      exportGuardTimeoutRef.current = null;
+      setExportingBackup(false);
+    }, EXPORT_DOWNLOAD_GUARD_MS);
   }
 
   // Creates the client immediately in Supabase (or, in dev fallback, a
@@ -834,6 +970,81 @@ export function ProjectSettingsScreen({ slug }: { slug: string }) {
           {saveError && <span className="text-[13px] font-medium text-red-600 dark:text-red-400">{saveError}</span>}
         </div>
 
+        <SettingGroup title="Backup & Restore">
+          <div className="py-4 flex items-start justify-between gap-6">
+            <div>
+              <p className="text-[13px] font-semibold text-slate-800 dark:text-zinc-200">Export Project</p>
+              <p className="text-[12px] text-slate-400 dark:text-zinc-500 mt-0.5 max-w-sm">
+                Export a backup of this project so it can be restored later.
+              </p>
+              <div className="mt-3 space-y-2">
+                <label className="flex items-start gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="backup-type"
+                    checked={backupType === "full"}
+                    onChange={() => setBackupType("full")}
+                    disabled={exportingBackup}
+                    className="mt-0.5 accent-brand-600"
+                  />
+                  <span>
+                    <span className="block text-[13px] font-medium text-slate-700 dark:text-zinc-300">Full Backup</span>
+                    <span className="block text-[12px] text-slate-400 dark:text-zinc-500">
+                      Includes attachment files. For a large project this archive may be too big to analyze or
+                      restore from the Restore Project screen — it&apos;s still a complete, useful backup on its own.
+                    </span>
+                  </span>
+                </label>
+                <label className="flex items-start gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="backup-type"
+                    checked={backupType === "data-only"}
+                    onChange={() => setBackupType("data-only")}
+                    disabled={exportingBackup}
+                    className="mt-0.5 accent-brand-600"
+                  />
+                  <span>
+                    <span className="block text-[13px] font-medium text-slate-700 dark:text-zinc-300">Data Only</span>
+                    <span className="block text-[12px] text-slate-400 dark:text-zinc-500">
+                      Excludes attachment files. Stays small regardless of project size — use this for large
+                      projects if you plan to restore from the Restore Project screen.
+                    </span>
+                  </span>
+                </label>
+              </div>
+              {exportingBackup && (
+                <p className="text-[12px] text-slate-400 dark:text-zinc-500 mt-2">Large backups may take several seconds.</p>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={handleExportProject}
+              disabled={exportingBackup}
+              className="flex-shrink-0 text-[13px] font-medium text-white bg-brand-600 hover:bg-brand-700 px-3 py-1.5 rounded-lg shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-500 dark:hover:bg-brand-600 disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {exportingBackup ? "Preparing backup…" : "Export Project"}
+            </button>
+          </div>
+
+          <div className="py-4 flex items-center justify-between gap-6 border-t border-slate-100 dark:border-zinc-800/70">
+            <div>
+              <p className="text-[13px] font-semibold text-slate-800 dark:text-zinc-200">Restore Project</p>
+              <p className="text-[12px] text-slate-400 dark:text-zinc-500 mt-0.5 max-w-sm">
+                Upload a project backup .zip to see what it contains. This only analyzes the file — nothing is
+                restored yet.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowRestoreModal(true)}
+              className="flex-shrink-0 text-[13px] font-medium text-slate-500 dark:text-zinc-400 border border-slate-200 dark:border-zinc-700 px-3 py-1.5 rounded-lg hover:bg-slate-50 dark:hover:bg-zinc-800/50 transition-colors"
+            >
+              Restore Project
+            </button>
+          </div>
+        </SettingGroup>
+
         <SettingGroup title="Danger Zone">
           <div className="py-4">
             <div className="flex items-start justify-between gap-6">
@@ -867,6 +1078,24 @@ export function ProjectSettingsScreen({ slug }: { slug: string }) {
               )}
             </div>
           </div>
+
+          {!isDevFallback && organization && (
+            <div className="py-4 flex items-start justify-between gap-6 border-t border-slate-100 dark:border-zinc-800/70">
+              <div>
+                <p className="text-[13px] font-semibold text-slate-800 dark:text-zinc-200">Delete Project</p>
+                <p className="text-[12px] text-slate-400 dark:text-zinc-500 mt-0.5 max-w-sm">
+                  Permanently deletes this project and all of its data. This action cannot be undone.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowDeleteModal(true)}
+                className="flex-shrink-0 text-[13px] font-medium text-white bg-red-600 hover:bg-red-700 px-3 py-1.5 rounded-lg shadow-sm shadow-red-600/20 transition-colors"
+              >
+                Delete Project
+              </button>
+            </div>
+          )}
         </SettingGroup>
       </div>
 
@@ -880,9 +1109,57 @@ export function ProjectSettingsScreen({ slug }: { slug: string }) {
         />
       )}
 
+      {showDeleteModal && organization && (
+        <DeleteProjectModal
+          projectId={project.id}
+          projectName={project.name}
+          organizationId={organization.id}
+          onClose={() => setShowDeleteModal(false)}
+          onError={(message) => setBackupActionError(message)}
+          onDeleted={() => {
+            setShowDeleteModal(false);
+            setDeletedProjectName(project.name);
+            retryOrganizationProjects();
+            // Brief delay so the confirmation toast is actually visible
+            // before this screen unmounts — /projects' own data is already
+            // client-side and would otherwise swap in almost instantly.
+            setTimeout(() => router.push("/projects"), 900);
+          }}
+        />
+      )}
+
+      {deletedProjectName && (
+        <div className="fixed bottom-5 right-5 z-[60] flex items-center gap-2 bg-slate-900 dark:bg-zinc-800 text-white text-[13px] font-medium px-4 py-2.5 rounded-lg shadow-lg shadow-black/20 max-w-sm">
+          <svg className="w-4 h-4 text-emerald-400 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M5 12l5 5L20 7" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          <span className="leading-snug">&quot;{deletedProjectName}&quot; was permanently deleted.</span>
+        </div>
+      )}
+
       {showAddClientModal && (
         <AddClientModal onClose={() => setShowAddClientModal(false)} onCreate={handleCreateClient} />
       )}
+
+      {showRestoreModal && organization && (
+        <RestoreProjectPreviewModal
+          onClose={() => setShowRestoreModal(false)}
+          onAnalysisError={(message) => setBackupActionError(message)}
+          organizationId={organization.id}
+          organizationName={organization.name}
+          onRestored={(restoredProject) => {
+            setShowRestoreModal(false);
+            // The restored project is brand new — refetch the shared
+            // Sidebar/`/projects` list so it shows up there immediately,
+            // then navigate straight to its own Overview, same as any
+            // other "just created a project, go look at it" flow.
+            retryOrganizationProjects();
+            router.push(`/projects/${restoredProject.slug}`);
+          }}
+        />
+      )}
+
+      {backupActionError && <ErrorToast message={backupActionError} onDismiss={() => setBackupActionError(null)} />}
     </div>
   );
 }

@@ -1207,6 +1207,10 @@ type AttachmentItem = {
   avatar: string;
   uploadedAt: string;
   storagePath: string;
+  /** False for attachment metadata restored from a Data Only Backup — no
+   *  physical file exists at storagePath. Download/Preview must never be
+   *  attempted in that case (see AttachmentRow/CommentAttachmentRow). */
+  isAvailable: boolean;
 };
 
 type UploadingItem = {
@@ -1324,7 +1328,9 @@ function AttachmentRow({
   const [menuOpen, setMenuOpen]     = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
-  const previewKind = getPreviewKind(file.ext);
+  // Never offered for an unavailable file — there is no physical object
+  // in Storage to preview, so a preview attempt would only ever fail.
+  const previewKind = file.isAvailable ? getPreviewKind(file.ext) : null;
   // Screen-space position for the portaled menu panel below — computed from
   // the trigger button at the moment the menu opens (see toggleMenu) so it
   // tracks the button correctly even though it's no longer a DOM descendant
@@ -1454,20 +1460,27 @@ function AttachmentRow({
           <span>·</span>
           <span>{file.uploadedAt}</span>
         </div>
+        {!file.isAvailable && (
+          <p className="text-[11px] font-medium text-amber-600 dark:text-amber-400 mt-1">
+            File not included in this backup
+          </p>
+        )}
       </div>
 
       {/* Actions (hidden while renaming) */}
       {!renaming && (
         <div className="flex items-center gap-0.5 flex-shrink-0">
-          <button
-            aria-label={`Download ${file.name}`}
-            onClick={onDownload}
-            className="p-1.5 rounded-md text-slate-400 dark:text-zinc-600 hover:text-slate-600 dark:hover:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
-          >
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-              <path d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5 5-5M12 15V3" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </button>
+          {file.isAvailable && (
+            <button
+              aria-label={`Download ${file.name}`}
+              onClick={onDownload}
+              className="p-1.5 rounded-md text-slate-400 dark:text-zinc-600 hover:text-slate-600 dark:hover:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                <path d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5 5-5M12 15V3" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+          )}
 
           <div ref={menuRef} className="relative">
             <button
@@ -1544,14 +1557,18 @@ function AttachmentRow({
 
 function CommentAttachmentRow({ file }: { file: AttachmentItem }) {
   const [previewOpen, setPreviewOpen] = useState(false);
-  const previewKind = getPreviewKind(file.ext);
+  // Never offered for an unavailable file — no physical object exists in
+  // Storage to preview.
+  const previewKind = file.isAvailable ? getPreviewKind(file.ext) : null;
   const extColor = EXT_COLOR[file.ext] ?? "bg-slate-100 text-slate-500 dark:bg-zinc-800 dark:text-zinc-400";
 
   return (
     <>
       <button
         type="button"
+        disabled={!file.isAvailable}
         onClick={() => {
+          if (!file.isAvailable) return;
           if (previewKind) {
             setPreviewOpen(true);
             return;
@@ -1562,7 +1579,7 @@ function CommentAttachmentRow({ file }: { file: AttachmentItem }) {
             }
           });
         }}
-        className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg border border-slate-100 dark:border-zinc-800 bg-white dark:bg-zinc-950/40 hover:border-slate-200 dark:hover:border-zinc-700 transition-colors text-left"
+        className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg border border-slate-100 dark:border-zinc-800 bg-white dark:bg-zinc-950/40 hover:border-slate-200 dark:hover:border-zinc-700 transition-colors text-left disabled:cursor-default disabled:hover:border-slate-100 dark:disabled:hover:border-zinc-800"
       >
         <span className={"w-5 h-5 rounded flex items-center justify-center flex-shrink-0 text-[7px] font-bold uppercase tracking-wide " + extColor}>
           {file.ext}
@@ -1570,7 +1587,11 @@ function CommentAttachmentRow({ file }: { file: AttachmentItem }) {
         <span className="flex-1 min-w-0 text-[12px] font-medium text-slate-700 dark:text-zinc-300 truncate">
           {file.name}
         </span>
-        <span className="text-[11px] text-slate-400 dark:text-zinc-600 flex-shrink-0">{file.size}</span>
+        {file.isAvailable ? (
+          <span className="text-[11px] text-slate-400 dark:text-zinc-600 flex-shrink-0">{file.size}</span>
+        ) : (
+          <span className="text-[11px] font-medium text-amber-600 dark:text-amber-400 flex-shrink-0">Not included in this backup</span>
+        )}
       </button>
 
       {previewOpen && previewKind && createPortal(
@@ -1712,6 +1733,7 @@ function toAttachmentItem(a: TicketAttachment): AttachmentItem {
     avatar: a.uploadedByAvatar,
     uploadedAt: a.uploadedAt,
     storagePath: a.storagePath,
+    isAvailable: a.isAvailable,
   };
 }
 
@@ -1949,6 +1971,11 @@ function AttachmentsSection({
                   }
                 }}
                 onDownload={() => {
+                  // Defense in depth — AttachmentRow already hides the
+                  // Download button entirely when !a.isAvailable, so this
+                  // should be unreachable, but never attempt a download
+                  // against a storage_path known to have no object.
+                  if (!a.isAvailable) return;
                   downloadTicketAttachment(a.storagePath, a.name).then((result) => {
                     if (result.status === "error") {
                       console.warn("[ticket-detail] attachment download failed:", result.message);

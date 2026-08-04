@@ -904,7 +904,7 @@ export async function loadTicketComments(ticketId: string): Promise<TicketCommen
   // extra query no matter how many comments there are.
   const { data: attachmentRows, error: attachmentsError } = await supabase
     .from("ticket_attachments")
-    .select("id, filename, storage_path, size_bytes, mime_type, uploaded_by, created_at, comment_id")
+    .select("id, filename, storage_path, size_bytes, mime_type, uploaded_by, created_at, comment_id, is_available")
     .eq("ticket_id", ticketId)
     .not("comment_id", "is", null)
     .order("created_at", { ascending: true })
@@ -1855,6 +1855,13 @@ export interface TicketAttachment {
   uploadedByAvatar: string;
   /** Pre-formatted relative time ("3 days ago") — same convention as TicketComment/TicketActivityEvent. */
   uploadedAt: string;
+  /** False only for attachment metadata restored from a Data Only Backup
+   *  (see ticket_attachments.is_available) — that backup never included
+   *  the physical file, so nothing exists at storagePath in Storage.
+   *  True for every attachment created normally and every attachment
+   *  restored from a Full Backup. The UI must never attempt a
+   *  download/preview when this is false. */
+  isAvailable: boolean;
 }
 
 interface AttachmentRow {
@@ -1865,6 +1872,7 @@ interface AttachmentRow {
   mime_type: string | null;
   uploaded_by: string | null;
   created_at: string;
+  is_available: boolean;
 }
 
 function rowToAttachment(row: AttachmentRow, uploaderRow: AssigneeProfileRow | undefined): TicketAttachment {
@@ -1878,6 +1886,7 @@ function rowToAttachment(row: AttachmentRow, uploaderRow: AssigneeProfileRow | u
     uploadedByAvatar:
       (uploaderRow ? resolveAvatarUrl(uploaderRow.avatar_url, uploaderRow.updated_at) : null) ?? FALLBACK_AVATAR,
     uploadedAt: formatRelativeTime(row.created_at),
+    isAvailable: row.is_available,
   };
 }
 
@@ -1895,7 +1904,7 @@ export async function loadTicketAttachments(ticketId: string): Promise<TicketAtt
 
   const { data: rows, error } = await supabase
     .from("ticket_attachments")
-    .select("id, filename, storage_path, size_bytes, mime_type, uploaded_by, created_at")
+    .select("id, filename, storage_path, size_bytes, mime_type, uploaded_by, created_at, is_available")
     .eq("ticket_id", ticketId)
     .is("comment_id", null)
     .order("created_at", { ascending: false })
@@ -1961,7 +1970,7 @@ export async function uploadTicketAttachment(
       size_bytes: file.size,
       mime_type: file.type || null,
     })
-    .select("id, filename, storage_path, size_bytes, mime_type, uploaded_by, created_at")
+    .select("id, filename, storage_path, size_bytes, mime_type, uploaded_by, created_at, is_available")
     .single<AttachmentRow>();
 
   if (insertError) {
