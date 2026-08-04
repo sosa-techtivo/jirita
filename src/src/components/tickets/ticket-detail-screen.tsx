@@ -1,6 +1,15 @@
 "use client";
 
-import { useState, useRef, useEffect, type KeyboardEvent, type ReactNode } from "react";
+import {
+  useState,
+  useRef,
+  useEffect,
+  forwardRef,
+  useImperativeHandle,
+  type KeyboardEvent,
+  type DragEvent as ReactDragEvent,
+  type ReactNode,
+} from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import type { Ticket, TicketStatus, TicketPriority, TicketType } from "@/lib/mock-tickets";
@@ -1635,6 +1644,75 @@ function AttachmentRow({
   );
 }
 
+// ── CommentDropZone ──────────────────────────────────────────────────────────
+// Makes one already-posted comment its own drop target — but only ever
+// rendered `active` for the viewer's own comments (see the Comments section
+// below). A drop here calls onFilesDropped and stops the event's propagation
+// so it never also reaches TicketDetailScreen's page-level drop handler,
+// which is exactly how "drop outside a comment → ticket attachment instead"
+// falls out for free: nothing special-cases it, the event simply never gets
+// there. Inactive comments (someone else's) render `children` completely
+// unwrapped — no drag handlers, so a drop on those already bubbles straight
+// to the page-level handler.
+function CommentDropZone({
+  active,
+  onFilesDropped,
+  children,
+}: {
+  active: boolean;
+  onFilesDropped: (files: File[]) => void;
+  children: ReactNode;
+}) {
+  const [dragOver, setDragOver] = useState(false);
+  const counterRef = useRef(0);
+
+  if (!active) return <>{children}</>;
+
+  function isFileDrag(e: ReactDragEvent): boolean {
+    return Array.from(e.dataTransfer?.types ?? []).includes("Files");
+  }
+
+  return (
+    <div
+      className={
+        "rounded-xl transition-colors " +
+        (dragOver ? "ring-2 ring-brand-500 dark:ring-brand-500/70" : "")
+      }
+      onDragEnter={(e) => {
+        if (!isFileDrag(e)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        counterRef.current += 1;
+        setDragOver(true);
+      }}
+      onDragOver={(e) => {
+        if (!isFileDrag(e)) return;
+        e.preventDefault();
+        e.stopPropagation();
+      }}
+      onDragLeave={(e) => {
+        if (!isFileDrag(e)) return;
+        e.stopPropagation();
+        counterRef.current -= 1;
+        if (counterRef.current <= 0) {
+          counterRef.current = 0;
+          setDragOver(false);
+        }
+      }}
+      onDrop={(e) => {
+        if (!isFileDrag(e)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        counterRef.current = 0;
+        setDragOver(false);
+        if (e.dataTransfer.files.length > 0) onFilesDropped(Array.from(e.dataTransfer.files));
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
 // ── CommentAttachmentRow ─────────────────────────────────────────────────────
 // Read-only by design: comment attachments are view/preview/download only in
 // this feature (no rename, delete, or upload-from-comment) — see the
@@ -1887,23 +1965,26 @@ function toAttachmentItem(a: TicketAttachment): AttachmentItem {
   };
 }
 
-function AttachmentsSection({
-  ticketId,
-  projectSlug,
-  isDevFallback,
-  onUploaded,
-  onError,
-}: {
-  ticketId: string;
-  /** This ticket's own real project — passed straight through to each
-   *  AttachmentRow's "addedBy" MemberTrigger. */
-  projectSlug?: string;
-  isDevFallback: boolean;
-  /** Called after a successful upload, rename, or delete — a database trigger already logged the real activity row; this just tells the parent to refetch it. */
-  onUploaded: () => void;
-  /** Called with a message when an upload/rename/delete fails — surfaced via the shared error toast. */
-  onError: (message: string) => void;
-}) {
+// Imperative handle so the page-level drag & drop / paste handlers (see
+// TicketDetailScreen) can feed files into this exact section's own
+// startUpload — the same validations/upload/visualization "Upload Files"
+// already uses — instead of a second, parallel upload implementation.
+export type AttachmentsSectionHandle = { addFiles: (files: FileList | File[]) => void };
+
+const AttachmentsSection = forwardRef<
+  AttachmentsSectionHandle,
+  {
+    ticketId: string;
+    /** This ticket's own real project — passed straight through to each
+     *  AttachmentRow's "addedBy" MemberTrigger. */
+    projectSlug?: string;
+    isDevFallback: boolean;
+    /** Called after a successful upload, rename, or delete — a database trigger already logged the real activity row; this just tells the parent to refetch it. */
+    onUploaded: () => void;
+    /** Called with a message when an upload/rename/delete fails — surfaced via the shared error toast. */
+    onError: (message: string) => void;
+  }
+>(function AttachmentsSection({ ticketId, projectSlug, isDevFallback, onUploaded, onError }, ref) {
   const [attachments,   setAttachments]   = useState<AttachmentItem[]>([]);
   const [uploading,     setUploading]     = useState<UploadingItem[]>([]);
   const [dragActive,    setDragActive]    = useState(false);
@@ -1990,6 +2071,8 @@ function AttachmentsSection({
       });
     });
   };
+
+  useImperativeHandle(ref, () => ({ addFiles: startUpload }));
 
   const totalCount = attachments.length + uploading.length;
   const isEmpty    = attachments.length === 0 && uploading.length === 0;
@@ -2144,7 +2227,7 @@ function AttachmentsSection({
       </div>
     </CollapsibleSection>
   );
-}
+});
 
 // ── Development (real GitHub, read-only) ────────────────────────────────────
 // Real branches/commits/pull requests related to this ticket by its own
@@ -3282,7 +3365,12 @@ export function TicketDetailScreen({
   slug: string;
   ticketCode: string;
 }) {
-  const { organization, isDevFallback } = useCurrentUser();
+  const { organization, isDevFallback, userId } = useCurrentUser();
+
+  // Feeds the page-level drag & drop / paste handlers below — lets them
+  // reuse this exact section's own real upload/validation flow instead of
+  // a second implementation. Only ever populated once the section mounts.
+  const attachmentsSectionRef = useRef<AttachmentsSectionHandle | null>(null);
 
   const [loadState, setLoadState] = useState<"loading" | "ready" | "not-found" | "error">(
     isDevFallback ? (resolveDevTicket(slug, ticketCode) ? "ready" : "not-found") : "loading"
@@ -3381,6 +3469,75 @@ export function TicketDetailScreen({
 
   useEffect(() => {
     if (addingComment) commentTextareaRef.current?.focus();
+  }, [addingComment]);
+
+  // ── Page-level drag & drop ──────────────────────────────────────────────
+  // Files dropped directly on one of the viewer's own comments never reach
+  // here — CommentDropZone's own onDrop handles those and stops propagation
+  // before the event bubbles up to these document-level listeners, so
+  // everything else (including someone else's comment) falls through to
+  // the general ticket Attachments section, exactly as "Upload Files"
+  // already would. Registered from mount (attachmentsSectionRef is simply
+  // still null, a safe no-op, until the ticket loads and that section
+  // mounts) and cleaned up on unmount.
+  useEffect(() => {
+    function isFileDrag(e: DragEvent): boolean {
+      return Array.from(e.dataTransfer?.types ?? []).includes("Files");
+    }
+    function onDragOver(e: DragEvent) {
+      if (!isFileDrag(e)) return;
+      // Required on dragover (not just drop) to stop the browser's own
+      // default of opening/navigating to the dropped file.
+      e.preventDefault();
+    }
+    function onDrop(e: DragEvent) {
+      if (!isFileDrag(e)) return;
+      e.preventDefault();
+      if (e.dataTransfer?.files?.length) {
+        attachmentsSectionRef.current?.addFiles(e.dataTransfer.files);
+      }
+    }
+    document.addEventListener("dragover", onDragOver);
+    document.addEventListener("drop", onDrop);
+    return () => {
+      document.removeEventListener("dragover", onDragOver);
+      document.removeEventListener("drop", onDrop);
+    };
+  }, []);
+
+  // ── Page-level paste ─────────────────────────────────────────────────────
+  // Routes a pasted image/file to whichever attachment flow is contextually
+  // active: the new-comment composer when it's open and its textarea is
+  // actually focused, otherwise the general ticket Attachments section —
+  // exactly the same two real flows "Attach files"/"Upload Files" already
+  // use, never a third. Never calls preventDefault(): a clipboard with both
+  // text and files must still paste its text normally into whatever's
+  // focused (e.g. mid-sentence in the comment textarea) — only the file
+  // items are ever intercepted here.
+  useEffect(() => {
+    function onPaste(e: ClipboardEvent) {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      const files: File[] = [];
+      for (const item of Array.from(items)) {
+        if (item.kind !== "file") continue;
+        const file = item.getAsFile();
+        if (file) files.push(file);
+      }
+      if (files.length === 0) return;
+
+      const commentComposerFocused =
+        addingComment && document.activeElement === commentTextareaRef.current;
+
+      if (commentComposerFocused) {
+        const items2 = files.map((file) => ({ id: newId(), file }));
+        setPendingCommentFiles((prev) => [...prev, ...items2]);
+      } else {
+        attachmentsSectionRef.current?.addFiles(files);
+      }
+    }
+    document.addEventListener("paste", onPaste);
+    return () => document.removeEventListener("paste", onPaste);
   }, [addingComment]);
 
   if (loadState === "loading") {
@@ -3522,13 +3679,73 @@ export function TicketDetailScreen({
     setPendingCommentFiles([]);
   }
 
+  // The one place files actually get attached to an existing comment —
+  // reused by submitComment's own post-creation upload below and by
+  // dropping files directly onto one of the viewer's own already-posted
+  // comments (see CommentDropZone). Each upload targets the same
+  // ticket_id/uploaded_by-default path as a direct ticket upload, just with
+  // this comment's real id attached (see uploadTicketAttachment's commentId
+  // param) — so a comment attachment can never reference a comment_id that
+  // doesn't exist. Returns which files failed so each caller can phrase its
+  // own error toast for its own context.
+  async function uploadFilesToComment(commentId: string, files: File[]): Promise<{ failedNames: string[] }> {
+    if (files.length === 0) return { failedNames: [] };
+    const uploads = await Promise.all(
+      files.map(async (file) => {
+        try {
+          return { name: file.name, result: await uploadTicketAttachment(ticketId, file, commentId) };
+        } catch (err) {
+          return {
+            name: file.name,
+            result: { status: "error" as const, message: err instanceof Error ? err.message : "Something went wrong. Please try again." },
+          };
+        }
+      })
+    );
+
+    const failedNames: string[] = [];
+    let anySucceeded = false;
+    for (const upload of uploads) {
+      if (upload.result.status === "error") {
+        console.warn("[ticket-detail] comment attachment upload failed:", upload.name, upload.result.message);
+        failedNames.push(upload.name);
+        continue;
+      }
+      anySucceeded = true;
+      const uploadedAttachment = upload.result.attachment;
+      setComments((prev) =>
+        prev.map((c) =>
+          c.id === commentId ? { ...c, attachments: [...c.attachments, uploadedAttachment] } : c
+        )
+      );
+    }
+    // Each successful upload already logged its own real
+    // "attachment_uploaded" activity row (same trigger as a direct
+    // ticket upload) — refetch once instead of inventing local entries.
+    if (anySucceeded) refreshActivity();
+    return { failedNames };
+  }
+
+  // A file (or several) dropped directly onto one of the viewer's own
+  // already-posted comments — see CommentDropZone, only ever rendered for
+  // comments where authorProfileId === the signed-in user. Uploads
+  // immediately (the comment already exists, unlike the composer's own
+  // stage-then-upload-on-submit flow above) via the exact same
+  // uploadFilesToComment used there.
+  async function handleFilesDroppedOnComment(commentId: string, files: File[]) {
+    const { failedNames } = await uploadFilesToComment(commentId, files);
+    if (failedNames.length > 0) {
+      showError(
+        failedNames.length === 1
+          ? `"${failedNames[0]}" failed to attach.`
+          : `These files failed to attach: ${failedNames.join(", ")}.`
+      );
+    }
+  }
+
   // Attachments only ever start uploading after the comment itself exists —
   // never before "Comment" is pressed, and never at all if the comment
   // insert fails (see the early return on result.status === "error" below).
-  // Each upload targets the same ticket_id/uploaded_by-default path as a
-  // direct ticket upload, just with the freshly created comment's id
-  // attached (see uploadTicketAttachment's commentId param) — so a comment
-  // attachment can never reference a comment_id that doesn't exist.
   async function submitComment() {
     const trimmed = commentDraft.trim();
     if (!trimmed || submittingComment) return;
@@ -3552,39 +3769,7 @@ export function TicketDetailScreen({
       setPendingCommentFiles([]);
 
       if (filesToUpload.length > 0) {
-        const uploads = await Promise.all(
-          filesToUpload.map(async (item) => {
-            try {
-              return { name: item.file.name, result: await uploadTicketAttachment(ticketId, item.file, newComment.id) };
-            } catch (err) {
-              return {
-                name: item.file.name,
-                result: { status: "error" as const, message: err instanceof Error ? err.message : "Something went wrong. Please try again." },
-              };
-            }
-          })
-        );
-
-        const failedNames: string[] = [];
-        let anySucceeded = false;
-        for (const upload of uploads) {
-          if (upload.result.status === "error") {
-            console.warn("[ticket-detail] comment attachment upload failed:", upload.name, upload.result.message);
-            failedNames.push(upload.name);
-            continue;
-          }
-          anySucceeded = true;
-          const uploadedAttachment = upload.result.attachment;
-          setComments((prev) =>
-            prev.map((c) =>
-              c.id === newComment.id ? { ...c, attachments: [...c.attachments, uploadedAttachment] } : c
-            )
-          );
-        }
-        // Each successful upload already logged its own real
-        // "attachment_uploaded" activity row (same trigger as a direct
-        // ticket upload) — refetch once instead of inventing local entries.
-        if (anySucceeded) refreshActivity();
+        const { failedNames } = await uploadFilesToComment(newComment.id, filesToUpload.map((item) => item.file));
         if (failedNames.length > 0) {
           showError(
             failedNames.length === 1
@@ -3724,7 +3909,7 @@ export function TicketDetailScreen({
             )}
 
             <div className="order-[50]">
-              <AttachmentsSection ticketId={ticket.id} projectSlug={ticket.projectSlug} isDevFallback={isDevFallback} onUploaded={refreshActivity} onError={showError} />
+              <AttachmentsSection ref={attachmentsSectionRef} ticketId={ticket.id} projectSlug={ticket.projectSlug} isDevFallback={isDevFallback} onUploaded={refreshActivity} onError={showError} />
             </div>
 
             <div className="order-[70]">
@@ -3837,43 +4022,53 @@ export function TicketDetailScreen({
               ) : (
               <div className="space-y-6">
                 {comments.map((c) => (
-                  <div key={c.id} className="flex items-start gap-3">
-                    <MemberTrigger
-                      name={c.name}
-                      avatar={c.avatar}
-                      profileId={c.authorProfileId ?? undefined}
-                      projectSlug={ticket.projectSlug}
-                      className="flex-shrink-0 mt-0.5 rounded-full"
-                    >
-                      <Avatar
-                        src={c.avatar}
+                  <CommentDropZone
+                    key={c.id}
+                    // Only the viewer's own comments become drop targets —
+                    // dropping on anyone else's falls through to the
+                    // page-level handler (general ticket attachment), per
+                    // this feature's own rule.
+                    active={userId !== null && c.authorProfileId === userId}
+                    onFilesDropped={(files) => handleFilesDroppedOnComment(c.id, files)}
+                  >
+                    <div className="flex items-start gap-3">
+                      <MemberTrigger
                         name={c.name}
-                        className="w-7 h-7 rounded-full flex-shrink-0 ring-1 ring-slate-200 dark:ring-zinc-700"
-                      />
-                    </MemberTrigger>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-[13px] font-semibold text-slate-800 dark:text-zinc-200 leading-snug">
-                        <MemberTrigger name={c.name} avatar={c.avatar} profileId={c.authorProfileId ?? undefined} projectSlug={ticket.projectSlug} className="hover:underline">
-                          {c.name}
-                        </MemberTrigger>
-                        <span className="ml-2 font-normal text-slate-400 dark:text-zinc-600">
-                          · {c.timeAgo}
-                        </span>
-                      </p>
-                      <div className="mt-2 px-4 py-3 rounded-xl bg-slate-50 dark:bg-zinc-900 border border-slate-100 dark:border-zinc-800/80">
-                        <p className="text-[13px] text-slate-700 dark:text-zinc-300 leading-relaxed">
-                          {c.text}
+                        avatar={c.avatar}
+                        profileId={c.authorProfileId ?? undefined}
+                        projectSlug={ticket.projectSlug}
+                        className="flex-shrink-0 mt-0.5 rounded-full"
+                      >
+                        <Avatar
+                          src={c.avatar}
+                          name={c.name}
+                          className="w-7 h-7 rounded-full flex-shrink-0 ring-1 ring-slate-200 dark:ring-zinc-700"
+                        />
+                      </MemberTrigger>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[13px] font-semibold text-slate-800 dark:text-zinc-200 leading-snug">
+                          <MemberTrigger name={c.name} avatar={c.avatar} profileId={c.authorProfileId ?? undefined} projectSlug={ticket.projectSlug} className="hover:underline">
+                            {c.name}
+                          </MemberTrigger>
+                          <span className="ml-2 font-normal text-slate-400 dark:text-zinc-600">
+                            · {c.timeAgo}
+                          </span>
                         </p>
-                      </div>
-                      {c.attachments.length > 0 && (
-                        <div className="mt-2 space-y-1.5">
-                          {c.attachments.map((a) => (
-                            <CommentAttachmentRow key={a.id} file={toAttachmentItem(a)} />
-                          ))}
+                        <div className="mt-2 px-4 py-3 rounded-xl bg-slate-50 dark:bg-zinc-900 border border-slate-100 dark:border-zinc-800/80">
+                          <p className="text-[13px] text-slate-700 dark:text-zinc-300 leading-relaxed">
+                            {c.text}
+                          </p>
                         </div>
-                      )}
+                        {c.attachments.length > 0 && (
+                          <div className="mt-2 space-y-1.5">
+                            {c.attachments.map((a) => (
+                              <CommentAttachmentRow key={a.id} file={toAttachmentItem(a)} />
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     </div>
-                  </div>
+                  </CommentDropZone>
                 ))}
               </div>
               )}
