@@ -1602,17 +1602,17 @@ export async function setProjectLead(
 }
 
 // Wired from member-profile-modal.tsx's MemberMenu (Team's real member
-// cards only — see hasProjectMemberHistory below, which is what MemberMenu
-// checks before it even offers this). Deletes only the one
-// project_memberships row for this exact project + profile — never the
-// profile, the auth user, the organization membership, or any
-// ticket/comment/attachment/time-entry history, none of which reference
-// project_memberships at all. The real guarantee against removing a member
-// with history isn't this function or the UI hiding the option — it's the
-// project_memberships_prevent_delete_with_history trigger
-// (20260809000000), which blocks the delete at the database level no
-// matter how it's invoked; a rejected delete here just surfaces that
-// trigger's own error message.
+// cards only). Deletes only the one project_memberships row for this exact
+// project + profile — never the profile, the auth user, the organization
+// membership, or any ticket/comment/attachment/time-entry history, none of
+// which reference project_memberships at all. The real guarantee against
+// removing the project's only active Project Lead, or a member who still
+// has a non-Done ticket assigned in this project, isn't this function or
+// any client-side pre-check — it's the
+// project_memberships_prevent_unsafe_delete trigger (20260910000000),
+// which blocks the delete at the database level no matter how it's
+// invoked; a rejected delete here just surfaces that trigger's own
+// exception message as-is, which MemberMenu shows the caller directly.
 export async function removeProjectMember(
   organizationId: string,
   slug: string,
@@ -1641,61 +1641,17 @@ export async function removeProjectMember(
 
   if (error) {
     logDev("project_memberships delete failed", error);
-    // Includes the project_memberships_prevent_delete_with_history
-    // trigger's own raised message when this member actually has real
-    // history — surfaced as-is rather than a generic string, since it's
-    // already a clear, non-technical sentence.
+    // Includes the project_memberships_prevent_unsafe_delete trigger's own
+    // raised message when this removal is actually blocked (last active
+    // Project Lead, or a non-Done ticket still assigned) — surfaced as-is
+    // rather than a generic string, since it's already a clear,
+    // non-technical sentence.
     return { status: "error", message: error.message };
   }
 
   return { status: "success" };
 }
 
-// Whether this project member has any real, already-recorded
-// participation (tickets created/assigned, comments, time entries,
-// attachments, relations, or any other ticket_activity row) in this
-// project — what member-profile-modal.tsx's MemberMenu checks before
-// deciding whether "Remove from Project" belongs in the menu at all.
-// Never the source of truth for whether removal is actually allowed —
-// that's project_memberships_prevent_delete_with_history (20260809000000),
-// enforced at the database level regardless of what this returns; this is
-// only what decides whether the option is *offered*. Errors (including an
-// unresolvable project, or a profile id that was never real to begin with
-// — e.g. a mock/synthesized identity from a non-Team context opening this
-// same shared modal) default to `true` (assume history), the same "don't
-// offer removal unless positively confirmed safe" default the option's
-// absence during the loading window already uses.
-export async function hasProjectMemberHistory(
-  organizationId: string,
-  slug: string,
-  profileId: string
-): Promise<boolean> {
-  const supabase = getSupabaseBrowserClient();
-
-  const { data: projectRow, error: projectError } = await supabase
-    .from("projects")
-    .select("id")
-    .eq("organization_id", organizationId)
-    .eq("slug", slug)
-    .maybeSingle<{ id: string }>();
-
-  if (projectError || !projectRow) {
-    if (projectError) logDev("project id lookup failed for history check", projectError);
-    return true;
-  }
-
-  const { data, error } = await supabase.rpc("project_membership_has_history", {
-    target_project_id: projectRow.id,
-    target_profile_id: profileId,
-  });
-
-  if (error) {
-    logDev("project_membership_has_history rpc failed", error);
-    return true;
-  }
-
-  return Boolean(data);
-}
 
 // ── Member Dashboard reads ──────────────────────────────────────────────────
 // (src/components/member-dashboard.tsx).

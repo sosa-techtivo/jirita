@@ -84,6 +84,8 @@ Most recently, the offline Unfuddle → JIRITA importer (`src/lib/unfuddle-impor
 
 Most recently, Ticket Detail's Description and Comments both became real rich-text fields, sharing one new reusable component (`components/rich-text/` — `RichTextEditor`/`RichTextViewer`, built on Tiptap) rather than two separate implementations. The editor covers bold/italic/underline/strike, headings, bullet/numbered/task lists, blockquote, code block, links, text color, highlight, horizontal rule, and undo/redo. Storage stays a plain string in the same existing `description`/`ticket_comments.body` columns — the editor's own HTML output, sanitized (`isomorphic-dompurify`, an explicit tag/attribute allowlist) both right before every save and again right before every render, so stored content can never carry an unsafe payload regardless of how it got there. Legacy plain-text content (both fields) is migrated transparently at read/edit time only (paragraphs from blank-line breaks, `<br>` from single newlines) — nothing already persisted is rewritten until a real edit/save happens. Comments gained a second new capability alongside this: editing an already-posted comment's own text, reusing the exact click-pencil/Cancel-Save pattern Description's own inline editing already established, restricted to the viewer's own comments and enforced again at the database level by a new migration (`20260907000000_enable_ticket_comment_editing.sql`, adding the author-only `ticket_comments_update` RLS policy — the schema's own `ticket_comments.updated_at` column had carried the doc comment "set only if the comment is edited" since the original MVP schema, RLS just hadn't caught up until now). **That migration has not yet been pushed to the live Supabase project** — comment editing will 403/no-op against real data until `npm run db:push` (or the equivalent Supabase CLI step) actually applies it. Comments' existing drag-and-drop/paste/attachment/ordering behavior is unchanged. Not yet clicked through in a live browser.
 
+Most recently, Ticket Detail gained full Acceptance Criteria editing (previously only each criterion's checked state could change — the text list itself was create-time-only). A new shared, presentational component (`components/tickets/acceptance-criteria-fields.tsx` — `AcceptanceCriteriaFields`) is now the one array-editor UI for the criteria text list, used verbatim by both `new-ticket-modal.tsx` (refactored onto it, no behavior change) and Ticket Detail's new `EditableAcceptanceCriteria`, so the two can never drift. Positioned right after Description and before Attachments (same section order as before). Three states: an empty ticket shows a plain "Add acceptance criteria" prompt; a ticket with criteria shows the existing read-only checklist (checkbox toggles unchanged) plus a header "Edit" action, matching the small-pill header-action convention Attachments'/Development's own section headers already use; clicking it swaps in the same array editor (add/edit/delete rows, blank rows dropped on save, same as New Ticket's own filtering), with Save/Cancel styled exactly like `EditableDescription`'s. Each row's checked state travels paired with its own text through the edit session (never two parallel arrays), so removing/reordering rows can't misalign a criterion's done-flag with the wrong row once saved. Saves go through the ticket's existing `updateTicket`/`persist()` path — `UpdateTicketInput` gained `acceptanceCriteria?: string[]` (replaces the full ordered list in one write, same "empty list stored as `null`" convention `createTicket` already used) alongside the pre-existing `acceptanceCriteriaDone?: boolean[]`, both written in the same patch. No new migration, no RLS change — permission enforcement is the same `tickets_update` policy every other Ticket Detail field edit already goes through. `tsc`/`eslint`/`next build` all pass clean; the route was confirmed to render without a server error against the dev server, but the actual add/edit/delete/save interaction has not yet been clicked through in a live browser.
+
 ---
 
 # Repository Structure
@@ -1080,8 +1082,11 @@ real too, each covered by its own section above/below.
   unwired and always write fixed defaults — `backlog`/`medium`/`task`/none —
   matching that sprint's explicit scope), `updateTicket` (every Ticket
   Detail *and* Quick Ticket Preview inline edit: Title, Description,
-  Status, Type, Priority, Assignee, Estimated Hours, Due Date, Labels, and
-  each Acceptance Criterion's checked state), `loadTicketComments` /
+  Status, Type, Priority, Assignee, Estimated Hours, Due Date, Labels,
+  each Acceptance Criterion's checked state, and — new — the Acceptance
+  Criteria text list itself: `UpdateTicketInput.acceptanceCriteria`
+  replaces the ticket's entire ordered list in one write, same "empty
+  list stored as `null`" convention `createTicket` already used), `loadTicketComments` /
   `createTicketComment` (real comment thread, newest first),
   `loadTicketActivity` (see Activity Log below), `loadOrganizationLabels` /
   `createOrganizationLabel` (the Labels selector's real, per-org,
@@ -1485,12 +1490,29 @@ screen only — every other `mock-team.ts` consumer is untouched.
   is never overridden.
 - `src/lib/projects.ts` — `loadProjectTeam`, `addProjectMember`,
   `removeProjectMember` (direct client delete; the real guarantee against
-  removing a member with history is a database trigger, not this function
-  or the UI), and `hasProjectMemberHistory` (an RPC check deciding whether
-  "Remove from Project" even appears).
-- **"Remove from Project" can never delete a member with real history, at
-  the database level.** A `BEFORE DELETE` trigger on `project_memberships`
-  calls the same history check and raises an exception if it's true.
+  an unsafe removal is a database trigger, not this function or the UI).
+- **"Remove from Project" — real removal flow, revised.** An Admin (or
+  Project Lead — same `canManage` gate `team-screen.tsx`'s own "+ Add
+  Member" button already uses) can remove a Member or Project Lead from
+  the project's `project_memberships` row directly from
+  `member-profile-modal.tsx`'s `MemberMenu`, always offered (no more
+  client-side "has any history at all" pre-check hiding it — that
+  20260809000000 rule made the option effectively unusable, since almost
+  any real team member has *some* history). A `BEFORE DELETE` trigger on
+  `project_memberships` (`project_memberships_prevent_unsafe_delete`,
+  20260910000000, replacing 20260809000000's blanket guard) blocks the
+  delete at the database level only when: (a) this member is the
+  project's only active Project Lead (`project_memberships_one_lead_per_project`
+  already guarantees there's never more than one, so this is simply "is
+  this row currently the lead"), or (b) this member still has a ticket
+  assigned to them in this project whose status isn't `done`. Otherwise —
+  no tickets assigned, or every assigned ticket is already Done — removal
+  succeeds even though the member has real past history; only the one
+  `project_memberships` row is deleted, never the profile/auth user/org
+  membership/ticket/comment/time-entry/activity history, none of which
+  reference it. A rejected attempt now actually surfaces the trigger's own
+  message to the caller (via a real `ErrorToast`) instead of failing
+  silently as before.
 - `src/components/team-screen.tsx` — real roster + real KPIs. "+ Add
   Member" opens `add-team-member-modal.tsx`, a picker over real org
   members not already on the team.
@@ -1546,7 +1568,16 @@ screen only — every other `mock-team.ts` consumer is untouched.
   the user before applying. Fully verified restored afterward. Live-
   validation scripts against this schema must always scope test-data
   creation/cleanup to freshly-generated, uniquely-stamped slugs/emails —
-  never broad/unscoped deletes against any real table).
+  never broad/unscoped deletes against any real table), and
+  `20260910000000_project_member_removal_rules.sql` — **written, not yet
+  applied to the live Supabase project** (needs explicit confirmation
+  before `db:push`). Drops 20260809000000's trigger/function outright and
+  replaces them with `project_membership_is_active_lead`/
+  `project_membership_has_open_tickets` plus a new
+  `project_memberships_prevent_unsafe_delete` trigger implementing the
+  revised removal rule described above. `tsc`/`eslint`/`next build` all
+  pass clean with the accompanying app-code changes; **not yet clicked
+  through in a live browser**, since the migration isn't live yet.
 
 ## Confirmed working (Project Overview — Admin, Project Lead, and Member)
 

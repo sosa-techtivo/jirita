@@ -9,19 +9,18 @@ import type { AvailabilityStatus, TeamMember } from "@/lib/mock-team";
 import { TEAM_MEMBER_REMOVED_EVENT, TEAM_PROJECT_LEAD_CHANGED_EVENT } from "@/lib/mock-team";
 import { getTicketById, getTicketDisplayKey } from "@/lib/mock-tickets";
 import type { Ticket } from "@/lib/mock-tickets";
-import { StatusBadge as TicketStatusBadge, PriorityBadge, TicketTypeIcon, ActivityTimeline } from "@/components/tickets/ticket-ui";
+import { StatusBadge as TicketStatusBadge, PriorityBadge, TicketTypeIcon, ActivityTimeline, ErrorToast } from "@/components/tickets/ticket-ui";
 import type { MockActivity } from "@/components/tickets/ticket-ui";
 import { TicketPreviewPanel } from "@/components/tickets/ticket-preview-panel";
 import type { User, UserStatus } from "@/lib/mock-users";
 import { fullName } from "@/lib/mock-users";
 import type { Role } from "@/lib/current-user";
-import { ROLE_LABELS } from "@/lib/current-user";
+import { ROLE_LABELS, canManage } from "@/lib/current-user";
 import { loadProjectTickets, loadOrganizationTickets, loadUserActivity } from "@/lib/tickets";
 import type { UserActivityEvent } from "@/lib/tickets";
 import { generatePasswordResetLink } from "@/lib/users";
 import { formatHours, round1 } from "@/components/time-tracking-screen";
 import {
-  hasProjectMemberHistory,
   removeProjectMember,
   setProjectLead,
   loadProjectTeam,
@@ -538,23 +537,20 @@ function CloseButton({ onClick }: { onClick: () => void }) {
 // where no single project applies), "View Work History" is omitted from
 // `items` below rather than built into an invalid `/projects//team/...`
 // path; no global/cross-project equivalent page exists yet to fall back to.
-// "Remove from Project" is real (removeProjectMember) and only ever offered
-// when hasProjectMemberHistory confirms this member has no real
-// participation in the project yet — never rendered disabled, simply
-// omitted from `items` otherwise. That check (and both actions) only
-// resolve correctly when `member.id` is a real profiles.id, which is only
-// ever true when this modal was opened from Team (see mock-team.ts's
-// resolveTeamMember — every other trigger across the app still passes a
-// mock/synthesized id, for which the history check safely defaults to
-// "has history" and Remove from Project never appears, matching this
-// menu's previous — dead — behavior for those contexts; View Work History
-// would simply navigate to an empty page for those, same as opening it for
-// anyone with no real history today). The real guarantee against deleting
-// a member with history is the database trigger (20260809000000), not this
-// hidden/shown decision — a stale "no history" read (a contribution
-// landing between the check and the click) simply fails the delete
-// silently here, same as this menu's other items have never surfaced
-// errors before.
+// "Remove from Project" is real (removeProjectMember) and offered whenever
+// the viewer is an Admin/Project Lead (canManage — the same gate
+// team-screen.tsx's own "+ Add Member" button already uses) looking at a
+// real Team roster row (member.projectRole is only ever set by the real
+// Team roster — loadProjectTeam — never by any other trigger across the
+// app, which still pass a mock/synthesized id; matching canMakeLead's own
+// guard below). Whether the removal actually succeeds — never removing the
+// project's only active Project Lead, and never removing a member who
+// still has a non-Done ticket assigned in this project — is entirely a
+// database-level decision (project_memberships_prevent_unsafe_delete,
+// 20260910000000), not a client-side pre-check: this menu always offers
+// the option to someone who can manage the team, and a rejected attempt
+// surfaces that trigger's own clear message via removeError below rather
+// than failing silently.
 function MemberMenu({
   member,
   slug,
@@ -567,19 +563,10 @@ function MemberMenu({
   const { user, organization, isDevFallback } = useCurrentUser();
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  const [canRemove, setCanRemove] = useState(false);
+  const [removeError, setRemoveError] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    if (isDevFallback || !organization) return;
-    let cancelled = false;
-    hasProjectMemberHistory(organization.id, slug, member.id).then((hasHistory) => {
-      if (!cancelled) setCanRemove(!hasHistory);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [organization, isDevFallback, slug, member.id]);
+  const canRemove = canManage(user.role) && member.projectRole !== undefined;
 
   useEffect(() => {
     if (!open) return;
@@ -594,7 +581,14 @@ function MemberMenu({
     setOpen(false);
     if (isDevFallback || !organization) return;
     const result = await removeProjectMember(organization.id, slug, member.id);
-    if (result.status !== "success") return; // leave the member/modal exactly as-is on failure — no separate error UI added here, per this action's existing (unchanged) behavior
+    if (result.status !== "success") {
+      // Surfaces the blocking trigger's own message as-is (e.g. "still has
+      // tickets assigned... aren't Done" / "only active Project Lead") —
+      // the same clear, non-technical sentence the database raised, never
+      // a generic string.
+      setRemoveError(result.message);
+      return;
+    }
     // Only fired once the server has actually confirmed the delete — never
     // before, so Team's own listener (team-screen.tsx) is reacting to a
     // real, already-committed removal, not an optimistic guess.
@@ -695,6 +689,7 @@ function MemberMenu({
         </div>
       </div>
 
+      {removeError && <ErrorToast message={removeError} onDismiss={() => setRemoveError(null)} />}
     </div>
   );
 }

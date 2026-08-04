@@ -35,6 +35,7 @@ import {
 } from "@/components/tickets/ticket-ui";
 import { BackToTicketsButton } from "@/components/tickets/back-to-tickets-button";
 import { TicketPreviewPanel } from "@/components/tickets/ticket-preview-panel";
+import { AcceptanceCriteriaFields } from "@/components/tickets/acceptance-criteria-fields";
 import { getRegisteredTicketByCode } from "@/lib/pending-tickets";
 import {
   loadTicketByCode,
@@ -1148,8 +1149,12 @@ function CollapsibleSection({
 }
 
 // ── Acceptance Criteria ───────────────────────────────────────────────────────
+// Read-only checklist rows — the surrounding CollapsibleSection (title,
+// "N/M done" badge, header "Edit" action, and the view/edit-mode/empty-
+// state swap) lives in EditableAcceptanceCriteria below, which is the only
+// caller of this checklist.
 
-function AcceptanceCriteriaSection({
+function AcceptanceCriteriaChecklist({
   criteria,
   doneFlags,
   onToggle,
@@ -1159,46 +1164,183 @@ function AcceptanceCriteriaSection({
   doneFlags: boolean[];
   onToggle: (index: number) => void;
 }) {
+  return (
+    <ul className="space-y-2.5">
+      {criteria.map((text, i) => {
+        const done = doneFlags[i] ?? false;
+        return (
+          <li key={i} className="flex items-start gap-3">
+            <button
+              onClick={() => onToggle(i)}
+              aria-label={done ? "Mark incomplete" : "Mark complete"}
+              className={
+                "mt-0.5 w-4 h-4 rounded flex-shrink-0 border transition-colors flex items-center justify-center " +
+                (done
+                  ? "bg-brand-500 border-brand-500 dark:bg-brand-600 dark:border-brand-600"
+                  : "border-slate-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 hover:border-brand-400 dark:hover:border-brand-500")
+              }
+            >
+              {done && (
+                <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" strokeWidth="3" viewBox="0 0 12 12">
+                  <path d="M2 6l3 3 5-5" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              )}
+            </button>
+            <span
+              className={
+                "text-[14px] leading-snug select-none cursor-pointer " +
+                (done
+                  ? "line-through text-slate-400 dark:text-zinc-600"
+                  : "text-slate-700 dark:text-zinc-300")
+              }
+              onClick={() => onToggle(i)}
+            >
+              {text}
+            </span>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+// Adds create/edit/delete on top of the read-only checklist above — reuses
+// AcceptanceCriteriaFields, the exact same array-editor component and
+// underlying string[] data structure new-ticket-modal.tsx's own Acceptance
+// Criteria field already uses, and follows EditableDescription's own
+// click-to-edit / Save-Cancel pattern rather than inventing a new one.
+// Saving persists both the text list and a re-aligned doneFlags array
+// together through the ticket's existing onSave (persist()/updateTicket)
+// — never a separate write path — so this goes through exactly the same
+// RLS/permission enforcement every other Ticket Detail edit already does.
+function EditableAcceptanceCriteria({
+  criteria,
+  doneFlags,
+  onToggle,
+  onSave,
+}: {
+  criteria: string[];
+  doneFlags: boolean[];
+  onToggle: (index: number) => void;
+  onSave: (nextCriteria: string[], nextDoneFlags: boolean[]) => Promise<boolean>;
+}) {
+  const [editing, setEditing] = useState(false);
+  // Text and its own done-state travel together per row here (never two
+  // parallel arrays during the edit session), so adding/removing rows can
+  // never misalign a criterion's checked state with the wrong row once saved.
+  const [draftItems, setDraftItems] = useState<{ text: string; done: boolean }[]>([]);
+  const [saving, setSaving] = useState(false);
+  const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
+  const justAdded = useRef(false);
+
+  // Same "focus the newest row" behavior new-ticket-modal.tsx's own
+  // Acceptance Criteria field already has.
+  useEffect(() => {
+    if (justAdded.current && draftItems.length > 0) {
+      justAdded.current = false;
+      inputRefs.current[draftItems.length - 1]?.focus();
+    }
+  }, [draftItems.length]);
+
+  const startEditing = () => {
+    setDraftItems(criteria.map((text, i) => ({ text, done: doneFlags[i] ?? false })));
+    setEditing(true);
+  };
+
+  const addCriterion = () => {
+    justAdded.current = true;
+    setDraftItems((prev) => [...prev, { text: "", done: false }]);
+  };
+  const updateCriterion = (i: number, value: string) =>
+    setDraftItems((prev) => prev.map((it, idx) => (idx === i ? { ...it, text: value } : it)));
+  const removeCriterion = (i: number) =>
+    setDraftItems((prev) => prev.filter((_, idx) => idx !== i));
+
+  const save = async () => {
+    setSaving(true);
+    // Same "drop blank rows before persisting" rule the New Ticket form's
+    // own filledCriteria already applies.
+    const filled = draftItems.filter((it) => it.text.trim().length > 0);
+    const ok = await onSave(filled.map((it) => it.text.trim()), filled.map((it) => it.done));
+    setSaving(false);
+    if (ok) setEditing(false);
+  };
+  const cancel = () => setEditing(false);
+
+  if (editing) {
+    return (
+      <CollapsibleSection title="Acceptance Criteria" defaultOpen={true}>
+        <AcceptanceCriteriaFields
+          criteria={draftItems.map((it) => it.text)}
+          inputRefs={inputRefs}
+          onAdd={addCriterion}
+          onUpdate={updateCriterion}
+          onRemove={removeCriterion}
+        />
+        <div className="flex items-center justify-end gap-2 mt-3">
+          <button
+            type="button"
+            onClick={cancel}
+            disabled={saving}
+            className="px-3.5 py-1.5 text-[13px] font-medium text-slate-600 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={save}
+            disabled={saving}
+            className={[
+              "px-3.5 py-1.5 text-[13px] font-semibold rounded-lg transition-all",
+              saving
+                ? "bg-slate-100 dark:bg-zinc-800 text-slate-400 dark:text-zinc-600 cursor-not-allowed"
+                : "bg-brand-500 hover:bg-brand-600 text-white shadow-sm shadow-brand-500/30 cursor-pointer",
+            ].join(" ")}
+          >
+            Save
+          </button>
+        </div>
+      </CollapsibleSection>
+    );
+  }
+
+  if (criteria.length === 0) {
+    return (
+      <CollapsibleSection title="Acceptance Criteria" defaultOpen={true}>
+        <button
+          type="button"
+          onClick={startEditing}
+          className="flex items-center gap-1.5 text-[13px] font-medium text-slate-400 dark:text-zinc-600 hover:text-brand-600 dark:hover:text-brand-400 transition-colors"
+        >
+          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 5v14M5 12h14" strokeLinecap="round" />
+          </svg>
+          Add acceptance criteria
+        </button>
+      </CollapsibleSection>
+    );
+  }
+
   const doneCount = criteria.filter((_, i) => doneFlags[i] ?? false).length;
 
   return (
-    <CollapsibleSection title="Acceptance Criteria" badge={`· ${doneCount}/${criteria.length} done`} defaultOpen={true}>
-      <ul className="space-y-2.5">
-        {criteria.map((text, i) => {
-          const done = doneFlags[i] ?? false;
-          return (
-            <li key={i} className="flex items-start gap-3">
-              <button
-                onClick={() => onToggle(i)}
-                aria-label={done ? "Mark incomplete" : "Mark complete"}
-                className={
-                  "mt-0.5 w-4 h-4 rounded flex-shrink-0 border transition-colors flex items-center justify-center " +
-                  (done
-                    ? "bg-brand-500 border-brand-500 dark:bg-brand-600 dark:border-brand-600"
-                    : "border-slate-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 hover:border-brand-400 dark:hover:border-brand-500")
-                }
-              >
-                {done && (
-                  <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" strokeWidth="3" viewBox="0 0 12 12">
-                    <path d="M2 6l3 3 5-5" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                )}
-              </button>
-              <span
-                className={
-                  "text-[14px] leading-snug select-none cursor-pointer " +
-                  (done
-                    ? "line-through text-slate-400 dark:text-zinc-600"
-                    : "text-slate-700 dark:text-zinc-300")
-                }
-                onClick={() => onToggle(i)}
-              >
-                {text}
-              </span>
-            </li>
-          );
-        })}
-      </ul>
+    <CollapsibleSection
+      title="Acceptance Criteria"
+      badge={`· ${doneCount}/${criteria.length} done`}
+      defaultOpen={true}
+      headerAction={
+        <button
+          type="button"
+          onClick={startEditing}
+          aria-label="Edit acceptance criteria"
+          className="flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-md bg-slate-100 dark:bg-zinc-800 text-slate-600 dark:text-zinc-300 hover:bg-slate-200 dark:hover:bg-zinc-700 transition-colors"
+        >
+          <PencilIcon className="w-3 h-3" />
+          Edit
+        </button>
+      }
+    >
+      <AcceptanceCriteriaChecklist criteria={criteria} doneFlags={doneFlags} onToggle={onToggle} />
     </CollapsibleSection>
   );
 }
@@ -4044,15 +4186,21 @@ export function TicketDetailScreen({
             </CollapsibleSection>
             </div>
 
-            {ticket.acceptanceCriteria !== undefined && ticket.acceptanceCriteria.length > 0 && (
-              <div className="order-[45]">
-                <AcceptanceCriteriaSection
-                  criteria={ticket.acceptanceCriteria}
-                  doneFlags={ticket.acceptanceCriteriaDone ?? []}
-                  onToggle={toggleAcceptanceCriterion}
-                />
-              </div>
-            )}
+            <div className="order-[45]">
+              <EditableAcceptanceCriteria
+                criteria={ticket.acceptanceCriteria ?? []}
+                doneFlags={ticket.acceptanceCriteriaDone ?? []}
+                onToggle={toggleAcceptanceCriterion}
+                onSave={async (nextCriteria, nextDoneFlags) => {
+                  const ok = await persist({ acceptanceCriteria: nextCriteria, acceptanceCriteriaDone: nextDoneFlags });
+                  if (ok) {
+                    update("acceptanceCriteria", nextCriteria.length > 0 ? nextCriteria : undefined);
+                    update("acceptanceCriteriaDone", nextDoneFlags);
+                  }
+                  return ok;
+                }}
+              />
+            </div>
 
             <div className="order-[50]">
               <AttachmentsSection ref={attachmentsSectionRef} ticketId={ticket.id} projectSlug={ticket.projectSlug} isDevFallback={isDevFallback} onUploaded={refreshActivity} onError={showError} />

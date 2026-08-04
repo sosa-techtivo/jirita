@@ -4,6 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import type { Ticket, TicketStatus, TicketPriority, TicketType } from "@/lib/mock-tickets";
 import { getTicketDisplayKey } from "@/lib/mock-tickets";
 import { StatusBadge, STATUS_LABEL, TicketTypeIcon, TicketTypeSelect, PRIORITY_LABEL } from "@/components/tickets/ticket-ui";
+import { AcceptanceCriteriaFields } from "@/components/tickets/acceptance-criteria-fields";
 import { registerTicket, nextTicketNumber, titleToTicketId } from "@/lib/pending-tickets";
 import { createTicket, uploadTicketAttachment } from "@/lib/tickets";
 import { useCurrentUser } from "@/components/current-user-provider";
@@ -824,55 +825,13 @@ export function NewTicketModal({
                 </span>
               </label>
 
-              {criteria.length > 0 && (
-                <div className="mb-2 border border-slate-200 dark:border-zinc-800 rounded-lg divide-y divide-slate-100 dark:divide-zinc-800">
-                  {criteria.map((c, i) => (
-                    <div key={i} className="flex items-center gap-2.5 px-3 py-2 group">
-                      {/* Visual checkbox */}
-                      <div className="w-3.5 h-3.5 rounded border-[1.5px] border-slate-300 dark:border-zinc-600 flex-shrink-0" />
-                      {/* Text input */}
-                      <input
-                        ref={(el) => { criteriaRefs.current[i] = el; }}
-                        type="text"
-                        value={c}
-                        placeholder="Add a criterion…"
-                        onChange={(e) => updateCriterion(i, e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") { e.preventDefault(); addCriterion(); }
-                          if (e.key === "Backspace" && !criteria[i]) {
-                            e.preventDefault();
-                            removeCriterion(i);
-                            criteriaRefs.current[i - 1]?.focus();
-                          }
-                        }}
-                        className="flex-1 bg-transparent text-[16px] sm:text-[13px] text-slate-800 dark:text-zinc-200 outline-none placeholder:text-slate-300 dark:placeholder:text-zinc-600 min-w-0"
-                      />
-                      {/* Remove */}
-                      <button
-                        type="button"
-                        onClick={() => removeCriterion(i)}
-                        aria-label="Remove criterion"
-                        className="opacity-0 group-hover:opacity-100 focus:opacity-100 p-0.5 rounded text-slate-400 dark:text-zinc-600 hover:text-slate-700 dark:hover:text-zinc-300 transition-opacity flex-shrink-0"
-                      >
-                        <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
-                          <path d="M18 6L6 18M6 6l12 12" />
-                        </svg>
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              <button
-                type="button"
-                onClick={addCriterion}
-                className="flex items-center gap-1.5 text-[12px] font-medium text-slate-400 dark:text-zinc-600 hover:text-brand-600 dark:hover:text-brand-400 transition-colors"
-              >
-                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
-                  <path d="M12 5v14M5 12h14" strokeLinecap="round" />
-                </svg>
-                Add criterion
-              </button>
+              <AcceptanceCriteriaFields
+                criteria={criteria}
+                inputRefs={criteriaRefs}
+                onAdd={addCriterion}
+                onUpdate={updateCriterion}
+                onRemove={removeCriterion}
+              />
             </div>
 
             {/* Attachments — staged locally; the ticket doesn't exist yet,

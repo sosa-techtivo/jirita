@@ -437,9 +437,6 @@ export async function createTicket(
 
 // Persists a single Ticket Detail inline edit. Only fields already present
 // in the schema are accepted — every field here maps 1:1 to a real column.
-// Acceptance criteria TEXT is still not editable anywhere in Ticket Detail
-// (no add/remove/rename UI exists), only each criterion's checked state —
-// see acceptanceCriteriaDone below.
 export interface UpdateTicketInput {
   title?: string;
   description?: string;
@@ -453,6 +450,8 @@ export interface UpdateTicketInput {
   /** ISO date (yyyy-mm-dd), or null to clear. */
   dueDate?: string | null;
   labels?: string[];
+  /** Full, ordered replacement of the ticket's Acceptance Criteria text list (Ticket Detail's edit mode) — an empty array clears it entirely, same as never having set any. */
+  acceptanceCriteria?: string[];
   /** Checked/unchecked state, aligned by index with the ticket's acceptanceCriteria. */
   acceptanceCriteriaDone?: boolean[];
 }
@@ -517,6 +516,11 @@ export async function updateTicket(
   if (input.hours !== undefined) patch.hours = input.hours;
   if (input.dueDate !== undefined) patch.due_date = input.dueDate;
   if (input.labels !== undefined) patch.labels = input.labels;
+  // Same "empty list stored as null" convention createTicket already uses
+  // for this column.
+  if (input.acceptanceCriteria !== undefined) {
+    patch.acceptance_criteria = input.acceptanceCriteria.length > 0 ? input.acceptanceCriteria : null;
+  }
   if (input.acceptanceCriteriaDone !== undefined) patch.acceptance_criteria_done = input.acceptanceCriteriaDone;
 
   const { data: row, error } = await supabase
