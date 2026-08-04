@@ -26,17 +26,18 @@ export type TicketsResult =
   | { status: "not-found" }
   | { status: "error"; message: string };
 
-// Fields the New Ticket modal actually persists — everything else it shows
-// under "More Options" (Type/Status/Priority/Labels/Due Date) keeps its
-// current, unwired behavior for this sprint and is written with fixed
-// defaults below, matching the modal's own current default state. Assignee
-// is the one More Options field that IS persisted — real org member id.
 export interface CreateTicketInput {
   title: string;
   description?: string;
   acceptanceCriteria?: string[];
   hours?: number;
   assigneeProfileId?: string;
+  status?: TicketStatus;
+  type?: TicketType;
+  priority?: TicketPriority;
+  labels?: string[];
+  /** ISO date (yyyy-mm-dd). */
+  dueDate?: string;
 }
 
 export type CreateTicketResult =
@@ -321,10 +322,9 @@ export async function loadTicketByCode(
 // generated here (max existing number for the project + 1) since the
 // `tickets` table has no auto-numbering — matches pending-tickets.ts's
 // existing per-project counter design, just backed by a real query instead
-// of an in-memory Map. Every field the modal doesn't yet expose as
-// configurable is written with the same fixed defaults the modal's own
-// initial state already uses (backlog / normal / task / unassigned / no due
-// date) — see CreateTicketInput above.
+// of an in-memory Map. Status/Type/Priority/Labels/Due Date are all real,
+// optional inputs now, each falling back to the modal's own default
+// (backlog/task/medium/no labels/no due date) only when omitted.
 export async function createTicket(
   organizationId: string,
   slug: string,
@@ -392,11 +392,13 @@ export async function createTicket(
       ticket_number: ticketNumber,
       title: input.title,
       description: input.description ?? null,
-      status: "backlog",
-      priority: "medium",
-      type: "task",
+      status: input.status ? STATUS_TO_DB[input.status] : "backlog",
+      priority: input.priority ?? "medium",
+      type: input.type ? TYPE_TO_DB[input.type] : "task",
+      labels: input.labels && input.labels.length > 0 ? input.labels : null,
       acceptance_criteria: acceptanceCriteria,
       hours: input.hours ?? null,
+      due_date: input.dueDate ?? null,
       assignee_profile_id: input.assigneeProfileId ?? null,
     })
     .select(TICKET_COLUMNS)

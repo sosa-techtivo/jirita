@@ -5,7 +5,7 @@ import type { Ticket, TicketStatus, TicketPriority, TicketType } from "@/lib/moc
 import { getTicketDisplayKey } from "@/lib/mock-tickets";
 import { StatusBadge, STATUS_LABEL, TicketTypeIcon, TicketTypeSelect, PRIORITY_LABEL } from "@/components/tickets/ticket-ui";
 import { registerTicket, nextTicketNumber, titleToTicketId } from "@/lib/pending-tickets";
-import { createTicket } from "@/lib/tickets";
+import { createTicket, uploadTicketAttachment } from "@/lib/tickets";
 import { useCurrentUser } from "@/components/current-user-provider";
 import { FALLBACK_AVATAR } from "@/lib/current-user";
 import type { OrgMember } from "@/lib/projects";
@@ -56,6 +56,134 @@ const INPUT =
 
 const FIELD_LABEL =
   "block text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600 mb-1.5";
+
+// ── Attachments (staged locally — the ticket doesn't exist yet, so nothing
+// uploads until Create Ticket succeeds) ─────────────────────────────────────
+
+const EXT_COLOR: Record<string, string> = {
+  fig:  "bg-purple-100 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400",
+  pdf:  "bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400",
+  mp4:  "bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400",
+  mov:  "bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400",
+  png:  "bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400",
+  jpg:  "bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400",
+  jpeg: "bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400",
+  svg:  "bg-orange-100 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400",
+  zip:  "bg-yellow-100 text-yellow-600 dark:bg-yellow-900/30 dark:text-yellow-400",
+  doc:  "bg-sky-100 text-sky-600 dark:bg-sky-900/30 dark:text-sky-400",
+  docx: "bg-sky-100 text-sky-600 dark:bg-sky-900/30 dark:text-sky-400",
+};
+
+function getExt(name: string): string {
+  return name.split(".").pop()?.toLowerCase() ?? "file";
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+let pendingAttachmentIdCounter = 0;
+
+// Same collision-safety reasoning as ticket-detail-screen.tsx's own newId():
+// a counter avoids two files picked in the same synchronous batch getting
+// the same Date.now() value.
+function newPendingAttachmentId(): string {
+  pendingAttachmentIdCounter += 1;
+  return `pending-att-${Date.now()}-${pendingAttachmentIdCounter}`;
+}
+
+// `previewUrl` is a local blob: URL (URL.createObjectURL(file)) — purely
+// client-side, never uploaded anywhere. It backs both the image thumbnail
+// below and, for non-image files, the "open/download locally" link, so the
+// user can always confirm exactly what they attached before Create Ticket
+// actually persists it.
+type PendingAttachment = { id: string; file: File; previewUrl: string; isImage: boolean };
+
+// Staged, not-yet-uploaded non-image file — same ext badge/size layout as
+// Ticket Detail's AttachmentRow/PendingCommentFileRow. The filename opens/
+// downloads the local file (via its own blob: URL) so the user can verify
+// its contents even though it can't be thumbnailed inline.
+function PendingAttachmentRow({
+  file,
+  previewUrl,
+  onRemove,
+}: {
+  file: File;
+  previewUrl: string;
+  onRemove: () => void;
+}) {
+  const ext = getExt(file.name);
+  const extColor = EXT_COLOR[ext] ?? "bg-slate-100 text-slate-500 dark:bg-zinc-800 dark:text-zinc-400";
+
+  return (
+    <div className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg border border-slate-100 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-900/60">
+      <span className={"w-5 h-5 rounded flex items-center justify-center flex-shrink-0 text-[7px] font-bold uppercase tracking-wide " + extColor}>
+        {ext}
+      </span>
+      <a
+        href={previewUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        download={file.name}
+        title={`Open "${file.name}"`}
+        className="flex-1 min-w-0 text-[12px] font-medium text-slate-700 dark:text-zinc-300 truncate hover:text-brand-600 dark:hover:text-brand-400 hover:underline"
+      >
+        {file.name}
+      </a>
+      <span className="text-[11px] text-slate-400 dark:text-zinc-600 flex-shrink-0">{formatBytes(file.size)}</span>
+      <button
+        type="button"
+        aria-label={`Remove ${file.name}`}
+        onClick={onRemove}
+        className="p-1 rounded text-slate-400 dark:text-zinc-600 hover:text-slate-600 dark:hover:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors flex-shrink-0"
+      >
+        <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+          <path strokeLinecap="round" d="M18 6L6 18M6 6l12 12" />
+        </svg>
+      </button>
+    </div>
+  );
+}
+
+// Staged, not-yet-uploaded image file — an inline thumbnail (fit to width,
+// aspect ratio preserved, capped height so it can never overflow the modal)
+// replaces the plain list row, with the same name/size/Remove strip below it.
+function PendingImageAttachmentRow({
+  file,
+  previewUrl,
+  onRemove,
+}: {
+  file: File;
+  previewUrl: string;
+  onRemove: () => void;
+}) {
+  return (
+    <div className="w-full rounded-lg border border-slate-100 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-900/60 overflow-hidden">
+      <div className="w-full h-48 flex items-center justify-center bg-slate-100 dark:bg-zinc-900">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={previewUrl} alt={file.name} className="max-w-full max-h-full object-contain" />
+      </div>
+      <div className="flex items-center gap-2 px-2.5 py-1.5 border-t border-slate-100 dark:border-zinc-800">
+        <span className="flex-1 min-w-0 text-[12px] font-medium text-slate-700 dark:text-zinc-300 truncate">
+          {file.name}
+        </span>
+        <span className="text-[11px] text-slate-400 dark:text-zinc-600 flex-shrink-0">{formatBytes(file.size)}</span>
+        <button
+          type="button"
+          aria-label={`Remove ${file.name}`}
+          onClick={onRemove}
+          className="p-1 rounded text-slate-400 dark:text-zinc-600 hover:text-slate-600 dark:hover:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors flex-shrink-0"
+        >
+          <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+            <path strokeLinecap="round" d="M18 6L6 18M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+    </div>
+  );
+}
 
 // ── Label picker (inline, avoids overflow clipping issues) ────────────────────
 
@@ -228,18 +356,34 @@ export function NewTicketModal({
   const [assigneeId, setAssigneeId]     = useState("");
   const [labels, setLabels]             = useState<string[]>([]);
   const [dueDate, setDueDate]           = useState("");
-  const [hours, setHours]               = useState("");
-  const [moreOpen, setMoreOpen]         = useState(false);
+  const [attachments, setAttachments]   = useState<PendingAttachment[]>([]);
   const [submitting, setSubmitting]     = useState(false);
   const [error, setError]               = useState<string | null>(null);
 
-  const titleRef      = useRef<HTMLInputElement>(null);
-  const textareaRef   = useRef<HTMLTextAreaElement>(null);
-  const criteriaRefs  = useRef<(HTMLInputElement | null)[]>([]);
-  const justAddedCrit = useRef(false);
+  const titleRef        = useRef<HTMLInputElement>(null);
+  const textareaRef     = useRef<HTMLTextAreaElement>(null);
+  const criteriaRefs    = useRef<(HTMLInputElement | null)[]>([]);
+  const justAddedCrit   = useRef(false);
+  const fileInputRef    = useRef<HTMLInputElement>(null);
+
+  // Kept in sync after every commit so the unmount effect below always
+  // revokes whatever's actually staged, without listing `attachments` as a
+  // dep (which would tear down and recreate the cleanup on every add/remove).
+  const attachmentsRef = useRef<PendingAttachment[]>(attachments);
+  useLayoutEffect(() => {
+    attachmentsRef.current = attachments;
+  });
 
   // Focus title on open
   useEffect(() => { if (visible) titleRef.current?.focus(); }, [visible]);
+
+  // Revoke every staged attachment's local blob: URL on unmount — they're
+  // never uploaded anywhere, so nothing else releases them.
+  useEffect(() => {
+    return () => {
+      attachmentsRef.current.forEach((a) => URL.revokeObjectURL(a.previewUrl));
+    };
+  }, []);
 
   // Lock body scroll
   useEffect(() => {
@@ -294,7 +438,6 @@ export function NewTicketModal({
       labels,
       acceptanceCriteria: filledCriteria.length > 0 ? filledCriteria : undefined,
       dueDate:     dueDate ? formatDueDate(dueDate) : undefined,
-      hours:       hours ? (parseInt(hours, 10) >= 0 ? parseInt(hours, 10) : undefined) : undefined,
       updatedAt:   "Just now",
     };
   };
@@ -302,14 +445,9 @@ export function NewTicketModal({
   const handleSubmit = async () => {
     if (!canSubmit) { titleRef.current?.focus(); return; }
 
-    // Estimation stays optional at creation — JIRITA only ever requires a
-    // real estimate before a ticket moves to In Progress/In Review/Done
-    // (enforced in updateTicket, lib/tickets.ts), never at creation time.
-    const parsedHours = hours ? parseInt(hours, 10) : undefined;
-    const validHours = parsedHours !== undefined && parsedHours >= 0 ? parsedHours : undefined;
-
     // Dev-only fallback: no real organization — unchanged local/mock
-    // behavior (never reached once a real organization exists).
+    // behavior (never reached once a real organization exists). There's no
+    // real Storage to upload staged attachments to here, so they're dropped.
     if (isDevFallback || !organization) {
       const ticket = buildTicket();
       registerTicket(ticket);
@@ -325,12 +463,29 @@ export function NewTicketModal({
         title: title.trim(),
         description: description.trim() || undefined,
         acceptanceCriteria: filledCriteria.length > 0 ? filledCriteria : undefined,
-        hours: validHours,
         assigneeProfileId: assigneeId || undefined,
+        status,
+        type: ticketType,
+        priority,
+        labels: labels.length > 0 ? labels : undefined,
+        dueDate: dueDate || undefined,
       });
       if (result.status === "error") {
         setError(result.message);
         return;
+      }
+      // Attachments only exist once the ticket does — uploaded here,
+      // best-effort, same "doesn't block the primary write" convention as
+      // the Ticket Detail comment composer's own Attach flow. A failed
+      // upload never undoes the ticket that was just created.
+      if (attachments.length > 0) {
+        await Promise.all(
+          attachments.map((item) =>
+            uploadTicketAttachment(result.ticket.id, item.file).catch((err) => {
+              console.error(`Failed to upload attachment "${item.file.name}":`, err);
+            })
+          )
+        );
       }
       onCreated(result.ticket);
     } catch (err) {
@@ -417,6 +572,43 @@ export function NewTicketModal({
           {/* ── Scrollable body ──────────────────────────────────────────────── */}
           <div className="flex-1 overflow-y-auto px-6 pb-2 space-y-5">
 
+            {/* Type + Assignee + Status + Priority */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div>
+                <label className={FIELD_LABEL}>Type</label>
+                <TicketTypeSelect
+                  value={ticketType}
+                  onChange={setTicketType}
+                  buttonClassName={INPUT + " flex items-center justify-between"}
+                />
+              </div>
+              <div>
+                <label className={FIELD_LABEL}>Assignee</label>
+                <select value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)} className={INPUT}>
+                  <option value="">— Unassigned</option>
+                  {members.map((m) => (
+                    <option key={m.id} value={m.id}>{m.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className={FIELD_LABEL}>Status</label>
+                <select value={status} onChange={(e) => setStatus(e.target.value as TicketStatus)} className={INPUT}>
+                  {(Object.keys(STATUS_LABEL) as TicketStatus[]).map((k) => (
+                    <option key={k} value={k}>{STATUS_LABEL[k]}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className={FIELD_LABEL}>Priority</label>
+                <select value={priority} onChange={(e) => setPriority(e.target.value as TicketPriority)} className={INPUT}>
+                  {(Object.keys(PRIORITY_LABEL) as TicketPriority[]).map((k) => (
+                    <option key={k} value={k}>{PRIORITY_LABEL[k]}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
             {/* Title */}
             <div>
               <label className={FIELD_LABEL}>
@@ -458,6 +650,64 @@ export function NewTicketModal({
                 rows={3}
                 className={INPUT + " resize-none leading-relaxed py-2.5 overflow-hidden"}
               />
+            </div>
+
+            {/* Possible Duplicates */}
+            {duplicates.length > 0 && (
+              <div className="rounded-xl border border-amber-200 dark:border-amber-900/50 bg-amber-50/60 dark:bg-amber-950/15 overflow-hidden">
+                <div className="flex items-center gap-1.5 px-3.5 py-2.5 border-b border-amber-100 dark:border-amber-900/40">
+                  <svg className="w-3 h-3 text-amber-500 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
+                  </svg>
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-amber-600 dark:text-amber-400">
+                    Possible Duplicates
+                  </p>
+                </div>
+                <div className="divide-y divide-amber-100 dark:divide-amber-900/30">
+                  {duplicates.map((t) => (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() => { onPreviewDuplicate(t); onClose(); }}
+                      className="w-full flex items-center gap-2.5 px-3.5 py-2.5 hover:bg-amber-100/60 dark:hover:bg-amber-950/30 transition-colors text-left"
+                    >
+                      <TicketTypeIcon type={t.type} />
+                      <span className="font-mono text-[10px] font-semibold text-amber-700 dark:text-amber-500 flex-shrink-0">
+                        {getTicketDisplayKey(t)}
+                      </span>
+                      <StatusBadge status={t.status} />
+                      <span className="text-[12px] text-slate-700 dark:text-zinc-300 truncate min-w-0">
+                        {t.title}
+                      </span>
+                      <svg className="w-3 h-3 text-amber-400 dark:text-amber-600 flex-shrink-0 ml-auto" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                        <path d="M9 18l6-6-6-6" />
+                      </svg>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Labels + Due Date */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className={FIELD_LABEL}>Labels</label>
+                <LabelPicker selected={labels} onToggle={toggleLabel} />
+              </div>
+              <div>
+                <label className={FIELD_LABEL}>
+                  Due Date
+                  <span className="ml-2 font-normal normal-case tracking-normal text-slate-300 dark:text-zinc-700">
+                    optional
+                  </span>
+                </label>
+                <input
+                  type="date"
+                  value={dueDate}
+                  onChange={(e) => setDueDate(e.target.value)}
+                  className={INPUT}
+                />
+              </div>
             </div>
 
             {/* Acceptance Criteria */}
@@ -520,167 +770,71 @@ export function NewTicketModal({
               </button>
             </div>
 
-            {/* Hours — always visible, always optional at creation. */}
+            {/* Attachments — staged locally; the ticket doesn't exist yet,
+                so nothing uploads until Create Ticket actually succeeds. */}
             <div>
               <label className={FIELD_LABEL}>
-                Hours
+                Attachments
                 <span className="ml-2 font-normal normal-case tracking-normal text-slate-300 dark:text-zinc-700">
                   optional
                 </span>
               </label>
-              <div className="relative flex items-center w-36">
-                <input
-                  type="number"
-                  min="0"
-                  step="1"
-                  placeholder="8"
-                  value={hours}
-                  onChange={(e) => setHours(e.target.value)}
-                  className={INPUT + " pr-8"}
-                />
-                <span className="absolute right-3 text-[12px] text-slate-400 dark:text-zinc-600 pointer-events-none select-none">
-                  h
-                </span>
-              </div>
-            </div>
 
-            {/* Possible Duplicates */}
-            {duplicates.length > 0 && (
-              <div className="rounded-xl border border-amber-200 dark:border-amber-900/50 bg-amber-50/60 dark:bg-amber-950/15 overflow-hidden">
-                <div className="flex items-center gap-1.5 px-3.5 py-2.5 border-b border-amber-100 dark:border-amber-900/40">
-                  <svg className="w-3 h-3 text-amber-500 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                    <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
-                  </svg>
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-amber-600 dark:text-amber-400">
-                    Possible Duplicates
-                  </p>
-                </div>
-                <div className="divide-y divide-amber-100 dark:divide-amber-900/30">
-                  {duplicates.map((t) => (
-                    <button
-                      key={t.id}
-                      type="button"
-                      onClick={() => { onPreviewDuplicate(t); onClose(); }}
-                      className="w-full flex items-center gap-2.5 px-3.5 py-2.5 hover:bg-amber-100/60 dark:hover:bg-amber-950/30 transition-colors text-left"
-                    >
-                      <TicketTypeIcon type={t.type} />
-                      <span className="font-mono text-[10px] font-semibold text-amber-700 dark:text-amber-500 flex-shrink-0">
-                        {getTicketDisplayKey(t)}
-                      </span>
-                      <StatusBadge status={t.status} />
-                      <span className="text-[12px] text-slate-700 dark:text-zinc-300 truncate min-w-0">
-                        {t.title}
-                      </span>
-                      <svg className="w-3 h-3 text-amber-400 dark:text-amber-600 flex-shrink-0 ml-auto" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                        <path d="M9 18l6-6-6-6" />
-                      </svg>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                className="hidden"
+                onChange={(e) => {
+                  if (e.target.files?.length) {
+                    const items = Array.from(e.target.files).map((file) => ({
+                      id: newPendingAttachmentId(),
+                      file,
+                      previewUrl: URL.createObjectURL(file),
+                      isImage: file.type.startsWith("image/"),
+                    }));
+                    setAttachments((prev) => [...prev, ...items]);
+                    e.target.value = "";
+                  }
+                }}
+              />
 
-            {/* More Options (collapsible) */}
-            <div>
+              {attachments.length > 0 && (
+                <div className="mb-2 space-y-1.5">
+                  {attachments.map((item) => {
+                    const remove = () => {
+                      URL.revokeObjectURL(item.previewUrl);
+                      setAttachments((prev) => prev.filter((p) => p.id !== item.id));
+                    };
+                    return item.isImage ? (
+                      <PendingImageAttachmentRow
+                        key={item.id}
+                        file={item.file}
+                        previewUrl={item.previewUrl}
+                        onRemove={remove}
+                      />
+                    ) : (
+                      <PendingAttachmentRow
+                        key={item.id}
+                        file={item.file}
+                        previewUrl={item.previewUrl}
+                        onRemove={remove}
+                      />
+                    );
+                  })}
+                </div>
+              )}
+
               <button
                 type="button"
-                onClick={() => setMoreOpen((v) => !v)}
-                className="flex items-center gap-3 w-full group focus:outline-none focus-visible:ring-1 focus-visible:ring-brand-500/40 rounded"
+                onClick={() => fileInputRef.current?.click()}
+                className="flex items-center gap-1.5 text-[12px] font-medium text-slate-400 dark:text-zinc-600 hover:text-brand-600 dark:hover:text-brand-400 transition-colors"
               >
-                <p className="text-[10px] font-bold uppercase tracking-widest text-slate-300 dark:text-zinc-700 flex-shrink-0 group-hover:text-slate-400 dark:group-hover:text-zinc-500 transition-colors">
-                  More Options
-                </p>
-                <div className="flex-1 h-px bg-slate-100 dark:bg-zinc-800" />
-                <svg
-                  className={
-                    "w-3 h-3 text-slate-300 dark:text-zinc-700 group-hover:text-slate-400 dark:group-hover:text-zinc-500 " +
-                    "transition-all duration-200 flex-shrink-0 " +
-                    (moreOpen ? "rotate-0" : "-rotate-90")
-                  }
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2.5"
-                  viewBox="0 0 24 24"
-                  aria-hidden
-                >
-                  <path d="M19 9l-7 7-7-7" strokeLinecap="round" strokeLinejoin="round" />
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                  <path d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.372L8.552 18.32m.009-.01l-.01.01m5.699-9.941l-7.81 7.81a1.5 1.5 0 002.112 2.13" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
+                Attach files
               </button>
-
-              {/* Animated content */}
-              <div
-                className={
-                  "grid transition-all duration-200 ease-in-out " +
-                  (moreOpen ? "grid-rows-[1fr]" : "grid-rows-[0fr]")
-                }
-              >
-                <div className="overflow-hidden">
-                  <div className="pt-4 space-y-3">
-
-                    {/* Type + Status + Priority */}
-                    <div className="grid grid-cols-3 gap-3">
-                      <div>
-                        <label className={FIELD_LABEL}>Type</label>
-                        <TicketTypeSelect
-                          value={ticketType}
-                          onChange={setTicketType}
-                          buttonClassName={INPUT + " flex items-center justify-between"}
-                        />
-                      </div>
-                      <div>
-                        <label className={FIELD_LABEL}>Status</label>
-                        <select value={status} onChange={(e) => setStatus(e.target.value as TicketStatus)} className={INPUT}>
-                          {(Object.keys(STATUS_LABEL) as TicketStatus[]).map((k) => (
-                            <option key={k} value={k}>{STATUS_LABEL[k]}</option>
-                          ))}
-                        </select>
-                      </div>
-                      <div>
-                        <label className={FIELD_LABEL}>Priority</label>
-                        <select value={priority} onChange={(e) => setPriority(e.target.value as TicketPriority)} className={INPUT}>
-                          {(Object.keys(PRIORITY_LABEL) as TicketPriority[]).map((k) => (
-                            <option key={k} value={k}>{PRIORITY_LABEL[k]}</option>
-                          ))}
-                        </select>
-                      </div>
-                    </div>
-
-                    {/* Assignee */}
-                    <div>
-                      <label className={FIELD_LABEL}>Assignee</label>
-                      <select value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)} className={INPUT}>
-                        <option value="">— Unassigned</option>
-                        {members.map((m) => (
-                          <option key={m.id} value={m.id}>{m.name}</option>
-                        ))}
-                      </select>
-                    </div>
-
-                    {/* Labels — searchable inline picker */}
-                    <div>
-                      <label className={FIELD_LABEL}>Labels</label>
-                      <LabelPicker selected={labels} onToggle={toggleLabel} />
-                    </div>
-
-                    {/* Due Date */}
-                    <div className="pb-1">
-                      <label className={FIELD_LABEL}>
-                        Due Date
-                        <span className="ml-2 font-normal normal-case tracking-normal text-slate-300 dark:text-zinc-700">
-                          optional
-                        </span>
-                      </label>
-                      <input
-                        type="date"
-                        value={dueDate}
-                        onChange={(e) => setDueDate(e.target.value)}
-                        className={INPUT}
-                      />
-                    </div>
-
-                  </div>
-                </div>
-              </div>
             </div>
 
             {error && <p className="text-[13px] text-red-600 dark:text-red-400 pb-1">{error}</p>}

@@ -21,10 +21,12 @@ import {
 } from "@/components/tickets/ticket-ui";
 import {
   loadTicketComments,
-  loadTicketActivity,
+  loadTicketAttachments,
+  getTicketAttachmentPreviewUrl,
+  downloadTicketAttachment,
   updateTicket,
   type TicketComment,
-  type TicketActivityEvent,
+  type TicketAttachment,
   type UpdateTicketInput,
 } from "@/lib/tickets";
 import { MemberTrigger } from "@/components/member-profile";
@@ -35,6 +37,125 @@ import type { OrgMember } from "@/lib/projects";
 
 const FIELD_LABEL = "text-[10px] font-semibold uppercase tracking-widest text-slate-400 dark:text-zinc-600 mb-1";
 const FIELD_VALUE = "text-[12px] font-medium text-slate-800 dark:text-zinc-200";
+
+// ── Attachments (read-only) ─────────────────────────────────────────────────
+// Same visual criteria as the New Ticket modal's own staged-attachment rows
+// (an image gets an inline thumbnail; anything else gets a list row), but
+// these are real, already-uploaded attachments — preview goes through a
+// short-lived signed URL and download through the authenticated fetch, the
+// same two gateways ticket-detail-screen.tsx's own Attachments section uses,
+// since the Storage bucket is private and has no direct public URL.
+
+const EXT_COLOR: Record<string, string> = {
+  fig:  "bg-purple-100 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400",
+  pdf:  "bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400",
+  mp4:  "bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400",
+  mov:  "bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400",
+  png:  "bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400",
+  jpg:  "bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400",
+  jpeg: "bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400",
+  svg:  "bg-orange-100 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400",
+  zip:  "bg-yellow-100 text-yellow-600 dark:bg-yellow-900/30 dark:text-yellow-400",
+  doc:  "bg-sky-100 text-sky-600 dark:bg-sky-900/30 dark:text-sky-400",
+  docx: "bg-sky-100 text-sky-600 dark:bg-sky-900/30 dark:text-sky-400",
+};
+
+function getExt(name: string): string {
+  return name.split(".").pop()?.toLowerCase() ?? "file";
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+// Same extension allowlist as ticket-detail-screen.tsx's own
+// PREVIEWABLE_IMAGE_EXTS. Never attempted when !isAvailable — a Data Only
+// Backup restore has no physical Storage object to fetch a preview for.
+const PREVIEWABLE_IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "avif"]);
+
+function isPreviewableImage(attachment: TicketAttachment): boolean {
+  return attachment.isAvailable && PREVIEWABLE_IMAGE_EXTS.has(getExt(attachment.filename));
+}
+
+// Image attachment — fetches its own short-lived signed URL (same
+// getTicketAttachmentPreviewUrl used by AttachmentPreviewModal) and renders
+// it as an inline thumbnail: fit to width, aspect ratio preserved via
+// object-contain inside a capped-height box, so it can never overflow the
+// panel regardless of the image's own dimensions.
+function PreviewAttachmentImageRow({ attachment }: { attachment: TicketAttachment }) {
+  const [url, setUrl] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    getTicketAttachmentPreviewUrl(attachment.storagePath).then((result) => {
+      if (cancelled) return;
+      if (result.status === "error") { setFailed(true); return; }
+      setUrl(result.url);
+    });
+    return () => { cancelled = true; };
+  }, [attachment.storagePath]);
+
+  return (
+    <div className="w-full rounded-lg border border-slate-100 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-900/60 overflow-hidden">
+      <div className="w-full h-48 flex items-center justify-center bg-slate-100 dark:bg-zinc-900">
+        {url && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={url} alt={attachment.filename} className="max-w-full max-h-full object-contain" />
+        )}
+        {!url && !failed && (
+          <svg className="w-4 h-4 animate-spin text-slate-300 dark:text-zinc-700" fill="none" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+          </svg>
+        )}
+        {failed && (
+          <p className="text-[11px] text-slate-400 dark:text-zinc-600">Couldn&apos;t load preview.</p>
+        )}
+      </div>
+      <div className="flex items-center gap-2 px-2.5 py-1.5 border-t border-slate-100 dark:border-zinc-800">
+        <span className="flex-1 min-w-0 text-[12px] font-medium text-slate-700 dark:text-zinc-300 truncate">
+          {attachment.filename}
+        </span>
+        <span className="text-[11px] text-slate-400 dark:text-zinc-600 flex-shrink-0">
+          {formatBytes(attachment.sizeBytes)}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// Non-image attachment — plain list row. The filename itself is the
+// open/download action (same authenticated downloadTicketAttachment every
+// other real Attachments UI in the app uses — the bucket is private, so a
+// plain href can't work), disabled with an explanatory title when the file
+// has no physical Storage object to fetch (!isAvailable).
+function PreviewAttachmentFileRow({ attachment }: { attachment: TicketAttachment }) {
+  const ext = getExt(attachment.filename);
+  const extColor = EXT_COLOR[ext] ?? "bg-slate-100 text-slate-500 dark:bg-zinc-800 dark:text-zinc-400";
+
+  return (
+    <div className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg border border-slate-100 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-900/60">
+      <span className={"w-5 h-5 rounded flex items-center justify-center flex-shrink-0 text-[7px] font-bold uppercase tracking-wide " + extColor}>
+        {ext}
+      </span>
+      <button
+        type="button"
+        disabled={!attachment.isAvailable}
+        onClick={() => downloadTicketAttachment(attachment.storagePath, attachment.filename)}
+        title={attachment.isAvailable ? `Download "${attachment.filename}"` : "File not included in this backup"}
+        className="flex-1 min-w-0 text-left text-[12px] font-medium text-slate-700 dark:text-zinc-300 truncate hover:text-brand-600 dark:hover:text-brand-400 hover:underline disabled:hover:no-underline disabled:hover:text-slate-700 dark:disabled:hover:text-zinc-300 disabled:cursor-default"
+      >
+        {attachment.filename}
+      </button>
+      <span className="text-[11px] text-slate-400 dark:text-zinc-600 flex-shrink-0">
+        {formatBytes(attachment.sizeBytes)}
+      </span>
+    </div>
+  );
+}
 
 // ── Editable field controls (preview-panel-sized) ───────────────────────────
 // Mirror Ticket Detail's EditableSidebarXxx components in ticket-detail-screen.tsx
@@ -522,11 +643,10 @@ export function TicketPreviewPanel({
     setTimeout(onClose, 250);
   }
 
-  // Real Comments/Activity for the displayed ticket only — this panel has no
-  // comment-creation UI, but edits made here (when editable) do generate
-  // real Activity Log rows, refetched by persistPatch below after each save.
+  // Real Comments/Attachments for the displayed ticket only — this panel has
+  // no comment-creation or attachment-upload UI, both are read-only here.
   const [comments, setComments] = useState<TicketComment[]>([]);
-  const [activity, setActivity] = useState<TicketActivityEvent[]>([]);
+  const [attachments, setAttachments] = useState<TicketAttachment[]>([]);
   // Surfaces a failed inline edit (see persistPatch below) — previously only
   // logged to the console, with no indication the change didn't save.
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -537,9 +657,9 @@ export function TicketPreviewPanel({
       if (cancelled) return;
       setComments(result.status === "ready" ? result.comments : []);
     });
-    loadTicketActivity(displayedTicket.id).then((result) => {
+    loadTicketAttachments(displayedTicket.id).then((result) => {
       if (cancelled) return;
-      setActivity(result.status === "ready" ? result.events : []);
+      setAttachments(result.status === "ready" ? result.attachments : []);
     });
     return () => {
       cancelled = true;
@@ -550,13 +670,11 @@ export function TicketPreviewPanel({
 
   // The single gateway every editable field below goes through — same
   // updateTicket() action Ticket Detail's own inline edits use (see
-  // ticket-detail-screen.tsx's persist()). A real trigger already logs the
-  // Activity Log row as part of the same update (20260728000000), so this
-  // only needs to refetch it, never invent a local entry. Local state only
-  // updates after a confirmed success, so a failed edit never leaves an
-  // incorrect optimistic value on screen — the field just keeps showing
-  // whatever was last actually saved. applyLocally covers only the
-  // dev-fallback path (no real ticket row to write to).
+  // ticket-detail-screen.tsx's persist()). Local state only updates after a
+  // confirmed success, so a failed edit never leaves an incorrect optimistic
+  // value on screen — the field just keeps showing whatever was last
+  // actually saved. applyLocally covers only the dev-fallback path (no real
+  // ticket row to write to).
   function persistPatch(patch: UpdateTicketInput, applyLocally: (prev: Ticket) => Ticket) {
     if (isDevFallback) {
       setDisplayedTicket(applyLocally);
@@ -570,9 +688,6 @@ export function TicketPreviewPanel({
       }
       setDisplayedTicket(result.ticket);
       onTicketUpdated?.(result.ticket);
-      loadTicketActivity(result.ticket.id).then((r) => {
-        if (r.status === "ready") setActivity(r.events);
-      });
     }).catch((err) => {
       console.warn("[ticket-preview] failed to save change:", err);
       setErrorMessage(err instanceof Error ? err.message : "Something went wrong. Please try again.");
@@ -845,41 +960,21 @@ export function TicketPreviewPanel({
             )}
           </div>
 
-          {/* ── Activity (vertical timeline) ─────────────────────────────────── */}
-          <div className="px-5 pt-4 pb-6 border-t border-slate-100 dark:border-zinc-800">
-            <p className={`${FIELD_LABEL} mb-3`}>Activity</p>
-
-            {activity.length === 0 ? (
-              <p className="text-[12px] text-slate-400 dark:text-zinc-600">No activity yet.</p>
-            ) : (
-            <div>
-              {activity.map((a, i) => {
-                const isLast = i === activity.length - 1;
-                return (
-                  <div key={i} className="flex gap-3">
-                    {/* Timeline track: dot + connecting line */}
-                    <div className="flex flex-col items-center w-4 flex-shrink-0">
-                      <div className="w-2 h-2 rounded-full bg-slate-300 dark:bg-zinc-600 mt-1.5 flex-shrink-0 ring-2 ring-white dark:ring-zinc-950" />
-                      {!isLast && (
-                        <div className="w-px flex-1 bg-slate-200 dark:bg-zinc-800 mt-1 min-h-[16px]" />
-                      )}
-                    </div>
-
-                    {/* Event label + timestamp */}
-                    <div className={`flex-1 min-w-0 ${isLast ? "pb-1" : "pb-3.5"}`}>
-                      <p className="text-[12px] text-slate-700 dark:text-zinc-300 leading-snug">
-                        {a.label}
-                      </p>
-                      <p className="text-[10px] text-slate-400 dark:text-zinc-600 mt-0.5">
-                        {a.timeAgo}
-                      </p>
-                    </div>
-                  </div>
-                );
-              })}
+          {/* ── Attachments ──────────────────────────────────────────────────── */}
+          {attachments.length > 0 && (
+            <div className="px-5 pt-4 pb-6 border-t border-slate-100 dark:border-zinc-800">
+              <p className={`${FIELD_LABEL} mb-3`}>Attachments</p>
+              <div className="space-y-2">
+                {attachments.map((a) =>
+                  isPreviewableImage(a) ? (
+                    <PreviewAttachmentImageRow key={a.id} attachment={a} />
+                  ) : (
+                    <PreviewAttachmentFileRow key={a.id} attachment={a} />
+                  )
+                )}
+              </div>
             </div>
-            )}
-          </div>
+          )}
         </div>
 
         {/* ── Footer: always visible, outside scroll container ─────────────── */}
