@@ -6,7 +6,16 @@
 // Nothing here is React-specific, so both RichTextEditor and RichTextViewer
 // (and any future non-editor consumer) share one implementation.
 
-import DOMPurify from "isomorphic-dompurify";
+// Plain, browser-only DOMPurify — not "isomorphic-dompurify". That package
+// constructs a real jsdom window at module-import time (unconditionally,
+// even in Node/SSR), which is what actually crashed every route that
+// merely imported this file: jsdom either isn't traced into the Vercel
+// serverless bundle correctly or simply can't run there, so requiring it
+// throws the instant this module loads — before sanitizeRichTextHtml is
+// even called. Plain dompurify imports safely with no window (isSupported
+// just becomes false); see rich-text-viewer.tsx for why sanitize() itself
+// is still only ever actually invoked client-side.
+import DOMPurify from "dompurify";
 
 // A real HTML tag anywhere in the string is enough to treat a value as
 // already-rich content — Tiptap always emits at least one block tag
