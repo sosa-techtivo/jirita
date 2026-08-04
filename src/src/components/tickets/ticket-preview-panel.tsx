@@ -30,6 +30,7 @@ import {
   type UpdateTicketInput,
 } from "@/lib/tickets";
 import { MemberTrigger } from "@/components/member-profile";
+import { RichTextViewer } from "@/components/rich-text/rich-text-viewer";
 import { round1 } from "@/components/time-tracking-screen";
 import { Avatar } from "@/components/ui/avatar";
 import { FALLBACK_AVATAR } from "@/lib/current-user";
@@ -768,9 +769,7 @@ export function TicketPreviewPanel({
           {/* ── Description ──────────────────────────────────────────────────── */}
           <div className="px-5 pt-4 pb-5 border-t border-slate-100 dark:border-zinc-800">
             <p className={`${FIELD_LABEL} mb-2.5`}>Description</p>
-            <p className="text-[13px] text-slate-700 dark:text-zinc-300 leading-relaxed">
-              {t.description}
-            </p>
+            <RichTextViewer content={t.description} className="text-[13px] text-slate-700 dark:text-zinc-300" />
           </div>
 
           {/* ── Acceptance Criteria ──────────────────────────────────────────── */}
@@ -844,9 +843,10 @@ export function TicketPreviewPanel({
                         · {c.timeAgo}
                       </span>
                     </p>
-                    <p className="text-[12px] text-slate-600 dark:text-zinc-400 leading-relaxed mt-1">
-                      {c.text}
-                    </p>
+                    <RichTextViewer
+                      content={c.text}
+                      className="text-[12px] text-slate-600 dark:text-zinc-400 mt-1"
+                    />
                   </div>
                 </div>
               ))}

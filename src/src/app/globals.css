@@ -85,6 +85,10 @@ body {
      this component never silently overrides a field's own established
      text size. */
   line-height: 1.7;
+  /* A long unbroken run (a bare URL, a long link) must wrap within
+     whatever narrow container this renders in (e.g. the compact preview
+     panel) instead of forcing horizontal overflow. */
+  overflow-wrap: anywhere;
   color: var(--tw-prose-body, inherit);
 }
 
