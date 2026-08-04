@@ -159,7 +159,18 @@ export function Sidebar({
   const router = useRouter();
   const mainNav     = mainNavForRole(user.role);
   const projectNav  = projectNavForRole(user.role);
-  const pinnedProjects = projects.filter((project) => project.status !== "archived").slice(0, 3);
+  // Same "not archived" rule the Projects view itself defaults to
+  // (projects-list-screen.tsx's own `matchesStatus` with no Status filter
+  // applied) — the single shared visibility rule between both surfaces,
+  // since `projects` here is already the exact same RLS-scoped array
+  // ManagedProjectsScreen/MemberProjectsScreen read via this same
+  // useOrganizationProjects() hook. Admin's global role already grants
+  // visibility into every org project (projects_select RLS), independent of
+  // any project_memberships row, so an Admin sees every one of them here —
+  // not just the 3 most recently updated. Project Lead/Member keep the
+  // existing 3-item "pinned" cap unchanged.
+  const visibleProjects = projects.filter((project) => project.status !== "archived");
+  const pinnedProjects = user.role === "ADMIN" ? visibleProjects : visibleProjects.slice(0, 3);
   // Member never creates projects (same rule projects-list-screen.tsx and
   // dashboard-screen.tsx's own "New Project" buttons already enforce) — this
   // quick-create "+" next to the pinned Projects list had no such check.
