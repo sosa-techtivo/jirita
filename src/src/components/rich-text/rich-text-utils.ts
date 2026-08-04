@@ -78,3 +78,15 @@ export function sanitizeRichTextHtml(html: string): string {
 export function disableCheckboxes(html: string): string {
   return html.replace(/<input(?![^>]*\bdisabled\b)([^>]*)>/g, "<input$1 disabled>");
 }
+
+// A brand-new Tiptap doc still serializes to "<p></p>" — a non-empty
+// string that would otherwise pass any naive `.trim().length > 0` check.
+// Reuses DOMPurify itself (stripping every tag leaves only real text
+// content) rather than a second, regex-based "is this actually blank"
+// implementation. Any field that requires real content (Comments) should
+// gate its own submit button on this, exactly like a plain <textarea>
+// would gate on `.trim().length === 0`.
+export function isRichTextEmpty(html: string): boolean {
+  if (!html) return true;
+  return DOMPurify.sanitize(html, { ALLOWED_TAGS: [] }).replace(/\s+/g, "").length === 0;
+}

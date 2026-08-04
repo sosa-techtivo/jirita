@@ -79,7 +79,11 @@ body {
    controls the markup of. */
 
 .jirita-rich-text {
-  font-size: 14px;
+  /* No font-size here on purpose — every real caller sets its own via
+     className/contentClassName (Description: 14px, Comments: 13px, plus
+     the shared 16px-on-mobile iOS-zoom-prevention size while editing), so
+     this component never silently overrides a field's own established
+     text size. */
   line-height: 1.7;
   color: var(--tw-prose-body, inherit);
 }

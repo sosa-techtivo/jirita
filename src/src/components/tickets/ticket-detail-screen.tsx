@@ -41,6 +41,7 @@ import {
   loadTicketComments,
   loadTicketActivity,
   createTicketComment,
+  updateTicketComment,
   updateTicket,
   loadOrganizationLabels,
   createOrganizationLabel,
@@ -73,7 +74,7 @@ import { formatHours } from "@/components/time-tracking-screen";
 import { MemberTrigger } from "@/components/member-profile";
 import { RichTextEditor } from "@/components/rich-text/rich-text-editor";
 import { RichTextViewer } from "@/components/rich-text/rich-text-viewer";
-import { sanitizeRichTextHtml } from "@/components/rich-text/rich-text-utils";
+import { sanitizeRichTextHtml, isRichTextEmpty } from "@/components/rich-text/rich-text-utils";
 import { Avatar } from "@/components/ui/avatar";
 import { useCurrentUser } from "@/components/current-user-provider";
 import { useOrganizationProjects } from "@/components/organization-projects-provider";
@@ -199,6 +200,7 @@ function EditableDescription({ value, onSave }: { value: string; onSave: (v: str
           onChange={setDraft}
           placeholder="Add a description…"
           autoFocus
+          contentClassName="sm:text-[14px]"
         />
         <div className="flex items-center justify-end gap-2 mt-2">
           <button
@@ -230,7 +232,7 @@ function EditableDescription({ value, onSave }: { value: string; onSave: (v: str
   return (
     <div className="group relative cursor-text" onClick={startEditing}>
       {value ? (
-        <RichTextViewer content={value} className="text-slate-700 dark:text-zinc-300" />
+        <RichTextViewer content={value} className="text-[14px] text-slate-700 dark:text-zinc-300" />
       ) : (
         <p className="text-[14px] text-slate-400 dark:text-zinc-600 italic leading-relaxed">Add a description...</p>
       )}
@@ -1699,6 +1701,139 @@ function CommentDropZone({
     >
       {children}
     </div>
+  );
+}
+
+// ── CommentItem ──────────────────────────────────────────────────────────────
+// One posted comment: real rich-text rendering (RichTextViewer, migrating
+// legacy plain text transparently) plus, only for the viewer's own
+// comments, a click-to-edit affordance reusing RichTextEditor and the same
+// click-pencil/Cancel-Save pattern EditableDescription already established
+// — never a second editing UI. Wraps CommentDropZone itself so the .map()
+// call site in TicketDetailScreen stays a single, simple component call.
+
+function CommentItem({
+  comment,
+  projectSlug,
+  isOwn,
+  onFilesDropped,
+  onSaveEdit,
+}: {
+  comment: TicketComment;
+  projectSlug?: string;
+  /** Only the viewer's own comments are editable or become drop targets —
+   *  ticket_comments_update RLS (20260907000000) enforces the same rule
+   *  again at the database level regardless of what this prop says. */
+  isOwn: boolean;
+  onFilesDropped: (files: File[]) => void;
+  onSaveEdit: (html: string) => Promise<boolean>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(comment.text);
+  const [saving, setSaving] = useState(false);
+  // Bumped every time editing starts — remounts RichTextEditor with a
+  // fresh instance loaded from the latest real comment text, same role it
+  // plays in EditableDescription.
+  const [editorKey, setEditorKey] = useState(0);
+
+  const startEditing = () => {
+    setDraft(comment.text);
+    setEditorKey((k) => k + 1);
+    setEditing(true);
+  };
+  const cancel = () => { setDraft(comment.text); setEditing(false); };
+  const save = async () => {
+    setSaving(true);
+    const ok = await onSaveEdit(sanitizeRichTextHtml(draft));
+    setSaving(false);
+    if (ok) setEditing(false);
+  };
+
+  return (
+    <CommentDropZone active={isOwn} onFilesDropped={onFilesDropped}>
+      <div className="flex items-start gap-3">
+        <MemberTrigger
+          name={comment.name}
+          avatar={comment.avatar}
+          profileId={comment.authorProfileId ?? undefined}
+          projectSlug={projectSlug}
+          className="flex-shrink-0 mt-0.5 rounded-full"
+        >
+          <Avatar
+            src={comment.avatar}
+            name={comment.name}
+            className="w-7 h-7 rounded-full flex-shrink-0 ring-1 ring-slate-200 dark:ring-zinc-700"
+          />
+        </MemberTrigger>
+        <div className="flex-1 min-w-0">
+          <p className="text-[13px] font-semibold text-slate-800 dark:text-zinc-200 leading-snug">
+            <MemberTrigger name={comment.name} avatar={comment.avatar} profileId={comment.authorProfileId ?? undefined} projectSlug={projectSlug} className="hover:underline">
+              {comment.name}
+            </MemberTrigger>
+            <span className="ml-2 font-normal text-slate-400 dark:text-zinc-600">
+              · {comment.timeAgo}
+              {comment.wasEdited && " · edited"}
+            </span>
+          </p>
+
+          {editing ? (
+            <div className="mt-2">
+              <RichTextEditor
+                key={editorKey}
+                content={comment.text}
+                onChange={setDraft}
+                autoFocus
+                contentClassName="sm:text-[13px]"
+              />
+              <div className="flex items-center justify-end gap-2 mt-2">
+                <button
+                  type="button"
+                  onClick={cancel}
+                  disabled={saving}
+                  className="px-3.5 py-1.5 text-[13px] font-medium text-slate-600 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={save}
+                  disabled={saving || isRichTextEmpty(draft)}
+                  className={[
+                    "px-3.5 py-1.5 text-[13px] font-semibold rounded-lg transition-all",
+                    saving || isRichTextEmpty(draft)
+                      ? "bg-slate-100 dark:bg-zinc-800 text-slate-400 dark:text-zinc-600 cursor-not-allowed"
+                      : "bg-brand-500 hover:bg-brand-600 text-white shadow-sm shadow-brand-500/30 cursor-pointer",
+                  ].join(" ")}
+                >
+                  Save
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="group relative mt-2 px-4 py-3 rounded-xl bg-slate-50 dark:bg-zinc-900 border border-slate-100 dark:border-zinc-800/80">
+              <RichTextViewer content={comment.text} className="text-[13px] text-slate-700 dark:text-zinc-300" />
+              {isOwn && (
+                <button
+                  className={EDIT_BTN + " absolute top-2 right-2"}
+                  onClick={startEditing}
+                  aria-label="Edit comment"
+                >
+                  <PencilIcon />
+                </button>
+              )}
+            </div>
+          )}
+
+          {comment.attachments.length > 0 && (
+            <div className="mt-2 space-y-1.5">
+              {comment.attachments.map((a) => (
+                <CommentAttachmentRow key={a.id} file={toAttachmentItem(a)} />
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </CommentDropZone>
   );
 }
 
@@ -3375,7 +3510,12 @@ export function TicketDetailScreen({
   const [addingComment, setAddingComment] = useState(false);
   const [commentDraft, setCommentDraft] = useState("");
   const [submittingComment, setSubmittingComment] = useState(false);
-  const commentTextareaRef = useRef<HTMLTextAreaElement>(null);
+  // Mirrors the composer's own RichTextEditor focus state — replaces the
+  // old `document.activeElement === <textarea ref>` check now that typing
+  // happens in a contenteditable ProseMirror element, not a real textarea.
+  // Used by the page-level paste handler to decide "is the new-comment
+  // composer the actual paste target right now."
+  const [commentEditorFocused, setCommentEditorFocused] = useState(false);
   // Files picked via the composer's Attach button — local only, no upload
   // starts until the comment itself is created (see submitComment below).
   const [pendingCommentFiles, setPendingCommentFiles] = useState<PendingCommentFile[]>([]);
@@ -3456,9 +3596,6 @@ export function TicketDetailScreen({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isDevFallback, organization?.id]);
 
-  useEffect(() => {
-    if (addingComment) commentTextareaRef.current?.focus();
-  }, [addingComment]);
 
   // ── Page-level drag & drop ──────────────────────────────────────────────
   // Files dropped directly on one of the viewer's own comments never reach
@@ -3496,12 +3633,12 @@ export function TicketDetailScreen({
 
   // ── Page-level paste ─────────────────────────────────────────────────────
   // Routes a pasted image/file to whichever attachment flow is contextually
-  // active: the new-comment composer when it's open and its textarea is
-  // actually focused, otherwise the general ticket Attachments section —
+  // active: the new-comment composer when it's open and its RichTextEditor
+  // is actually focused, otherwise the general ticket Attachments section —
   // exactly the same two real flows "Attach files"/"Upload Files" already
   // use, never a third. Never calls preventDefault(): a clipboard with both
   // text and files must still paste its text normally into whatever's
-  // focused (e.g. mid-sentence in the comment textarea) — only the file
+  // focused (e.g. mid-sentence in the comment editor) — only the file
   // items are ever intercepted here.
   useEffect(() => {
     function onPaste(e: ClipboardEvent) {
@@ -3515,10 +3652,7 @@ export function TicketDetailScreen({
       }
       if (files.length === 0) return;
 
-      const commentComposerFocused =
-        addingComment && document.activeElement === commentTextareaRef.current;
-
-      if (commentComposerFocused) {
+      if (addingComment && commentEditorFocused) {
         const items2 = files.map((file) => ({ id: newId(), file }));
         setPendingCommentFiles((prev) => [...prev, ...items2]);
       } else {
@@ -3527,7 +3661,7 @@ export function TicketDetailScreen({
     }
     document.addEventListener("paste", onPaste);
     return () => document.removeEventListener("paste", onPaste);
-  }, [addingComment]);
+  }, [addingComment, commentEditorFocused]);
 
   if (loadState === "loading") {
     return <TicketDetailSkeleton />;
@@ -3666,6 +3800,7 @@ export function TicketDetailScreen({
     setCommentDraft("");
     setAddingComment(false);
     setPendingCommentFiles([]);
+    setCommentEditorFocused(false);
   }
 
   // The one place files actually get attached to an existing comment —
@@ -3732,15 +3867,36 @@ export function TicketDetailScreen({
     }
   }
 
+  // Edits an already-posted comment's own text — reachable only for the
+  // viewer's own comments (see CommentItem below; ticket_comments_update
+  // RLS, 20260907000000, enforces the same rule again at the database
+  // level regardless). Merges just the text/wasEdited fields into the
+  // existing comment, so its already-loaded real attachments are never
+  // touched or refetched by this. Returns success the same way
+  // EditableDescription's own onSave contract does, so CommentItem can
+  // reuse the identical click-to-edit/Cancel/Save pattern.
+  async function saveCommentEdit(commentId: string, html: string): Promise<boolean> {
+    const result = await updateTicketComment(commentId, html);
+    if (result.status === "error") {
+      showError(result.message);
+      return false;
+    }
+    setComments((prev) =>
+      prev.map((c) =>
+        c.id === commentId ? { ...c, text: result.comment.text, wasEdited: result.comment.wasEdited } : c
+      )
+    );
+    return true;
+  }
+
   // Attachments only ever start uploading after the comment itself exists —
   // never before "Comment" is pressed, and never at all if the comment
   // insert fails (see the early return on result.status === "error" below).
   async function submitComment() {
-    const trimmed = commentDraft.trim();
-    if (!trimmed || submittingComment) return;
+    if (isRichTextEmpty(commentDraft) || submittingComment) return;
     setSubmittingComment(true);
     try {
-      const result = await createTicketComment(ticketId, trimmed);
+      const result = await createTicketComment(ticketId, sanitizeRichTextHtml(commentDraft));
       if (result.status === "error") {
         console.warn("[ticket-detail] failed to post comment:", result.message);
         showError(result.message);
@@ -3750,6 +3906,7 @@ export function TicketDetailScreen({
       setComments((prev) => [newComment, ...prev]);
       setCommentDraft("");
       setAddingComment(false);
+      setCommentEditorFocused(false);
       // A database trigger already created the matching "<name> added a
       // comment" ticket_activity row as part of the same insert.
       refreshActivity();
@@ -3925,13 +4082,14 @@ export function TicketDetailScreen({
               <div className={comments.length === 0 ? "mb-4" : "mb-6"}>
                 {addingComment ? (
                   <div>
-                    <textarea
-                      ref={commentTextareaRef}
-                      rows={3}
+                    <RichTextEditor
+                      content={commentDraft}
+                      onChange={setCommentDraft}
                       placeholder="Write a comment…"
-                      value={commentDraft}
-                      onChange={(e) => setCommentDraft(e.target.value)}
-                      className="w-full resize-none text-[16px] sm:text-[13px] text-slate-700 dark:text-zinc-300 leading-relaxed bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-700 rounded-lg px-3 py-2.5 outline-none focus:border-brand-500 dark:focus:border-brand-500 focus:ring-1 focus:ring-brand-500/30 placeholder:text-slate-300 dark:placeholder:text-zinc-700"
+                      autoFocus
+                      contentClassName="sm:text-[13px]"
+                      onFocus={() => setCommentEditorFocused(true)}
+                      onBlur={() => setCommentEditorFocused(false)}
                     />
 
                     <input
@@ -3982,10 +4140,10 @@ export function TicketDetailScreen({
                         <button
                           type="button"
                           onClick={submitComment}
-                          disabled={commentDraft.trim().length === 0 || submittingComment}
+                          disabled={isRichTextEmpty(commentDraft) || submittingComment}
                           className={[
                             "px-3.5 py-1.5 text-[13px] font-semibold rounded-lg transition-all",
-                            commentDraft.trim().length === 0 || submittingComment
+                            isRichTextEmpty(commentDraft) || submittingComment
                               ? "bg-slate-100 dark:bg-zinc-800 text-slate-400 dark:text-zinc-600 cursor-not-allowed"
                               : "bg-brand-500 hover:bg-brand-600 text-white shadow-sm shadow-brand-500/30 cursor-pointer",
                           ].join(" ")}
@@ -4011,53 +4169,18 @@ export function TicketDetailScreen({
               ) : (
               <div className="space-y-6">
                 {comments.map((c) => (
-                  <CommentDropZone
+                  <CommentItem
                     key={c.id}
-                    // Only the viewer's own comments become drop targets —
-                    // dropping on anyone else's falls through to the
-                    // page-level handler (general ticket attachment), per
-                    // this feature's own rule.
-                    active={userId !== null && c.authorProfileId === userId}
+                    comment={c}
+                    projectSlug={ticket.projectSlug}
+                    // Only the viewer's own comments are editable or become
+                    // drop targets — dropping on/editing anyone else's
+                    // falls through to the page-level handler (general
+                    // ticket attachment) or simply isn't offered.
+                    isOwn={userId !== null && c.authorProfileId === userId}
                     onFilesDropped={(files) => handleFilesDroppedOnComment(c.id, files)}
-                  >
-                    <div className="flex items-start gap-3">
-                      <MemberTrigger
-                        name={c.name}
-                        avatar={c.avatar}
-                        profileId={c.authorProfileId ?? undefined}
-                        projectSlug={ticket.projectSlug}
-                        className="flex-shrink-0 mt-0.5 rounded-full"
-                      >
-                        <Avatar
-                          src={c.avatar}
-                          name={c.name}
-                          className="w-7 h-7 rounded-full flex-shrink-0 ring-1 ring-slate-200 dark:ring-zinc-700"
-                        />
-                      </MemberTrigger>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-[13px] font-semibold text-slate-800 dark:text-zinc-200 leading-snug">
-                          <MemberTrigger name={c.name} avatar={c.avatar} profileId={c.authorProfileId ?? undefined} projectSlug={ticket.projectSlug} className="hover:underline">
-                            {c.name}
-                          </MemberTrigger>
-                          <span className="ml-2 font-normal text-slate-400 dark:text-zinc-600">
-                            · {c.timeAgo}
-                          </span>
-                        </p>
-                        <div className="mt-2 px-4 py-3 rounded-xl bg-slate-50 dark:bg-zinc-900 border border-slate-100 dark:border-zinc-800/80">
-                          <p className="text-[13px] text-slate-700 dark:text-zinc-300 leading-relaxed">
-                            {c.text}
-                          </p>
-                        </div>
-                        {c.attachments.length > 0 && (
-                          <div className="mt-2 space-y-1.5">
-                            {c.attachments.map((a) => (
-                              <CommentAttachmentRow key={a.id} file={toAttachmentItem(a)} />
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </CommentDropZone>
+                    onSaveEdit={(html) => saveCommentEdit(c.id, html)}
+                  />
                 ))}
               </div>
               )}

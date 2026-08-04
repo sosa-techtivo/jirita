@@ -715,6 +715,10 @@ export interface TicketComment {
   authorProfileId: string | null;
   timeAgo: string;
   text: string;
+  /** True once updated_at is real (the set_updated_at trigger only ever
+   *  sets it on an actual UPDATE) — lets the UI show "(edited)" without a
+   *  second, separately-tracked flag. */
+  wasEdited: boolean;
   /** Comment-level attachments only (ticket_attachments.comment_id = this comment's id) — read-only here, see loadTicketComments. */
   attachments: TicketAttachment[];
 }
@@ -737,6 +741,7 @@ interface CommentRow {
   author_profile_id: string | null;
   body: string;
   created_at: string;
+  updated_at: string | null;
 }
 
 interface ActivityRow {
@@ -921,7 +926,7 @@ export async function loadTicketComments(ticketId: string): Promise<TicketCommen
 
   const { data: rows, error } = await supabase
     .from("ticket_comments")
-    .select("id, author_profile_id, body, created_at")
+    .select("id, author_profile_id, body, created_at, updated_at")
     .eq("ticket_id", ticketId)
     .order("created_at", { ascending: false })
     .returns<CommentRow[]>();
@@ -975,6 +980,7 @@ export async function loadTicketComments(ticketId: string): Promise<TicketCommen
       authorProfileId: row.author_profile_id,
       timeAgo: formatRelativeTime(row.created_at),
       text: row.body,
+      wasEdited: row.updated_at !== null,
       attachments: attachmentsByCommentId.get(row.id) ?? [],
     };
   });
@@ -1003,7 +1009,7 @@ export async function createTicketComment(ticketId: string, body: string): Promi
   const { data: row, error } = await supabase
     .from("ticket_comments")
     .insert({ ticket_id: ticketId, body: trimmed })
-    .select("id, author_profile_id, body, created_at")
+    .select("id, author_profile_id, body, created_at, updated_at")
     .single<CommentRow>();
 
   if (error) {
@@ -1046,6 +1052,70 @@ export async function createTicketComment(ticketId: string, body: string): Promi
       authorProfileId: row.author_profile_id,
       timeAgo: formatRelativeTime(row.created_at),
       text: row.body,
+      wasEdited: row.updated_at !== null,
+      attachments: [],
+    },
+  };
+}
+
+export type UpdateTicketCommentResult =
+  | { status: "success"; comment: TicketComment }
+  | { status: "error"; message: string };
+
+// Edits a comment's own body — only ever reachable for the comment's real
+// author (ticket_comments_update RLS, 20260907000000), re-enforced here
+// too since Postgres would otherwise just return zero rows updated rather
+// than a clear error. attachments come back empty the same way
+// createTicketComment's own result does; the caller merges this into the
+// comment it already has loaded (with its own real attachments intact),
+// never replaces the whole row from this result alone.
+export async function updateTicketComment(commentId: string, body: string): Promise<UpdateTicketCommentResult> {
+  const trimmed = body.trim();
+  if (trimmed.length === 0) {
+    return { status: "error", message: "Comment can't be empty." };
+  }
+
+  const supabase = getSupabaseBrowserClient();
+
+  const { data: row, error } = await supabase
+    .from("ticket_comments")
+    .update({ body: trimmed })
+    .eq("id", commentId)
+    .select("id, author_profile_id, body, created_at, updated_at")
+    .maybeSingle<CommentRow>();
+
+  if (error) {
+    logDev("ticket comment update failed", error);
+    return { status: "error", message: error.message };
+  }
+  if (!row) {
+    return { status: "error", message: "You can only edit your own comments." };
+  }
+
+  let authorRow: AssigneeProfileRow | undefined;
+  if (row.author_profile_id) {
+    const { data: profileRow, error: profileError } = await supabase
+      .from("profiles")
+      .select("id, first_name, last_name, avatar_url, updated_at")
+      .eq("id", row.author_profile_id)
+      .maybeSingle<AssigneeProfileRow>();
+    if (profileError) {
+      logDev("comment author profile lookup failed", profileError);
+    } else {
+      authorRow = profileRow ?? undefined;
+    }
+  }
+
+  return {
+    status: "success",
+    comment: {
+      id: row.id,
+      name: resolveProfileName(authorRow) ?? "Unknown",
+      avatar: (authorRow ? resolveAvatarUrl(authorRow.avatar_url, authorRow.updated_at) : null) ?? FALLBACK_AVATAR,
+      authorProfileId: row.author_profile_id,
+      timeAgo: formatRelativeTime(row.created_at),
+      text: row.body,
+      wasEdited: row.updated_at !== null,
       attachments: [],
     },
   };

@@ -23,9 +23,12 @@ import { RichTextToolbar } from "./rich-text-toolbar";
 export function RichTextEditor({
   content,
   onChange,
+  onFocus,
+  onBlur,
   placeholder = "Write something…",
   autoFocus = false,
   className,
+  contentClassName,
 }: {
   /** Initial HTML (or legacy plain text — normalized transparently). Only
    *  read once, on mount; remount via a `key` change to load new content
@@ -34,9 +37,20 @@ export function RichTextEditor({
   content: string;
   /** Called with the editor's current HTML on every change. */
   onChange: (html: string) => void;
+  /** Mirrors the underlying editor's own focus state — e.g. so a caller can
+   *  tell "is the user actively typing here right now" (contextual paste
+   *  routing, an active-state indicator, etc.) without reaching into
+   *  ProseMirror internals itself. */
+  onFocus?: () => void;
+  onBlur?: () => void;
   placeholder?: string;
   autoFocus?: boolean;
   className?: string;
+  /** Extra classes for the actual editable content element — every real
+   *  field sets its own text size here (Description: 14px, Comments: 13px)
+   *  since this component deliberately has no size opinion of its own
+   *  beyond the mobile iOS-zoom-prevention default below. */
+  contentClassName?: string;
 }) {
   const editor = useEditor({
     // Next.js renders client components once on the server too —
@@ -61,10 +75,14 @@ export function RichTextEditor({
     content: normalizeRichText(content),
     editorProps: {
       attributes: {
-        class: "jirita-rich-text jirita-rich-text-editable focus:outline-none",
+        class:
+          "jirita-rich-text jirita-rich-text-editable text-[16px] focus:outline-none " +
+          (contentClassName ?? ""),
       },
     },
     onUpdate: ({ editor }) => onChange(editor.getHTML()),
+    onFocus: () => onFocus?.(),
+    onBlur: () => onBlur?.(),
   });
 
   useEffect(() => {
