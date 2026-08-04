@@ -71,6 +71,9 @@ import { formatAbsoluteDate } from "@/lib/date-format";
 import { FALLBACK_AVATAR } from "@/lib/current-user";
 import { formatHours } from "@/components/time-tracking-screen";
 import { MemberTrigger } from "@/components/member-profile";
+import { RichTextEditor } from "@/components/rich-text/rich-text-editor";
+import { RichTextViewer } from "@/components/rich-text/rich-text-viewer";
+import { sanitizeRichTextHtml } from "@/components/rich-text/rich-text-utils";
 import { Avatar } from "@/components/ui/avatar";
 import { useCurrentUser } from "@/components/current-user-provider";
 import { useOrganizationProjects } from "@/components/organization-projects-provider";
@@ -163,53 +166,39 @@ function EditableDescription({ value, onSave }: { value: string; onSave: (v: str
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
   const [saving, setSaving] = useState(false);
-  const ref = useRef<HTMLTextAreaElement>(null);
+  // Bumped every time editing starts — remounts RichTextEditor with a fresh
+  // instance loaded from the latest real `value`, the same role a plain
+  // <textarea>'s own `value` reset already played before this change.
+  const [editorKey, setEditorKey] = useState(0);
 
-  useEffect(() => {
-    if (editing && ref.current) {
-      ref.current.focus();
-      ref.current.style.height = "auto";
-      ref.current.style.height = ref.current.scrollHeight + "px";
-    }
-  }, [editing]);
-
-  const startEditing = () => { setDraft(value); setEditing(true); };
+  const startEditing = () => {
+    setDraft(value);
+    setEditorKey((k) => k + 1);
+    setEditing(true);
+  };
 
   // Stays in edit mode with the typed draft intact on failure — the parent's
   // shared ErrorToast surfaces the reason — so a rejected save never loses
   // what was typed. Only exits edit mode once the save is confirmed.
+  // Sanitized here (not just in RichTextViewer at render time) so nothing
+  // unsafe is ever actually persisted, regardless of how it's later read.
   const save = async () => {
     setSaving(true);
-    const ok = await onSave(draft);
+    const ok = await onSave(sanitizeRichTextHtml(draft));
     setSaving(false);
     if (ok) setEditing(false);
   };
   const cancel = () => { setDraft(value); setEditing(false); };
-  const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Escape") { e.preventDefault(); cancel(); }
-  };
-  const autoResize = () => {
-    if (ref.current) {
-      ref.current.style.height = "auto";
-      ref.current.style.height = ref.current.scrollHeight + "px";
-    }
-  };
 
   if (editing) {
     return (
       <div>
-        <textarea
-          ref={ref}
-          className={
-            "w-full text-[16px] sm:text-[14px] text-slate-700 dark:text-zinc-300 leading-relaxed " +
-            "bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-700 " +
-            "rounded-lg px-3 py-2.5 outline-none resize-none overflow-hidden " +
-            "focus:border-brand-500 dark:focus:border-brand-500 focus:ring-1 focus:ring-brand-500/30"
-          }
-          value={draft}
-          onChange={(e) => { setDraft(e.target.value); autoResize(); }}
-          onKeyDown={onKey}
-          disabled={saving}
+        <RichTextEditor
+          key={editorKey}
+          content={value}
+          onChange={setDraft}
+          placeholder="Add a description…"
+          autoFocus
         />
         <div className="flex items-center justify-end gap-2 mt-2">
           <button
@@ -241,7 +230,7 @@ function EditableDescription({ value, onSave }: { value: string; onSave: (v: str
   return (
     <div className="group relative cursor-text" onClick={startEditing}>
       {value ? (
-        <p className="text-[14px] text-slate-700 dark:text-zinc-300 leading-relaxed">{value}</p>
+        <RichTextViewer content={value} className="text-slate-700 dark:text-zinc-300" />
       ) : (
         <p className="text-[14px] text-slate-400 dark:text-zinc-600 italic leading-relaxed">Add a description...</p>
       )}
