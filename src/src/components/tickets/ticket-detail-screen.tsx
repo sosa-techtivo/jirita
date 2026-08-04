@@ -3747,54 +3747,8 @@ export function TicketDetailScreen({
               badge={ticket.commentCount !== undefined ? `· ${ticket.commentCount} total` : undefined}
               defaultOpen={true}
             >
-              {comments.length === 0 ? (
-                <p className="text-[13px] text-slate-400 dark:text-zinc-600">No comments yet.</p>
-              ) : (
-              <div className="space-y-6">
-                {comments.map((c) => (
-                  <div key={c.id} className="flex items-start gap-3">
-                    <MemberTrigger
-                      name={c.name}
-                      avatar={c.avatar}
-                      profileId={c.authorProfileId ?? undefined}
-                      projectSlug={ticket.projectSlug}
-                      className="flex-shrink-0 mt-0.5 rounded-full"
-                    >
-                      <Avatar
-                        src={c.avatar}
-                        name={c.name}
-                        className="w-7 h-7 rounded-full flex-shrink-0 ring-1 ring-slate-200 dark:ring-zinc-700"
-                      />
-                    </MemberTrigger>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-[13px] font-semibold text-slate-800 dark:text-zinc-200 leading-snug">
-                        <MemberTrigger name={c.name} avatar={c.avatar} profileId={c.authorProfileId ?? undefined} projectSlug={ticket.projectSlug} className="hover:underline">
-                          {c.name}
-                        </MemberTrigger>
-                        <span className="ml-2 font-normal text-slate-400 dark:text-zinc-600">
-                          · {c.timeAgo}
-                        </span>
-                      </p>
-                      <div className="mt-2 px-4 py-3 rounded-xl bg-slate-50 dark:bg-zinc-900 border border-slate-100 dark:border-zinc-800/80">
-                        <p className="text-[13px] text-slate-700 dark:text-zinc-300 leading-relaxed">
-                          {c.text}
-                        </p>
-                      </div>
-                      {c.attachments.length > 0 && (
-                        <div className="mt-2 space-y-1.5">
-                          {c.attachments.map((a) => (
-                            <CommentAttachmentRow key={a.id} file={toAttachmentItem(a)} />
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-              )}
-
-              {/* Add comment */}
-              <div className={comments.length === 0 ? "mt-4" : "mt-6"}>
+              {/* Add comment — above the list, right under the section header */}
+              <div className={comments.length === 0 ? "mb-4" : "mb-6"}>
                 {addingComment ? (
                   <div>
                     <textarea
@@ -3877,6 +3831,52 @@ export function TicketDetailScreen({
                   </button>
                 )}
               </div>
+
+              {comments.length === 0 ? (
+                <p className="text-[13px] text-slate-400 dark:text-zinc-600">No comments yet.</p>
+              ) : (
+              <div className="space-y-6">
+                {comments.map((c) => (
+                  <div key={c.id} className="flex items-start gap-3">
+                    <MemberTrigger
+                      name={c.name}
+                      avatar={c.avatar}
+                      profileId={c.authorProfileId ?? undefined}
+                      projectSlug={ticket.projectSlug}
+                      className="flex-shrink-0 mt-0.5 rounded-full"
+                    >
+                      <Avatar
+                        src={c.avatar}
+                        name={c.name}
+                        className="w-7 h-7 rounded-full flex-shrink-0 ring-1 ring-slate-200 dark:ring-zinc-700"
+                      />
+                    </MemberTrigger>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[13px] font-semibold text-slate-800 dark:text-zinc-200 leading-snug">
+                        <MemberTrigger name={c.name} avatar={c.avatar} profileId={c.authorProfileId ?? undefined} projectSlug={ticket.projectSlug} className="hover:underline">
+                          {c.name}
+                        </MemberTrigger>
+                        <span className="ml-2 font-normal text-slate-400 dark:text-zinc-600">
+                          · {c.timeAgo}
+                        </span>
+                      </p>
+                      <div className="mt-2 px-4 py-3 rounded-xl bg-slate-50 dark:bg-zinc-900 border border-slate-100 dark:border-zinc-800/80">
+                        <p className="text-[13px] text-slate-700 dark:text-zinc-300 leading-relaxed">
+                          {c.text}
+                        </p>
+                      </div>
+                      {c.attachments.length > 0 && (
+                        <div className="mt-2 space-y-1.5">
+                          {c.attachments.map((a) => (
+                            <CommentAttachmentRow key={a.id} file={toAttachmentItem(a)} />
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              )}
             </CollapsibleSection>
             </div>
 
