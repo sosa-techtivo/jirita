@@ -242,6 +242,24 @@ body {
   color: inherit;
 }
 
+/* @mention (Comments only) — a visually distinct, non-editable chip rather
+   than plain text, both while editing and in the read-only viewer (both
+   render the exact same stored <span data-type="mention">). */
+.jirita-rich-text .mention {
+  display: inline;
+  border-radius: 0.3em;
+  padding: 0.05em 0.35em;
+  font-weight: 600;
+  color: var(--color-brand-600, #5644dd);
+  background: var(--color-brand-50, #f1f0ff);
+  box-decoration-break: clone;
+}
+
+.dark .jirita-rich-text .mention {
+  color: var(--color-brand-500, #6655ee);
+  background: rgba(102, 85, 238, 0.16);
+}
+
 .jirita-rich-text-editable p.is-editor-empty:first-child::before {
   content: attr(data-placeholder);
   float: left;

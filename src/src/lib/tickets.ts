@@ -20,6 +20,12 @@ import type { ProjectStatus } from "./mock-projects";
 import { roundLoggedMinutesUp } from "./time-rounding";
 import { formatAbsoluteDate, formatAbsoluteDateTime } from "./date-format";
 import { createNotification } from "./notifications";
+// Plain, browser-only DOMPurify — same package/reasoning as
+// components/rich-text/rich-text-utils.ts (never "isomorphic-dompurify").
+// This module already only ever runs client-side (every function here
+// goes through getSupabaseBrowserClient), so using it — and the browser's
+// own DOMParser below — directly here is safe.
+import DOMPurify from "dompurify";
 
 export type TicketsResult =
   | { status: "ready"; tickets: Ticket[] }
@@ -746,6 +752,10 @@ interface CommentRow {
   body: string;
   created_at: string;
   updated_at: string | null;
+  /** Only ever actually selected (and populated) by updateTicketComment,
+   *  which needs it to notify newly-added @mentions — createTicketComment
+   *  already has ticketId as its own param and never selects this column. */
+  ticket_id?: string;
 }
 
 interface ActivityRow {
@@ -1045,6 +1055,15 @@ export async function createTicketComment(ticketId: string, body: string): Promi
     void notifyTicketComment(supabase, ticketId, row.author_profile_id, trimmed, authorRow).catch((err) => {
       logDev("ticket comment notification failed", err);
     });
+
+    // Every real @mention in a brand-new comment is a new mention by
+    // definition — no "already existed" set to diff against, unlike edits.
+    const mentionedProfileIds = extractMentionedProfileIds(trimmed);
+    if (mentionedProfileIds.length > 0) {
+      void notifyCommentMentions(supabase, ticketId, row.author_profile_id, mentionedProfileIds, trimmed, authorRow).catch((err) => {
+        logDev("comment mention notification failed", err);
+      });
+    }
   }
 
   return {
@@ -1081,11 +1100,23 @@ export async function updateTicketComment(commentId: string, body: string): Prom
 
   const supabase = getSupabaseBrowserClient();
 
+  // Real "before" body, read purely to diff @mentions afterward — never
+  // what gates the edit itself (the update below, restricted by
+  // ticket_comments_update RLS to the real author, is what does that).
+  // Any project member can already read any comment in a visible project
+  // (ticket_comments_select), so this succeeds regardless of who's editing;
+  // a missing row here just means there's nothing prior to diff against.
+  const { data: beforeRow } = await supabase
+    .from("ticket_comments")
+    .select("body")
+    .eq("id", commentId)
+    .maybeSingle<{ body: string }>();
+
   const { data: row, error } = await supabase
     .from("ticket_comments")
     .update({ body: trimmed })
     .eq("id", commentId)
-    .select("id, author_profile_id, body, created_at, updated_at")
+    .select("id, ticket_id, author_profile_id, body, created_at, updated_at")
     .maybeSingle<CommentRow>();
 
   if (error) {
@@ -1110,6 +1141,18 @@ export async function updateTicketComment(commentId: string, body: string): Prom
     }
   }
 
+  // Only ever notify @mentions newly added by this specific edit — a
+  // mention that was already there before never fires again.
+  if (row.author_profile_id && row.ticket_id) {
+    const oldMentionIds = new Set(beforeRow ? extractMentionedProfileIds(beforeRow.body) : []);
+    const newMentionIds = extractMentionedProfileIds(trimmed).filter((id) => !oldMentionIds.has(id));
+    if (newMentionIds.length > 0) {
+      void notifyCommentMentions(supabase, row.ticket_id, row.author_profile_id, newMentionIds, trimmed, authorRow).catch((err) => {
+        logDev("comment mention notification failed", err);
+      });
+    }
+  }
+
   return {
     status: "success",
     comment: {
@@ -1127,12 +1170,11 @@ export async function updateTicketComment(commentId: string, body: string): Prom
 
 // Notifies the ticket's current assignee that someone commented — the one
 // place this is composed, so every real caller of createTicketComment
-// shares it rather than duplicating the lookup/text. Mentions are
-// deliberately not handled here: comments are plain, unparsed text with no
-// structured @mention storage anywhere in this schema, so resolving one by
-// name would mean guessing — out of scope per this feature's own rule
-// against ambiguous name-based resolution (comment_mention stays a real,
-// allowed notification `type` for when a real mention mechanism exists).
+// shares it rather than duplicating the lookup/text. @mentions are handled
+// entirely separately, by notifyCommentMentions below (a real mention is
+// now a real Mention node — <span data-type="mention" data-id="...">,
+// see components/rich-text/mention-suggestion.ts — never resolved by
+// name-matching).
 async function notifyTicketComment(
   supabase: ReturnType<typeof getSupabaseBrowserClient>,
   ticketId: string,
@@ -1171,6 +1213,102 @@ async function notifyTicketComment(
     projectId: projectRow.id,
     ticketId,
   });
+}
+
+// The real profiles.id of every @mention in a saved comment's HTML —
+// Mention's own default markup (<span data-type="mention" data-id="...">,
+// see components/rich-text/mention-suggestion.ts), never resolved by
+// name-matching. Deduped via the Set (repeating the same mention several
+// times in one comment still yields it once) — the one real source of
+// truth both createTicketComment and updateTicketComment diff against,
+// so the two can never disagree about what a comment actually mentions.
+function extractMentionedProfileIds(html: string): string[] {
+  if (!html || typeof DOMParser === "undefined") return [];
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  const ids = new Set<string>();
+  doc.querySelectorAll('span[data-type="mention"]').forEach((el) => {
+    const id = el.getAttribute("data-id");
+    if (id) ids.add(id);
+  });
+  return Array.from(ids);
+}
+
+// Plain-text excerpt for a comment_mention notification's message — strips
+// every tag (DOMPurify with an empty allowlist, same technique
+// rich-text-utils.ts's own isRichTextEmpty already uses) rather than
+// truncating raw sanitized HTML mid-tag.
+function plainTextExcerpt(html: string, maxLength = 300): string {
+  const text = DOMPurify.sanitize(html, { ALLOWED_TAGS: [] }).replace(/\s+/g, " ").trim();
+  return text.length > maxLength ? `${text.slice(0, maxLength)}…` : text;
+}
+
+// Notifies every real, currently-active member of this exact project
+// @mentioned in a comment (create or edit — both callers already dedupe/
+// diff before calling this, see createTicketComment/updateTicketComment
+// above). Never trusts the editor's own suggestion list at face value:
+// the mention picker is already scoped to real project members
+// (mentionCandidates, threaded from loadProjectTeam), but this re-checks
+// every mentioned id against a fresh project_memberships query before
+// sending anything — the actual server-side validation this feature
+// requires, not just a client-side restriction on what the picker offers.
+// The author is excluded up front (never self-notifies, and skips the
+// membership check/DB round trip entirely when there's nothing real left
+// to verify) — createNotification's own actor===recipient guard would
+// catch it too, but this avoids the redundant work.
+async function notifyCommentMentions(
+  supabase: ReturnType<typeof getSupabaseBrowserClient>,
+  ticketId: string,
+  authorProfileId: string,
+  mentionedProfileIds: string[],
+  commentBody: string,
+  authorRow: AssigneeProfileRow | undefined
+): Promise<void> {
+  const candidateIds = mentionedProfileIds.filter((id) => id !== authorProfileId);
+  if (candidateIds.length === 0) return;
+
+  const { data: ticketRow, error: ticketError } = await supabase
+    .from("tickets")
+    .select("project_id, ticket_number")
+    .eq("id", ticketId)
+    .maybeSingle<{ project_id: string; ticket_number: number }>();
+
+  if (ticketError || !ticketRow) return;
+
+  const { data: projectRow, error: projectError } = await supabase
+    .from("projects")
+    .select("id, organization_id, project_code")
+    .eq("id", ticketRow.project_id)
+    .maybeSingle<{ id: string; organization_id: string; project_code: string }>();
+
+  if (projectError || !projectRow) return;
+
+  const { data: memberRows, error: memberError } = await supabase
+    .from("project_memberships")
+    .select("profile_id")
+    .eq("project_id", ticketRow.project_id)
+    .in("profile_id", candidateIds)
+    .returns<{ profile_id: string }[]>();
+
+  if (memberError || !memberRows || memberRows.length === 0) return;
+
+  const ticketCode = `${projectRow.project_code}-${ticketRow.ticket_number}`;
+  const authorName = resolveProfileName(authorRow) ?? "Someone";
+  const message = plainTextExcerpt(commentBody);
+
+  await Promise.all(
+    memberRows.map((member) =>
+      createNotification({
+        organizationId: projectRow.organization_id,
+        recipientProfileId: member.profile_id,
+        actorProfileId: authorProfileId,
+        type: "comment_mention",
+        title: `${authorName} mentioned you in ${ticketCode}`,
+        message,
+        projectId: projectRow.id,
+        ticketId,
+      })
+    )
+  );
 }
 
 // Newest first. Every real action (create, field edits, labels, acceptance

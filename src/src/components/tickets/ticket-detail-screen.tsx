@@ -4,6 +4,7 @@ import {
   useState,
   useRef,
   useEffect,
+  useMemo,
   forwardRef,
   useImperativeHandle,
   type KeyboardEvent,
@@ -68,12 +69,12 @@ import {
   type RelatedTicket,
   type TicketRelationKind,
 } from "@/lib/tickets";
-import { loadProjectTeam, loadProjectDetail, type OrgMember } from "@/lib/projects";
+import { loadProjectTeam, loadProjectDetail, type OrgMember, type ProjectTeamMember } from "@/lib/projects";
 import { formatAbsoluteDate } from "@/lib/date-format";
 import { FALLBACK_AVATAR } from "@/lib/current-user";
 import { formatHours } from "@/components/time-tracking-screen";
 import { MemberTrigger } from "@/components/member-profile";
-import { RichTextEditor } from "@/components/rich-text/rich-text-editor";
+import { RichTextEditor, type MentionCandidate } from "@/components/rich-text/rich-text-editor";
 import { RichTextViewer } from "@/components/rich-text/rich-text-viewer";
 import { sanitizeRichTextHtml, isRichTextEmpty } from "@/components/rich-text/rich-text-utils";
 import { Avatar } from "@/components/ui/avatar";
@@ -1858,6 +1859,7 @@ function CommentItem({
   comment,
   projectSlug,
   isOwn,
+  mentionCandidates,
   onFilesDropped,
   onSaveEdit,
 }: {
@@ -1867,6 +1869,10 @@ function CommentItem({
    *  ticket_comments_update RLS (20260907000000) enforces the same rule
    *  again at the database level regardless of what this prop says. */
   isOwn: boolean;
+  /** Real, active members of this comment's own project — same list the
+   *  composer's own RichTextEditor uses, so @mention support is identical
+   *  whether creating a comment or editing an existing one. */
+  mentionCandidates: MentionCandidate[];
   onFilesDropped: (files: File[]) => void;
   onSaveEdit: (html: string) => Promise<boolean>;
 }) {
@@ -1926,6 +1932,7 @@ function CommentItem({
                 onChange={setDraft}
                 autoFocus
                 contentClassName="sm:text-[13px]"
+                mentionCandidates={mentionCandidates}
               />
               <div className="flex items-center justify-end gap-2 mt-2">
                 <button
@@ -3663,7 +3670,20 @@ export function TicketDetailScreen({
   const [pendingCommentFiles, setPendingCommentFiles] = useState<PendingCommentFile[]>([]);
   const commentFileInputRef = useRef<HTMLInputElement>(null);
   const [loggedEntries, setLoggedEntries] = useState<TimeEntry[]>([]);
-  const [members, setMembers] = useState<OrgMember[]>([]);
+  // Typed ProjectTeamMember[] (not the narrower OrgMember[] other
+  // consumers of this same roster declare) purely to keep `email` around —
+  // needed for the @mention picker's real name/email search below; every
+  // existing read of `members` only ever touched id/name/avatar anyway, so
+  // this widening changes nothing else.
+  const [members, setMembers] = useState<ProjectTeamMember[]>([]);
+  // @mention candidates for both the new-comment composer and each
+  // CommentItem's own edit mode — real, active members of this exact
+  // project only (the same roster Assignee/Team already use), never the
+  // wider organization. Rebuilt only when `members` itself actually changes.
+  const mentionCandidates: MentionCandidate[] = useMemo(
+    () => members.map((m) => ({ id: m.id, name: m.name, email: m.email, avatar: m.avatar })),
+    [members]
+  );
   // Real, per-organization label catalog — starts empty; merged with the
   // static ALL_LABELS seed list below. Dev fallback: no real catalog to
   // load, so only the static seed list is offered (no persistence anyway).
@@ -4238,6 +4258,7 @@ export function TicketDetailScreen({
                       contentClassName="sm:text-[13px]"
                       onFocus={() => setCommentEditorFocused(true)}
                       onBlur={() => setCommentEditorFocused(false)}
+                      mentionCandidates={mentionCandidates}
                     />
 
                     <input
@@ -4326,6 +4347,7 @@ export function TicketDetailScreen({
                     // falls through to the page-level handler (general
                     // ticket attachment) or simply isn't offered.
                     isOwn={userId !== null && c.authorProfileId === userId}
+                    mentionCandidates={mentionCandidates}
                     onFilesDropped={(files) => handleFilesDroppedOnComment(c.id, files)}
                     onSaveEdit={(html) => saveCommentEdit(c.id, html)}
                   />

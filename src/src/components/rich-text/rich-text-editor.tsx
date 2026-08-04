@@ -16,9 +16,14 @@ import Highlight from "@tiptap/extension-highlight";
 import TaskList from "@tiptap/extension-task-list";
 import TaskItem from "@tiptap/extension-task-item";
 import Placeholder from "@tiptap/extension-placeholder";
-import { useEffect } from "react";
+import Mention from "@tiptap/extension-mention";
+import { useEffect, useRef } from "react";
 import { normalizeRichText } from "./rich-text-utils";
 import { RichTextToolbar } from "./rich-text-toolbar";
+import { buildMentionSuggestion } from "./mention-suggestion";
+import type { MentionCandidate } from "./mention-types";
+
+export type { MentionCandidate };
 
 export function RichTextEditor({
   content,
@@ -29,6 +34,7 @@ export function RichTextEditor({
   autoFocus = false,
   className,
   contentClassName,
+  mentionCandidates,
 }: {
   /** Initial HTML (or legacy plain text — normalized transparently). Only
    *  read once, on mount; remount via a `key` change to load new content
@@ -51,7 +57,23 @@ export function RichTextEditor({
    *  since this component deliberately has no size opinion of its own
    *  beyond the mobile iOS-zoom-prevention default below. */
   contentClassName?: string;
+  /** Enables @mention support (typing "@" opens a picker over these real,
+   *  active project members) when — and only when — this is passed at all;
+   *  omit entirely for fields that shouldn't support mentions (e.g.
+   *  Description) to leave them completely unaffected. Comments passes the
+   *  ticket's own real project roster. */
+  mentionCandidates?: MentionCandidate[];
 }) {
+  // The Mention extension itself is only ever configured once, at mount
+  // (below) — but the roster it searches can still arrive asynchronously
+  // after that (a fetch already in flight when this editor mounts), so
+  // its own items() callback always reads the freshest list via this ref
+  // rather than a value captured once at construction time.
+  const mentionCandidatesRef = useRef<MentionCandidate[]>(mentionCandidates ?? []);
+  useEffect(() => {
+    mentionCandidatesRef.current = mentionCandidates ?? [];
+  }, [mentionCandidates]);
+
   const editor = useEditor({
     // Next.js renders client components once on the server too —
     // Tiptap's own SSR content would then mismatch the client's first
@@ -71,6 +93,19 @@ export function RichTextEditor({
       TaskList,
       TaskItem.configure({ nested: false }),
       Placeholder.configure({ placeholder }),
+      // Presence of the prop (not its length) decides whether this field
+      // supports mentions at all — an empty array while the roster is
+      // still loading still gets the extension, since mentionCandidatesRef
+      // will pick up the real list the moment it arrives.
+      ...(mentionCandidates !== undefined
+        ? [
+            Mention.configure({
+              HTMLAttributes: { class: "mention" },
+              // eslint-disable-next-line react-hooks/refs -- intentional: this closure is only ever invoked later, inside Suggestion's own async items() callback (fired on each "@" keystroke, never during render) — it never dereferences mentionCandidatesRef.current synchronously here
+              suggestion: buildMentionSuggestion(() => mentionCandidatesRef.current),
+            }),
+          ]
+        : []),
     ],
     content: normalizeRichText(content),
     editorProps: {

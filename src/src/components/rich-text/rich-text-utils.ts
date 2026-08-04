@@ -74,6 +74,13 @@ const ALLOWED_ATTR = [
   "href", "target", "rel", "style", "class",
   "type", "checked", "disabled",
   "data-type", "data-checked", "data-color", "color",
+  // @mention spans (Comments only — see mention-suggestion.ts/Mention's own
+  // default attribute rendering): data-id is the real profiles.id a saved
+  // mention is later parsed back out of and notified against; data-label
+  // and data-mention-suggestion-char are kept too so reloading saved HTML
+  // back into RichTextEditor for a fresh edit reconstructs the exact same
+  // mention node (see Mention's own parseHTML), not just inert text.
+  "data-id", "data-label", "data-mention-suggestion-char",
 ];
 
 export function sanitizeRichTextHtml(html: string): string {
