@@ -174,24 +174,27 @@ function StatusDonut({ tickets }: { tickets: Ticket[] }) {
 // ── Workload by assignee ─────────────────────────────────────────────────────
 
 function AssigneeWorkload({ tickets }: { tickets: Ticket[] }) {
-  const map = new Map<string, { avatar: string; projectSlug: string; count: number }>();
+  // Grouped by the real assigneeProfileId (falling back to the display name
+  // only for mock/dev-fallback tickets with no real id) — grouping by name
+  // alone would silently merge two different real people who share one,
+  // and can never pass a real profileId through to MemberTrigger below.
+  const map = new Map<string, { name: string; avatar: string; profileId: string | null; projectSlug: string; count: number }>();
   for (const t of tickets) {
-    const e = map.get(t.assignee.name);
+    const key = t.assigneeProfileId ?? t.assignee.name;
+    const e = map.get(key);
     if (e) e.count++;
-    else map.set(t.assignee.name, { avatar: t.assignee.avatar, projectSlug: t.projectSlug, count: 1 });
+    else map.set(key, { name: t.assignee.name, avatar: t.assignee.avatar, profileId: t.assigneeProfileId ?? null, projectSlug: t.projectSlug, count: 1 });
   }
-  const rows = Array.from(map.entries())
-    .map(([name, { avatar, projectSlug, count }]) => ({ name, avatar, projectSlug, count }))
-    .sort((a, b) => b.count - a.count);
+  const rows = Array.from(map.values()).sort((a, b) => b.count - a.count);
   const max = rows[0]?.count ?? 1;
 
   return (
     <Card title="Workload by Assignee">
       <div className="space-y-4">
-        {rows.map(({ name, avatar, projectSlug, count }) => (
-          <div key={name} className="space-y-1.5">
+        {rows.map(({ name, avatar, profileId, projectSlug, count }) => (
+          <div key={profileId ?? name} className="space-y-1.5">
             <div className="flex items-center justify-between gap-2">
-              <MemberTrigger name={name} avatar={avatar} projectSlug={projectSlug} className="flex items-center gap-2 min-w-0">
+              <MemberTrigger name={name} avatar={avatar} profileId={profileId ?? undefined} projectSlug={projectSlug} className="flex items-center gap-2 min-w-0">
                 <Avatar src={avatar} name={name} className="w-5 h-5 rounded-full flex-shrink-0" />
                 <span className="text-[12px] text-slate-700 dark:text-zinc-300 truncate">{name}</span>
               </MemberTrigger>
@@ -396,6 +399,7 @@ function RecentlyCompleted({
                 <MemberTrigger
                   name={t.assignee.name}
                   avatar={t.assignee.avatar}
+                  profileId={t.assigneeProfileId ?? undefined}
                   projectSlug={t.projectSlug}
                   nested
                   className="rounded-full"

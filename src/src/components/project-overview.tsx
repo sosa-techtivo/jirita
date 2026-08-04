@@ -187,6 +187,7 @@ function AttentionRow({ item, slug, onOpen }: { item: AttentionItem; slug: strin
       <MemberTrigger
         name={item.ticket.assignee.name}
         avatar={item.ticket.assignee.avatar}
+        profileId={item.ticket.assigneeProfileId ?? undefined}
         projectSlug={slug}
         nested
         className="flex-shrink-0 mt-0.5 rounded-full"
@@ -693,7 +694,7 @@ export function ProjectOverview({ slug = "mobile-banking-app" }: { slug?: string
               <ul className="space-y-4">
                 {myActivity.map((entry) => (
                   <li key={entry.id} className="flex items-start gap-3">
-                    <MemberTrigger name={entry.name} avatar={entry.avatar} projectSlug={slug} className="flex-shrink-0 mt-0.5 rounded-full">
+                    <MemberTrigger name={entry.name} avatar={entry.avatar} profileId={entry.actorProfileId ?? undefined} projectSlug={slug} className="flex-shrink-0 mt-0.5 rounded-full">
                       <Avatar src={entry.avatar} name={entry.name} className="w-6 h-6 rounded-full" />
                     </MemberTrigger>
                     <div className="text-sm leading-snug min-w-0 flex-1">
@@ -752,6 +753,7 @@ export function ProjectOverview({ slug = "mobile-banking-app" }: { slug?: string
                       name={member.name}
                       avatar={member.avatar}
                       role={member.role}
+                      profileId={member.id}
                       projectSlug={slug}
                       className="flex items-center gap-2.5 w-full text-left"
                     >

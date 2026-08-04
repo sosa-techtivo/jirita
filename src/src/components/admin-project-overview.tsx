@@ -55,6 +55,10 @@ export interface ActivityEntry {
   id: string;
   avatar: string;
   name: string;
+  /** Real profiles.id of the actor, when known — lets a "click this person"
+   *  trigger open the Member Profile Modal against their real identity
+   *  instead of a name-based guess. */
+  actorProfileId: string | null;
   /** The action fragment only — the ticket title never appears here; when
    *  `ticket` is set it renders on its own clickable line instead. */
   message: ReactNode;
@@ -195,6 +199,7 @@ export function TicketRow({
       <MemberTrigger
         name={ticket.assignee.name}
         avatar={ticket.assignee.avatar}
+        profileId={ticket.assigneeProfileId ?? undefined}
         projectSlug={slug}
         nested
         className="flex-shrink-0 rounded-full"
@@ -245,6 +250,7 @@ export function activityEventToEntry(event: OrganizationActivityEvent, ticket: T
     id: event.id,
     avatar: event.actorAvatar,
     name: event.actorName ?? "Someone",
+    actorProfileId: event.actorProfileId,
     time: event.time,
     ticket,
   };
@@ -856,12 +862,12 @@ export function AdminProjectOverview({ slug = "mobile-banking-app" }: { slug?: s
               <ul className="space-y-4">
                 {visibleActivity.map((entry) => (
                   <li key={entry.id} className="flex items-start gap-3">
-                    <MemberTrigger name={entry.name} avatar={entry.avatar} projectSlug={slug} className="flex-shrink-0 mt-0.5 rounded-full">
+                    <MemberTrigger name={entry.name} avatar={entry.avatar} profileId={entry.actorProfileId ?? undefined} projectSlug={slug} className="flex-shrink-0 mt-0.5 rounded-full">
                       <Avatar src={entry.avatar} name={entry.name} className="w-6 h-6 rounded-full" />
                     </MemberTrigger>
                     <div className="text-sm leading-snug min-w-0 flex-1">
                       <p className="text-slate-700 dark:text-zinc-300">
-                        <MemberTrigger name={entry.name} avatar={entry.avatar} projectSlug={slug} className="font-medium text-slate-900 dark:text-zinc-100 hover:underline">
+                        <MemberTrigger name={entry.name} avatar={entry.avatar} profileId={entry.actorProfileId ?? undefined} projectSlug={slug} className="font-medium text-slate-900 dark:text-zinc-100 hover:underline">
                           {entry.name}
                         </MemberTrigger> {entry.message}
                       </p>
@@ -924,6 +930,7 @@ export function AdminProjectOverview({ slug = "mobile-banking-app" }: { slug?: s
                       name={member.name}
                       avatar={member.avatar}
                       role={member.role}
+                      profileId={member.id}
                       projectSlug={slug}
                       className="flex items-center gap-2.5 w-full text-left"
                     >

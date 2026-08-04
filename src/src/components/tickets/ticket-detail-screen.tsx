@@ -327,11 +327,16 @@ function EditableSidebarType({ value, onChange }: { value: TicketType; onChange:
 
 function EditableSidebarAssignee({
   value,
+  assigneeProfileId,
   onChange,
   projectSlug,
   members,
 }: {
   value: { name: string; avatar: string };
+  /** Real profiles.id backing `value`, when known — passed straight through
+   *  to the read-only MemberTrigger below so it opens the real profile
+   *  instead of falling back to a name-based guess. */
+  assigneeProfileId?: string | null;
   onChange: (v: { name: string; avatar: string }) => void;
   projectSlug?: string;
   /** Real organization members only — no mock names. */
@@ -372,6 +377,7 @@ function EditableSidebarAssignee({
           <MemberTrigger
             name={value.name}
             avatar={value.avatar}
+            profileId={assigneeProfileId ?? undefined}
             projectSlug={projectSlug}
             className="flex items-center gap-1.5 min-w-0"
           >
@@ -797,6 +803,7 @@ function RelatedTicketCard({
           <MemberTrigger
             name={ticket.assignee.name}
             avatar={ticket.assignee.avatar}
+            profileId={ticket.assigneeProfileId ?? undefined}
             projectSlug={ticket.projectSlug}
             nested
             className="ml-auto flex-shrink-0 rounded-full"
@@ -1205,6 +1212,10 @@ type AttachmentItem = {
   size: string;
   addedBy: string;
   avatar: string;
+  /** Real profiles.id of the uploader, when known — lets the "addedBy"
+   *  trigger open the Member Profile Modal against their real identity
+   *  instead of a name-based guess. */
+  profileId: string | null;
   uploadedAt: string;
   storagePath: string;
   /** False for attachment metadata restored from a Data Only Backup — no
@@ -1311,11 +1322,15 @@ function UploadingRow({ item }: { item: UploadingItem }) {
 
 function AttachmentRow({
   file,
+  projectSlug,
   onDelete,
   onRename,
   onDownload,
 }: {
   file: AttachmentItem;
+  /** This ticket's own real project — lets the "addedBy" MemberTrigger fetch
+   *  the uploader's real per-project metrics instead of aggregating org-wide. */
+  projectSlug?: string;
   onDelete: () => void;
   /** Resolves to whether the rename actually persisted — the input only
    *  closes on success, so a failure leaves it open to retry instead of
@@ -1453,7 +1468,7 @@ function AttachmentRow({
         <div className="text-[11px] text-slate-400 dark:text-zinc-600 mt-0.5 flex items-center gap-1.5">
           <span>{file.size}</span>
           <span>·</span>
-          <MemberTrigger name={file.addedBy} avatar={file.avatar} className="flex items-center gap-1.5">
+          <MemberTrigger name={file.addedBy} avatar={file.avatar} profileId={file.profileId ?? undefined} projectSlug={projectSlug} className="flex items-center gap-1.5">
             <Avatar src={file.avatar} name={file.addedBy} className="w-3.5 h-3.5 rounded-full flex-shrink-0" />
             <span>{file.addedBy}</span>
           </MemberTrigger>
@@ -1731,6 +1746,7 @@ function toAttachmentItem(a: TicketAttachment): AttachmentItem {
     size: formatBytes(a.sizeBytes),
     addedBy: a.uploadedByName,
     avatar: a.uploadedByAvatar,
+    profileId: a.uploadedByProfileId,
     uploadedAt: a.uploadedAt,
     storagePath: a.storagePath,
     isAvailable: a.isAvailable,
@@ -1739,11 +1755,15 @@ function toAttachmentItem(a: TicketAttachment): AttachmentItem {
 
 function AttachmentsSection({
   ticketId,
+  projectSlug,
   isDevFallback,
   onUploaded,
   onError,
 }: {
   ticketId: string;
+  /** This ticket's own real project — passed straight through to each
+   *  AttachmentRow's "addedBy" MemberTrigger. */
+  projectSlug?: string;
   isDevFallback: boolean;
   /** Called after a successful upload, rename, or delete — a database trigger already logged the real activity row; this just tells the parent to refetch it. */
   onUploaded: () => void;
@@ -1917,6 +1937,7 @@ function AttachmentsSection({
               <AttachmentRow
                 key={a.id}
                 file={a}
+                projectSlug={projectSlug}
                 onDelete={() => {
                   // Dev fallback: no real attachment row to delete.
                   if (isDevFallback) {
@@ -3569,7 +3590,7 @@ export function TicketDetailScreen({
             )}
 
             <div className="order-[50]">
-              <AttachmentsSection ticketId={ticket.id} isDevFallback={isDevFallback} onUploaded={refreshActivity} onError={showError} />
+              <AttachmentsSection ticketId={ticket.id} projectSlug={ticket.projectSlug} isDevFallback={isDevFallback} onUploaded={refreshActivity} onError={showError} />
             </div>
 
             <div className="order-[70]">
@@ -3601,6 +3622,7 @@ export function TicketDetailScreen({
                     <MemberTrigger
                       name={c.name}
                       avatar={c.avatar}
+                      profileId={c.authorProfileId ?? undefined}
                       projectSlug={ticket.projectSlug}
                       className="flex-shrink-0 mt-0.5 rounded-full"
                     >
@@ -3612,7 +3634,7 @@ export function TicketDetailScreen({
                     </MemberTrigger>
                     <div className="flex-1 min-w-0">
                       <p className="text-[13px] font-semibold text-slate-800 dark:text-zinc-200 leading-snug">
-                        <MemberTrigger name={c.name} avatar={c.avatar} projectSlug={ticket.projectSlug} className="hover:underline">
+                        <MemberTrigger name={c.name} avatar={c.avatar} profileId={c.authorProfileId ?? undefined} projectSlug={ticket.projectSlug} className="hover:underline">
                           {c.name}
                         </MemberTrigger>
                         <span className="ml-2 font-normal text-slate-400 dark:text-zinc-600">
@@ -3790,6 +3812,7 @@ export function TicketDetailScreen({
 
             <EditableSidebarAssignee
               value={ticket.assignee}
+              assigneeProfileId={ticket.assigneeProfileId}
               onChange={(v) => {
                 update("assignee", v);
                 const member = members.find((m) => m.name === v.name);

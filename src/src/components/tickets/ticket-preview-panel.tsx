@@ -249,11 +249,16 @@ function PreviewPriorityControl({ value, onChange }: { value: TicketPriority; on
 
 function PreviewAssigneeControl({
   value,
+  assigneeProfileId,
   onChange,
   projectSlug,
   members,
 }: {
   value: { name: string; avatar: string };
+  /** Real profiles.id backing `value`, when known — passed straight through
+   *  to the read-only MemberTrigger below so it opens the real profile
+   *  instead of falling back to a name-based guess. */
+  assigneeProfileId?: string | null;
   onChange: (v: { name: string; avatar: string }) => void;
   projectSlug?: string;
   members: OrgMember[];
@@ -295,6 +300,7 @@ function PreviewAssigneeControl({
       <MemberTrigger
         name={value.name}
         avatar={value.avatar}
+        profileId={assigneeProfileId ?? undefined}
         projectSlug={projectSlug}
         className="flex items-center gap-1.5 min-w-0"
       >
@@ -649,6 +655,7 @@ export function TicketPreviewPanel({
                   {editable ? (
                     <PreviewAssigneeControl
                       value={t.assignee}
+                      assigneeProfileId={t.assigneeProfileId}
                       projectSlug={t.projectSlug}
                       members={members}
                       onChange={(v) => {
@@ -663,6 +670,7 @@ export function TicketPreviewPanel({
                     <MemberTrigger
                       name={t.assignee.name}
                       avatar={t.assignee.avatar}
+                      profileId={t.assigneeProfileId ?? undefined}
                       projectSlug={t.projectSlug}
                       className="flex items-center gap-1.5 min-w-0"
                     >
@@ -680,6 +688,7 @@ export function TicketPreviewPanel({
                     <MemberTrigger
                       name={creator.name}
                       avatar={creator.avatar}
+                      profileId={t.createdByProfileId ?? undefined}
                       projectSlug={t.projectSlug}
                       className="flex items-center gap-1.5 min-w-0"
                     >
@@ -815,6 +824,7 @@ export function TicketPreviewPanel({
                   <MemberTrigger
                     name={c.name}
                     avatar={c.avatar}
+                    profileId={c.authorProfileId ?? undefined}
                     projectSlug={t.projectSlug}
                     className="flex-shrink-0 mt-0.5 rounded-full"
                   >
@@ -827,7 +837,7 @@ export function TicketPreviewPanel({
                   <div className="flex-1 min-w-0">
                     {/* Author · timestamp on one line */}
                     <p className="text-[12px] font-semibold text-slate-800 dark:text-zinc-200 leading-snug">
-                      <MemberTrigger name={c.name} avatar={c.avatar} projectSlug={t.projectSlug} className="hover:underline">
+                      <MemberTrigger name={c.name} avatar={c.avatar} profileId={c.authorProfileId ?? undefined} projectSlug={t.projectSlug} className="hover:underline">
                         {c.name}
                       </MemberTrigger>
                       <span className="ml-1.5 font-normal text-slate-400 dark:text-zinc-600">

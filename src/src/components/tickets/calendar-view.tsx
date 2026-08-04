@@ -201,6 +201,7 @@ function DayPanel({
                 <MemberTrigger
                   name={ticket.assignee.name}
                   avatar={ticket.assignee.avatar}
+                  profileId={ticket.assigneeProfileId ?? undefined}
                   projectSlug={ticket.projectSlug}
                   nested
                   className="flex items-center gap-1.5 mt-2"

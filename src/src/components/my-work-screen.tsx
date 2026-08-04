@@ -52,6 +52,10 @@ interface ActivityEntry {
   id: string;
   name: string;
   avatar: string;
+  /** Real profiles.id of the actor, when known — lets a "click this person"
+   *  trigger open the Member Profile Modal against their real identity
+   *  instead of a name-based guess. */
+  actorProfileId: string | null;
   /** The action fragment only — the ticket title never appears here; when
    *  `ticket` is set it renders on its own clickable line instead. */
   action: ReactNode;
@@ -84,7 +88,15 @@ function activityEventToEntry(
   const group: ActivityEntry["group"] =
     localDate === todayISO ? "today" : localDate === yesterdayISO ? "yesterday" : "earlier";
 
-  const base = { id: event.id, name: event.actorName ?? "Someone", avatar: event.actorAvatar, time: event.time, group, ticket };
+  const base = {
+    id: event.id,
+    name: event.actorName ?? "Someone",
+    avatar: event.actorAvatar,
+    actorProfileId: event.actorProfileId,
+    time: event.time,
+    group,
+    ticket,
+  };
 
   if (event.type === "blocked") {
     return { ...base, action: <>marked <span className="text-red-600 dark:text-red-400 font-medium">Blocked</span></> };
@@ -1091,12 +1103,12 @@ export function MyWorkScreen() {
                       <ul className="space-y-3.5">
                         {entries.map((entry) => (
                           <li key={entry.id} className="flex items-start gap-3">
-                            <MemberTrigger name={entry.name} avatar={entry.avatar} className="flex-shrink-0 mt-0.5 rounded-full">
+                            <MemberTrigger name={entry.name} avatar={entry.avatar} profileId={entry.actorProfileId ?? undefined} projectSlug={entry.ticket?.projectSlug} className="flex-shrink-0 mt-0.5 rounded-full">
                               <Avatar src={entry.avatar} name={entry.name} className="w-6 h-6 rounded-full" />
                             </MemberTrigger>
                             <div className="text-sm leading-snug min-w-0 flex-1">
                               <p className="text-slate-700 dark:text-zinc-300">
-                                <MemberTrigger name={entry.name} avatar={entry.avatar} className="font-medium text-slate-900 dark:text-zinc-100 hover:underline">
+                                <MemberTrigger name={entry.name} avatar={entry.avatar} profileId={entry.actorProfileId ?? undefined} projectSlug={entry.ticket?.projectSlug} className="font-medium text-slate-900 dark:text-zinc-100 hover:underline">
                                   {entry.name}
                                 </MemberTrigger>{" "}
                                 {entry.action}

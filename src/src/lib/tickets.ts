@@ -708,6 +708,11 @@ export interface TicketComment {
   id: string;
   name: string;
   avatar: string;
+  /** Real profiles.id of the comment author, when known — lets a "click this
+   *  person" trigger open the Member Profile Modal against their real
+   *  identity instead of a name-based guess. Null when genuinely unknown
+   *  (author_profile_id is null). */
+  authorProfileId: string | null;
   timeAgo: string;
   text: string;
   /** Comment-level attachments only (ticket_attachments.comment_id = this comment's id) — read-only here, see loadTicketComments. */
@@ -967,6 +972,7 @@ export async function loadTicketComments(ticketId: string): Promise<TicketCommen
       id: row.id,
       name: resolveProfileName(author) ?? "Unknown",
       avatar: (author ? resolveAvatarUrl(author.avatar_url, author.updated_at) : null) ?? FALLBACK_AVATAR,
+      authorProfileId: row.author_profile_id,
       timeAgo: formatRelativeTime(row.created_at),
       text: row.body,
       attachments: attachmentsByCommentId.get(row.id) ?? [],
@@ -1037,6 +1043,7 @@ export async function createTicketComment(ticketId: string, body: string): Promi
       id: row.id,
       name: resolveProfileName(authorRow) ?? "Unknown",
       avatar: (authorRow ? resolveAvatarUrl(authorRow.avatar_url, authorRow.updated_at) : null) ?? FALLBACK_AVATAR,
+      authorProfileId: row.author_profile_id,
       timeAgo: formatRelativeTime(row.created_at),
       text: row.body,
       attachments: [],
@@ -1888,6 +1895,11 @@ export interface TicketAttachment {
   mimeType: string | null;
   uploadedByName: string;
   uploadedByAvatar: string;
+  /** Real profiles.id of the uploader, when known — lets a "click this
+   *  person" trigger open the Member Profile Modal against their real
+   *  identity instead of a name-based guess. Null when genuinely unknown
+   *  (uploaded_by is null). */
+  uploadedByProfileId: string | null;
   /** Pre-formatted relative time ("3 days ago") — same convention as TicketComment/TicketActivityEvent. */
   uploadedAt: string;
   /** False only for attachment metadata restored from a Data Only Backup
@@ -1920,6 +1932,7 @@ function rowToAttachment(row: AttachmentRow, uploaderRow: AssigneeProfileRow | u
     uploadedByName: resolveProfileName(uploaderRow) ?? "Unknown",
     uploadedByAvatar:
       (uploaderRow ? resolveAvatarUrl(uploaderRow.avatar_url, uploaderRow.updated_at) : null) ?? FALLBACK_AVATAR,
+    uploadedByProfileId: row.uploaded_by,
     uploadedAt: formatRelativeTime(row.created_at),
     isAvailable: row.is_available,
   };

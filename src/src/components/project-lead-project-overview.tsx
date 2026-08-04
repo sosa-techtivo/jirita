@@ -76,6 +76,7 @@ function AttentionRow({
       <MemberTrigger
         name={ticket.assignee.name}
         avatar={ticket.assignee.avatar}
+        profileId={ticket.assigneeProfileId ?? undefined}
         projectSlug={slug}
         nested
         className="flex-shrink-0 mt-0.5 rounded-full"
@@ -517,6 +518,7 @@ export function ProjectLeadProjectOverview({ slug = "mobile-banking-app" }: { sl
                       name={member.name}
                       avatar={member.avatar}
                       role={member.role}
+                      profileId={member.id}
                       projectSlug={slug}
                       className="flex items-center gap-2.5 w-full text-left"
                     >
