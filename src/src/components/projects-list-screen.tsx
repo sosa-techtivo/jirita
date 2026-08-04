@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { ProjectHealth, ProjectStatus, ProjectSummary } from "@/lib/mock-projects";
@@ -13,11 +13,17 @@ import { useOrganizationProjects } from "@/components/organization-projects-prov
 import { MemberTrigger } from "@/components/member-profile";
 import { Avatar } from "@/components/ui/avatar";
 import { loadOrganizationTickets } from "@/lib/tickets";
-import { loadProjectTeam } from "@/lib/projects";
+import {
+  loadProjectTeam,
+  loadPendingAccessRequestsForLead,
+  approveProjectAccessRequest,
+  rejectProjectAccessRequest,
+  type ProjectAccessRequest,
+} from "@/lib/projects";
 import { SkeletonBlock } from "@/components/dashboard-shared";
 import { buildProjectHealthRows, computeProjectProgressPct } from "@/components/reports-screen";
 import type { Risk } from "@/components/reports-screen";
-import { getTodayISO, parseDisplayDate } from "@/components/tickets/ticket-ui";
+import { getTodayISO, parseDisplayDate, ErrorToast } from "@/components/tickets/ticket-ui";
 import { canManage } from "@/lib/current-user";
 import { MemberProjectsScreen } from "@/components/member-projects-screen";
 import { CreateProjectModal } from "@/components/create-project-modal";
@@ -499,6 +505,57 @@ function ManagedProjectsScreen() {
     };
   }, [isDevFallback, organization, isProjectLead]);
 
+  // Pending Project Access Requests (Project Lead only) — Members asking to
+  // join a project this user leads. project_access_requests_select RLS
+  // already scopes rows to the caller's own led projects (or an Admin), so
+  // no client-side project filter is needed here beyond isProjectLead
+  // gating whether this section renders at all. Fetched independently from
+  // the metrics effect above (it's additive/secondary, never blocking the
+  // primary loading skeleton).
+  const [pendingAccessRequests, setPendingAccessRequests] = useState<ProjectAccessRequest[]>([]);
+  const [accessRequestActionId, setAccessRequestActionId] = useState<string | null>(null);
+  const [accessRequestError, setAccessRequestError] = useState<string | null>(null);
+  const accessRequestsFetchIdRef = useRef(0);
+
+  const refetchAccessRequests = useCallback(() => {
+    if (!isProjectLead) return;
+    const requestId = ++accessRequestsFetchIdRef.current;
+    loadPendingAccessRequestsForLead().then((result) => {
+      if (accessRequestsFetchIdRef.current !== requestId) return;
+      if (result.status === "ready") setPendingAccessRequests(result.requests);
+    });
+  }, [isProjectLead]);
+
+  useEffect(() => {
+    refetchAccessRequests();
+  }, [refetchAccessRequests]);
+
+  async function handleApproveAccessRequest(request: ProjectAccessRequest) {
+    if (!organization || accessRequestActionId) return;
+    setAccessRequestActionId(request.id);
+    setAccessRequestError(null);
+    const result = await approveProjectAccessRequest(organization.id, request);
+    setAccessRequestActionId(null);
+    if (result.status === "error") {
+      setAccessRequestError(result.message);
+      return;
+    }
+    refetchAccessRequests();
+  }
+
+  async function handleRejectAccessRequest(request: ProjectAccessRequest) {
+    if (!organization || accessRequestActionId) return;
+    setAccessRequestActionId(request.id);
+    setAccessRequestError(null);
+    const result = await rejectProjectAccessRequest(organization.id, request);
+    setAccessRequestActionId(null);
+    if (result.status === "error") {
+      setAccessRequestError(result.message);
+      return;
+    }
+    refetchAccessRequests();
+  }
+
   const statusGroups: DropdownGroup[] = useMemo(() => {
     const statuses = isProjectLead ? STATUS_ORDER.filter((s) => s !== "archived") : STATUS_ORDER;
     return [{ options: statuses.map((status) => ({ value: status, label: statusMeta[status].label })) }];
@@ -713,6 +770,28 @@ function ManagedProjectsScreen() {
         <p className="mt-6 text-xs font-medium text-slate-500 dark:text-zinc-400">{leadSummaryLine}</p>
       )}
 
+      {isProjectLead && pendingAccessRequests.length > 0 && (
+        <div className="mt-4 rounded-xl border border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900 shadow-sm shadow-slate-200/40 dark:shadow-black/20 overflow-hidden">
+          <div className="px-5 py-3 border-b border-slate-100 dark:border-zinc-800">
+            <h2 className="text-sm font-semibold text-slate-900 dark:text-zinc-50">Pending Access Requests</h2>
+            <p className="text-xs text-slate-500 dark:text-zinc-400 mt-0.5">
+              Members asking to join a project you lead.
+            </p>
+          </div>
+          <div className="divide-y divide-slate-100 dark:divide-zinc-800">
+            {pendingAccessRequests.map((request) => (
+              <AccessRequestRow
+                key={request.id}
+                request={request}
+                busy={accessRequestActionId === request.id}
+                onApprove={() => handleApproveAccessRequest(request)}
+                onReject={() => handleRejectAccessRequest(request)}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className={isProjectLead ? "mt-3" : "mt-6"}>
         {filtered.length === 0 ? (
           <EmptyState hasAnyProjects={baseProjects.length > 0} onCreate={() => setShowCreateModal(true)} />
@@ -752,6 +831,55 @@ function ManagedProjectsScreen() {
       {archivingProject && (
         <ArchiveProjectModal project={archivingProject} onClose={() => setArchivingProject(null)} />
       )}
+      {accessRequestError && (
+        <ErrorToast message={accessRequestError} onDismiss={() => setAccessRequestError(null)} />
+      )}
+    </div>
+  );
+}
+
+function AccessRequestRow({
+  request,
+  busy,
+  onApprove,
+  onReject,
+}: {
+  request: ProjectAccessRequest;
+  busy: boolean;
+  onApprove: () => void;
+  onReject: () => void;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-4 px-5 py-3.5">
+      <div className="flex items-center gap-3 min-w-0">
+        <Avatar name={request.requesterName} src={request.requesterAvatar} className="w-9 h-9 rounded-full flex-shrink-0" />
+        <div className="min-w-0">
+          <p className="text-sm font-medium text-slate-900 dark:text-zinc-100 truncate">
+            {request.requesterName}
+            <span className="font-normal text-slate-500 dark:text-zinc-400"> wants to join </span>
+            {request.projectName}
+          </p>
+          <p className="text-xs text-slate-400 dark:text-zinc-500 mt-0.5">Requested {request.requestedAt}</p>
+        </div>
+      </div>
+      <div className="flex items-center gap-2 flex-shrink-0">
+        <button
+          type="button"
+          disabled={busy}
+          onClick={onReject}
+          className="text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          Reject
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={onApprove}
+          className="text-xs font-medium px-2.5 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-700 dark:bg-brand-500 dark:hover:bg-brand-600 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          Accept
+        </button>
+      </div>
     </div>
   );
 }

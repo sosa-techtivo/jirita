@@ -23,6 +23,7 @@ import { getSupabaseBrowserClient } from "./supabase-client";
 import { resolveAvatarUrl } from "./membership";
 import { FALLBACK_AVATAR } from "./current-user";
 import { createNotification } from "./notifications";
+import { formatAbsoluteDate } from "./date-format";
 import { deleteProjectAction, type DeleteProjectResult } from "./server/delete-project-action";
 import type { ClientName, ProjectCategory, ProjectHealth, ProjectStatus, ProjectSummary } from "./mock-projects";
 
@@ -1205,6 +1206,340 @@ async function notifyProjectMemberAdded(
     title: `${actorName} added you to ${projectName}`,
     projectId,
   });
+}
+
+// ── Project access requests ──────────────────────────────────────────────────
+// A Member requesting to join a project they're not staffed on yet
+// ("Other Projects" in their own /projects view), and that project's real
+// Lead approving/rejecting it from theirs. See
+// 20260908000000_add_project_access_requests.sql for the table/RLS/
+// trigger this all rests on. Approving reuses addProjectMember above
+// verbatim — this file never inserts into project_memberships a second way.
+
+export type ProjectAccessRequestStatus = "pending" | "approved" | "rejected" | "cancelled";
+
+export interface BrowsableOrgProject {
+  id: string;
+  slug: string;
+  name: string;
+  shortName: string | null;
+  category: ProjectCategory;
+  description: string | null;
+  clientName: string | null;
+}
+
+export type BrowsableOrgProjectsResult =
+  | { status: "ready"; projects: BrowsableOrgProject[] }
+  | { status: "error"; message: string };
+
+interface BrowsableProjectRow {
+  id: string;
+  slug: string;
+  name: string;
+  short_name: string | null;
+  category: ProjectCategory;
+  description: string | null;
+  client_name: string | null;
+}
+
+// Active org projects the caller isn't already staffed on — projects_select
+// RLS (can_view_project) deliberately hides these from a plain Member, so
+// this goes through list_browsable_org_projects (security definer, exposes
+// only the fields the "Other Projects" card needs) rather than a second,
+// looser projects_select policy.
+export async function loadBrowsableOrgProjects(organizationId: string): Promise<BrowsableOrgProjectsResult> {
+  const supabase = getSupabaseBrowserClient();
+
+  const { data, error } = await supabase.rpc("list_browsable_org_projects", { target_org_id: organizationId });
+
+  if (error) {
+    logDev("browsable org projects query failed", error);
+    return { status: "error", message: error.message };
+  }
+
+  const rows = (data ?? []) as BrowsableProjectRow[];
+  const projects: BrowsableOrgProject[] = rows.map((row) => ({
+    id: row.id,
+    slug: row.slug,
+    name: row.name,
+    shortName: row.short_name,
+    category: row.category,
+    description: row.description,
+    clientName: row.client_name,
+  }));
+
+  return { status: "ready", projects };
+}
+
+export interface ProjectAccessRequest {
+  id: string;
+  projectId: string;
+  projectSlug: string;
+  projectName: string;
+  requesterProfileId: string;
+  requesterName: string;
+  requesterAvatar: string;
+  status: ProjectAccessRequestStatus;
+  /** Pre-formatted absolute date ("Aug 3, 2026"), same convention as the rest of this app's date displays. */
+  requestedAt: string;
+}
+
+export type ProjectAccessRequestsResult =
+  | { status: "ready"; requests: ProjectAccessRequest[] }
+  | { status: "error"; message: string };
+
+interface AccessRequestRow {
+  id: string;
+  project_id: string;
+  requester_profile_id: string;
+  status: ProjectAccessRequestStatus;
+  created_at: string;
+}
+
+interface AccessRequestProfileRow {
+  id: string;
+  first_name: string | null;
+  last_name: string | null;
+  avatar_url: string | null;
+  updated_at: string;
+}
+
+async function hydrateAccessRequests(
+  supabase: ReturnType<typeof getSupabaseBrowserClient>,
+  rows: AccessRequestRow[]
+): Promise<ProjectAccessRequest[]> {
+  if (rows.length === 0) return [];
+
+  const projectIds = Array.from(new Set(rows.map((r) => r.project_id)));
+  const requesterIds = Array.from(new Set(rows.map((r) => r.requester_profile_id)));
+
+  const [{ data: projectRows }, { data: profileRows }] = await Promise.all([
+    supabase.from("projects").select("id, slug, name").in("id", projectIds).returns<{ id: string; slug: string; name: string }[]>(),
+    supabase
+      .from("profiles")
+      .select("id, first_name, last_name, avatar_url, updated_at")
+      .in("id", requesterIds)
+      .returns<AccessRequestProfileRow[]>(),
+  ]);
+
+  const projectById = new Map((projectRows ?? []).map((p) => [p.id, p]));
+  const profileById = new Map((profileRows ?? []).map((p) => [p.id, p]));
+
+  return rows.map((row) => {
+    const project = projectById.get(row.project_id);
+    const profile = profileById.get(row.requester_profile_id);
+    return {
+      id: row.id,
+      projectId: row.project_id,
+      projectSlug: project?.slug ?? "",
+      projectName: project?.name ?? "Unknown project",
+      requesterProfileId: row.requester_profile_id,
+      requesterName: profile ? [profile.first_name, profile.last_name].filter(Boolean).join(" ") || "Unnamed" : "Unknown",
+      requesterAvatar: (profile ? resolveAvatarUrl(profile.avatar_url, profile.updated_at) : null) ?? FALLBACK_AVATAR,
+      status: row.status,
+      requestedAt: formatAbsoluteDate(row.created_at),
+    };
+  });
+}
+
+// This member's own requests, every status — lets the "Other Projects" card
+// know whether to show "Request to be added"/"Pending access" per project
+// (only ever one *pending* row per project/requester, see the migration's
+// partial unique index) without a second query per card.
+export async function loadMyProjectAccessRequests(profileId: string): Promise<ProjectAccessRequestsResult> {
+  const supabase = getSupabaseBrowserClient();
+
+  const { data, error } = await supabase
+    .from("project_access_requests")
+    .select("id, project_id, requester_profile_id, status, created_at")
+    .eq("requester_profile_id", profileId)
+    .returns<AccessRequestRow[]>();
+
+  if (error) {
+    logDev("my project access requests query failed", error);
+    return { status: "error", message: error.message };
+  }
+
+  return { status: "ready", requests: await hydrateAccessRequests(supabase, data ?? []) };
+}
+
+// Pending requests for whatever projects the caller actually leads —
+// project_access_requests_select RLS already scopes this to exactly that
+// (or an Admin), so no separate "which projects do I lead" filter is
+// needed client-side; a Member calling this simply gets an empty list.
+export async function loadPendingAccessRequestsForLead(): Promise<ProjectAccessRequestsResult> {
+  const supabase = getSupabaseBrowserClient();
+
+  const { data, error } = await supabase
+    .from("project_access_requests")
+    .select("id, project_id, requester_profile_id, status, created_at")
+    .eq("status", "pending")
+    .order("created_at", { ascending: true })
+    .returns<AccessRequestRow[]>();
+
+  if (error) {
+    logDev("pending access requests query failed", error);
+    return { status: "error", message: error.message };
+  }
+
+  return { status: "ready", requests: await hydrateAccessRequests(supabase, data ?? []) };
+}
+
+export type ProjectAccessRequestWriteResult = { status: "success" } | { status: "error"; message: string };
+
+// "Request to be added to the team" — direct client insert, gated by
+// project_access_requests_insert RLS (requester_profile_id = auth.uid(),
+// not already a member, project must be active/in-org). The partial
+// unique index on (project_id, requester_profile_id) where pending is
+// what actually prevents a duplicate active request; 23505 here means one
+// already exists, not a real failure.
+export async function requestProjectAccess(
+  organizationId: string,
+  projectId: string,
+  projectName: string,
+  requesterProfileId: string
+): Promise<ProjectAccessRequestWriteResult> {
+  const supabase = getSupabaseBrowserClient();
+
+  const { error } = await supabase
+    .from("project_access_requests")
+    .insert({ project_id: projectId, requester_profile_id: requesterProfileId });
+
+  if (error) {
+    logDev("project access request insert failed", error);
+    if (error.code === "23505") return { status: "success" };
+    return { status: "error", message: error.message };
+  }
+
+  // Notify every real Lead of this project (there's normally exactly one —
+  // the partial unique index on project_role = 'lead' — but this holds
+  // even if that's ever momentarily untrue). Fire-and-forget: never
+  // delays or can fail the already-successful request above.
+  void (async () => {
+    const { data: leadRows } = await supabase
+      .from("project_memberships")
+      .select("profile_id")
+      .eq("project_id", projectId)
+      .eq("project_role", "lead")
+      .returns<{ profile_id: string }[]>();
+
+    const {
+      data: { user: authUser },
+    } = await supabase.auth.getUser();
+    const actorProfileId = authUser?.id ?? null;
+
+    let requesterName = "Someone";
+    if (actorProfileId) {
+      const { data: requesterRow } = await supabase
+        .from("profiles")
+        .select("first_name, last_name")
+        .eq("id", actorProfileId)
+        .maybeSingle<{ first_name: string | null; last_name: string | null }>();
+      requesterName = requesterRow
+        ? [requesterRow.first_name, requesterRow.last_name].filter(Boolean).join(" ") || "Unnamed"
+        : "Someone";
+    }
+
+    for (const lead of leadRows ?? []) {
+      await createNotification({
+        organizationId,
+        recipientProfileId: lead.profile_id,
+        actorProfileId,
+        type: "project_access_requested",
+        title: `${requesterName} requested to join ${projectName}`,
+        projectId,
+      });
+    }
+  })().catch((err) => {
+    logDev("project access request notification failed", err);
+  });
+
+  return { status: "success" };
+}
+
+// "Cancel request" — the requester withdrawing their own still-pending
+// request. project_access_requests_update RLS only allows this exact
+// transition (pending -> cancelled) by the request's own requester; no
+// notification is sent (nothing to tell the Lead that changes what they'd do).
+export async function cancelProjectAccessRequest(requestId: string): Promise<ProjectAccessRequestWriteResult> {
+  const supabase = getSupabaseBrowserClient();
+
+  const { error } = await supabase
+    .from("project_access_requests")
+    .update({ status: "cancelled" })
+    .eq("id", requestId);
+
+  if (error) {
+    logDev("project access request cancel failed", error);
+    return { status: "error", message: error.message };
+  }
+  return { status: "success" };
+}
+
+// "Accept" — adds the requester to the team via the exact same
+// addProjectMember every other real "add to project" flow already uses
+// (so it fires the exact same project_member_added notification too, one
+// of this feature's own required notifications, for free), then marks the
+// request approved. If the membership add fails, the request is left
+// pending rather than silently marked approved with no real membership —
+// project_access_requests_update RLS only allows this project's real Lead/
+// an Admin to make this transition at all, re-enforcing "only the right
+// Lead, only once" at the database level regardless of this ordering.
+export async function approveProjectAccessRequest(
+  organizationId: string,
+  request: ProjectAccessRequest
+): Promise<ProjectAccessRequestWriteResult> {
+  const addResult = await addProjectMember(organizationId, request.projectSlug, request.requesterProfileId);
+  if (addResult.status === "error") return addResult;
+
+  const supabase = getSupabaseBrowserClient();
+  const { error } = await supabase
+    .from("project_access_requests")
+    .update({ status: "approved" })
+    .eq("id", request.id);
+
+  if (error) {
+    logDev("project access request approve failed", error);
+    return { status: "error", message: error.message };
+  }
+  return { status: "success" };
+}
+
+// "Reject" — no membership is ever created; the project stays in the
+// requester's own "Other Projects" and a fresh request is allowed
+// afterwards (the partial unique index only blocks a second *pending* row).
+export async function rejectProjectAccessRequest(
+  organizationId: string,
+  request: ProjectAccessRequest
+): Promise<ProjectAccessRequestWriteResult> {
+  const supabase = getSupabaseBrowserClient();
+
+  const { error } = await supabase
+    .from("project_access_requests")
+    .update({ status: "rejected" })
+    .eq("id", request.id);
+
+  if (error) {
+    logDev("project access request reject failed", error);
+    return { status: "error", message: error.message };
+  }
+
+  const {
+    data: { user: authUser },
+  } = await supabase.auth.getUser();
+
+  void createNotification({
+    organizationId,
+    recipientProfileId: request.requesterProfileId,
+    actorProfileId: authUser?.id ?? null,
+    type: "project_access_rejected",
+    title: `Your request to join ${request.projectName} was rejected`,
+    projectId: request.projectId,
+  }).catch((err) => {
+    logDev("project access reject notification failed", err);
+  });
+
+  return { status: "success" };
 }
 
 // Wired from member-profile-modal.tsx's MemberMenu "Make Project Lead"

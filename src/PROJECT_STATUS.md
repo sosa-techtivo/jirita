@@ -1005,6 +1005,62 @@ real now, but is unrelated to this one.)
   text, this table only supplies a real per-org roster and basic
   duplicate-by-name prevention).
 
+## Project Access Requests (Member → "Other Projects", Project Lead → "Pending Access Requests") — implemented, not yet verified live
+
+- New feature: a Member can now see an "Other Projects" section on their own
+  `/projects` view (`member-projects-screen.tsx`) — active org projects
+  they're not staffed on — and request to join. The request persists, is
+  deduplicated (only one active `pending` request per project/requester,
+  enforced by a partial unique index, not just client-side), and the button
+  becomes "Pending access" with a "Cancel request" action. The corresponding
+  project's real Lead sees a new "Pending Access Requests" section on their
+  own `/projects` view (`projects-list-screen.tsx`'s `ManagedProjectsScreen`)
+  with Accept/Reject actions per request.
+- Migration: `20260908000000_add_project_access_requests.sql` — **written,
+  not yet applied to the live Supabase project** (needs explicit
+  confirmation before `db:push`, same practice as every other migration in
+  this codebase). Adds:
+  - `project_access_requests` table (`project_id`, `requester_profile_id`,
+    `status` — `pending`/`approved`/`rejected`/`cancelled` — `resolved_at`/
+    `resolved_by_profile_id` set only by a `before update` trigger reading
+    `auth.uid()`, never client-supplied).
+  - A partial unique index on `(project_id, requester_profile_id) where
+    status = 'pending'` — one active request per project/requester, but a
+    resolved one never blocks a later new request.
+  - RLS: requester sees/cancels their own; the project's real Lead (or an
+    Admin) sees/approves/rejects requests for that project only. The
+    `update` policy's `using` clause only matches rows still `pending`, so a
+    second approve/reject on an already-resolved request matches zero rows
+    (no double-approval), and its `with check` strictly separates what each
+    actor may transition to (requester → `cancelled` only; Lead/Admin →
+    `approved`/`rejected` only) — closes the gap a naive `with check (true)`
+    would leave for self-approval.
+  - `list_browsable_org_projects(target_org_id)` — a narrow `security
+    definer` RPC returning only the basic fields "Other Projects" needs.
+    `projects_select`/`can_view_project` intentionally only lets a
+    non-admin/lead see projects they already belong to, so this is a
+    deliberately separate, narrow read — never a loosening of that policy,
+    which everything else in the app still relies on.
+  - Two new real notification kinds added to `notifications_type_check` and
+    to `NOTIFICATION_TYPES`/`NotificationType` in
+    `lib/server/create-notification-action.ts`: `project_access_requested`
+    (to every Lead of the project, on request) and `project_access_rejected`
+    (to the requester, on reject). Approval deliberately reuses the
+    *existing* `project_member_added` kind (fired by `addProjectMember`
+    itself) rather than adding a redundant third kind.
+- `lib/projects.ts` additions: `loadBrowsableOrgProjects`,
+  `loadMyProjectAccessRequests`, `loadPendingAccessRequestsForLead`,
+  `requestProjectAccess`, `cancelProjectAccessRequest`,
+  `approveProjectAccessRequest`, `rejectProjectAccessRequest`. Approving
+  reuses the existing `addProjectMember` function/membership-insert path
+  unchanged (and its existing notification) — this table only ever tracks
+  the request itself, never a second copy of membership state.
+- `tsc --noEmit`, `eslint`, and `next build` all pass clean with these
+  changes. **Not yet clicked through in a live browser** (the migration
+  itself hasn't been applied yet, so there's nothing live to click through
+  against) — treat as "should work, not yet verified," same bar as the rest
+  of this file's not-yet-verified items.
+
 ## Confirmed working (Tickets — list views, New Ticket, and Ticket Detail)
 
 Scoped narrowly, like Projects above: only the ticket data itself and the
