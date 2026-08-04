@@ -1074,6 +1074,7 @@ function CollapsibleSection({
   headerAction,
   defaultOpen = true,
   forceOpenSignal,
+  collapsible = true,
   children,
 }: {
   // ReactNode (not just string) so Development can prefix its own title
@@ -1089,56 +1090,74 @@ function CollapsibleSection({
   // as before. Never fires on mount, only on a later change, so it can't
   // override defaultOpen on first render.
   forceOpenSignal?: number;
+  // false permanently removes the expand/collapse behavior — always open,
+  // no chevron, and the header is no longer a clickable toggle. Only
+  // Attachments passes this; every other caller keeps the default
+  // (collapsible) behavior unchanged.
+  collapsible?: boolean;
   children: ReactNode;
 }) {
   const [open, setOpen] = useState(defaultOpen);
   const isFirstRender = useRef(true);
 
   useEffect(() => {
-    if (forceOpenSignal === undefined) return;
+    if (!collapsible || forceOpenSignal === undefined) return;
     if (isFirstRender.current) {
       isFirstRender.current = false;
       return;
     }
     setOpen(true);
-  }, [forceOpenSignal]);
+  }, [collapsible, forceOpenSignal]);
+
+  const isOpen = !collapsible || open;
 
   return (
     <div className="mt-10 pt-8 border-t border-slate-100 dark:border-zinc-800">
       <div className="flex items-center gap-2">
-        <button
-          type="button"
-          onClick={() => setOpen((v) => !v)}
-          className="flex-1 flex items-center gap-2 min-w-0 py-0.5 focus:outline-none focus-visible:ring-1 focus-visible:ring-brand-500/50 rounded"
-          aria-expanded={open}
-        >
-          <span className={SECTION_LABEL}>{title}</span>
-          {badge && (
-            <span className="text-[11px] font-normal normal-case tracking-normal text-slate-300 dark:text-zinc-700">
-              {badge}
-            </span>
-          )}
-          <svg
-            className={
-              "ml-auto w-3 h-3 text-slate-300 dark:text-zinc-700 transition-transform duration-200 flex-shrink-0 " +
-              (open ? "rotate-0" : "-rotate-90")
-            }
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.5"
-            viewBox="0 0 24 24"
-            aria-hidden="true"
+        {collapsible ? (
+          <button
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            className="flex-1 flex items-center gap-2 min-w-0 py-0.5 focus:outline-none focus-visible:ring-1 focus-visible:ring-brand-500/50 rounded"
+            aria-expanded={open}
           >
-            <path d="M19 9l-7 7-7-7" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </button>
+            <span className={SECTION_LABEL}>{title}</span>
+            {badge && (
+              <span className="text-[11px] font-normal normal-case tracking-normal text-slate-300 dark:text-zinc-700">
+                {badge}
+              </span>
+            )}
+            <svg
+              className={
+                "ml-auto w-3 h-3 text-slate-300 dark:text-zinc-700 transition-transform duration-200 flex-shrink-0 " +
+                (open ? "rotate-0" : "-rotate-90")
+              }
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+            >
+              <path d="M19 9l-7 7-7-7" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+        ) : (
+          <div className="flex-1 flex items-center gap-2 min-w-0 py-0.5">
+            <span className={SECTION_LABEL}>{title}</span>
+            {badge && (
+              <span className="text-[11px] font-normal normal-case tracking-normal text-slate-300 dark:text-zinc-700">
+                {badge}
+              </span>
+            )}
+          </div>
+        )}
         {headerAction && <div className="flex-shrink-0">{headerAction}</div>}
       </div>
 
       <div
         className={
           "grid transition-all duration-200 ease-in-out " +
-          (open ? "grid-rows-[1fr]" : "grid-rows-[0fr]")
+          (isOpen ? "grid-rows-[1fr]" : "grid-rows-[0fr]")
         }
       >
         <div className="overflow-hidden">
@@ -2261,10 +2280,6 @@ const AttachmentsSection = forwardRef<
   const [attachments,   setAttachments]   = useState<AttachmentItem[]>([]);
   const [uploading,     setUploading]     = useState<UploadingItem[]>([]);
   const [dragActive,    setDragActive]    = useState(false);
-  // Bumped once per successful upload — forces the section open if it was
-  // closed, and is a no-op (stays open) if it already was. Never bumped on
-  // failure, so a failed upload never opens the section.
-  const [uploadSuccessSignal, setUploadSuccessSignal] = useState(0);
 
   const dragCounter    = useRef(0);
   const fileInputRef   = useRef<HTMLInputElement>(null);
@@ -2332,7 +2347,6 @@ const AttachmentsSection = forwardRef<
             if (prev.some((a) => a.id === result.attachment.id)) return prev;
             return [toAttachmentItem(result.attachment), ...prev];
           });
-          setUploadSuccessSignal((n) => n + 1);
           onUploaded();
         }, 200);
       }).catch((err) => {
@@ -2354,8 +2368,7 @@ const AttachmentsSection = forwardRef<
     <CollapsibleSection
       title="Attachments"
       badge={totalCount > 0 ? `· ${totalCount} ${totalCount === 1 ? "file" : "files"}` : undefined}
-      defaultOpen={false}
-      forceOpenSignal={uploadSuccessSignal}
+      collapsible={false}
       headerAction={
         <button
           onClick={() => fileInputRef.current?.click()}
