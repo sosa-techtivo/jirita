@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Ticket, TicketStatus, TicketPriority, TicketType } from "@/lib/mock-tickets";
 import { getTicketDisplayKey } from "@/lib/mock-tickets";
 import { StatusBadge, STATUS_LABEL, TicketTypeIcon, TicketTypeSelect, PRIORITY_LABEL } from "@/components/tickets/ticket-ui";
@@ -357,6 +357,7 @@ export function NewTicketModal({
   const [labels, setLabels]             = useState<string[]>([]);
   const [dueDate, setDueDate]           = useState("");
   const [attachments, setAttachments]   = useState<PendingAttachment[]>([]);
+  const [dragActive, setDragActive]     = useState(false);
   const [submitting, setSubmitting]     = useState(false);
   const [error, setError]               = useState<string | null>(null);
 
@@ -365,6 +366,7 @@ export function NewTicketModal({
   const criteriaRefs    = useRef<(HTMLInputElement | null)[]>([]);
   const justAddedCrit   = useRef(false);
   const fileInputRef    = useRef<HTMLInputElement>(null);
+  const dragCounterRef  = useRef(0);
 
   // Kept in sync after every commit so the unmount effect below always
   // revokes whatever's actually staged, without listing `attachments` as a
@@ -384,6 +386,96 @@ export function NewTicketModal({
       attachmentsRef.current.forEach((a) => URL.revokeObjectURL(a.previewUrl));
     };
   }, []);
+
+  // The one place files become staged PendingAttachments, regardless of how
+  // they arrived — "Attach files", drag & drop, or a pasted clipboard image
+  // all funnel through here, so all three get the exact same shape/preview/
+  // upload behavior instead of three slightly different implementations.
+  const addAttachments = useCallback((files: FileList | File[]) => {
+    const items = Array.from(files).map((file) => ({
+      id: newPendingAttachmentId(),
+      file,
+      previewUrl: URL.createObjectURL(file),
+      isImage: file.type.startsWith("image/"),
+    }));
+    if (items.length === 0) return;
+    setAttachments((prev) => [...prev, ...items]);
+  }, []);
+
+  // Drag & drop anywhere over the modal — document-level (not just the
+  // Attachments field) so a file can be dropped on any part of the modal,
+  // per this feature's own requirement. Only active while this modal is
+  // mounted; the cleanup below removes every listener on close.
+  // dragCounterRef (not dragActive alone) is needed because dragenter/
+  // dragleave fire once per element boundary crossed while dragging over
+  // nested children — the same convention Ticket Detail's own Attachments
+  // drop zone already uses, just scoped to the whole document here.
+  useEffect(() => {
+    function isFileDrag(e: DragEvent): boolean {
+      return Array.from(e.dataTransfer?.types ?? []).includes("Files");
+    }
+    function onDragEnter(e: DragEvent) {
+      if (!isFileDrag(e)) return;
+      e.preventDefault();
+      dragCounterRef.current += 1;
+      setDragActive(true);
+    }
+    function onDragOver(e: DragEvent) {
+      if (!isFileDrag(e)) return;
+      // Prevents the browser's own default (opening/navigating to the
+      // dropped file) — required on dragover, not just drop.
+      e.preventDefault();
+    }
+    function onDragLeave(e: DragEvent) {
+      if (!isFileDrag(e)) return;
+      dragCounterRef.current -= 1;
+      if (dragCounterRef.current <= 0) {
+        dragCounterRef.current = 0;
+        setDragActive(false);
+      }
+    }
+    function onDrop(e: DragEvent) {
+      if (!isFileDrag(e)) return;
+      e.preventDefault();
+      dragCounterRef.current = 0;
+      setDragActive(false);
+      if (e.dataTransfer?.files?.length) addAttachments(e.dataTransfer.files);
+    }
+    document.addEventListener("dragenter", onDragEnter);
+    document.addEventListener("dragover", onDragOver);
+    document.addEventListener("dragleave", onDragLeave);
+    document.addEventListener("drop", onDrop);
+    return () => {
+      document.removeEventListener("dragenter", onDragEnter);
+      document.removeEventListener("dragover", onDragOver);
+      document.removeEventListener("dragleave", onDragLeave);
+      document.removeEventListener("drop", onDrop);
+    };
+  }, [addAttachments]);
+
+  // Paste-an-image-as-attachment — document-level so it works no matter
+  // what's focused inside the modal. Only ever intercepts the paste (via
+  // preventDefault) when the clipboard actually contains at least one image
+  // file; a text-only clipboard is left completely untouched, so pasting
+  // into Title/Description/Acceptance Criteria/etc. keeps working exactly
+  // as before.
+  useEffect(() => {
+    function onPaste(e: ClipboardEvent) {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      const imageFiles: File[] = [];
+      for (const item of Array.from(items)) {
+        if (item.kind !== "file" || !item.type.startsWith("image/")) continue;
+        const file = item.getAsFile();
+        if (file) imageFiles.push(file);
+      }
+      if (imageFiles.length === 0) return;
+      e.preventDefault();
+      addAttachments(imageFiles);
+    }
+    document.addEventListener("paste", onPaste);
+    return () => document.removeEventListener("paste", onPaste);
+  }, [addAttachments]);
 
   // Lock body scroll
   useEffect(() => {
@@ -546,7 +638,7 @@ export function NewTicketModal({
           aria-modal
           aria-label="New Ticket"
           className={
-            "pointer-events-auto w-full max-w-2xl flex flex-col " +
+            "relative pointer-events-auto w-full max-w-2xl flex flex-col " +
             "max-h-[calc(100dvh-3rem)] " +
             "bg-white dark:bg-zinc-950 " +
             "rounded-2xl border border-slate-200 dark:border-zinc-800 " +
@@ -555,6 +647,19 @@ export function NewTicketModal({
             (visible ? "opacity-100 translate-y-0 scale-100" : "opacity-0 translate-y-2 scale-[0.98]")
           }
         >
+          {/* Drag-over overlay — covers the whole modal, since a file can be
+              dropped anywhere over it, not just on the Attachments field. */}
+          {dragActive && (
+            <div className="absolute inset-0 z-10 rounded-2xl bg-white/90 dark:bg-zinc-950/90 border-2 border-dashed border-brand-500 dark:border-brand-600 flex items-center justify-center pointer-events-none">
+              <div className="flex flex-col items-center gap-2">
+                <svg className="w-8 h-8 text-brand-500 dark:text-brand-600" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
+                  <path d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                <p className="text-[13px] font-semibold text-brand-600 dark:text-brand-500">Drop files to attach</p>
+              </div>
+            </div>
+          )}
+
           {/* ── Header ──────────────────────────────────────────────────────── */}
           <div className="flex items-center justify-between px-6 pt-5 pb-4 flex-shrink-0">
             <h2 className="text-[15px] font-semibold text-slate-900 dark:text-zinc-50">New Ticket</h2>
@@ -787,13 +892,7 @@ export function NewTicketModal({
                 className="hidden"
                 onChange={(e) => {
                   if (e.target.files?.length) {
-                    const items = Array.from(e.target.files).map((file) => ({
-                      id: newPendingAttachmentId(),
-                      file,
-                      previewUrl: URL.createObjectURL(file),
-                      isImage: file.type.startsWith("image/"),
-                    }));
-                    setAttachments((prev) => [...prev, ...items]);
+                    addAttachments(e.target.files);
                     e.target.value = "";
                   }
                 }}
