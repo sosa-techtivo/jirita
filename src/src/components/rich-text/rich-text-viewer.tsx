@@ -15,21 +15,31 @@
 // after mount instead of in the server-rendered HTML.
 
 import { useEffect, useState } from "react";
-import { normalizeRichText, sanitizeRichTextHtml, disableCheckboxes } from "./rich-text-utils";
+import { normalizeRichText, sanitizeRichTextHtml, disableCheckboxes, disableLinks } from "./rich-text-utils";
 
 export function RichTextViewer({
   content,
   className,
+  interactiveLinks = true,
 }: {
   content: string;
   className?: string;
+  /** false renders every link inert (no real navigation) while keeping its
+   *  usual visual style — for a read-only preview nested inside its own
+   *  clickable row (e.g. the notification panel's comment excerpt), where
+   *  a real, navigable link would fight that row's own click target.
+   *  Every existing caller (Description, Comments, Ticket Preview) keeps
+   *  real, clickable links by leaving this at its default. */
+  interactiveLinks?: boolean;
 }) {
   const [html, setHtml] = useState("");
 
   useEffect(() => {
+    let next = disableCheckboxes(sanitizeRichTextHtml(normalizeRichText(content)));
+    if (!interactiveLinks) next = disableLinks(next);
     // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: sanitize() must never run during Next.js's SSR pass (no real DOM to sanitize against there), so this is the one place it's deliberately deferred to a real, browser-only effect instead of computed directly in the render body
-    setHtml(disableCheckboxes(sanitizeRichTextHtml(normalizeRichText(content))));
-  }, [content]);
+    setHtml(next);
+  }, [content, interactiveLinks]);
 
   return (
     <div

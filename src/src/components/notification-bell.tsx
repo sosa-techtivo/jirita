@@ -7,6 +7,7 @@ import { useRefreshOnFocusAndVisibility } from "@/components/member-profile-moda
 import { formatRelativeTime } from "@/lib/tickets";
 import { FALLBACK_AVATAR } from "@/lib/current-user";
 import { Avatar } from "@/components/ui/avatar";
+import { RichTextViewer } from "@/components/rich-text/rich-text-viewer";
 import {
   loadRecentNotifications,
   loadUnreadNotificationCount,
@@ -326,7 +327,11 @@ export function NotificationBell() {
                       {n.title}
                     </p>
                     {n.message && (
-                      <p className="text-[12px] text-slate-400 dark:text-zinc-500 truncate mt-0.5">{n.message}</p>
+                      <RichTextViewer
+                        content={n.message}
+                        interactiveLinks={false}
+                        className="text-[12px] text-slate-400 dark:text-zinc-500 mt-0.5 line-clamp-2"
+                      />
                     )}
                     <p className="text-[11px] text-slate-400 dark:text-zinc-600 mt-0.5">{formatRelativeTime(n.createdAt)}</p>
                   </div>

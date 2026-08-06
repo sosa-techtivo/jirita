@@ -95,6 +95,17 @@ export function disableCheckboxes(html: string): string {
   return html.replace(/<input(?![^>]*\bdisabled\b)([^>]*)>/g, "<input$1 disabled>");
 }
 
+// Read-only rendering nested inside its own clickable row only (e.g. a
+// notification's comment-excerpt preview, itself inside a <button> that
+// navigates to the ticket) — strips just the `href` off every real <a>,
+// so a click can never navigate away or fight that row's own click
+// handler. The link keeps its usual visual style regardless: this app's
+// own `.jirita-rich-text a` CSS is a plain element selector (not a
+// :link/:visited pseudo-class), so it still matches an <a> with no href.
+export function disableLinks(html: string): string {
+  return html.replace(/<a\b([^>]*)>/gi, (_match, attrs: string) => `<a${attrs.replace(/\s+href=("[^"]*"|'[^']*')/i, "")}>`);
+}
+
 // A brand-new Tiptap doc still serializes to "<p></p>" — a non-empty
 // string that would otherwise pass any naive `.trim().length > 0` check.
 // Reuses DOMPurify itself (stripping every tag leaves only real text
