@@ -117,3 +117,13 @@ export function isRichTextEmpty(html: string): boolean {
   if (!html) return true;
   return DOMPurify.sanitize(html, { ALLOWED_TAGS: [] }).replace(/\s+/g, "").length === 0;
 }
+
+// Plain-text rendering for a compact preview (e.g. a card/list snippet
+// meant to be truncated with line-clamp) — strips every tag via DOMPurify
+// (same empty-allowlist technique isRichTextEmpty already uses) rather
+// than truncating raw HTML mid-tag. A no-op for legacy plain text (nothing
+// to strip), so callers never need to normalizeRichText first.
+export function richTextToPlainText(html: string): string {
+  if (!html) return "";
+  return DOMPurify.sanitize(html, { ALLOWED_TAGS: [] }).replace(/\s+/g, " ").trim();
+}

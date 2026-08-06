@@ -16,4 +16,22 @@ export interface ProjectNote {
   tag?: string;
   updatedAt: string;
   author: { name: string; avatar: string };
+  attachments: ProjectNoteAttachment[];
+}
+
+export interface ProjectNoteAttachment {
+  id: string;
+  filename: string;
+  storagePath: string;
+  sizeBytes: number;
+  mimeType: string | null;
+  uploadedByName: string;
+  uploadedByAvatar: string;
+  /** Real profiles.id of the uploader, when known — lets a "click this
+   *  person" trigger open the Member Profile Modal against their real
+   *  identity instead of a name-based guess. Null when genuinely unknown
+   *  (uploaded_by is null). */
+  uploadedByProfileId: string | null;
+  /** Pre-formatted relative time ("3 days ago") — same convention as ProjectNote.updatedAt. */
+  uploadedAt: string;
 }

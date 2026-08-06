@@ -19,9 +19,16 @@
 import { getSupabaseBrowserClient } from "./supabase-client";
 import { resolveAvatarUrl } from "./membership";
 import { FALLBACK_AVATAR } from "./current-user";
-import type { ProjectNote } from "./mock-notes";
+import type { ProjectNote, ProjectNoteAttachment } from "./mock-notes";
 
 type SupabaseClient = ReturnType<typeof getSupabaseBrowserClient>;
+
+// Private Storage bucket for Project Note attachments — same "private,
+// signed-URL reads" shape as ticket_attachments' own "ticket-attachments"
+// bucket (lib/tickets.ts), just a separate bucket so nothing here ever
+// touches that table/bucket's own RLS or grants. See
+// 20260917000000_add_project_note_attachments.sql.
+const NOTE_ATTACHMENTS_BUCKET = "project-note-attachments";
 
 export type NotesResult =
   | { status: "ready"; notes: ProjectNote[] }
@@ -93,7 +100,12 @@ async function loadAuthorsByIds(supabase: SupabaseClient, ids: string[]): Promis
   return byId;
 }
 
-function rowToNote(row: NoteRow, slug: string, author: AuthorProfileRow | undefined): ProjectNote {
+function rowToNote(
+  row: NoteRow,
+  slug: string,
+  author: AuthorProfileRow | undefined,
+  attachments: ProjectNoteAttachment[] = []
+): ProjectNote {
   const name = author ? [author.first_name, author.last_name].filter(Boolean).join(" ") || "Unnamed" : "Unknown";
   return {
     id: row.id,
@@ -105,6 +117,35 @@ function rowToNote(row: NoteRow, slug: string, author: AuthorProfileRow | undefi
       name,
       avatar: (author ? resolveAvatarUrl(author.avatar_url, author.updated_at) : null) ?? FALLBACK_AVATAR,
     },
+    attachments,
+  };
+}
+
+interface NoteAttachmentRow {
+  id: string;
+  filename: string;
+  storage_path: string;
+  size_bytes: number;
+  mime_type: string | null;
+  uploaded_by: string | null;
+  created_at: string;
+}
+
+function rowToNoteAttachment(row: NoteAttachmentRow, uploaderRow: AuthorProfileRow | undefined): ProjectNoteAttachment {
+  const name = uploaderRow
+    ? [uploaderRow.first_name, uploaderRow.last_name].filter(Boolean).join(" ") || "Unnamed"
+    : "Unknown";
+  return {
+    id: row.id,
+    filename: row.filename,
+    storagePath: row.storage_path,
+    sizeBytes: row.size_bytes,
+    mimeType: row.mime_type,
+    uploadedByName: name,
+    uploadedByAvatar:
+      (uploaderRow ? resolveAvatarUrl(uploaderRow.avatar_url, uploaderRow.updated_at) : null) ?? FALLBACK_AVATAR,
+    uploadedByProfileId: row.uploaded_by,
+    uploadedAt: formatUpdatedAt(row.created_at),
   };
 }
 
@@ -151,8 +192,36 @@ export async function loadProjectNotes(organizationId: string, slug: string): Pr
   );
   const authorsById = await loadAuthorsByIds(supabase, authorIds);
 
+  // Every attachment for every note in this project, fetched once (same
+  // "one extra query no matter how many rows" shape ticket_attachments'
+  // own batching uses) and grouped in memory — never a per-note query.
+  const noteIds = (rows ?? []).map((row) => row.id);
+  const attachmentsByNoteId = new Map<string, ProjectNoteAttachment[]>();
+  if (noteIds.length > 0) {
+    const { data: attachmentRows, error: attachmentsError } = await supabase
+      .from("project_note_attachments")
+      .select("id, filename, storage_path, size_bytes, mime_type, uploaded_by, created_at, note_id")
+      .in("note_id", noteIds)
+      .order("created_at", { ascending: true })
+      .returns<(NoteAttachmentRow & { note_id: string })[]>();
+
+    if (attachmentsError) {
+      logDev("note attachments query failed", attachmentsError);
+    } else {
+      const uploaderIds = Array.from(
+        new Set((attachmentRows ?? []).map((row) => row.uploaded_by).filter((id): id is string => Boolean(id)))
+      );
+      const uploadersById = await loadAuthorsByIds(supabase, uploaderIds);
+      for (const row of attachmentRows ?? []) {
+        const list = attachmentsByNoteId.get(row.note_id) ?? [];
+        list.push(rowToNoteAttachment(row, row.uploaded_by ? uploadersById.get(row.uploaded_by) : undefined));
+        attachmentsByNoteId.set(row.note_id, list);
+      }
+    }
+  }
+
   const notes = (rows ?? []).map((row) =>
-    rowToNote(row, slug, row.created_by ? authorsById.get(row.created_by) : undefined)
+    rowToNote(row, slug, row.created_by ? authorsById.get(row.created_by) : undefined, attachmentsByNoteId.get(row.id))
   );
 
   return { status: "ready", notes };
@@ -273,14 +342,171 @@ export async function duplicateNote(organizationId: string, slug: string, note: 
   return { status: "success", note: rowToNote(row, slug, author) };
 }
 
+// Deleting the note itself already cascade-deletes its own
+// project_note_attachments rows for free (note_id ON DELETE CASCADE,
+// 20260917000000) — but that cascade never touches the underlying Storage
+// objects (Postgres FKs don't reach into Storage). This reads each
+// attachment's storage_path *before* the delete (their row wouldn't exist
+// to query afterward), then best-effort removes them from the bucket once
+// the note itself is confirmed gone — same "the row is the source of
+// truth, Storage cleanup is best-effort" precedent as
+// deleteTicketAttachment (lib/tickets.ts).
 export async function deleteNote(noteId: string): Promise<DeleteNoteResult> {
   const supabase = getSupabaseBrowserClient();
+
+  const { data: attachmentRows } = await supabase
+    .from("project_note_attachments")
+    .select("storage_path")
+    .eq("note_id", noteId)
+    .returns<{ storage_path: string }[]>();
 
   const { error } = await supabase.from("project_notes").delete().eq("id", noteId);
 
   if (error) {
     logDev("note delete failed", error);
     return { status: "error", message: error.message };
+  }
+
+  const storagePaths = (attachmentRows ?? []).map((row) => row.storage_path);
+  if (storagePaths.length > 0) {
+    const { error: storageError } = await supabase.storage.from(NOTE_ATTACHMENTS_BUCKET).remove(storagePaths);
+    if (storageError) {
+      // The note (and its attachment rows, via cascade) are already gone —
+      // log for visibility but don't surface this as a failure of the
+      // delete action.
+      logDev("note attachment storage cleanup failed", storageError);
+    }
+  }
+
+  return { status: "success" };
+}
+
+export type UploadNoteAttachmentResult =
+  | { status: "success"; attachment: ProjectNoteAttachment }
+  | { status: "error"; message: string };
+
+// Storage path is "<note_id>/<uuid>-<sanitized filename>" — the leading
+// note_id segment is exactly what the Storage RLS policies check via
+// storage.foldername(name), same convention as uploadTicketAttachment
+// (lib/tickets.ts). uploaded_by is never sent — the column defaults to
+// auth.uid() at the database level.
+export async function uploadProjectNoteAttachment(noteId: string, file: File): Promise<UploadNoteAttachmentResult> {
+  const supabase = getSupabaseBrowserClient();
+
+  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+  const storagePath = `${noteId}/${crypto.randomUUID()}-${safeName}`;
+
+  const { error: uploadError } = await supabase.storage.from(NOTE_ATTACHMENTS_BUCKET).upload(storagePath, file);
+
+  if (uploadError) {
+    logDev("note attachment storage upload failed", uploadError);
+    return { status: "error", message: uploadError.message };
+  }
+
+  const { data: row, error: insertError } = await supabase
+    .from("project_note_attachments")
+    .insert({
+      note_id: noteId,
+      storage_path: storagePath,
+      filename: file.name,
+      size_bytes: file.size,
+      mime_type: file.type || null,
+    })
+    .select("id, filename, storage_path, size_bytes, mime_type, uploaded_by, created_at")
+    .single<NoteAttachmentRow>();
+
+  if (insertError) {
+    logDev("note attachment record insert failed", insertError);
+    // Best-effort cleanup — don't leave an orphaned Storage object with no
+    // corresponding row if the insert failed after the upload succeeded.
+    await supabase.storage.from(NOTE_ATTACHMENTS_BUCKET).remove([storagePath]);
+    return { status: "error", message: insertError.message };
+  }
+
+  const uploaderRow = row.uploaded_by
+    ? (await loadAuthorsByIds(supabase, [row.uploaded_by])).get(row.uploaded_by)
+    : undefined;
+
+  return { status: "success", attachment: rowToNoteAttachment(row, uploaderRow) };
+}
+
+export type DownloadNoteAttachmentResult = { status: "success" } | { status: "error"; message: string };
+
+// The bucket is private, so a plain public URL doesn't work — this fetches
+// the object through the authenticated client (same
+// project_note_attachments_storage_select RLS policy) and saves it via a
+// temporary object URL, so the browser downloads it with its original
+// filename regardless of the randomized storage path. Same approach as
+// downloadTicketAttachment (lib/tickets.ts).
+export async function downloadProjectNoteAttachment(
+  storagePath: string,
+  filename: string
+): Promise<DownloadNoteAttachmentResult> {
+  const supabase = getSupabaseBrowserClient();
+
+  const { data: blob, error } = await supabase.storage.from(NOTE_ATTACHMENTS_BUCKET).download(storagePath);
+
+  if (error || !blob) {
+    logDev("note attachment download failed", error);
+    return { status: "error", message: error?.message ?? "Download failed" };
+  }
+
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+
+  return { status: "success" };
+}
+
+export type NoteAttachmentPreviewUrlResult = { status: "success"; url: string } | { status: "error"; message: string };
+
+// The bucket is private, so previewing (embedding in an <img>/<iframe>)
+// needs a signed URL rather than getPublicUrl — same short-lived (5 min)
+// convention as getTicketAttachmentPreviewUrl (lib/tickets.ts).
+export async function getProjectNoteAttachmentPreviewUrl(storagePath: string): Promise<NoteAttachmentPreviewUrlResult> {
+  const supabase = getSupabaseBrowserClient();
+
+  const { data, error } = await supabase.storage.from(NOTE_ATTACHMENTS_BUCKET).createSignedUrl(storagePath, 300);
+
+  if (error || !data) {
+    logDev("note attachment preview signed url failed", error);
+    return { status: "error", message: error?.message ?? "Preview failed" };
+  }
+
+  return { status: "success", url: data.signedUrl };
+}
+
+export type DeleteNoteAttachmentResult = { status: "success" } | { status: "error"; message: string };
+
+// Deletes the metadata row first — that row is what the attachments list
+// actually depends on. The Storage object is then removed best-effort,
+// same "row is source of truth, Storage cleanup best-effort" precedent as
+// deleteTicketAttachment (lib/tickets.ts). .select() after .delete() is
+// required to tell "deleted" apart from "RLS silently matched zero rows."
+export async function deleteProjectNoteAttachment(
+  attachmentId: string,
+  storagePath: string
+): Promise<DeleteNoteAttachmentResult> {
+  const supabase = getSupabaseBrowserClient();
+
+  const { data, error } = await supabase.from("project_note_attachments").delete().eq("id", attachmentId).select("id");
+
+  if (error) {
+    logDev("note attachment delete failed", error);
+    return { status: "error", message: error.message };
+  }
+  if (!data || data.length === 0) {
+    return { status: "error", message: "You don't have permission to delete this attachment." };
+  }
+
+  const { error: storageError } = await supabase.storage.from(NOTE_ATTACHMENTS_BUCKET).remove([storagePath]);
+  if (storageError) {
+    logDev("note attachment storage cleanup failed", storageError);
   }
 
   return { status: "success" };

@@ -1,15 +1,20 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { ProjectNote } from "@/lib/mock-notes";
+import type { ProjectNote, ProjectNoteAttachment } from "@/lib/mock-notes";
 import { TAG_OPTIONS, TagBadge, INPUT, FIELD_LABEL } from "@/components/notes-shared";
 import { Avatar } from "@/components/ui/avatar";
+import { NoteAttachmentsField, NoteAttachmentsList, newPendingNoteFileId, type PendingNoteFile } from "@/components/note-attachments";
+import { RichTextEditor } from "@/components/rich-text/rich-text-editor";
+import { RichTextViewer } from "@/components/rich-text/rich-text-viewer";
+import { sanitizeRichTextHtml, isRichTextEmpty } from "@/components/rich-text/rich-text-utils";
 
 export function NoteDetailModal({
   note,
   startInEditMode = false,
   onClose,
   onSave,
+  onSaveAttachments,
   onDuplicate,
   onDelete,
 }: {
@@ -17,6 +22,10 @@ export function NoteDetailModal({
   startInEditMode?: boolean;
   onClose: () => void;
   onSave: (input: { title: string; body: string; tag?: string }) => Promise<boolean>;
+  /** Applies staged attachment removals/additions — called once, right
+   *  after onSave above already succeeded. Never called at all when
+   *  nothing was actually staged. */
+  onSaveAttachments: (toRemove: ProjectNoteAttachment[], newFiles: File[]) => Promise<void>;
   onDuplicate: () => void;
   onDelete: () => Promise<boolean>;
 }) {
@@ -27,6 +36,11 @@ export function NoteDetailModal({
   const [body, setBody] = useState(note.body);
   const [saving, setSaving] = useState(false);
   const titleRef = useRef<HTMLInputElement>(null);
+  // Attachment changes staged during this edit session only — neither a
+  // removal nor a new file is ever actually persisted until Save; Cancel
+  // just discards both, leaving the note's real attachments untouched.
+  const [stagedFiles, setStagedFiles] = useState<PendingNoteFile[]>([]);
+  const [removedAttachmentIds, setRemovedAttachmentIds] = useState<string[]>([]);
 
   const canSave = title.trim().length > 0 && !saving;
 
@@ -39,7 +53,15 @@ export function NoteDetailModal({
     setTitle(note.title);
     setTag(note.tag);
     setBody(note.body);
+    setStagedFiles([]);
+    setRemovedAttachmentIds([]);
     setMode("edit");
+  }
+
+  function cancelEdit() {
+    setStagedFiles([]);
+    setRemovedAttachmentIds([]);
+    setMode("view");
   }
 
   async function handleSave() {
@@ -51,8 +73,19 @@ export function NoteDetailModal({
     const success = await onSave({
       title: title.trim(),
       tag,
-      body: body.trim() || "No additional details yet.",
+      body: isRichTextEmpty(body) ? "No additional details yet." : sanitizeRichTextHtml(body),
     });
+
+    if (success) {
+      const toRemove = note.attachments.filter((a) => removedAttachmentIds.includes(a.id));
+      const newFiles = stagedFiles.map((item) => item.file);
+      if (toRemove.length > 0 || newFiles.length > 0) {
+        await onSaveAttachments(toRemove, newFiles);
+      }
+      setStagedFiles([]);
+      setRemovedAttachmentIds([]);
+    }
+
     setSaving(false);
     if (success) setMode("view");
   }
@@ -127,10 +160,20 @@ export function NoteDetailModal({
                 </div>
 
                 <div className="mt-6 pt-6 border-t border-slate-100 dark:border-zinc-800">
-                  <p className="text-[15px] leading-relaxed text-slate-700 dark:text-zinc-300 whitespace-pre-wrap">
-                    {note.body}
-                  </p>
+                  <RichTextViewer
+                    content={note.body}
+                    className="text-[15px] leading-relaxed text-slate-700 dark:text-zinc-300"
+                  />
                 </div>
+
+                {note.attachments.length > 0 && (
+                  <div className="mt-6 pt-6 border-t border-slate-100 dark:border-zinc-800">
+                    <label className={FIELD_LABEL}>Attachments</label>
+                    <div className="mt-1.5">
+                      <NoteAttachmentsList attachments={note.attachments} />
+                    </div>
+                  </div>
+                )}
               </div>
             </>
           ) : (
@@ -178,18 +221,28 @@ export function NoteDetailModal({
 
                 <div>
                   <label className={FIELD_LABEL}>Details</label>
-                  <textarea
-                    value={body}
-                    onChange={(e) => setBody(e.target.value)}
-                    rows={8}
-                    className={INPUT + " resize-none"}
+                  <RichTextEditor
+                    content={body}
+                    onChange={setBody}
+                    contentClassName="sm:text-[13px]"
                   />
                 </div>
+
+                <NoteAttachmentsField
+                  existing={note.attachments.filter((a) => !removedAttachmentIds.includes(a.id))}
+                  onRemoveExisting={(id) => setRemovedAttachmentIds((prev) => [...prev, id])}
+                  pendingFiles={stagedFiles}
+                  onFilesSelected={(files) => {
+                    const items = files.map((file) => ({ id: newPendingNoteFileId(), file }));
+                    setStagedFiles((prev) => [...prev, ...items]);
+                  }}
+                  onRemovePending={(id) => setStagedFiles((prev) => prev.filter((p) => p.id !== id))}
+                />
               </div>
 
               <div className="flex items-center justify-between gap-3 px-6 py-4 mt-1 border-t border-slate-100 dark:border-zinc-800 flex-shrink-0 rounded-b-2xl bg-slate-50/40 dark:bg-zinc-900/20">
                 <button
-                  onClick={() => setMode("view")}
+                  onClick={cancelEdit}
                   className="px-4 py-2 text-[13px] font-medium text-slate-500 dark:text-zinc-500 hover:text-slate-800 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800 rounded-lg transition-colors"
                 >
                   Cancel

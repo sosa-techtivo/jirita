@@ -1,13 +1,24 @@
 "use client";
 
 import { useCallback, useEffect, useId, useRef, useState } from "react";
-import type { ProjectNote } from "@/lib/mock-notes";
-import { loadProjectNotes, createNote, updateNote, deleteNote, duplicateNote } from "@/lib/notes";
+import type { ProjectNote, ProjectNoteAttachment } from "@/lib/mock-notes";
+import {
+  loadProjectNotes,
+  createNote,
+  updateNote,
+  deleteNote,
+  duplicateNote,
+  uploadProjectNoteAttachment,
+  deleteProjectNoteAttachment,
+} from "@/lib/notes";
 import { useCurrentUser } from "@/components/current-user-provider";
 import { NoteDetailModal } from "@/components/note-detail-modal";
 import { ErrorToast } from "@/components/tickets/ticket-ui";
 import { TAG_OPTIONS, TagBadge, INPUT, FIELD_LABEL } from "@/components/notes-shared";
 import { Avatar } from "@/components/ui/avatar";
+import { NoteAttachmentsField, newPendingNoteFileId, type PendingNoteFile } from "@/components/note-attachments";
+import { RichTextEditor } from "@/components/rich-text/rich-text-editor";
+import { sanitizeRichTextHtml, isRichTextEmpty, richTextToPlainText } from "@/components/rich-text/rich-text-utils";
 
 // Real replacement for src/lib/mock-notes.ts's hardcoded array — see
 // src/lib/notes.ts's header comment for the full data story (project_notes
@@ -58,14 +69,42 @@ export function NotesScreen({ slug, projectName }: { slug: string; projectName: 
     return note.title.toLowerCase().includes(query) || note.body.toLowerCase().includes(query);
   });
 
-  async function handleCreateNote(input: { title: string; body: string; tag?: string }): Promise<boolean> {
+  // Attachments only ever start uploading after the note itself exists —
+  // never before "Create Note" is pressed, and never at all if the note
+  // insert fails. Same "attach only after the real entity exists" pattern
+  // ticket-detail-screen.tsx's own submitComment already uses.
+  async function handleCreateNote(input: { title: string; body: string; tag?: string; files: File[] }): Promise<boolean> {
     if (!organization) return false;
     const result = await createNote(organization.id, slug, { title: input.title, body: input.body });
     if (result.status === "error") {
       setErrorMessage(result.message);
       return false;
     }
-    setNotes((prev) => [result.note, ...prev]);
+    let note = result.note;
+
+    if (input.files.length > 0) {
+      const uploads = await Promise.all(input.files.map((file) => uploadProjectNoteAttachment(note.id, file)));
+      const attachments: ProjectNoteAttachment[] = [];
+      const failedNames: string[] = [];
+      uploads.forEach((upload, i) => {
+        if (upload.status === "error") {
+          console.warn("[notes] attachment upload failed:", upload.message);
+          failedNames.push(input.files[i].name);
+        } else {
+          attachments.push(upload.attachment);
+        }
+      });
+      note = { ...note, attachments };
+      if (failedNames.length > 0) {
+        setErrorMessage(
+          failedNames.length === 1
+            ? `Note created, but "${failedNames[0]}" failed to attach.`
+            : `Note created, but these files failed to attach: ${failedNames.join(", ")}.`
+        );
+      }
+    }
+
+    setNotes((prev) => [note, ...prev]);
     setShowNewNote(false);
     return true;
   }
@@ -77,9 +116,66 @@ export function NotesScreen({ slug, projectName }: { slug: string; projectName: 
       setErrorMessage(result.message);
       return false;
     }
-    setNotes((prev) => prev.map((n) => (n.id === result.note.id ? result.note : n)));
-    setActiveNote(result.note);
+    // Preserve the note's already-loaded attachments — updateNote's own
+    // result never re-reads them (same "attachments: []" placeholder
+    // ticket-detail-screen.tsx's saveCommentEdit-equivalent leaves alone).
+    // saveNoteAttachmentEdits (called separately by NoteDetailModal right
+    // after this, only when attachments actually changed) refines this
+    // further; this alone must never wipe them.
+    const updated = { ...result.note, attachments: activeNote.attachments };
+    setNotes((prev) => prev.map((n) => (n.id === updated.id ? updated : n)));
+    setActiveNote(updated);
     return true;
+  }
+
+  // Applies the attachment side of editing an existing note — called once
+  // by NoteDetailModal, right after handleSaveNote above already
+  // succeeded. Takes the pre-edit attachments list explicitly (rather than
+  // re-reading activeNote from this closure) so it can never act on a
+  // stale snapshot from before that same save. Reuses the exact same
+  // deleteProjectNoteAttachment/uploadProjectNoteAttachment calls a
+  // standalone attachments manager would — never a second
+  // upload/deletion implementation.
+  async function saveNoteAttachmentEdits(
+    noteId: string,
+    currentAttachments: ProjectNoteAttachment[],
+    toRemove: ProjectNoteAttachment[],
+    newFiles: File[]
+  ): Promise<void> {
+    let attachments = currentAttachments;
+
+    for (const attachment of toRemove) {
+      const result = await deleteProjectNoteAttachment(attachment.id, attachment.storagePath);
+      if (result.status === "error") {
+        console.warn("[notes] attachment delete failed:", result.message);
+        setErrorMessage(result.message);
+        continue;
+      }
+      attachments = attachments.filter((a) => a.id !== attachment.id);
+    }
+
+    if (newFiles.length > 0) {
+      const uploads = await Promise.all(newFiles.map((file) => uploadProjectNoteAttachment(noteId, file)));
+      const failedNames: string[] = [];
+      uploads.forEach((upload, i) => {
+        if (upload.status === "error") {
+          console.warn("[notes] attachment upload failed:", upload.message);
+          failedNames.push(newFiles[i].name);
+        } else {
+          attachments = [...attachments, upload.attachment];
+        }
+      });
+      if (failedNames.length > 0) {
+        setErrorMessage(
+          failedNames.length === 1
+            ? `Note updated, but "${failedNames[0]}" failed to attach.`
+            : `Note updated, but these files failed to attach: ${failedNames.join(", ")}.`
+        );
+      }
+    }
+
+    setNotes((prev) => prev.map((n) => (n.id === noteId ? { ...n, attachments } : n)));
+    setActiveNote((prev) => (prev && prev.id === noteId ? { ...prev, attachments } : prev));
   }
 
   async function handleDuplicateNote(note: ProjectNote): Promise<boolean> {
@@ -213,6 +309,7 @@ export function NotesScreen({ slug, projectName }: { slug: string; projectName: 
           startInEditMode={activeNoteEditMode}
           onClose={() => setActiveNote(null)}
           onSave={handleSaveNote}
+          onSaveAttachments={(toRemove, newFiles) => saveNoteAttachmentEdits(activeNote.id, activeNote.attachments, toRemove, newFiles)}
           onDuplicate={() => { void handleDuplicateNote(activeNote); }}
           onDelete={() => handleDeleteNote(activeNote.id)}
         />
@@ -261,7 +358,7 @@ function NoteCard({
         </div>
       </div>
 
-      <p className="text-sm text-slate-500 dark:text-zinc-400 mt-1.5 line-clamp-2">{note.body}</p>
+      <p className="text-sm text-slate-500 dark:text-zinc-400 mt-1.5 line-clamp-2">{richTextToPlainText(note.body)}</p>
 
       <div className="flex items-center justify-between mt-auto pt-3.5">
         <div className="flex items-center gap-1.5 min-w-0">
@@ -391,13 +488,14 @@ export function NewNoteModal({
 }: {
   projectName: string;
   onClose: () => void;
-  onCreated: (input: { title: string; body: string; tag?: string }) => Promise<boolean>;
+  onCreated: (input: { title: string; body: string; tag?: string; files: File[] }) => Promise<boolean>;
 }) {
   const [visible, setVisible] = useState(false);
   const [title, setTitle] = useState("");
   const [tag, setTag] = useState<string | undefined>(undefined);
   const [body, setBody] = useState("");
   const [saving, setSaving] = useState(false);
+  const [pendingFiles, setPendingFiles] = useState<PendingNoteFile[]>([]);
   const titleRef = useRef<HTMLInputElement>(null);
 
   const canSubmit = title.trim().length > 0 && !saving;
@@ -413,7 +511,12 @@ export function NewNoteModal({
       return;
     }
     setSaving(true);
-    await onCreated({ title: title.trim(), tag, body: body.trim() || "No additional details yet." });
+    await onCreated({
+      title: title.trim(),
+      tag,
+      body: isRichTextEmpty(body) ? "No additional details yet." : sanitizeRichTextHtml(body),
+      files: pendingFiles.map((item) => item.file),
+    });
     setSaving(false);
   }
 
@@ -514,14 +617,22 @@ export function NewNoteModal({
 
             <div>
               <label className={FIELD_LABEL}>Details</label>
-              <textarea
+              <RichTextEditor
+                content={body}
+                onChange={setBody}
                 placeholder="Capture the decision, link, or context..."
-                value={body}
-                onChange={(e) => setBody(e.target.value)}
-                rows={5}
-                className={INPUT + " resize-none"}
+                contentClassName="sm:text-[13px]"
               />
             </div>
+
+            <NoteAttachmentsField
+              pendingFiles={pendingFiles}
+              onFilesSelected={(files) => {
+                const items = files.map((file) => ({ id: newPendingNoteFileId(), file }));
+                setPendingFiles((prev) => [...prev, ...items]);
+              }}
+              onRemovePending={(id) => setPendingFiles((prev) => prev.filter((p) => p.id !== id))}
+            />
           </div>
 
           <div className="flex items-center justify-between gap-3 px-6 py-4 mt-1 border-t border-slate-100 dark:border-zinc-800 flex-shrink-0 rounded-b-2xl bg-slate-50/40 dark:bg-zinc-900/20">
