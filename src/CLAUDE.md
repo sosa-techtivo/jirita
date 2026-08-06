@@ -320,6 +320,21 @@ Admin-editable through the UI. "Settings" no longer appears in the
 sidebar; `/settings` and every subroute now just redirect to the
 Dashboard. Project Settings is unaffected.
 
+Since then: Ticket Comments gained one-level-deep reply threads, Like/Dislike
+reactions, and add/remove attachments when editing an existing comment — all
+enforced by real RLS, never just hidden in the UI. Time Tracking gained real
+edit/delete for a logged entry (Admin may manage any entry in their
+organization; Project Lead/Member only their own) and a real bug fix: a
+mandatory 15-minute rounding that silently altered every logged duration was
+removed, so an entry now persists the exact minutes entered. Profile gained a
+"My Profile" entry in the account menu for every role (previously missing
+for Member on Desktop), and Weekly Capacity is now Admin/Project-Lead-editable
+only, read-only for Member. Project Notes gained real attachments (images
+previewed inline, other files downloadable) and a real rich-text Details
+field, reusing the same editor as Ticket Description/Comments. A real bug
+was also fixed where Project → Team and Project → Notes always showed a
+hardcoded mock project name in their breadcrumb instead of the real one.
+
 **For the authoritative, feature-by-feature breakdown — every Server
 Action, migration, and real bug fixed along the way, and the exact
 boundary of what's confirmed live vs. not-yet-verified vs. still mock —
