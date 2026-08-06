@@ -2716,6 +2716,81 @@ function toAttachmentItem(a: TicketAttachment): AttachmentItem {
   };
 }
 
+// ── CommentAttachmentsOverview ───────────────────────────────────────────────
+// Read-only, consolidated view of every attachment posted through any
+// comment on this ticket — parent or reply alike, same as CommentItem's own
+// Reply action makes no distinction between them. Purely a derived render
+// over the already-loaded `comments` array (no second fetch, no separate
+// state, nothing here can upload/edit/delete) — reuses the exact same
+// CommentAttachmentRow (image inline preview / clickable non-image row)
+// every comment's own inline attachments already render, so this can never
+// drift into a second attachment presentation. Order matches exactly what
+// the Comments section itself already displays — groupCommentThreads'
+// own top-level-then-its-replies shape — rather than inventing a
+// different sort for this same data.
+function CommentAttachmentsOverview({
+  comments,
+  projectSlug,
+}: {
+  comments: TicketComment[];
+  projectSlug?: string;
+}) {
+  const commentsWithAttachments = groupCommentThreads(comments)
+    .flatMap(({ parent, replies }) => [parent, ...replies])
+    .filter((c) => c.attachments.length > 0);
+
+  if (commentsWithAttachments.length === 0) return null;
+
+  const totalAttachments = commentsWithAttachments.reduce((sum, c) => sum + c.attachments.length, 0);
+
+  return (
+    <CollapsibleSection
+      title="Attachments from comments"
+      badge={`· ${totalAttachments} total`}
+      defaultOpen={false}
+    >
+      <div className="space-y-5">
+        {commentsWithAttachments.map((c) => (
+          <div key={c.id}>
+            <div className="flex items-center gap-2 mb-2">
+              <MemberTrigger
+                name={c.name}
+                avatar={c.avatar}
+                profileId={c.authorProfileId ?? undefined}
+                projectSlug={projectSlug}
+                className="flex-shrink-0 rounded-full"
+              >
+                <Avatar
+                  src={c.avatar}
+                  name={c.name}
+                  className="w-5 h-5 rounded-full flex-shrink-0 ring-1 ring-white dark:ring-zinc-900"
+                />
+              </MemberTrigger>
+              <p className="text-[12px] text-slate-500 dark:text-zinc-400 min-w-0 truncate">
+                <MemberTrigger
+                  name={c.name}
+                  avatar={c.avatar}
+                  profileId={c.authorProfileId ?? undefined}
+                  projectSlug={projectSlug}
+                  className="font-semibold text-slate-700 dark:text-zinc-300 hover:underline"
+                >
+                  {c.name}
+                </MemberTrigger>
+                <span> · {c.timeAgo}</span>
+              </p>
+            </div>
+            <div className="space-y-1.5">
+              {c.attachments.map((a) => (
+                <CommentAttachmentRow key={a.id} file={toAttachmentItem(a)} />
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </CollapsibleSection>
+  );
+}
+
 // Imperative handle so the page-level drag & drop / paste handlers (see
 // TicketDetailScreen) can feed files into this exact section's own
 // startUpload — the same validations/upload/visualization "Upload Files"
@@ -5120,6 +5195,10 @@ export function TicketDetailScreen({
 
             <div className="order-[50]">
               <AttachmentsSection ref={attachmentsSectionRef} ticketId={ticket.id} projectSlug={ticket.projectSlug} isDevFallback={isDevFallback} onUploaded={refreshActivity} onError={showError} />
+            </div>
+
+            <div className="order-[55]">
+              <CommentAttachmentsOverview comments={comments} projectSlug={ticket.projectSlug} />
             </div>
 
             <div className="order-[70]">
