@@ -40,13 +40,14 @@ export interface Organization {
   // NOT exposed here (deliberately): organizations.show_ticket_estimates,
   // require_ticket_estimate, time_rounding_minutes, and round_time_up.
   // These columns still exist (kept for compatibility, see
-  // 20260816000000_add_organization_time_tracking_settings.sql), but
-  // ticket estimate visibility/requirement and time-entry rounding are now
-  // fixed, non-configurable product rules — see lib/tickets.ts's
-  // updateTicket (estimate required before In Progress/In Review/Done) and
-  // lib/time-rounding.ts (always round up to 15 minutes). Settings →
-  // Time Tracking, the one UI that used to read/write these four fields,
-  // was removed outright.
+  // 20260816000000_add_organization_time_tracking_settings.sql). Ticket
+  // estimate visibility/requirement is a fixed, non-configurable product
+  // rule — see lib/tickets.ts's updateTicket (estimate required before In
+  // Progress/In Review/Done). Logged time is no longer rounded at all —
+  // logTicketTime (lib/tickets.ts) persists the exact minutes entered — so
+  // time_rounding_minutes/round_time_up are now unread everywhere, not just
+  // unconfigurable. Settings → Time Tracking, the one UI that used to
+  // read/write these four fields, was removed outright.
 }
 
 export interface Membership {

@@ -17,7 +17,6 @@ import { registerProjectCode } from "./mock-tickets";
 import type { Ticket, TicketPriority, TicketStatus, TicketType } from "./mock-tickets";
 import { loadOrganizationProjects } from "./projects";
 import type { ProjectStatus } from "./mock-projects";
-import { roundLoggedMinutesUp } from "./time-rounding";
 import { formatAbsoluteDate, formatAbsoluteDateTime } from "./date-format";
 import { createNotification } from "./notifications";
 // Plain, browser-only DOMPurify — same package/reasoning as
@@ -902,9 +901,23 @@ function buildActivityLabel(row: ActivityRow, actorName: string | null, resolveN
     case "attachment_deleted":
       return `${who}deleted attachment "${row.old_value ?? ""}"`.trim();
     case "time_logged": {
+      // Exact, never rounded to 1 decimal — logTicketTime persists the
+      // real entered minutes as-is (no forced rounding), so this must
+      // reflect that same exact duration rather than lossily rounding it
+      // for display (the earlier per-entry 1-decimal rounding here turned
+      // a real e.g. 0.25h entry into a displayed "0.3 h").
       const minutes = Number(row.new_value ?? "0");
-      const hrs = Math.round((minutes / 60) * 10) / 10;
+      const hrs = minutes / 60;
       return `${who}logged ${hrs} h`.trim();
+    }
+    case "time_entry_updated": {
+      const oldHrs = Number(row.old_value ?? "0") / 60;
+      const newHrs = Number(row.new_value ?? "0") / 60;
+      return `${who}updated a time entry from ${oldHrs} h to ${newHrs} h`.trim();
+    }
+    case "time_entry_deleted": {
+      const hrs = Number(row.old_value ?? "0") / 60;
+      return `${who}deleted a time entry of ${hrs} h`.trim();
     }
     case "added_a_comment":
       return `${who}added a comment`.trim();
@@ -1918,7 +1931,7 @@ export type TeamWorkHistoryActivityFilter =
 // an invented event type. "Attachments" spans all three real attachment
 // events (upload/rename/delete) since the filter has no finer distinction.
 const ACTIVITY_FILTER_EVENT_TYPES: Record<TeamWorkHistoryActivityFilter, string[]> = {
-  time_logged: ["time_logged"],
+  time_logged: ["time_logged", "time_entry_updated", "time_entry_deleted"],
   comments: ["added_a_comment"],
   status_changes: ["status_changed"],
   assignments: ["assignee_changed"],
@@ -2723,6 +2736,11 @@ export interface TimeEntryRecord {
   workDate: string;
   loggedByName: string;
   loggedByAvatar: string;
+  /** Real profiles.id of who logged this entry, when known — lets the UI
+   *  restrict edit/delete to the entry's own real author (re-enforced at
+   *  the database level regardless by ticket_time_entries_update/_delete
+   *  RLS, 20260913000000). Null exactly when logged_by itself is null. */
+  loggedByProfileId: string | null;
 }
 
 interface TimeEntryRow {
@@ -2743,6 +2761,7 @@ function rowToTimeEntryRecord(row: TimeEntryRow, loggerRow: AssigneeProfileRow |
     loggedByName: resolveProfileName(loggerRow) ?? "Unknown",
     loggedByAvatar:
       (loggerRow ? resolveAvatarUrl(loggerRow.avatar_url, loggerRow.updated_at) : null) ?? FALLBACK_AVATAR,
+    loggedByProfileId: row.logged_by,
   };
 }
 
@@ -2854,25 +2873,22 @@ export async function logTicketTime(ticketId: string, input: LogTimeInput): Prom
 
   const supabase = getSupabaseBrowserClient();
 
-  // Real normalization, not just validation: the raw minutes the caller
-  // computed (e.g. LogTimeModal's own h*60+m, ticket-detail-screen.tsx) are
-  // never persisted as-is — always rounded here, server-side, to JIRITA's
-  // fixed product rule (TIME_ROUNDING_INCREMENT_MINUTES, always rounding
-  // up — see lib/time-rounding.ts), via the one shared pure helper every
-  // real time-entry write path in the app reuses. This is the only real
-  // write path today (Admin/Project Lead/Member all share this same Ticket
-  // Detail component and this same function), so there is nowhere else
-  // rounding could be applied differently. Fixed, not configurable — no
-  // organization lookup, never reads organizations.time_rounding_minutes/
-  // round_time_up (deprecated, unused columns; see that file's own header
-  // comment).
-  const roundedMinutes = roundLoggedMinutesUp(input.minutes);
-
+  // Persisted exactly as entered (the caller's own h*60+m, e.g.
+  // LogTimeModal in ticket-detail-screen.tsx) — no rounding of any kind.
+  // JIRITA previously force-rounded every logged duration up to the next
+  // 15-minute increment here; that was a real product bug (a 3-minute
+  // entry silently became 15 minutes) and has been removed. This is the
+  // only real time-entry write path (Admin/Project Lead/Member all share
+  // this same Ticket Detail component and this same function), so every
+  // reader of ticket_time_entries.minutes — totals, Time History, Activity
+  // Log — already reflects the real logged duration once this one write
+  // stops altering it. Still never reads organizations.time_rounding_minutes/
+  // round_time_up (deprecated, unused columns — see lib/membership.ts).
   const { data: row, error } = await supabase
     .from("ticket_time_entries")
     .insert({
       ticket_id: ticketId,
-      minutes: roundedMinutes,
+      minutes: input.minutes,
       comment: input.comment?.trim() || null,
       work_date: input.workDate,
     })
@@ -2899,6 +2915,80 @@ export async function logTicketTime(ticketId: string, input: LogTimeInput): Prom
   }
 
   return { status: "success", entry: rowToTimeEntryRecord(row, loggerRow) };
+}
+
+// Edits an already-logged time entry's own minutes/comment/work date —
+// reachable only for the entry's real logger (ticket_time_entries_update
+// RLS, 20260913000000, enforces the same rule again at the database level
+// regardless). Same "no rounding of any kind" rule logTicketTime itself
+// follows — an edit corrects a specific entry to its real exact duration,
+// never re-applies any increment.
+export async function updateTicketTimeEntry(entryId: string, input: LogTimeInput): Promise<LogTimeResult> {
+  if (!Number.isFinite(input.minutes) || input.minutes <= 0) {
+    return { status: "error", message: "Worked time must be greater than 0." };
+  }
+
+  const supabase = getSupabaseBrowserClient();
+
+  const { data: row, error } = await supabase
+    .from("ticket_time_entries")
+    .update({
+      minutes: input.minutes,
+      comment: input.comment?.trim() || null,
+      work_date: input.workDate,
+    })
+    .eq("id", entryId)
+    .select("id, minutes, comment, work_date, logged_by, created_at")
+    .maybeSingle<TimeEntryRow>();
+
+  if (error) {
+    logDev("time entry update failed", error);
+    return { status: "error", message: error.message };
+  }
+  if (!row) {
+    return { status: "error", message: "You can only edit your own time entries." };
+  }
+
+  let loggerRow: AssigneeProfileRow | undefined;
+  if (row.logged_by) {
+    const { data: profileRow, error: profileError } = await supabase
+      .from("profiles")
+      .select("id, first_name, last_name, avatar_url, updated_at")
+      .eq("id", row.logged_by)
+      .maybeSingle<AssigneeProfileRow>();
+    if (profileError) {
+      logDev("time entry logger profile lookup failed", profileError);
+    } else {
+      loggerRow = profileRow ?? undefined;
+    }
+  }
+
+  return { status: "success", entry: rowToTimeEntryRecord(row, loggerRow) };
+}
+
+export type DeleteTimeEntryResult = { status: "success" } | { status: "error"; message: string };
+
+// Deletes an already-logged time entry — reachable only for the entry's
+// real logger (ticket_time_entries_delete RLS, 20260913000000). No
+// security-definer RPC needed here (unlike deleteTicketComment): nothing
+// references ticket_time_entries.id as a foreign key, so a plain RLS
+// delete is never blocked by a cascade the way deleting a parent comment
+// with replies from other authors was.
+export async function deleteTicketTimeEntry(entryId: string): Promise<DeleteTimeEntryResult> {
+  const supabase = getSupabaseBrowserClient();
+
+  // Same reasoning as deleteTicketAttachment above: .select() is required
+  // to tell "deleted" apart from "RLS silently matched zero rows."
+  const { data, error } = await supabase.from("ticket_time_entries").delete().eq("id", entryId).select("id");
+
+  if (error) {
+    logDev("time entry delete failed", error);
+    return { status: "error", message: error.message };
+  }
+  if (!data || data.length === 0) {
+    return { status: "error", message: "You can only delete your own time entries." };
+  }
+  return { status: "success" };
 }
 
 // ── Organization-wide reads — backs the real Admin Dashboard only ──────────────

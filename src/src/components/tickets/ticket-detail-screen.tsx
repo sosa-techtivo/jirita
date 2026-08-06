@@ -57,6 +57,8 @@ import {
   deleteTicketAttachment,
   loadTicketTimeEntries,
   logTicketTime,
+  updateTicketTimeEntry,
+  deleteTicketTimeEntry,
   loadProjectTickets,
   loadTicketRelations,
   createTicketRelation,
@@ -3366,11 +3368,22 @@ function DevelopmentSection({ slug, ticketCode }: { slug: string; ticketCode: st
 
 interface TimeEntry {
   id:           string;
+  /** Real, exact minutes — the source of truth for editing (prefills
+   *  LogTimeModal) and for the entry's own author check. Never derived
+   *  from `hours` (hours*60 would reintroduce float error for a
+   *  non-quarter-hour value like 3 minutes). */
+  minutes:      number;
   hours:        number;
   comment:      string;
   date:         string;
+  /** Real ISO date (yyyy-mm-dd) — `date` above is already formatted for
+   *  display only; editing needs the raw value to prefill the date input. */
+  workDateISO:  string;
   authorName:   string;
   authorAvatar: string;
+  /** Real profiles.id of who logged this entry, when known — lets
+   *  TimeHistoryModal restrict Edit/Delete to the entry's own real author. */
+  authorProfileId: string | null;
 }
 
 
@@ -3382,30 +3395,63 @@ function formatDateDisplay(iso: string): string {
   return formatAbsoluteDate(iso);
 }
 
+// Presentation only, used consistently across the whole TimeHistoryModal —
+// both its own per-entry rows and its top Logged/Estimated/Remaining
+// figures — so every hours value in that one modal reads the same way
+// (the underlying numbers themselves stay exact; e.g. a 5-minute entry is
+// really 0.08333333333333333, unreadable printed raw). Caps at 4 decimals
+// and drops trailing zeros (0.0833h, 0.05h, 1h, 1.5h), never rounding to a
+// coarser increment the way formatHours/formatRemainingHours' own
+// 1-decimal rounding does — those two are untouched and keep formatting
+// every other Time Tracking total in the app (TimeTrackingSection's own
+// summary line, the ticket sidebar's Logged/Remaining) exactly as before.
+function formatEntryHours(hours: number): string {
+  return Number(hours.toFixed(4)).toString();
+}
+
 function toTimeEntry(record: TimeEntryRecord): TimeEntry {
   return {
     id: record.id,
-    hours: Math.round((record.minutes / 60) * 10) / 10,
+    minutes: record.minutes,
+    // Exact, never pre-rounded: record.minutes is the real logged duration
+    // (logTicketTime no longer force-rounds it to any increment), and
+    // rounding this per-entry value to 1 decimal before it's summed below
+    // (as this used to do) both loses real precision on a single entry and
+    // compounds across every entry once totaled for the ticket's own
+    // total/remaining — display-rounding (formatHours/formatRemainingHours)
+    // already happens exactly once, at that final total, which is the only
+    // place it should.
+    hours: record.minutes / 60,
     comment: record.comment,
     date: formatDateDisplay(record.workDate),
+    workDateISO: record.workDate,
     authorName: record.loggedByName,
     authorAvatar: record.loggedByAvatar,
+    authorProfileId: record.loggedByProfileId,
   };
 }
 
 function LogTimeModal({
   onClose,
   onSubmit,
+  initialEntry,
 }: {
   onClose:  () => void;
   // Returns whether the entry actually persisted — the modal only closes
   // itself on success, matching every other real-data modal in this file.
   onSubmit: (input: LogTimeInput) => Promise<boolean>;
+  /** Present only when editing an already-logged entry (see
+   *  TimeHistoryModal) — prefills every field from its real, exact values
+   *  and switches the header/submit label to "Edit"/"Save". Omitted when
+   *  logging a brand-new entry, which keeps every field at its original
+   *  empty/today default. */
+  initialEntry?: { minutes: number; comment: string; workDate: string };
 }) {
-  const [hrsStr,  setHrsStr]  = useState("");
-  const [minsStr, setMinsStr] = useState("");
-  const [comment, setComment] = useState("");
-  const [date,    setDate]    = useState(() => getTodayISO());
+  const isEditing = initialEntry !== undefined;
+  const [hrsStr,  setHrsStr]  = useState(() => (initialEntry ? String(Math.floor(initialEntry.minutes / 60)) : ""));
+  const [minsStr, setMinsStr] = useState(() => (initialEntry ? String(initialEntry.minutes % 60) : ""));
+  const [comment, setComment] = useState(initialEntry?.comment ?? "");
+  const [date,    setDate]    = useState(() => initialEntry?.workDate ?? getTodayISO());
   const [submitting, setSubmitting] = useState(false);
 
   const hrsRef = useRef<HTMLInputElement>(null);
@@ -3456,7 +3502,7 @@ function LogTimeModal({
         {/* Header */}
         <div className="flex items-center justify-between px-5 pt-5 pb-4 border-b border-slate-100 dark:border-zinc-800">
           <h2 id="log-time-title" className="text-[15px] font-bold text-slate-900 dark:text-zinc-50">
-            Log Time
+            {isEditing ? "Edit Time Entry" : "Log Time"}
           </h2>
           <button
             onClick={onClose}
@@ -3564,7 +3610,7 @@ function LogTimeModal({
                 : "bg-slate-100 dark:bg-zinc-800 text-slate-400 dark:text-zinc-600 cursor-not-allowed",
             ].join(" ")}
           >
-            Log Time
+            {isEditing ? "Save" : "Log Time"}
           </button>
         </div>
       </div>
@@ -3575,14 +3621,31 @@ function LogTimeModal({
 function TimeHistoryModal({
   entries,
   estimatedHours,
+  projectSlug,
+  userId,
+  isAdmin,
   onClose,
+  onUpdateEntry,
+  onDeleteEntry,
 }: {
   entries:        TimeEntry[];
   estimatedHours: number | undefined;
+  projectSlug?: string;
+  /** An entry's own real logger, or any Admin, sees Edit/Delete on it —
+   *  ticket_time_entries_update/_delete RLS (20260913000000/20260914000000)
+   *  enforces the same rule again at the database level regardless of what
+   *  this prop says. */
+  userId: string | null;
+  isAdmin: boolean;
   onClose:        () => void;
+  onUpdateEntry: (entryId: string, input: LogTimeInput) => Promise<boolean>;
+  onDeleteEntry: (entryId: string) => void;
 }) {
   const totalLogged = entries.reduce((s, e) => s + e.hours, 0);
   const remaining   = estimatedHours !== undefined ? Math.max(0, estimatedHours - totalLogged) : undefined;
+  const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
+  const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
+  const editingEntry = editingEntryId ? entries.find((e) => e.id === editingEntryId) : undefined;
 
   useEffect(() => {
     const onKey = (e: globalThis.KeyboardEvent) => { if (e.key === "Escape") onClose(); };
@@ -3619,14 +3682,14 @@ function TimeHistoryModal({
           <div className="flex items-center gap-6">
             <div>
               <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600 mb-0.5">Logged</p>
-              <p className="text-[18px] font-bold text-slate-800 dark:text-zinc-100 tabular-nums leading-none">{formatHours(totalLogged)}</p>
+              <p className="text-[18px] font-bold text-slate-800 dark:text-zinc-100 tabular-nums leading-none">{formatEntryHours(totalLogged)}h</p>
             </div>
             {estimatedHours !== undefined && (
               <>
                 <div className="w-px h-8 bg-slate-200 dark:bg-zinc-800 flex-shrink-0" />
                 <div>
                   <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600 mb-0.5">Estimated</p>
-                  <p className="text-[18px] font-bold text-slate-500 dark:text-zinc-400 tabular-nums leading-none">{formatHours(estimatedHours)}</p>
+                  <p className="text-[18px] font-bold text-slate-500 dark:text-zinc-400 tabular-nums leading-none">{formatEntryHours(estimatedHours)}h</p>
                 </div>
                 {remaining !== undefined && (
                   <>
@@ -3634,7 +3697,7 @@ function TimeHistoryModal({
                     <div>
                       <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600 mb-0.5">Remaining</p>
                       <p className={`text-[18px] font-bold tabular-nums leading-none ${remaining === 0 ? "text-emerald-600 dark:text-emerald-400" : "text-slate-800 dark:text-zinc-100"}`}>
-                        {formatRemainingHours(remaining)}h
+                        {formatEntryHours(remaining)}h
                       </p>
                     </div>
                   </>
@@ -3649,30 +3712,115 @@ function TimeHistoryModal({
             <p className="text-[13px] text-slate-400 dark:text-zinc-600 text-center py-6">No entries yet.</p>
           ) : (
             <div>
-              {entries.map((entry, i) => (
-                <div
-                  key={entry.id}
-                  className={`flex items-start gap-3.5 py-3 ${i < entries.length - 1 ? "border-b border-slate-100 dark:border-zinc-800/60" : ""}`}
-                >
-                  <div className="flex flex-col items-center flex-shrink-0 w-3.5 mt-0.5">
-                    <div className="w-1.5 h-1.5 rounded-full bg-brand-400 dark:bg-brand-500 ring-2 ring-white dark:ring-zinc-900" />
-                    {i < entries.length - 1 && (
-                      <div className="w-px flex-1 bg-slate-200 dark:bg-zinc-800 mt-1 min-h-[20px]" />
-                    )}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between gap-3 mb-0.5">
-                      <span className="text-[12px] font-semibold text-slate-500 dark:text-zinc-400">{entry.date}</span>
-                      <span className="text-[14px] font-bold text-slate-800 dark:text-zinc-100 tabular-nums flex-shrink-0">{entry.hours}h</span>
+              {entries.map((entry, i) => {
+                const isOwn = userId !== null && entry.authorProfileId === userId;
+                // Admin may edit/delete any entry — Project Lead/Member stay
+                // restricted to their own (ticket_time_entries_update/_delete
+                // RLS, 20260914000000, enforces the same rule again at the
+                // database level regardless of what this drives here).
+                const canManage = isOwn || isAdmin;
+                const isLast = i === entries.length - 1;
+
+                if (confirmingDeleteId === entry.id) {
+                  return (
+                    <div
+                      key={entry.id}
+                      className={`flex items-center gap-3 py-3 ${!isLast ? "border-b border-slate-100 dark:border-zinc-800/60" : ""}`}
+                    >
+                      <div className="flex-1 min-w-0 flex items-center gap-3 px-3 py-2 rounded-lg border border-red-200 dark:border-red-900/40 bg-red-50/60 dark:bg-red-950/20">
+                        <span className="flex-1 text-[12px] text-slate-700 dark:text-zinc-300">Delete this entry?</span>
+                        <button
+                          type="button"
+                          onClick={() => { setConfirmingDeleteId(null); onDeleteEntry(entry.id); }}
+                          className="flex-shrink-0 text-[12px] font-semibold text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 transition-colors"
+                        >
+                          Delete
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setConfirmingDeleteId(null)}
+                          className="flex-shrink-0 text-[12px] text-slate-400 dark:text-zinc-600 hover:text-slate-600 dark:hover:text-zinc-400 transition-colors"
+                        >
+                          Cancel
+                        </button>
+                      </div>
                     </div>
-                    {entry.comment && (
-                      <p className="text-[13px] text-slate-600 dark:text-zinc-400 leading-snug">
-                        &ldquo;{entry.comment}&rdquo;
-                      </p>
-                    )}
+                  );
+                }
+
+                return (
+                  <div
+                    key={entry.id}
+                    className={`group flex items-start gap-3.5 py-3 ${!isLast ? "border-b border-slate-100 dark:border-zinc-800/60" : ""}`}
+                  >
+                    <div className="flex flex-col items-center flex-shrink-0 w-3.5 mt-0.5">
+                      <div className="w-1.5 h-1.5 rounded-full bg-brand-400 dark:bg-brand-500 ring-2 ring-white dark:ring-zinc-900" />
+                      {!isLast && (
+                        <div className="w-px flex-1 bg-slate-200 dark:bg-zinc-800 mt-1 min-h-[20px]" />
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-3 mb-0.5">
+                        <span className="flex items-center gap-1.5 min-w-0">
+                          <MemberTrigger
+                            name={entry.authorName}
+                            avatar={entry.authorAvatar}
+                            profileId={entry.authorProfileId ?? undefined}
+                            projectSlug={projectSlug}
+                            className="flex-shrink-0 rounded-full"
+                          >
+                            <Avatar
+                              src={entry.authorAvatar}
+                              name={entry.authorName}
+                              className="w-5 h-5 rounded-full flex-shrink-0 ring-1 ring-white dark:ring-zinc-900"
+                            />
+                          </MemberTrigger>
+                          <span className="text-[12px] font-semibold text-slate-500 dark:text-zinc-400 truncate">
+                            <MemberTrigger
+                              name={entry.authorName}
+                              avatar={entry.authorAvatar}
+                              profileId={entry.authorProfileId ?? undefined}
+                              projectSlug={projectSlug}
+                              className="hover:underline"
+                            >
+                              {entry.authorName}
+                            </MemberTrigger>
+                            <span className="font-normal text-slate-400 dark:text-zinc-600"> · {entry.date}</span>
+                          </span>
+                        </span>
+                        <span className="flex items-center gap-0.5 flex-shrink-0">
+                          <span className="text-[14px] font-bold text-slate-800 dark:text-zinc-100 tabular-nums">{formatEntryHours(entry.hours)}h</span>
+                          {canManage && (
+                            <>
+                              <button
+                                type="button"
+                                className={EDIT_BTN.replace("ml-1.5 ", "")}
+                                onClick={() => setEditingEntryId(entry.id)}
+                                aria-label="Edit time entry"
+                              >
+                                <PencilIcon />
+                              </button>
+                              <button
+                                type="button"
+                                className={EDIT_BTN.replace("ml-1.5 ", "")}
+                                onClick={() => setConfirmingDeleteId(entry.id)}
+                                aria-label="Delete time entry"
+                              >
+                                <TrashIcon />
+                              </button>
+                            </>
+                          )}
+                        </span>
+                      </div>
+                      {entry.comment && (
+                        <p className="text-[13px] text-slate-600 dark:text-zinc-400 leading-snug">
+                          &ldquo;{entry.comment}&rdquo;
+                        </p>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -3687,22 +3835,47 @@ function TimeHistoryModal({
           </button>
         </div>
       </div>
+
+      {editingEntry && (
+        <LogTimeModal
+          initialEntry={{ minutes: editingEntry.minutes, comment: editingEntry.comment, workDate: editingEntry.workDateISO }}
+          onClose={() => setEditingEntryId(null)}
+          onSubmit={(input) => onUpdateEntry(editingEntry.id, input)}
+        />
+      )}
     </div>
   );
 }
 
 function TimeTrackingSection({
   ticketId,
+  projectSlug,
   entries,
   estimatedHours,
+  userId,
+  isAdmin,
   onAddEntry,
+  onUpdateEntry,
+  onDeleteEntry,
   onError,
 }: {
   ticketId:       string;
+  /** This ticket's own real project — lets each entry's author "avatar"
+   *  MemberTrigger fetch real per-project metrics, same convention as
+   *  Comments/Attachments. */
+  projectSlug?: string;
   entries:        TimeEntry[];
   estimatedHours: number | undefined;
+  /** Passed straight through to TimeHistoryModal — restricts Edit/Delete
+   *  there to each entry's own real logger, unless isAdmin. */
+  userId: string | null;
+  /** Admin may edit/delete any entry, not just their own — see
+   *  TicketDetailScreen's own doc comment on this same flag. */
+  isAdmin: boolean;
   /** Called with the real, persisted entry — after a successful save only. */
   onAddEntry:     (entry: TimeEntry) => void;
+  onUpdateEntry: (entryId: string, input: LogTimeInput) => Promise<boolean>;
+  onDeleteEntry: (entryId: string) => void;
   /** Called with a message when a save fails — surfaced via the shared error toast. */
   onError:        (message: string) => void;
 }) {
@@ -3825,7 +3998,12 @@ function TimeTrackingSection({
         <TimeHistoryModal
           entries={entries}
           estimatedHours={estimatedHours}
+          projectSlug={projectSlug}
+          userId={userId}
+          isAdmin={isAdmin}
           onClose={() => setHistModal(false)}
+          onUpdateEntry={onUpdateEntry}
+          onDeleteEntry={onDeleteEntry}
         />
       )}
     </>
@@ -4068,7 +4246,12 @@ export function TicketDetailScreen({
   slug: string;
   ticketCode: string;
 }) {
-  const { organization, isDevFallback, userId } = useCurrentUser();
+  const { organization, isDevFallback, userId, user } = useCurrentUser();
+  // Admin may edit/delete any time entry, not just their own — Project
+  // Lead and Member stay restricted to their own (ticket_time_entries_update/
+  // _delete RLS, 20260914000000, enforces the same rule again at the
+  // database level regardless of what this drives in the UI).
+  const isAdmin = user.role === "ADMIN";
 
   // Feeds the page-level drag & drop / paste handlers below — lets them
   // reuse this exact section's own real upload/validation flow instead of
@@ -4406,6 +4589,40 @@ export function TicketDetailScreen({
     // instead of inventing a local entry.
     refreshActivity();
   };
+
+  // Edits an already-logged entry's own minutes/comment/date — reachable
+  // only for the entry's real logger (ticket_time_entries_update RLS,
+  // 20260913000000, enforces the same rule again at the database level
+  // regardless of what TimeHistoryModal's own isOwn check says).
+  async function updateEntry(entryId: string, input: LogTimeInput): Promise<boolean> {
+    const result = await updateTicketTimeEntry(entryId, input);
+    if (result.status === "error") {
+      showError(result.message);
+      return false;
+    }
+    const updated = toTimeEntry(result.entry);
+    setLoggedEntries((prev) => prev.map((e) => (e.id === entryId ? updated : e)));
+    // A database trigger already logged the real "time_entry_updated"
+    // activity row as part of the same update (see 20260913000000) —
+    // refetch instead of inventing a local entry.
+    refreshActivity();
+    return true;
+  }
+
+  function deleteEntry(entryId: string) {
+    deleteTicketTimeEntry(entryId).then((result) => {
+      if (result.status === "error") {
+        console.warn("[ticket-detail] time entry delete failed:", result.message);
+        showError(result.message);
+        return;
+      }
+      setLoggedEntries((prev) => prev.filter((e) => e.id !== entryId));
+      refreshActivity();
+    }).catch((err) => {
+      console.warn("[ticket-detail] time entry delete failed:", err);
+      showError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
+    });
+  }
 
   function cancelComment() {
     setCommentDraft("");
@@ -4850,9 +5067,14 @@ export function TicketDetailScreen({
             <div className="order-[80]">
               <TimeTrackingSection
                 ticketId={ticket.id}
+                projectSlug={ticket.projectSlug}
                 entries={loggedEntries}
                 estimatedHours={ticket.hours}
+                userId={userId}
+                isAdmin={isAdmin}
                 onAddEntry={addEntry}
+                onUpdateEntry={updateEntry}
+                onDeleteEntry={deleteEntry}
                 onError={showError}
               />
             </div>
