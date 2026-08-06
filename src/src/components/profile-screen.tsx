@@ -281,18 +281,25 @@ function ProfileForm({ user }: { user: CurrentUser }) {
           <SettingRow label="Role">
             <span className="text-[13px] text-slate-500 dark:text-zinc-400">{ROLE_LABELS[user.role]}</span>
           </SettingRow>
-          <SettingRow label="Weekly Capacity">
-            <div className="flex items-center gap-2">
-              <input
-                type="number"
-                min="0"
-                step="1"
-                value={weeklyCapacity}
-                onChange={(e) => setWeeklyCapacity(e.target.value)}
-                className={`${NAME_INPUT} w-20`}
-              />
-              <span className="text-[13px] text-slate-500 dark:text-zinc-400">h / week</span>
-            </div>
+          <SettingRow
+            label="Weekly Capacity"
+            hint={user.role === "MEMBER" ? "Contact an admin to change your weekly capacity" : undefined}
+          >
+            {user.role === "MEMBER" ? (
+              <span className="text-[13px] text-slate-500 dark:text-zinc-400">{user.weeklyCapacity}h / week</span>
+            ) : (
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={weeklyCapacity}
+                  onChange={(e) => setWeeklyCapacity(e.target.value)}
+                  className={`${NAME_INPUT} w-20`}
+                />
+                <span className="text-[13px] text-slate-500 dark:text-zinc-400">h / week</span>
+              </div>
+            )}
           </SettingRow>
         </SettingGroup>
 

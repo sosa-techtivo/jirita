@@ -71,24 +71,27 @@ export function AccountMenu() {
           <p className="text-[12px] text-slate-400 dark:text-zinc-500 truncate">{user.email}</p>
         </div>
         <div className="py-1.5">
-          {/* Member already has a direct Profile tab in their own mobile
-              tab bar (mobile-tab-bar.tsx) — omitted here only for that role
-              to avoid duplicating it; Admin/Project Lead keep it (no tab bar
-              Profile entry of their own). */}
-          {user.role !== "MEMBER" && (
-            <Link
-              href="/profile"
-              role="menuitem"
-              onClick={() => setIsOpen(false)}
-              className="w-full flex items-center gap-2.5 px-3.5 py-1.5 text-[13px] text-left text-slate-700 dark:text-zinc-300 hover:bg-slate-50 dark:hover:bg-zinc-800/60 transition-colors"
-            >
-              <svg className="w-4 h-4 text-slate-400 dark:text-zinc-500" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                <circle cx="12" cy="8" r="4" />
-                <path d="M4 21c0-4 4-6 8-6s8 2 8 6" />
-              </svg>
-              My Profile
-            </Link>
-          )}
+          {/* Every role gets this link — Member previously didn't (see git
+              history), on the assumption their mobile tab bar's own Profile
+              tab (mobile-tab-bar.tsx) already covered it, but that tab is
+              Mobile-only (md:hidden) and Member has no other Desktop entry
+              point to /profile at all. ProfileScreen only ever reads/writes
+              the signed-in caller's own row regardless of role (useCurrentUser()),
+              so there's no access-control reason to withhold this link from
+              any role — Member seeing it in both places on Mobile is a minor,
+              harmless duplication, not a security concern. */}
+          <Link
+            href="/profile"
+            role="menuitem"
+            onClick={() => setIsOpen(false)}
+            className="w-full flex items-center gap-2.5 px-3.5 py-1.5 text-[13px] text-left text-slate-700 dark:text-zinc-300 hover:bg-slate-50 dark:hover:bg-zinc-800/60 transition-colors"
+          >
+            <svg className="w-4 h-4 text-slate-400 dark:text-zinc-500" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+              <circle cx="12" cy="8" r="4" />
+              <path d="M4 21c0-4 4-6 8-6s8 2 8 6" />
+            </svg>
+            My Profile
+          </Link>
           <Link
             href="/change-password"
             role="menuitem"

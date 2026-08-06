@@ -27,6 +27,7 @@ import {
   updateProfileNames,
   type Membership,
   type Organization,
+  type WriteResult,
 } from "@/lib/membership";
 import { blobToDataUrl, resizeAvatarToSquareJpeg, uploadAvatarBlob, validateAvatarFile } from "@/lib/avatar-upload";
 
@@ -333,9 +334,19 @@ export function CurrentUserProvider({ children }: { children: ReactNode }) {
   const updateProfile = useCallback(
     async (forRole: Role, fields: ProfileEditableFields): Promise<ProfileSaveResult> => {
       if (hasRealMembership && authUser) {
+        // Member can't change their own Weekly Capacity at all (Profile
+        // shows it read-only for that role, see profile-screen.tsx) — skip
+        // the call entirely rather than sending an unchanged value the
+        // backend would reject anyway (update_own_weekly_capacity,
+        // 20260916000000, rejects any 'member'-role caller regardless of
+        // what this client sends); avoids a spurious "capacity failed to
+        // save" error on every save for a field this role was never
+        // offered an input for in the first place.
         const [namesResult, capacityResult] = await Promise.all([
           updateProfileNames(authUser.id, { firstName: fields.firstName, lastName: fields.lastName }),
-          updateOwnWeeklyCapacity(fields.weeklyCapacity),
+          forRole === "MEMBER"
+            ? Promise.resolve<WriteResult>({ status: "success" })
+            : updateOwnWeeklyCapacity(fields.weeklyCapacity),
         ]);
         runFetch(authUser.id); // reflect the real persisted row either way
 
