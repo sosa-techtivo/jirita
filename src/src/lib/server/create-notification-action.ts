@@ -29,6 +29,7 @@ const NOTIFICATION_TYPES = [
   "project_member_added",
   "project_access_requested",
   "project_access_rejected",
+  "comment_reply",
 ] as const;
 
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number];

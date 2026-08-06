@@ -20,6 +20,7 @@ import {
 } from "@/components/tickets/ticket-ui";
 import {
   loadTicketComments,
+  groupCommentThreads,
   loadTicketAttachments,
   getTicketAttachmentPreviewUrl,
   downloadTicketAttachment,
@@ -561,6 +562,45 @@ export function TicketPreviewPanel({
     });
   }
 
+  // Read-only here (this panel has no reply/edit/delete UI at all) — reuses
+  // the exact same grouping Ticket Detail's own real comment threads use,
+  // so a reply shows up correctly indented under its parent instead of as
+  // an indistinguishable flat entry.
+  function renderCommentRow(c: TicketComment) {
+    return (
+      <div key={c.id} className="flex items-start gap-2.5">
+        <MemberTrigger
+          name={c.name}
+          avatar={c.avatar}
+          profileId={c.authorProfileId ?? undefined}
+          projectSlug={t.projectSlug}
+          className="flex-shrink-0 mt-0.5 rounded-full"
+        >
+          <Avatar
+            src={c.avatar}
+            name={c.name}
+            className="w-6 h-6 rounded-full flex-shrink-0 ring-1 ring-white dark:ring-zinc-900"
+          />
+        </MemberTrigger>
+        <div className="flex-1 min-w-0">
+          {/* Author · timestamp on one line */}
+          <p className="text-[12px] font-semibold text-slate-800 dark:text-zinc-200 leading-snug">
+            <MemberTrigger name={c.name} avatar={c.avatar} profileId={c.authorProfileId ?? undefined} projectSlug={t.projectSlug} className="hover:underline">
+              {c.name}
+            </MemberTrigger>
+            <span className="ml-1.5 font-normal text-slate-400 dark:text-zinc-600">
+              · {c.timeAgo}
+            </span>
+          </p>
+          <RichTextViewer
+            content={c.text}
+            className="text-[12px] text-slate-600 dark:text-zinc-400 mt-1"
+          />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <>
       {/* ── Backdrop ──────────────────────────────────────────────────────── */}
@@ -818,36 +858,14 @@ export function TicketPreviewPanel({
               <p className="text-[12px] text-slate-400 dark:text-zinc-600">No comments yet.</p>
             ) : (
             <div className="space-y-4">
-              {comments.map((c, i) => (
-                <div key={i} className="flex items-start gap-2.5">
-                  <MemberTrigger
-                    name={c.name}
-                    avatar={c.avatar}
-                    profileId={c.authorProfileId ?? undefined}
-                    projectSlug={t.projectSlug}
-                    className="flex-shrink-0 mt-0.5 rounded-full"
-                  >
-                    <Avatar
-                      src={c.avatar}
-                      name={c.name}
-                      className="w-6 h-6 rounded-full flex-shrink-0 ring-1 ring-white dark:ring-zinc-900"
-                    />
-                  </MemberTrigger>
-                  <div className="flex-1 min-w-0">
-                    {/* Author · timestamp on one line */}
-                    <p className="text-[12px] font-semibold text-slate-800 dark:text-zinc-200 leading-snug">
-                      <MemberTrigger name={c.name} avatar={c.avatar} profileId={c.authorProfileId ?? undefined} projectSlug={t.projectSlug} className="hover:underline">
-                        {c.name}
-                      </MemberTrigger>
-                      <span className="ml-1.5 font-normal text-slate-400 dark:text-zinc-600">
-                        · {c.timeAgo}
-                      </span>
-                    </p>
-                    <RichTextViewer
-                      content={c.text}
-                      className="text-[12px] text-slate-600 dark:text-zinc-400 mt-1"
-                    />
-                  </div>
+              {groupCommentThreads(comments).map(({ parent, replies }) => (
+                <div key={parent.id}>
+                  {renderCommentRow(parent)}
+                  {replies.length > 0 && (
+                    <div className="mt-3 space-y-3 pl-5 ml-3 border-l-2 border-slate-100 dark:border-zinc-800/80">
+                      {replies.map((r) => renderCommentRow(r))}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

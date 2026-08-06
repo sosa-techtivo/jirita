@@ -44,6 +44,8 @@ import {
   loadTicketActivity,
   createTicketComment,
   updateTicketComment,
+  deleteTicketComment,
+  groupCommentThreads,
   updateTicket,
   loadOrganizationLabels,
   createOrganizationLabel,
@@ -1928,11 +1930,18 @@ function CommentItem({
   mentionCandidates,
   onFilesDropped,
   onSaveEdit,
+  onSaveAttachmentEdits,
+  onEditorFocus,
+  onEditorBlur,
+  onReply,
+  onDelete,
+  replySlot,
 }: {
   comment: TicketComment;
   projectSlug?: string;
-  /** Only the viewer's own comments are editable or become drop targets —
-   *  ticket_comments_update RLS (20260907000000) enforces the same rule
+  /** Only the viewer's own comments are editable/deletable or become drop
+   *  targets — ticket_comments_update RLS (20260907000000) and the
+   *  delete_ticket_comment RPC (20260912000000) both enforce the same rule
    *  again at the database level regardless of what this prop says. */
   isOwn: boolean;
   /** Real, active members of this comment's own project — same list the
@@ -1941,30 +1950,89 @@ function CommentItem({
   mentionCandidates: MentionCandidate[];
   onFilesDropped: (files: File[]) => void;
   onSaveEdit: (html: string) => Promise<boolean>;
+  /** Applies this edit session's staged attachment changes (removals +
+   *  new uploads) — called once, right after onSaveEdit succeeds, never
+   *  before. Both operations reuse the exact same deleteTicketAttachment/
+   *  uploadFilesToComment calls the general Attachments section and the
+   *  new-comment composer already use. */
+  onSaveAttachmentEdits: (toRemove: TicketAttachment[], newFiles: File[]) => Promise<void>;
+  /** Registers this exact edit session as the current paste-to-attach
+   *  target (see the page-level paste handler in TicketDetailScreen) —
+   *  called on the edit RichTextEditor's own focus, passing the function
+   *  that actually stages a pasted file here. */
+  onEditorFocus: (stageFiles: (files: File[]) => void) => void;
+  onEditorBlur: () => void;
+  /** Opens the "Replying to {this comment's author}" composer under this
+   *  comment. Only ever rendered for a top-level comment (see the "Reply"
+   *  button below) — with a single level of nesting, offering it on a
+   *  reply too would be confusing even though it wouldn't actually create
+   *  a second level (the database trigger would just re-file it under the
+   *  same parent). Still accepted unconditionally here so CommentItem
+   *  doesn't need a second, reply-specific prop shape. */
+  onReply: () => void;
+  onDelete: () => void;
+  /** The reply composer, rendered directly under this exact comment while
+   *  it's the active reply target — null the rest of the time. */
+  replySlot?: ReactNode;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(comment.text);
   const [saving, setSaving] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   // Bumped every time editing starts — remounts RichTextEditor with a
   // fresh instance loaded from the latest real comment text, same role it
   // plays in EditableDescription.
   const [editorKey, setEditorKey] = useState(0);
+  // Attachment changes staged during this edit session only — neither a
+  // removal nor a new file is ever actually persisted until Save (see
+  // save() below); Cancel just discards both, leaving the comment's real
+  // attachments completely untouched.
+  const [stagedFiles, setStagedFiles] = useState<PendingCommentFile[]>([]);
+  const [removedAttachmentIds, setRemovedAttachmentIds] = useState<string[]>([]);
+  const editFileInputRef = useRef<HTMLInputElement>(null);
+
+  const stageFiles = (files: File[]) => {
+    setStagedFiles((prev) => [...prev, ...files.map((file) => ({ id: newId(), file }))]);
+  };
 
   const startEditing = () => {
     setDraft(comment.text);
     setEditorKey((k) => k + 1);
+    setStagedFiles([]);
+    setRemovedAttachmentIds([]);
     setEditing(true);
   };
-  const cancel = () => { setDraft(comment.text); setEditing(false); };
+  const cancel = () => {
+    setDraft(comment.text);
+    setStagedFiles([]);
+    setRemovedAttachmentIds([]);
+    setEditing(false);
+  };
   const save = async () => {
     setSaving(true);
     const ok = await onSaveEdit(sanitizeRichTextHtml(draft));
+    if (!ok) {
+      setSaving(false);
+      return;
+    }
+
+    const toRemove = comment.attachments.filter((a) => removedAttachmentIds.includes(a.id));
+    const newFiles = stagedFiles.map((item) => item.file);
+    if (toRemove.length > 0 || newFiles.length > 0) {
+      await onSaveAttachmentEdits(toRemove, newFiles);
+    }
+
+    setStagedFiles([]);
+    setRemovedAttachmentIds([]);
     setSaving(false);
-    if (ok) setEditing(false);
+    setEditing(false);
   };
 
   return (
-    <CommentDropZone active={isOwn} onFilesDropped={onFilesDropped}>
+    <CommentDropZone
+      active={isOwn}
+      onFilesDropped={(files) => { if (editing) stageFiles(files); else onFilesDropped(files); }}
+    >
       <div className="flex items-start gap-3">
         <MemberTrigger
           name={comment.name}
@@ -1999,56 +2067,297 @@ function CommentItem({
                 autoFocus
                 contentClassName="sm:text-[13px]"
                 mentionCandidates={mentionCandidates}
+                onFocus={() => onEditorFocus(stageFiles)}
+                onBlur={onEditorBlur}
               />
-              <div className="flex items-center justify-end gap-2 mt-2">
+
+              <input
+                ref={editFileInputRef}
+                type="file"
+                multiple
+                className="hidden"
+                onChange={(e) => {
+                  if (e.target.files?.length) {
+                    stageFiles(Array.from(e.target.files));
+                    e.target.value = "";
+                  }
+                }}
+              />
+
+              {comment.attachments.filter((a) => !removedAttachmentIds.includes(a.id)).length > 0 && (
+                <div className="mt-2 space-y-1.5">
+                  {comment.attachments
+                    .filter((a) => !removedAttachmentIds.includes(a.id))
+                    .map((a) => (
+                      <CommentAttachmentRow
+                        key={a.id}
+                        file={toAttachmentItem(a)}
+                        onRemove={() => setRemovedAttachmentIds((prev) => [...prev, a.id])}
+                      />
+                    ))}
+                </div>
+              )}
+
+              {stagedFiles.length > 0 && (
+                <div className="mt-2 space-y-1.5">
+                  {stagedFiles.map((item) => (
+                    <PendingCommentFileRow
+                      key={item.id}
+                      file={item.file}
+                      onRemove={() => setStagedFiles((prev) => prev.filter((p) => p.id !== item.id))}
+                    />
+                  ))}
+                </div>
+              )}
+
+              <div className="flex items-center justify-between gap-2 mt-2">
                 <button
                   type="button"
-                  onClick={cancel}
-                  disabled={saving}
-                  className="px-3.5 py-1.5 text-[13px] font-medium text-slate-600 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  aria-label="Attach files"
+                  onClick={() => editFileInputRef.current?.click()}
+                  className="p-1.5 rounded-md text-slate-400 dark:text-zinc-600 hover:text-slate-600 dark:hover:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors"
                 >
-                  Cancel
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                    <path d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.372L8.552 18.32m.009-.01l-.01.01m5.699-9.941l-7.81 7.81a1.5 1.5 0 002.112 2.13" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
                 </button>
-                <button
-                  type="button"
-                  onClick={save}
-                  disabled={saving || isRichTextEmpty(draft)}
-                  className={[
-                    "px-3.5 py-1.5 text-[13px] font-semibold rounded-lg transition-all",
-                    saving || isRichTextEmpty(draft)
-                      ? "bg-slate-100 dark:bg-zinc-800 text-slate-400 dark:text-zinc-600 cursor-not-allowed"
-                      : "bg-brand-500 hover:bg-brand-600 text-white shadow-sm shadow-brand-500/30 cursor-pointer",
-                  ].join(" ")}
-                >
-                  Save
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={cancel}
+                    disabled={saving}
+                    className="px-3.5 py-1.5 text-[13px] font-medium text-slate-600 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={save}
+                    disabled={saving || isRichTextEmpty(draft)}
+                    className={[
+                      "px-3.5 py-1.5 text-[13px] font-semibold rounded-lg transition-all",
+                      saving || isRichTextEmpty(draft)
+                        ? "bg-slate-100 dark:bg-zinc-800 text-slate-400 dark:text-zinc-600 cursor-not-allowed"
+                        : "bg-brand-500 hover:bg-brand-600 text-white shadow-sm shadow-brand-500/30 cursor-pointer",
+                    ].join(" ")}
+                  >
+                    Save
+                  </button>
+                </div>
               </div>
             </div>
           ) : (
             <div className="group relative mt-2 px-4 py-3 rounded-xl bg-slate-50 dark:bg-zinc-900 border border-slate-100 dark:border-zinc-800/80">
               <RichTextViewer content={comment.text} className="text-[13px] text-slate-700 dark:text-zinc-300" />
               {isOwn && (
-                <button
-                  className={EDIT_BTN + " absolute top-2 right-2"}
-                  onClick={startEditing}
-                  aria-label="Edit comment"
-                >
-                  <PencilIcon />
-                </button>
+                <div className="absolute top-2 right-2 flex items-center gap-1">
+                  <button
+                    className={EDIT_BTN.replace("ml-1.5 ", "")}
+                    onClick={startEditing}
+                    aria-label="Edit comment"
+                  >
+                    <PencilIcon />
+                  </button>
+                  <button
+                    className={EDIT_BTN.replace("ml-1.5 ", "")}
+                    onClick={() => setConfirmingDelete(true)}
+                    aria-label="Delete comment"
+                  >
+                    <TrashIcon />
+                  </button>
+                </div>
               )}
             </div>
           )}
 
-          {comment.attachments.length > 0 && (
+          {!editing && (
+            confirmingDelete ? (
+              <div className="mt-1.5 flex items-center gap-3 px-3 py-1.5 rounded-lg border border-red-200 dark:border-red-900/40 bg-red-50/60 dark:bg-red-950/20">
+                <span className="flex-1 text-[12px] text-slate-700 dark:text-zinc-300">Delete this comment?</span>
+                <button
+                  type="button"
+                  onClick={() => { setConfirmingDelete(false); onDelete(); }}
+                  className="text-[12px] font-semibold text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 transition-colors"
+                >
+                  Delete
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirmingDelete(false)}
+                  className="text-[12px] text-slate-400 dark:text-zinc-600 hover:text-slate-600 dark:hover:text-zinc-400 transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              // Only offered on top-level comments — with just one level of
+              // nesting, "Reply" on a reply would be confusing (it still
+              // wouldn't create a second level; the database just auto-files
+              // it under the same parent), so it's simplest to not offer it
+              // there at all.
+              !comment.parentCommentId && (
+                <div className="mt-1.5">
+                  <button
+                    type="button"
+                    onClick={onReply}
+                    className="text-[12px] font-medium text-slate-400 dark:text-zinc-600 hover:text-brand-600 dark:hover:text-brand-400 transition-colors"
+                  >
+                    Reply
+                  </button>
+                </div>
+              )
+            )
+          )}
+
+          {!editing && comment.attachments.length > 0 && (
             <div className="mt-2 space-y-1.5">
               {comment.attachments.map((a) => (
                 <CommentAttachmentRow key={a.id} file={toAttachmentItem(a)} />
               ))}
             </div>
           )}
+
+          {replySlot}
         </div>
       </div>
     </CommentDropZone>
+  );
+}
+
+function TrashIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className ?? "w-3 h-3"}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+    >
+      <path
+        d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+// ── ReplyComposer ────────────────────────────────────────────────────────────
+// Rendered directly under whichever comment "Reply" was just clicked on
+// (see CommentItem's replySlot prop) — the same RichTextEditor/attach/
+// mention-candidate composer the top-level "Add comment" box already uses,
+// just with a small "Replying to {author}" indicator (and its own "X"
+// cancel) above it instead of a plain placeholder.
+
+function ReplyComposer({
+  authorName,
+  draft,
+  onChange,
+  onCancel,
+  onSubmit,
+  submitting,
+  mentionCandidates,
+  pendingFiles,
+  onFilesSelected,
+  onRemoveFile,
+}: {
+  authorName: string;
+  draft: string;
+  onChange: (html: string) => void;
+  onCancel: () => void;
+  onSubmit: () => void;
+  submitting: boolean;
+  mentionCandidates: MentionCandidate[];
+  pendingFiles: PendingCommentFile[];
+  onFilesSelected: (files: File[]) => void;
+  onRemoveFile: (id: string) => void;
+}) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  return (
+    <div className="mt-2">
+      <div className="flex items-center justify-between mb-1.5">
+        <p className="text-[12px] text-slate-500 dark:text-zinc-500">
+          Replying to <span className="font-semibold text-slate-700 dark:text-zinc-300">{authorName}</span>
+        </p>
+        <button
+          type="button"
+          onClick={onCancel}
+          aria-label="Cancel reply"
+          className="p-0.5 rounded text-slate-400 dark:text-zinc-600 hover:text-slate-600 dark:hover:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors"
+        >
+          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M6 18L18 6M6 6l12 12" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+      </div>
+
+      <RichTextEditor
+        content={draft}
+        onChange={onChange}
+        placeholder="Write a reply…"
+        autoFocus
+        contentClassName="sm:text-[13px]"
+        mentionCandidates={mentionCandidates}
+      />
+
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        className="hidden"
+        onChange={(e) => {
+          if (e.target.files?.length) {
+            onFilesSelected(Array.from(e.target.files));
+            e.target.value = "";
+          }
+        }}
+      />
+
+      {pendingFiles.length > 0 && (
+        <div className="mt-2 space-y-1.5">
+          {pendingFiles.map((item) => (
+            <PendingCommentFileRow key={item.id} file={item.file} onRemove={() => onRemoveFile(item.id)} />
+          ))}
+        </div>
+      )}
+
+      <div className="flex items-center justify-between gap-2 mt-2">
+        <button
+          type="button"
+          aria-label="Attach files"
+          onClick={() => fileInputRef.current?.click()}
+          className="p-1.5 rounded-md text-slate-400 dark:text-zinc-600 hover:text-slate-600 dark:hover:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+            <path d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.372L8.552 18.32m.009-.01l-.01.01m5.699-9.941l-7.81 7.81a1.5 1.5 0 002.112 2.13" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="px-3.5 py-1.5 text-[13px] font-medium text-slate-600 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800 rounded-lg transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onSubmit}
+            disabled={isRichTextEmpty(draft) || submitting}
+            className={[
+              "px-3.5 py-1.5 text-[13px] font-semibold rounded-lg transition-all",
+              isRichTextEmpty(draft) || submitting
+                ? "bg-slate-100 dark:bg-zinc-800 text-slate-400 dark:text-zinc-600 cursor-not-allowed"
+                : "bg-brand-500 hover:bg-brand-600 text-white shadow-sm shadow-brand-500/30 cursor-pointer",
+            ].join(" ")}
+          >
+            Reply
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -2059,8 +2368,20 @@ function CommentItem({
 // and downloadTicketAttachment as the general AttachmentsSection so preview
 // and download behavior stay identical.
 
-function CommentAttachmentRow({ file }: { file: AttachmentItem }) {
+function CommentAttachmentRow({
+  file,
+  onRemove,
+}: {
+  file: AttachmentItem;
+  /** Only passed while editing an existing comment (see CommentItem) —
+   *  marks this attachment for removal in that edit session; the real
+   *  deleteTicketAttachment call only happens on Save, so Cancel leaves
+   *  it untouched. Omitted everywhere else (view mode), which renders
+   *  exactly as it always has. */
+  onRemove?: () => void;
+}) {
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [confirmingRemove, setConfirmingRemove] = useState(false);
   // Never offered for an unavailable file — no physical object exists in
   // Storage to preview.
   const previewKind = file.isAvailable ? getPreviewKind(file.ext) : null;
@@ -2100,9 +2421,33 @@ function CommentAttachmentRow({ file }: { file: AttachmentItem }) {
     });
   };
 
+  if (onRemove && confirmingRemove) {
+    return (
+      <div className="flex items-center gap-3 px-3 py-2 rounded-lg border border-red-200 dark:border-red-900/40 bg-red-50/60 dark:bg-red-950/20">
+        <span className="flex-1 min-w-0 text-[12px] text-slate-700 dark:text-zinc-300 truncate">
+          Remove <strong className="font-semibold">{file.name}</strong>?
+        </span>
+        <button
+          type="button"
+          onClick={() => { setConfirmingRemove(false); onRemove(); }}
+          className="flex-shrink-0 text-[12px] font-semibold text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 transition-colors"
+        >
+          Remove
+        </button>
+        <button
+          type="button"
+          onClick={() => setConfirmingRemove(false)}
+          className="flex-shrink-0 text-[12px] text-slate-400 dark:text-zinc-600 hover:text-slate-600 dark:hover:text-zinc-400 transition-colors"
+        >
+          Cancel
+        </button>
+      </div>
+    );
+  }
+
   if (isImage) {
     return (
-      <>
+      <div className="relative">
         <button
           type="button"
           onClick={handleClick}
@@ -2131,21 +2476,35 @@ function CommentAttachmentRow({ file }: { file: AttachmentItem }) {
           </div>
         </button>
 
+        {onRemove && (
+          <button
+            type="button"
+            aria-label={`Remove ${file.name}`}
+            onClick={() => setConfirmingRemove(true)}
+            className="absolute top-1.5 right-1.5 p-1 rounded-md bg-white/90 dark:bg-zinc-950/80 text-slate-400 dark:text-zinc-600 hover:text-red-600 dark:hover:text-red-400 hover:bg-white dark:hover:bg-zinc-900 shadow-sm transition-colors"
+          >
+            <TrashIcon className="w-3 h-3" />
+          </button>
+        )}
+
         {previewOpen && previewKind && createPortal(
           <AttachmentPreviewModal file={file} kind={previewKind} onClose={() => setPreviewOpen(false)} />,
           document.body
         )}
-      </>
+      </div>
     );
   }
 
   return (
-    <>
+    <div className="relative">
       <button
         type="button"
         disabled={!file.isAvailable}
         onClick={handleClick}
-        className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg border border-slate-100 dark:border-zinc-800 bg-white dark:bg-zinc-950/40 hover:border-slate-200 dark:hover:border-zinc-700 transition-colors text-left disabled:cursor-default disabled:hover:border-slate-100 dark:disabled:hover:border-zinc-800"
+        className={
+          "w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg border border-slate-100 dark:border-zinc-800 bg-white dark:bg-zinc-950/40 hover:border-slate-200 dark:hover:border-zinc-700 transition-colors text-left disabled:cursor-default disabled:hover:border-slate-100 dark:disabled:hover:border-zinc-800" +
+          (onRemove ? " pr-8" : "")
+        }
       >
         <span className={"w-5 h-5 rounded flex items-center justify-center flex-shrink-0 text-[7px] font-bold uppercase tracking-wide " + extColor}>
           {file.ext}
@@ -2160,11 +2519,22 @@ function CommentAttachmentRow({ file }: { file: AttachmentItem }) {
         )}
       </button>
 
+      {onRemove && (
+        <button
+          type="button"
+          aria-label={`Remove ${file.name}`}
+          onClick={() => setConfirmingRemove(true)}
+          className="absolute top-1/2 -translate-y-1/2 right-2 p-1 rounded text-slate-300 dark:text-zinc-600 hover:text-red-600 dark:hover:text-red-400 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors"
+        >
+          <TrashIcon className="w-3 h-3" />
+        </button>
+      )}
+
       {previewOpen && previewKind && createPortal(
         <AttachmentPreviewModal file={file} kind={previewKind} onClose={() => setPreviewOpen(false)} />,
         document.body
       )}
-    </>
+    </div>
   );
 }
 
@@ -3729,6 +4099,23 @@ export function TicketDetailScreen({
   // starts until the comment itself is created (see submitComment below).
   const [pendingCommentFiles, setPendingCommentFiles] = useState<PendingCommentFile[]>([]);
   const commentFileInputRef = useRef<HTMLInputElement>(null);
+  // One-level-deep replies — the id of whichever comment "Reply" was just
+  // clicked on (parent or reply alike; see CommentItem's own onReply doc),
+  // and that reply's own small composer state. Only one reply composer is
+  // ever open at a time across the whole thread.
+  const [replyingTo, setReplyingTo] = useState<{ id: string; name: string } | null>(null);
+  const [replyDraft, setReplyDraft] = useState("");
+  const [submittingReply, setSubmittingReply] = useState(false);
+  const [pendingReplyFiles, setPendingReplyFiles] = useState<PendingCommentFile[]>([]);
+  // Whichever existing comment's own edit composer currently has real
+  // focus, if any — lets the page-level paste handler below route a
+  // pasted file into that exact edit session's staged files, the same way
+  // it already routes into the new-comment composer via
+  // addingComment/commentEditorFocused. A ref (not state): CommentItem
+  // itself owns its staged-files state, so this only ever needs to carry
+  // "which comment, and its own stage function" for the one moment a
+  // paste event fires, never to trigger a re-render on its own.
+  const focusedEditCommentRef = useRef<{ id: string; stage: (files: File[]) => void } | null>(null);
   const [loggedEntries, setLoggedEntries] = useState<TimeEntry[]>([]);
   // Typed ProjectTeamMember[] (not the narrower OrgMember[] other
   // consumers of this same roster declare) purely to keep `email` around —
@@ -3877,6 +4264,8 @@ export function TicketDetailScreen({
       if (addingComment && commentEditorFocused) {
         const items2 = files.map((file) => ({ id: newId(), file }));
         setPendingCommentFiles((prev) => [...prev, ...items2]);
+      } else if (focusedEditCommentRef.current) {
+        focusedEditCommentRef.current.stage(files);
       } else {
         attachmentsSectionRef.current?.addFiles(files);
       }
@@ -4111,6 +4500,53 @@ export function TicketDetailScreen({
     return true;
   }
 
+  // Applies the attachment side of editing an existing comment — called
+  // once from CommentItem's own save(), right after saveCommentEdit above
+  // already succeeded. Both removals and new uploads were only ever
+  // staged locally until now (see CommentItem's stagedFiles/
+  // removedAttachmentIds); this is the one place either actually persists,
+  // reusing the exact same deleteTicketAttachment/uploadFilesToComment
+  // calls the general Attachments section and the new-comment composer
+  // already use — no second deletion/upload implementation. A failed
+  // removal is reported the same way a failed upload already is (an error
+  // toast, without blocking whatever else in this same save can still
+  // succeed) rather than rolling anything back — matches the exact same
+  // partial-success tolerance submitComment's own upload step already has.
+  async function saveCommentAttachmentEdits(
+    commentId: string,
+    toRemove: TicketAttachment[],
+    newFiles: File[]
+  ): Promise<void> {
+    let anyRemovalSucceeded = false;
+    for (const attachment of toRemove) {
+      const result = await deleteTicketAttachment(attachment.id, attachment.storagePath);
+      if (result.status === "error") {
+        console.warn("[ticket-detail] comment attachment delete failed:", result.message);
+        showError(result.message);
+        continue;
+      }
+      anyRemovalSucceeded = true;
+      setComments((prev) =>
+        prev.map((c) => (c.id === commentId ? { ...c, attachments: c.attachments.filter((a) => a.id !== attachment.id) } : c))
+      );
+    }
+    // A database trigger already logs "attachment_deleted" as part of the
+    // same delete (see the general Attachments section's own onDelete) —
+    // refetch instead of inventing a local entry.
+    if (anyRemovalSucceeded) refreshActivity();
+
+    if (newFiles.length > 0) {
+      const { failedNames } = await uploadFilesToComment(commentId, newFiles);
+      if (failedNames.length > 0) {
+        showError(
+          failedNames.length === 1
+            ? `Comment updated, but "${failedNames[0]}" failed to attach.`
+            : `Comment updated, but these files failed to attach: ${failedNames.join(", ")}.`
+        );
+      }
+    }
+  }
+
   // Attachments only ever start uploading after the comment itself exists —
   // never before "Comment" is pressed, and never at all if the comment
   // insert fails (see the early return on result.status === "error" below).
@@ -4155,6 +4591,127 @@ export function TicketDetailScreen({
       // composer stuck disabled.
       setSubmittingComment(false);
     }
+  }
+
+  function startReply(comment: TicketComment) {
+    setReplyingTo({ id: comment.id, name: comment.name });
+    setReplyDraft("");
+    setPendingReplyFiles([]);
+  }
+
+  function cancelReply() {
+    setReplyingTo(null);
+    setReplyDraft("");
+    setPendingReplyFiles([]);
+  }
+
+  // Same shape as submitComment above, just targeting replyingTo.id as the
+  // new comment's parent — a database trigger (20260912000000) auto-files
+  // this under the real top-level ancestor if replyingTo.id turns out to
+  // itself already be a reply, so this never needs to resolve that itself.
+  async function submitReply() {
+    if (!replyingTo || isRichTextEmpty(replyDraft) || submittingReply) return;
+    setSubmittingReply(true);
+    try {
+      const result = await createTicketComment(ticketId, sanitizeRichTextHtml(replyDraft), replyingTo.id);
+      if (result.status === "error") {
+        console.warn("[ticket-detail] failed to post reply:", result.message);
+        showError(result.message);
+        return;
+      }
+      const newComment = result.comment;
+      setComments((prev) => [newComment, ...prev]);
+      setReplyDraft("");
+      setReplyingTo(null);
+      // A database trigger already created the matching "<name> added a
+      // comment" ticket_activity row as part of the same insert.
+      refreshActivity();
+
+      const filesToUpload = pendingReplyFiles;
+      setPendingReplyFiles([]);
+
+      if (filesToUpload.length > 0) {
+        const { failedNames } = await uploadFilesToComment(newComment.id, filesToUpload.map((item) => item.file));
+        if (failedNames.length > 0) {
+          showError(
+            failedNames.length === 1
+              ? `Reply posted, but "${failedNames[0]}" failed to attach.`
+              : `Reply posted, but these files failed to attach: ${failedNames.join(", ")}.`
+          );
+        }
+      }
+    } catch (err) {
+      console.warn("[ticket-detail] failed to post reply:", err);
+      showError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
+    } finally {
+      setSubmittingReply(false);
+    }
+  }
+
+  // Deleting a parent comment also cascade-deletes its own replies at the
+  // database level (ticket_comments.parent_comment_id ON DELETE CASCADE,
+  // 20260912000000) — mirrored in local state here so the list reflects
+  // that immediately, without a full refetch.
+  function deleteComment(commentId: string) {
+    deleteTicketComment(commentId).then((result) => {
+      if (result.status === "error") {
+        console.warn("[ticket-detail] comment delete failed:", result.message);
+        showError(result.message);
+        return;
+      }
+      setComments((prev) => prev.filter((c) => c.id !== commentId && c.parentCommentId !== commentId));
+      if (replyingTo?.id === commentId) setReplyingTo(null);
+      refreshActivity();
+    }).catch((err) => {
+      console.warn("[ticket-detail] comment delete failed:", err);
+      showError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
+    });
+  }
+
+  // Shared between the top-level comments loop and each parent's own
+  // indented replies loop below — a single CommentItem call site either
+  // way, since a reply only ever differs from a parent in where it's
+  // rendered (indented, under its parent), never in what it can do.
+  function renderComment(c: TicketComment) {
+    return (
+      <CommentItem
+        key={c.id}
+        comment={c}
+        projectSlug={ticket?.projectSlug}
+        // Only the viewer's own comments are editable or become
+        // drop targets — dropping on/editing anyone else's
+        // falls through to the page-level handler (general
+        // ticket attachment) or simply isn't offered.
+        isOwn={userId !== null && c.authorProfileId === userId}
+        mentionCandidates={mentionCandidates}
+        onFilesDropped={(files) => handleFilesDroppedOnComment(c.id, files)}
+        onSaveEdit={(html) => saveCommentEdit(c.id, html)}
+        onSaveAttachmentEdits={(toRemove, newFiles) => saveCommentAttachmentEdits(c.id, toRemove, newFiles)}
+        onEditorFocus={(stage) => { focusedEditCommentRef.current = { id: c.id, stage }; }}
+        onEditorBlur={() => { if (focusedEditCommentRef.current?.id === c.id) focusedEditCommentRef.current = null; }}
+        onReply={() => startReply(c)}
+        onDelete={() => deleteComment(c.id)}
+        replySlot={
+          replyingTo?.id === c.id ? (
+            <ReplyComposer
+              authorName={replyingTo.name}
+              draft={replyDraft}
+              onChange={setReplyDraft}
+              onCancel={cancelReply}
+              onSubmit={submitReply}
+              submitting={submittingReply}
+              mentionCandidates={mentionCandidates}
+              pendingFiles={pendingReplyFiles}
+              onFilesSelected={(files) => {
+                const items = files.map((file) => ({ id: newId(), file }));
+                setPendingReplyFiles((prev) => [...prev, ...items]);
+              }}
+              onRemoveFile={(id) => setPendingReplyFiles((prev) => prev.filter((p) => p.id !== id))}
+            />
+          ) : null
+        }
+      />
+    );
   }
 
   return (
@@ -4397,20 +4954,15 @@ export function TicketDetailScreen({
                 <p className="text-[13px] text-slate-400 dark:text-zinc-600">No comments yet.</p>
               ) : (
               <div className="space-y-6">
-                {comments.map((c) => (
-                  <CommentItem
-                    key={c.id}
-                    comment={c}
-                    projectSlug={ticket.projectSlug}
-                    // Only the viewer's own comments are editable or become
-                    // drop targets — dropping on/editing anyone else's
-                    // falls through to the page-level handler (general
-                    // ticket attachment) or simply isn't offered.
-                    isOwn={userId !== null && c.authorProfileId === userId}
-                    mentionCandidates={mentionCandidates}
-                    onFilesDropped={(files) => handleFilesDroppedOnComment(c.id, files)}
-                    onSaveEdit={(html) => saveCommentEdit(c.id, html)}
-                  />
+                {groupCommentThreads(comments).map(({ parent, replies }) => (
+                  <div key={parent.id}>
+                    {renderComment(parent)}
+                    {replies.length > 0 && (
+                      <div className="mt-4 space-y-4 pl-6 ml-3.5 border-l-2 border-slate-100 dark:border-zinc-800/80">
+                        {replies.map((r) => renderComment(r))}
+                      </div>
+                    )}
+                  </div>
                 ))}
               </div>
               )}

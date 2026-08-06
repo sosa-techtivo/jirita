@@ -764,6 +764,11 @@ export interface TicketComment {
   wasEdited: boolean;
   /** Comment-level attachments only (ticket_attachments.comment_id = this comment's id) — read-only here, see loadTicketComments. */
   attachments: TicketAttachment[];
+  /** Null for a top-level (parent) comment; otherwise the real id of the
+   *  top-level comment this one replies to — never a second level deep, a
+   *  database trigger (20260912000000) auto-flattens any reply-to-a-reply
+   *  to the real top-level ancestor before it's ever stored. */
+  parentCommentId: string | null;
 }
 
 export interface TicketActivityEvent {
@@ -785,6 +790,7 @@ interface CommentRow {
   body: string;
   created_at: string;
   updated_at: string | null;
+  parent_comment_id: string | null;
   /** Only ever actually selected (and populated) by updateTicketComment,
    *  which needs it to notify newly-added @mentions — createTicketComment
    *  already has ticketId as its own param and never selects this column. */
@@ -973,7 +979,7 @@ export async function loadTicketComments(ticketId: string): Promise<TicketCommen
 
   const { data: rows, error } = await supabase
     .from("ticket_comments")
-    .select("id, author_profile_id, body, created_at, updated_at")
+    .select("id, author_profile_id, body, created_at, updated_at, parent_comment_id")
     .eq("ticket_id", ticketId)
     .order("created_at", { ascending: false })
     .returns<CommentRow[]>();
@@ -1029,10 +1035,28 @@ export async function loadTicketComments(ticketId: string): Promise<TicketCommen
       text: row.body,
       wasEdited: row.updated_at !== null,
       attachments: attachmentsByCommentId.get(row.id) ?? [],
+      parentCommentId: row.parent_comment_id,
     };
   });
 
   return { status: "ready", comments };
+}
+
+// Groups a flat TicketComment[] (as loaded above/kept in local component
+// state) into top-level comments each paired with their own replies — pure
+// and stateless, so both Ticket Detail and the Ticket Preview panel share
+// one real implementation instead of two. Top-level order is left exactly
+// as given (loadTicketComments' own newest-first order, unchanged by this
+// feature); replies come back oldest-first within their own parent
+// (loadTicketComments fetches newest-first overall, so this just reverses
+// each parent's own slice).
+export function groupCommentThreads(comments: TicketComment[]): { parent: TicketComment; replies: TicketComment[] }[] {
+  return comments
+    .filter((c) => !c.parentCommentId)
+    .map((parent) => ({
+      parent,
+      replies: comments.filter((c) => c.parentCommentId === parent.id).slice().reverse(),
+    }));
 }
 
 export type CreateTicketCommentResult =
@@ -1045,7 +1069,11 @@ export type CreateTicketCommentResult =
 // can't be spoofed. A database trigger on this insert also creates the
 // matching "<name> added a comment" ticket_activity row — see
 // 20260727000000_enable_real_ticket_comments.sql.
-export async function createTicketComment(ticketId: string, body: string): Promise<CreateTicketCommentResult> {
+export async function createTicketComment(
+  ticketId: string,
+  body: string,
+  parentCommentId?: string | null
+): Promise<CreateTicketCommentResult> {
   const trimmed = body.trim();
   if (trimmed.length === 0) {
     return { status: "error", message: "Comment can't be empty." };
@@ -1055,8 +1083,8 @@ export async function createTicketComment(ticketId: string, body: string): Promi
 
   const { data: row, error } = await supabase
     .from("ticket_comments")
-    .insert({ ticket_id: ticketId, body: trimmed })
-    .select("id, author_profile_id, body, created_at, updated_at")
+    .insert({ ticket_id: ticketId, body: trimmed, parent_comment_id: parentCommentId ?? null })
+    .select("id, author_profile_id, body, created_at, updated_at, parent_comment_id")
     .single<CommentRow>();
 
   if (error) {
@@ -1097,6 +1125,15 @@ export async function createTicketComment(ticketId: string, body: string): Promi
         logDev("comment mention notification failed", err);
       });
     }
+
+    // row.parent_comment_id reflects whatever the DB actually stored — the
+    // flatten-depth trigger (20260912000000) may have re-pointed it at a
+    // different (the real top-level) comment than what was passed in.
+    if (row.parent_comment_id) {
+      void notifyCommentReply(supabase, ticketId, row.parent_comment_id, row.author_profile_id, trimmed, authorRow, mentionedProfileIds).catch((err) => {
+        logDev("comment reply notification failed", err);
+      });
+    }
   }
 
   return {
@@ -1110,6 +1147,7 @@ export async function createTicketComment(ticketId: string, body: string): Promi
       text: row.body,
       wasEdited: row.updated_at !== null,
       attachments: [],
+      parentCommentId: row.parent_comment_id,
     },
   };
 }
@@ -1149,7 +1187,7 @@ export async function updateTicketComment(commentId: string, body: string): Prom
     .from("ticket_comments")
     .update({ body: trimmed })
     .eq("id", commentId)
-    .select("id, ticket_id, author_profile_id, body, created_at, updated_at")
+    .select("id, ticket_id, author_profile_id, body, created_at, updated_at, parent_comment_id")
     .maybeSingle<CommentRow>();
 
   if (error) {
@@ -1197,8 +1235,28 @@ export async function updateTicketComment(commentId: string, body: string): Prom
       text: row.body,
       wasEdited: row.updated_at !== null,
       attachments: [],
+      parentCommentId: row.parent_comment_id,
     },
   };
+}
+
+export type DeleteTicketCommentResult = { status: "success" } | { status: "error"; message: string };
+
+// Goes through a SECURITY DEFINER RPC (delete_ticket_comment,
+// 20260912000000) rather than a direct table DELETE: deleting a parent
+// comment cascades to its own replies (parent_comment_id ON DELETE
+// CASCADE), which a plain author-only RLS delete policy would then block
+// whenever a reply's author differs from the parent's own author — the RPC
+// re-verifies authorship itself, then deletes as its own definer, so that
+// cascade always succeeds regardless of who authored the replies.
+export async function deleteTicketComment(commentId: string): Promise<DeleteTicketCommentResult> {
+  const supabase = getSupabaseBrowserClient();
+  const { error } = await supabase.rpc("delete_ticket_comment", { p_comment_id: commentId });
+  if (error) {
+    logDev("ticket comment delete failed", error);
+    return { status: "error", message: error.message };
+  }
+  return { status: "success" };
 }
 
 // Notifies the ticket's current assignee that someone commented — the one
@@ -1342,6 +1400,63 @@ async function notifyCommentMentions(
       })
     )
   );
+}
+
+// Notifies a top-level comment's own author that someone replied to it.
+// Only ever called with the DB-flattened parent id (see createTicketComment
+// above), so this is always the real top-level ancestor, never a second
+// level of nesting. Skips a self-reply the same way notifyTicketComment
+// does, and also skips when the parent's author is already @mentioned in
+// this same reply — they'd otherwise get both a comment_mention and a
+// comment_reply notification for the identical action.
+async function notifyCommentReply(
+  supabase: ReturnType<typeof getSupabaseBrowserClient>,
+  ticketId: string,
+  parentCommentId: string,
+  authorProfileId: string,
+  commentBody: string,
+  authorRow: AssigneeProfileRow | undefined,
+  mentionedProfileIds: string[]
+): Promise<void> {
+  const { data: parentRow, error: parentError } = await supabase
+    .from("ticket_comments")
+    .select("author_profile_id")
+    .eq("id", parentCommentId)
+    .maybeSingle<{ author_profile_id: string | null }>();
+
+  if (parentError || !parentRow?.author_profile_id) return;
+  if (parentRow.author_profile_id === authorProfileId) return;
+  if (mentionedProfileIds.includes(parentRow.author_profile_id)) return;
+
+  const { data: ticketRow, error: ticketError } = await supabase
+    .from("tickets")
+    .select("project_id, ticket_number")
+    .eq("id", ticketId)
+    .maybeSingle<{ project_id: string; ticket_number: number }>();
+
+  if (ticketError || !ticketRow) return;
+
+  const { data: projectRow, error: projectError } = await supabase
+    .from("projects")
+    .select("id, organization_id, project_code")
+    .eq("id", ticketRow.project_id)
+    .maybeSingle<{ id: string; organization_id: string; project_code: string }>();
+
+  if (projectError || !projectRow) return;
+
+  const ticketCode = `${projectRow.project_code}-${ticketRow.ticket_number}`;
+  const authorName = resolveProfileName(authorRow) ?? "Someone";
+
+  await createNotification({
+    organizationId: projectRow.organization_id,
+    recipientProfileId: parentRow.author_profile_id,
+    actorProfileId: authorProfileId,
+    type: "comment_reply",
+    title: `${authorName} replied to your comment on ${ticketCode}`,
+    message: plainTextExcerpt(commentBody),
+    projectId: projectRow.id,
+    ticketId,
+  });
 }
 
 // Newest first. Every real action (create, field edits, labels, acceptance
