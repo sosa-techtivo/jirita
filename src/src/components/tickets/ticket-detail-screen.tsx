@@ -13,6 +13,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
+import { ThumbsUp, ThumbsDown } from "lucide-react";
 import type { Ticket, TicketStatus, TicketPriority, TicketType } from "@/lib/mock-tickets";
 import { tickets as ALL_TICKETS, getTicketDisplayKey } from "@/lib/mock-tickets";
 import {
@@ -46,6 +47,7 @@ import {
   updateTicketComment,
   deleteTicketComment,
   groupCommentThreads,
+  setCommentReaction,
   updateTicket,
   loadOrganizationLabels,
   createOrganizationLabel,
@@ -65,6 +67,7 @@ import {
   deleteTicketRelation,
   formatRelativeTime,
   type TicketComment,
+  type CommentReactionType,
   type TicketActivityEvent,
   type UpdateTicketInput,
   type TicketAttachment,
@@ -1937,6 +1940,7 @@ function CommentItem({
   onEditorBlur,
   onReply,
   onDelete,
+  onReact,
   replySlot,
 }: {
   comment: TicketComment;
@@ -1973,6 +1977,9 @@ function CommentItem({
    *  doesn't need a second, reply-specific prop shape. */
   onReply: () => void;
   onDelete: () => void;
+  /** Like/Dislike on this exact comment — offered on parent and reply
+   *  comments alike, no distinction (see comment.reactions doc). */
+  onReact: (reaction: CommentReactionType) => void;
   /** The reply composer, rendered directly under this exact comment while
    *  it's the active reply target — null the rest of the time. */
   replySlot?: ReactNode;
@@ -2192,13 +2199,46 @@ function CommentItem({
                 </button>
               </div>
             ) : (
-              // Only offered on top-level comments — with just one level of
-              // nesting, "Reply" on a reply would be confusing (it still
-              // wouldn't create a second level; the database just auto-files
-              // it under the same parent), so it's simplest to not offer it
-              // there at all.
-              !comment.parentCommentId && (
-                <div className="mt-1.5">
+              // Like/Dislike are offered on every comment, parent or reply
+              // alike; Reply only on top-level ones — with just one level
+              // of nesting, "Reply" on a reply would be confusing (it
+              // still wouldn't create a second level; the database just
+              // auto-files it under the same parent), so it's simplest to
+              // not offer it there at all.
+              <div className="mt-1.5 flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => onReact("like")}
+                  aria-label="Like"
+                  aria-pressed={comment.reactions.myReaction === "like"}
+                  className={`flex items-center gap-1 px-1.5 py-0.5 rounded-md transition-colors hover:bg-slate-100 dark:hover:bg-zinc-800 ${
+                    comment.reactions.myReaction === "like"
+                      ? "text-brand-600 dark:text-brand-400"
+                      : "text-slate-400 dark:text-zinc-600"
+                  }`}
+                >
+                  <ThumbsUp className="w-4 h-4" strokeWidth={2} />
+                  {comment.reactions.likeCount > 0 && (
+                    <span className="text-[12px] font-medium">{comment.reactions.likeCount}</span>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onReact("dislike")}
+                  aria-label="Dislike"
+                  aria-pressed={comment.reactions.myReaction === "dislike"}
+                  className={`flex items-center gap-1 px-1.5 py-0.5 rounded-md transition-colors hover:bg-slate-100 dark:hover:bg-zinc-800 ${
+                    comment.reactions.myReaction === "dislike"
+                      ? "text-red-500 dark:text-red-400"
+                      : "text-slate-400 dark:text-zinc-600"
+                  }`}
+                >
+                  <ThumbsDown className="w-4 h-4" strokeWidth={2} />
+                  {comment.reactions.dislikeCount > 0 && (
+                    <span className="text-[12px] font-medium">{comment.reactions.dislikeCount}</span>
+                  )}
+                </button>
+                {!comment.parentCommentId && (
                   <button
                     type="button"
                     onClick={onReply}
@@ -2206,8 +2246,8 @@ function CommentItem({
                   >
                     Reply
                   </button>
-                </div>
-              )
+                )}
+              </div>
             )
           )}
 
@@ -4885,6 +4925,27 @@ export function TicketDetailScreen({
     });
   }
 
+  // Like/Dislike a comment (parent or reply alike) — pressing the already-
+  // active reaction removes it, pressing the other one switches it.
+  // currentReaction comes from this exact comment's own already-loaded
+  // state, so setCommentReaction never needs an extra read to decide
+  // delete-vs-upsert.
+  function reactToComment(commentId: string, reaction: CommentReactionType) {
+    const target = comments.find((c) => c.id === commentId);
+    if (!target) return;
+    setCommentReaction(commentId, reaction, target.reactions.myReaction).then((result) => {
+      if (result.status === "error") {
+        console.warn("[ticket-detail] comment reaction failed:", result.message);
+        showError(result.message);
+        return;
+      }
+      setComments((prev) => prev.map((c) => (c.id === commentId ? { ...c, reactions: result.reactions } : c)));
+    }).catch((err) => {
+      console.warn("[ticket-detail] comment reaction failed:", err);
+      showError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
+    });
+  }
+
   // Shared between the top-level comments loop and each parent's own
   // indented replies loop below — a single CommentItem call site either
   // way, since a reply only ever differs from a parent in where it's
@@ -4908,6 +4969,7 @@ export function TicketDetailScreen({
         onEditorBlur={() => { if (focusedEditCommentRef.current?.id === c.id) focusedEditCommentRef.current = null; }}
         onReply={() => startReply(c)}
         onDelete={() => deleteComment(c.id)}
+        onReact={(reaction) => reactToComment(c.id, reaction)}
         replySlot={
           replyingTo?.id === c.id ? (
             <ReplyComposer

@@ -768,7 +768,24 @@ export interface TicketComment {
    *  database trigger (20260912000000) auto-flattens any reply-to-a-reply
    *  to the real top-level ancestor before it's ever stored. */
   parentCommentId: string | null;
+  /** Like/Dislike totals + the viewer's own current reaction, if any —
+   *  same for a parent comment or a reply, no distinction at this level. */
+  reactions: CommentReactionSummary;
 }
+
+export type CommentReactionType = "like" | "dislike";
+
+export interface CommentReactionSummary {
+  likeCount: number;
+  dislikeCount: number;
+  /** The signed-in viewer's own current reaction on this comment, or null —
+   *  never another user's; ticket_comment_reactions' own unique
+   *  (comment_id, profile_id) constraint (20260915000000) guarantees at
+   *  most one row per person per comment. */
+  myReaction: CommentReactionType | null;
+}
+
+const EMPTY_REACTIONS: CommentReactionSummary = { likeCount: 0, dislikeCount: 0, myReaction: null };
 
 export interface TicketActivityEvent {
   label: string;
@@ -1037,6 +1054,34 @@ export async function loadTicketComments(ticketId: string): Promise<TicketCommen
     attachmentsByCommentId.set(row.comment_id, list);
   }
 
+  // Like/Dislike totals for every comment on this ticket, fetched once
+  // (same "one extra query no matter how many comments" shape as
+  // attachments above) and grouped in memory — never a per-comment query.
+  const commentIds = (rows ?? []).map((row) => row.id);
+  const reactionsByCommentId = new Map<string, CommentReactionSummary>();
+  if (commentIds.length > 0) {
+    const { data: { user: viewerUser } } = await supabase.auth.getUser();
+    const viewerId = viewerUser?.id ?? null;
+
+    const { data: reactionRows, error: reactionsError } = await supabase
+      .from("ticket_comment_reactions")
+      .select("comment_id, profile_id, reaction")
+      .in("comment_id", commentIds)
+      .returns<{ comment_id: string; profile_id: string; reaction: CommentReactionType }[]>();
+
+    if (reactionsError) {
+      logDev("ticket comment reactions query failed", reactionsError);
+    } else {
+      for (const row of reactionRows ?? []) {
+        const summary = reactionsByCommentId.get(row.comment_id) ?? { likeCount: 0, dislikeCount: 0, myReaction: null };
+        if (row.reaction === "like") summary.likeCount += 1;
+        else summary.dislikeCount += 1;
+        if (viewerId && row.profile_id === viewerId) summary.myReaction = row.reaction;
+        reactionsByCommentId.set(row.comment_id, summary);
+      }
+    }
+  }
+
   const comments: TicketComment[] = (rows ?? []).map((row) => {
     const author = row.author_profile_id ? authorsById.get(row.author_profile_id) : undefined;
     return {
@@ -1049,10 +1094,86 @@ export async function loadTicketComments(ticketId: string): Promise<TicketCommen
       wasEdited: row.updated_at !== null,
       attachments: attachmentsByCommentId.get(row.id) ?? [],
       parentCommentId: row.parent_comment_id,
+      reactions: reactionsByCommentId.get(row.id) ?? EMPTY_REACTIONS,
     };
   });
 
   return { status: "ready", comments };
+}
+
+// Applies (or removes) the signed-in viewer's own Like/Dislike on one
+// comment — currentReaction is whatever that comment's own already-loaded
+// `reactions.myReaction` was (the caller always already has this; no extra
+// read needed to decide delete-vs-upsert). Pressing the already-active
+// reaction removes it; pressing the other one switches it (a real UPDATE
+// of the same row, never a second one — ticket_comment_reactions' own
+// unique (comment_id, profile_id) constraint guarantees that regardless).
+// Returns the freshly recomputed totals for just this one comment, so the
+// caller can update its local state without refetching every comment.
+export async function setCommentReaction(
+  commentId: string,
+  reaction: CommentReactionType,
+  currentReaction: CommentReactionType | null
+): Promise<{ status: "success"; reactions: CommentReactionSummary } | { status: "error"; message: string }> {
+  const supabase = getSupabaseBrowserClient();
+
+  if (currentReaction === reaction) {
+    // ticket_comment_reactions_delete RLS (author-only) means this can
+    // never remove anyone else's row even without an explicit profile_id
+    // filter here.
+    const { error } = await supabase.from("ticket_comment_reactions").delete().eq("comment_id", commentId);
+    if (error) {
+      logDev("comment reaction delete failed", error);
+      return { status: "error", message: error.message };
+    }
+  } else if (currentReaction === null) {
+    // No existing row for this viewer on this comment yet — a real INSERT
+    // (profile_id defaults to auth.uid(), never sent).
+    const { error } = await supabase.from("ticket_comment_reactions").insert({ comment_id: commentId, reaction });
+    if (error) {
+      logDev("comment reaction insert failed", error);
+      return { status: "error", message: error.message };
+    }
+  } else {
+    // Switching Like <-> Dislike on the viewer's already-existing row — a
+    // plain UPDATE touching only the `reaction` column, never `comment_id`.
+    // Deliberately NOT an upsert: Postgres/PostgREST's `INSERT ... ON
+    // CONFLICT DO UPDATE` sets every column present in the insert payload
+    // (comment_id included), and authenticated only holds a column-level
+    // UPDATE grant on `reaction` (20260915000000) — that upsert form
+    // always failed with "permission denied for table
+    // ticket_comment_reactions" the moment it tried to also set comment_id.
+    // ticket_comment_reactions_update RLS (author-only) restricts this to
+    // the viewer's own row regardless of not filtering by profile_id here.
+    const { error } = await supabase.from("ticket_comment_reactions").update({ reaction }).eq("comment_id", commentId);
+    if (error) {
+      logDev("comment reaction update failed", error);
+      return { status: "error", message: error.message };
+    }
+  }
+
+  const { data: { user: viewerUser } } = await supabase.auth.getUser();
+  const viewerId = viewerUser?.id ?? null;
+
+  const { data: rows, error: readError } = await supabase
+    .from("ticket_comment_reactions")
+    .select("profile_id, reaction")
+    .eq("comment_id", commentId)
+    .returns<{ profile_id: string; reaction: CommentReactionType }[]>();
+
+  if (readError) {
+    logDev("comment reaction summary read failed", readError);
+    return { status: "error", message: readError.message };
+  }
+
+  const summary: CommentReactionSummary = { likeCount: 0, dislikeCount: 0, myReaction: null };
+  for (const row of rows ?? []) {
+    if (row.reaction === "like") summary.likeCount += 1;
+    else summary.dislikeCount += 1;
+    if (viewerId && row.profile_id === viewerId) summary.myReaction = row.reaction;
+  }
+
+  return { status: "success", reactions: summary };
 }
 
 // Groups a flat TicketComment[] (as loaded above/kept in local component
@@ -1161,6 +1282,7 @@ export async function createTicketComment(
       wasEdited: row.updated_at !== null,
       attachments: [],
       parentCommentId: row.parent_comment_id,
+      reactions: EMPTY_REACTIONS,
     },
   };
 }
@@ -1249,6 +1371,7 @@ export async function updateTicketComment(commentId: string, body: string): Prom
       wasEdited: row.updated_at !== null,
       attachments: [],
       parentCommentId: row.parent_comment_id,
+      reactions: EMPTY_REACTIONS,
     },
   };
 }
