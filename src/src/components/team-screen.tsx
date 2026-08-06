@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useOrganizationProjects } from "@/components/organization-projects-provider";
 import type { TeamMember, TeamMemberRemovedEventDetail, TeamProjectLeadChangedEventDetail } from "@/lib/mock-team";
 import { TEAM_MEMBER_REMOVED_EVENT, TEAM_PROJECT_LEAD_CHANGED_EVENT } from "@/lib/mock-team";
 import { FilterDropdown } from "@/components/tickets/filter-dropdown";
@@ -26,6 +28,35 @@ import type { AddTeamMemberCandidate } from "@/components/add-team-member-modal"
 
 function assigneeQueryValue(name: string): string {
   return name.trim().split(/\s+/)[0]?.toLowerCase() ?? "";
+}
+
+// Real project name for the breadcrumb — previously read server-side from
+// mock-projects.ts's getProjectBySlug (app/projects/[slug]/team/page.tsx),
+// which has no row for any real, Supabase-backed project, so it always
+// fell through to that function's own hardcoded "Mobile Banking App"
+// fallback regardless of the real project's actual name. Same
+// useOrganizationProjects()-based pattern every other project sub-page's
+// own Breadcrumb (Tickets/Settings/Reports/etc.) already uses; falls back
+// to the slug itself (never a mock name) if the list hasn't loaded yet.
+export function TeamBreadcrumb({ slug }: { slug: string }) {
+  const { projects } = useOrganizationProjects();
+  const projectName = projects.find((p) => p.slug === slug)?.name ?? slug;
+  return (
+    <>
+      <Link href="/projects" className="text-slate-400 hover:text-slate-600 dark:text-zinc-500 dark:hover:text-zinc-300">
+        Projects
+      </Link>
+      <span className="text-slate-300 dark:text-zinc-700">/</span>
+      <Link
+        href={`/projects/${slug}`}
+        className="text-slate-400 hover:text-slate-600 dark:text-zinc-500 dark:hover:text-zinc-300"
+      >
+        {projectName}
+      </Link>
+      <span className="text-slate-300 dark:text-zinc-700">/</span>
+      <span className="text-slate-800 font-medium dark:text-zinc-200">Team</span>
+    </>
+  );
 }
 
 // ── Main screen ───────────────────────────────────────────────────────────────
