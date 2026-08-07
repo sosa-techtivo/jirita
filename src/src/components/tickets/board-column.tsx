@@ -91,7 +91,7 @@ export function BoardColumn({
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
             <span className={`w-2 h-2 rounded-full flex-shrink-0 ${column.dotClass}`} />
-            <h2 className="text-[11px] font-bold uppercase tracking-widest text-slate-600 dark:text-zinc-400 truncate">
+            <h2 className="text-[11px] font-bold uppercase tracking-widest text-slate-600 dark:text-zinc-400 line-clamp-2">
               {column.label}
             </h2>
           </div>
