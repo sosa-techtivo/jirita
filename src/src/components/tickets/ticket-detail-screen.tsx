@@ -22,7 +22,6 @@ import {
   LabelTag,
   TicketTypeIcon,
   TicketTypeSelect,
-  STATUS_LABEL,
   PRIORITY_LABEL,
   buildLabelCatalog,
   EDIT_BTN,
@@ -66,6 +65,8 @@ import {
   createTicketRelation,
   deleteTicketRelation,
   formatRelativeTime,
+  STATUS_FROM_DB,
+  FALLBACK_TICKET_STATUSES,
   type TicketComment,
   type CommentReactionType,
   type TicketActivityEvent,
@@ -75,6 +76,7 @@ import {
   type LogTimeInput,
   type RelatedTicket,
   type TicketRelationKind,
+  type TicketStatusOption,
 } from "@/lib/tickets";
 import { loadProjectTeam, loadProjectDetail, type OrgMember, type ProjectTeamMember } from "@/lib/projects";
 import { formatAbsoluteDate } from "@/lib/date-format";
@@ -258,29 +260,64 @@ function EditableDescription({ value, onSave }: { value: string; onSave: (v: str
 
 // ── Editable: Sidebar Status ──────────────────────────────────────────────────
 
-function EditableSidebarStatus({ value, onChange }: { value: TicketStatus; onChange: (v: TicketStatus) => void }) {
+function EditableSidebarStatus({
+  value,
+  statusId,
+  label,
+  statuses,
+  onChange,
+}: {
+  value: TicketStatus;
+  /** Real ticket_statuses.id (Fase 2.5) — see EditableStatusBadge's own doc
+   *  (ticket-ui.tsx) for why this is the primary match, with legacy-value
+   *  matching only as a mock/dev-fallback fallback. */
+  statusId?: string;
+  /** Real ticket_statuses.name for the current value — falls back to
+   *  STATUS_LABEL[value] when not given. */
+  label?: string;
+  /** Real, ordered per-project ticket_statuses (Fase 2) — falls back to
+   *  FALLBACK_TICKET_STATUSES (identical to the old fixed list) while not
+   *  yet loaded. */
+  statuses?: TicketStatusOption[];
+  /** Fires with the chosen real status row — see EditableStatusBadge's own
+   *  onChange doc (ticket-ui.tsx) for why this is a full option, not just
+   *  the legacy TicketStatus value. */
+  onChange: (option: TicketStatusOption) => void;
+}) {
   const [editing, setEditing] = useState(false);
   const ref = useRef<HTMLSelectElement>(null);
   useEffect(() => { if (editing) ref.current?.focus(); }, [editing]);
+  const options = statuses && statuses.length > 0 ? statuses : FALLBACK_TICKET_STATUSES;
 
   return (
     <SidebarField label="Status">
       {editing ? (
-        <select
-          ref={ref}
-          className={INPUT_BASE + " py-0.5 text-[16px] sm:text-[12px]"}
-          value={value}
-          onChange={(e) => { onChange(e.target.value as TicketStatus); setEditing(false); }}
-          onBlur={() => setEditing(false)}
-          onKeyDown={(e) => { if (e.key === "Escape") setEditing(false); }}
-        >
-          {(Object.keys(STATUS_LABEL) as TicketStatus[]).map((k) => (
-            <option key={k} value={k}>{STATUS_LABEL[k]}</option>
-          ))}
-        </select>
+        (() => {
+          const currentOption = statusId
+            ? options.find((option) => option.id === statusId)
+            : options.find((option) => option.legacyEnumValue && STATUS_FROM_DB[option.legacyEnumValue] === value);
+          return (
+            <select
+              ref={ref}
+              className={INPUT_BASE + " py-0.5 text-[16px] sm:text-[12px]"}
+              value={currentOption?.id ?? value}
+              onChange={(e) => {
+                const chosen = options.find((option) => option.id === e.target.value);
+                if (chosen) onChange(chosen);
+                setEditing(false);
+              }}
+              onBlur={() => setEditing(false)}
+              onKeyDown={(e) => { if (e.key === "Escape") setEditing(false); }}
+            >
+              {options.map((option) => (
+                <option key={option.id} value={option.id}>{option.name}</option>
+              ))}
+            </select>
+          );
+        })()
       ) : (
         <div className="group flex items-center gap-1.5 cursor-pointer" onClick={() => setEditing(true)}>
-          <StatusBadge status={value} />
+          <StatusBadge status={value} label={label} />
           <button className={EDIT_BTN} aria-label="Edit status"><PencilIcon /></button>
         </div>
       )}
@@ -1062,7 +1099,7 @@ function RelatedTicketsSection({
                     <span className="font-mono text-[9px] font-semibold text-slate-400 dark:text-zinc-600 flex-shrink-0">
                       {getTicketDisplayKey(t)}
                     </span>
-                    <StatusBadge status={t.status} />
+                    <StatusBadge status={t.status} label={t.statusName} />
                   </div>
                   <p className="text-[11px] text-slate-700 dark:text-zinc-300 truncate leading-snug">
                     {t.title}
@@ -4380,6 +4417,11 @@ export function TicketDetailScreen({
   const [ticket, setTicket] = useState<Ticket | undefined>(() =>
     isDevFallback ? resolveDevTicket(slug, ticketCode) : undefined
   );
+  // This project's real, ordered ticket_statuses (Fase 2) — the Status
+  // selector's own options (near the title and in the sidebar), instead of
+  // the old fixed 6-value enum. Dev fallback keeps EditableStatusBadge's
+  // own FALLBACK_TICKET_STATUSES default.
+  const [statuses, setStatuses] = useState<TicketStatusOption[]>([]);
   // Real Comments/Activity — start empty and stay empty unless real rows
   // exist, in every mode (including dev fallback — no mock people, ever).
   const [comments, setComments] = useState<TicketComment[]>([]);
@@ -4452,6 +4494,7 @@ export function TicketDetailScreen({
       if (detailRequestIdRef.current !== requestId) return;
       if (result.status === "ready") {
         setTicket(result.ticket);
+        setStatuses(result.statuses);
         setLoadState("ready");
         loadTicketComments(result.ticket.id).then((r) => {
           if (detailRequestIdRef.current === requestId) setComments(r.status === "ready" ? r.comments : []);
@@ -4649,6 +4692,21 @@ export function TicketDetailScreen({
       showError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
       return false;
     });
+  };
+
+  // A status change now writes `statusId` (Fase 2) — the option's own
+  // legacy_enum_value drives the optimistic local `status`/`statusName`/
+  // `statusGroupType` update (persist()'s success path never re-syncs
+  // `ticket` from the server, see its own comment above, so this optimistic
+  // update is what actually keeps state correct).
+  const updateStatus = (option: TicketStatusOption) => {
+    const nextStatus = option.legacyEnumValue ? STATUS_FROM_DB[option.legacyEnumValue] ?? ticket.status : ticket.status;
+    setTicket((prev) =>
+      prev
+        ? { ...prev, status: nextStatus, statusId: option.id, statusName: option.name, statusGroupType: option.groupType }
+        : prev
+    );
+    persist({ statusId: option.id });
   };
 
   // Acceptance Criteria checkbox — unlike persist() above, this updates
@@ -5093,7 +5151,10 @@ export function TicketDetailScreen({
                 </span>
                 <EditableStatusBadge
                   value={ticket.status}
-                  onChange={(v) => { update("status", v); persist({ status: v }); }}
+                  statusId={ticket.statusId}
+                  label={ticket.statusName}
+                  statuses={statuses}
+                  onChange={updateStatus}
                 />
               </div>
 
@@ -5394,7 +5455,10 @@ export function TicketDetailScreen({
 
             <EditableSidebarStatus
               value={ticket.status}
-              onChange={(v) => { update("status", v); persist({ status: v }); }}
+              statusId={ticket.statusId}
+              label={ticket.statusName}
+              statuses={statuses}
+              onChange={updateStatus}
             />
 
             <EditableSidebarAssignee

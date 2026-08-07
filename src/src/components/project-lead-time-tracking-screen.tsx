@@ -31,7 +31,7 @@ import { MemberTrigger } from "@/components/member-profile";
 import { useCurrentUser } from "@/components/current-user-provider";
 import { loadLeadProjects, loadOrganizationProjects, loadProjectTeam } from "@/lib/projects";
 import type { LeadProject, ProjectTeamMember } from "@/lib/projects";
-import { loadProjectTickets, loadOrganizationLoggedTimeForRange } from "@/lib/tickets";
+import { loadProjectTickets, loadOrganizationLoggedTimeForRange, isTicketClosed } from "@/lib/tickets";
 import type { OrganizationTimeEntry } from "@/lib/tickets";
 
 // Project Leads manage delivery and team capacity, not company finances — no
@@ -515,7 +515,7 @@ export function ProjectLeadTimeTrackingScreen() {
   const assignedHoursByMember = useMemo(() => {
     const assigned = new Map<string, number>();
     for (const t of rawTickets) {
-      if (t.status === "done" || !t.assigneeProfileId) continue;
+      if (isTicketClosed(t) || !t.assigneeProfileId) continue;
       if (!scopedTicketIds.has(t.id)) continue;
       assigned.set(t.assigneeProfileId, (assigned.get(t.assigneeProfileId) ?? 0) + (t.hours ?? 0));
     }

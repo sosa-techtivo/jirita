@@ -30,7 +30,7 @@ import {
 } from "@/components/tickets/ticket-ui";
 import { useCurrentUser } from "@/components/current-user-provider";
 import { useOrganizationProjects } from "@/components/organization-projects-provider";
-import { loadOrganizationTickets, loadOrganizationLoggedTimeForRange } from "@/lib/tickets";
+import { loadOrganizationTickets, loadOrganizationLoggedTimeForRange, isTicketClosed } from "@/lib/tickets";
 import type { OrganizationTimeEntry } from "@/lib/tickets";
 import { loadProjectTeam } from "@/lib/projects";
 import type { ProjectTeamMember, OrgWorkloadMember } from "@/lib/projects";
@@ -503,7 +503,7 @@ export function ProjectLeadReportsScreen() {
   const dueThisWeekList = useMemo(
     () =>
       rawTickets.filter((t) => {
-        if (t.status === "done" || !t.dueDate) return false;
+        if (isTicketClosed(t) || !t.dueDate) return false;
         const iso = parseDisplayDate(t.dueDate);
         return Boolean(iso) && iso >= weekRange.start && iso <= weekRange.end;
       }),
@@ -543,7 +543,7 @@ export function ProjectLeadReportsScreen() {
         if (t.status === "blocked") {
           blockedByProfileId.set(t.assigneeProfileId, (blockedByProfileId.get(t.assigneeProfileId) ?? 0) + (t.hours ?? 0));
         }
-        if (t.status === "done") continue;
+        if (isTicketClosed(t)) continue;
         assignedByProfileId.set(t.assigneeProfileId, (assignedByProfileId.get(t.assigneeProfileId) ?? 0) + (t.hours ?? 0));
       }
 
@@ -583,7 +583,7 @@ export function ProjectLeadReportsScreen() {
     const members = Array.from(byProfileId.values()).sort((a, b) => a.name.localeCompare(b.name));
     const totalCapacityHours = members.reduce((sum, m) => sum + m.weeklyCapacity, 0);
     const totalAssignedHours = rawTickets
-      .filter((t) => t.status !== "done" && t.assigneeProfileId)
+      .filter((t) => !isTicketClosed(t) && t.assigneeProfileId)
       .reduce((sum, t) => sum + (t.hours ?? 0), 0);
     const utilizationPct = totalCapacityHours > 0 ? Math.round((totalAssignedHours / totalCapacityHours) * 100) : 0;
 
@@ -815,7 +815,7 @@ export function ProjectLeadReportsScreen() {
   const upcomingDeadlines = useMemo(
     () =>
       rawTickets
-        .filter((t) => t.status !== "done" && t.dueDate)
+        .filter((t) => !isTicketClosed(t) && t.dueDate)
         .slice()
         .sort((a, b) => parseDisplayDate(a.dueDate as string).localeCompare(parseDisplayDate(b.dueDate as string))),
     [rawTickets]

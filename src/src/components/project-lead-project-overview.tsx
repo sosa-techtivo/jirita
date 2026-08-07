@@ -14,7 +14,7 @@ import { Avatar } from "@/components/ui/avatar";
 import { MemberTrigger, useMemberProfile } from "@/components/member-profile";
 import { loadProjectDetail, loadProjectTeam } from "@/lib/projects";
 import type { ProjectDetail, ProjectTeamMember } from "@/lib/projects";
-import { loadProjectTickets, loadOrganizationLoggedTimeForRange } from "@/lib/tickets";
+import { loadProjectTickets, loadOrganizationLoggedTimeForRange, isTicketClosed } from "@/lib/tickets";
 import type { OrganizationTimeEntry } from "@/lib/tickets";
 import {
   buildHoursByPersonRows,
@@ -212,16 +212,16 @@ export function ProjectLeadProjectOverview({ slug = "mobile-banking-app" }: { sl
   const monthPrefix = todayISO.slice(0, 7);
 
   // ── KPIs — identical definitions to AdminProjectOverview ──────────────────
-  const openTickets = tickets.filter((t) => t.status !== "done");
+  const openTickets = tickets.filter((t) => !isTicketClosed(t));
   const blocked = tickets.filter((t) => t.status === "blocked");
   const inProgress = tickets.filter((t) => t.status === "in-progress");
   const inReview = tickets.filter((t) => t.status === "review");
-  const doneTickets = tickets.filter((t) => t.status === "done");
+  const doneTickets = tickets.filter((t) => isTicketClosed(t));
   const closedThisMonth = doneTickets.filter((t) => t.updatedAtISO?.slice(0, 7) === monthPrefix).length;
   const progressPct = tickets.length > 0 ? Math.round((doneTickets.length / tickets.length) * 100) : 0;
 
   const overdueTickets = tickets.filter(
-    (t) => t.status !== "done" && t.dueDate && parseDisplayDate(t.dueDate) < todayISO
+    (t) => !isTicketClosed(t) && t.dueDate && parseDisplayDate(t.dueDate) < todayISO
   );
   const overdueOpenCount = overdueTickets.length;
 

@@ -3,17 +3,16 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import type { Ticket, TicketStatus } from "@/lib/mock-tickets";
+import type { Ticket } from "@/lib/mock-tickets";
 import { getTicketDisplayKey } from "@/lib/mock-tickets";
 import { TicketListRow } from "@/components/tickets/ticket-card";
-import { BoardView } from "@/components/tickets/board-view";
+import { BoardView, ticketColumnKey } from "@/components/tickets/board-view";
 import { TicketPreviewPanel } from "@/components/tickets/ticket-preview-panel";
 import { FilterDropdown } from "@/components/tickets/filter-dropdown";
 import type { DropdownGroup } from "@/components/tickets/filter-dropdown";
 import {
   StatusBadge,
   TicketTypeIcon,
-  STATUS_LABEL,
   PRIORITY_LABEL,
   PRIORITY_VALUES,
   getTodayISO,
@@ -30,8 +29,10 @@ import {
   loadProfileLoggedTimeForDate,
   loadProfileLoggedMinutesForRange,
   loadProfileTimeEntries,
+  isTicketClosed,
+  FALLBACK_TICKET_STATUSES,
 } from "@/lib/tickets";
-import type { OrganizationActivityEvent, ProfileTimeEntryRecord } from "@/lib/tickets";
+import type { OrganizationActivityEvent, ProfileTimeEntryRecord, TicketStatusOption } from "@/lib/tickets";
 import { loadMemberWeeklyCapacity } from "@/lib/projects";
 import { CapacityCell, formatHours, formatHoursMaybe } from "@/components/time-tracking-screen";
 import { PersonalTimesheetPanel } from "@/components/personal-timesheet-panel";
@@ -122,15 +123,19 @@ function activityEventToEntry(
 }
 
 // ── List groups (blocked first — most urgent) ─────────────────────────────────
-
-const LIST_GROUPS: { id: string; label: string; statuses: TicketStatus[] }[] = [
-  { id: "blocked",     label: "Blocked",     statuses: ["blocked"] },
-  { id: "in-progress", label: "In Progress", statuses: ["in-progress"] },
-  { id: "review",      label: "In Review",   statuses: ["review"] },
-  { id: "todo",        label: "To Do",       statuses: ["to-do"] },
-  { id: "backlog",     label: "Inbox",       statuses: ["backlog"] },
-  { id: "done",        label: "Done",        statuses: ["done"] },
-];
+// Priority order for the 6 legacy-linked statuses this phase seeds for
+// every project (blocked surfaces first regardless of its real
+// sort_order) — a real per-project status with no legacy equivalent has
+// no defined urgency yet, so it sorts after every known one, ordered by
+// its own sort_order among any other unknowns.
+const LIST_GROUP_PRIORITY: Record<string, number> = {
+  blocked: 0,
+  in_progress: 1,
+  review: 2,
+  to_do: 3,
+  backlog: 4,
+  done: 5,
+};
 
 // ── Date helpers ──────────────────────────────────────────────────────────────
 // Real local-calendar date logic throughout (never a fixed/mock date) — same
@@ -180,7 +185,7 @@ function isUrgentDue(dueISO: string, todayISO: string): boolean {
 }
 
 function isDueThisWeek(t: Ticket, weekStart: string, weekEnd: string): boolean {
-  if (t.status === "done" || !t.dueDate) return false;
+  if (isTicketClosed(t) || !t.dueDate) return false;
   const iso = parseDisplayDate(t.dueDate);
   return Boolean(iso) && iso >= weekStart && iso <= weekEnd;
 }
@@ -397,7 +402,7 @@ function KpiCard({
 
 function FocusTicketRow({ ticket, todayISO, onOpen }: { ticket: Ticket; todayISO: string; onOpen: (t: Ticket) => void }) {
   const dueISO    = ticket.dueDate ? parseDisplayDate(ticket.dueDate) : "";
-  const isOverdue = Boolean(dueISO) && dueISO < todayISO && ticket.status !== "done";
+  const isOverdue = Boolean(dueISO) && dueISO < todayISO && !isTicketClosed(ticket);
   const isUrgent  = !isOverdue && Boolean(dueISO) && isUrgentDue(dueISO, todayISO);
 
   return (
@@ -515,6 +520,11 @@ export function MyWorkScreen() {
   const [loadErrorMessage, setLoadErrorMessage] = useState<string | null>(null);
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [projects, setProjects] = useState<{ slug: string; name: string }[]>([]);
+  // Every loaded project's own real, ordered ticket_statuses (Fase 2.5),
+  // keyed by slug — merged by name below for the Board tab's own columns,
+  // since My Work spans every project the member belongs to and two of
+  // them are never assumed to share the same status configuration.
+  const [statusesBySlug, setStatusesBySlug] = useState<Record<string, TicketStatusOption[]>>({});
   const [activityEvents, setActivityEvents] = useState<OrganizationActivityEvent[]>([]);
   const [todayMinutes, setTodayMinutes] = useState(0);
   const [weekMinutes, setWeekMinutes] = useState(0);
@@ -599,6 +609,7 @@ export function MyWorkScreen() {
 
       setTickets(ticketsResult.tickets);
       setProjects(ticketsResult.projects);
+      setStatusesBySlug(ticketsResult.statusesBySlug);
       setActivityEvents(activityResult.events);
       setTodayMinutes(todayResult.entries.reduce((sum, e) => sum + e.minutes, 0));
       setWeekMinutes(weekResult.totalMinutes);
@@ -627,7 +638,7 @@ export function MyWorkScreen() {
   const myTicketsById = useMemo(() => new Map(myTickets.map((t) => [t.id, t])), [myTickets]);
   const projectsBySlug = useMemo(() => new Map(projects.map((p) => [p.slug, p])), [projects]);
 
-  const activeCount = myTickets.filter((t) => t.status !== "done").length;
+  const activeCount = myTickets.filter((t) => !isTicketClosed(t)).length;
   const totalHours = useMemo(() => myTickets.reduce((s, t) => s + (t.hours ?? 0), 0), [myTickets]);
   const blockedTickets = useMemo(() => myTickets.filter((t) => t.status === "blocked"), [myTickets]);
   const dueThisWeekTickets = useMemo(
@@ -644,19 +655,40 @@ export function MyWorkScreen() {
       blocked:    myTickets.filter((t) => t.status === "blocked").reduce((s, t) => s + (t.hours ?? 0), 0),
       inProgress: myTickets.filter((t) => t.status === "in-progress").reduce((s, t) => s + (t.hours ?? 0), 0),
       review:     myTickets.filter((t) => t.status === "review").reduce((s, t) => s + (t.hours ?? 0), 0),
-      done:       myTickets.filter((t) => t.status === "done").reduce((s, t) => s + (t.hours ?? 0), 0),
+      done:       myTickets.filter((t) => isTicketClosed(t)).reduce((s, t) => s + (t.hours ?? 0), 0),
     }),
     [myTickets, totalHours]
   );
   const remainingEstimatedHours = Math.max(0, totalHours - hoursByStatus.done);
 
-  // Filter option lists — restricted to values that actually occur among
-  // this member's own tickets, same "only real, present values" convention
-  // Admin Reports' own filters already use.
-  const statusOptions: DropdownGroup[] = useMemo(() => {
-    const present = new Set(myTickets.map((t) => t.status));
-    return [{ options: (Object.keys(STATUS_LABEL) as TicketStatus[]).filter((s) => present.has(s)).map((s) => ({ value: s, label: STATUS_LABEL[s] })) }];
-  }, [myTickets]);
+  // The Board tab's own column source (Fase 2.5) — the union, by name, of
+  // every one of the member's own projects' real statuses, never assuming
+  // two of them share the same configuration (see tickets-screen.tsx's own
+  // identical merge for the org-wide "all projects" Board). Declared here
+  // (not lower, nearer the Board tab itself) since the Status filter
+  // options below also read from it.
+  const boardColumnStatuses = useMemo(() => {
+    const byName = new Map<string, TicketStatusOption>();
+    for (const list of Object.values(statusesBySlug)) {
+      for (const option of list) {
+        if (!byName.has(option.name)) byName.set(option.name, option);
+      }
+    }
+    const merged = Array.from(byName.values()).sort((a, b) => a.sortOrder - b.sortOrder);
+    return merged.length > 0 ? merged : FALLBACK_TICKET_STATUSES;
+  }, [statusesBySlug]);
+
+  // Status filter options: every real, configured status across this
+  // member's own projects (boardColumnStatuses, already sourced straight
+  // from ticket_statuses, sort_order-ordered — see above), never narrowed
+  // to values that happen to occur among this member's own tickets. Unlike
+  // Priority/Project below, a status with zero tickets right now must
+  // still be selectable — it's a real, admin-configured status, not a
+  // derived value.
+  const statusOptions: DropdownGroup[] = useMemo(
+    () => [{ options: boardColumnStatuses.map((s) => ({ value: s.name, label: s.name })) }],
+    [boardColumnStatuses]
+  );
 
   const priorityOptions: DropdownGroup[] = useMemo(() => {
     const present = new Set(myTickets.map((t) => t.priority));
@@ -682,7 +714,7 @@ export function MyWorkScreen() {
   const filteredMyTickets = useMemo(
     () =>
       myTickets.filter((t) => {
-        if (statusFilter.length > 0 && !statusFilter.includes(t.status)) return false;
+        if (statusFilter.length > 0 && !statusFilter.includes(ticketColumnKey(t) ?? "")) return false;
         if (priorityFilter.length > 0 && !priorityFilter.includes(t.priority)) return false;
         if (projectFilter.length > 0 && !projectFilter.includes(t.projectSlug)) return false;
         if (labelFilter.length > 0 && !labelFilter.some((l) => t.labels.includes(l))) return false;
@@ -731,6 +763,27 @@ export function MyWorkScreen() {
     if (kpiMode === "hours")     return [...filteredMyTickets].sort((a, b) => (b.hours ?? 0) - (a.hours ?? 0));
     return filteredMyTickets;
   }, [filteredMyTickets, kpiMode, weekStart, weekEnd]);
+
+
+  // Grouped List view's own sections (Fase 2.5) — same merged status set as
+  // the Board tab, just re-ordered blocked-first (this list's own
+  // deliberate urgency convention, unrelated to sort_order) and with
+  // "Inbox" kept as Backlog's display label here only, same as before this
+  // phase. `id`/matching stays the real status name (ticketColumnKey),
+  // "Inbox" is a label override for this one list, never an actual rename.
+  const listGroups = useMemo(() => {
+    return [...boardColumnStatuses]
+      .sort((a, b) => {
+        const pa = (a.legacyEnumValue ? LIST_GROUP_PRIORITY[a.legacyEnumValue] : undefined) ?? 99;
+        const pb = (b.legacyEnumValue ? LIST_GROUP_PRIORITY[b.legacyEnumValue] : undefined) ?? 99;
+        if (pa !== pb) return pa - pb;
+        return a.sortOrder - b.sortOrder;
+      })
+      .map((option) => ({
+        id: option.name,
+        label: option.legacyEnumValue === "backlog" ? "Inbox" : option.name,
+      }));
+  }, [boardColumnStatuses]);
 
   // Flat list when kpiMode imposes its own order; grouped otherwise
   const useFlatList = kpiMode === "due-soon" || kpiMode === "hours";
@@ -982,7 +1035,7 @@ export function MyWorkScreen() {
         {/* Board view */}
         {view === "board" ? (
           <div className="flex flex-col h-[440px]">
-            <BoardView tickets={displayedTickets} onTicketClick={openPreview} />
+            <BoardView tickets={displayedTickets} onTicketClick={openPreview} statuses={boardColumnStatuses} />
           </div>
         ) : useFlatList ? (
           /* Flat list (for due-soon / hours kpiMode) */
@@ -1001,10 +1054,8 @@ export function MyWorkScreen() {
             {displayedTickets.length === 0 && (
               <p className="text-sm text-slate-400 dark:text-zinc-500 py-2">No tickets match this filter.</p>
             )}
-            {LIST_GROUPS.map((group) => {
-              const groupTickets = displayedTickets.filter((t) =>
-                (group.statuses as string[]).includes(t.status)
-              );
+            {listGroups.map((group) => {
+              const groupTickets = displayedTickets.filter((t) => ticketColumnKey(t) === group.id);
               if (groupTickets.length === 0) return null;
               return (
                 <section key={group.id} className="mb-6">

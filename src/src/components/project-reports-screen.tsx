@@ -11,7 +11,7 @@ import { useCurrentUser } from "@/components/current-user-provider";
 import { useOrganizationProjects } from "@/components/organization-projects-provider";
 import { loadProjectDetail, loadProjectTeam } from "@/lib/projects";
 import type { ProjectDetail, ProjectTeamMember } from "@/lib/projects";
-import { loadProjectTickets, loadOrganizationLoggedTimeForRange, loadTicketsCompletedInRange } from "@/lib/tickets";
+import { loadProjectTickets, loadOrganizationLoggedTimeForRange, loadTicketsCompletedInRange, isTicketClosed } from "@/lib/tickets";
 import type { OrganizationTimeEntry } from "@/lib/tickets";
 import { getTodayISO, formatISODate } from "@/components/tickets/ticket-ui";
 import { formatHours, round1 } from "@/components/time-tracking-screen";
@@ -292,7 +292,7 @@ export function ProjectReportsScreen({ slug }: { slug: string }) {
   // member's own currently-open tickets).
   const members: TeamMember[] = teamMembers.map((m) => {
     const ownTickets = tickets.filter((t) => t.assigneeProfileId === m.id);
-    const activeTickets = ownTickets.filter((t) => t.status !== "done");
+    const activeTickets = ownTickets.filter((t) => !isTicketClosed(t));
     const assignedHours = activeTickets.reduce((sum, t) => sum + (t.hours ?? 0), 0);
     return {
       id: m.id,
@@ -331,7 +331,7 @@ export function ProjectReportsScreen({ slug }: { slug: string }) {
 
   // Delivery
   const totalTickets = tickets.length;
-  const completedTickets = tickets.filter((t) => t.status === "done");
+  const completedTickets = tickets.filter((t) => isTicketClosed(t));
   const inProgressTickets = tickets.filter((t) => t.status === "in-progress");
   const blockedTickets = tickets.filter((t) => t.status === "blocked");
   const inProgressCount = inProgressTickets.length;

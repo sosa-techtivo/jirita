@@ -57,6 +57,23 @@ export interface Ticket {
   /** Real ISO creation timestamp, for a "Created Date" range filter — same
    *  reasoning as updatedAtISO above. Undefined on mock tickets. */
   createdAtISO?: string;
+  /** Real ticket_statuses.id backing this ticket's status (Fase 2 —
+   *  per-project configurable statuses). Undefined only for legacy/mock
+   *  tickets that predate that model; every ticket loaded via
+   *  lib/tickets.ts always has one. This is the target of a status change
+   *  going forward — Board columns, the status selector, and updateTicket
+   *  all key off this id, never off the `status` enum below. */
+  statusId?: string;
+  /** Real ticket_statuses.name for display — the project's own configured
+   *  label for this ticket's current status. Falls back to
+   *  STATUS_LABEL[status] (ticket-ui.tsx) wherever undefined. */
+  statusName?: string;
+  /** open|closed from ticket_statuses.group_type — the only correct source
+   *  for "is this ticket open or closed" (KPIs/alerts). Never infer this
+   *  from the literal `status` string — a project could rename/reorder its
+   *  statuses, but group_type is the one field that always means the same
+   *  thing. */
+  statusGroupType?: "open" | "closed";
 }
 
 // Real (Supabase-backed) projects don't exist in mock-projects.ts, so

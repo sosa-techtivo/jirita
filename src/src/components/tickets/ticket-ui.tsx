@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import type { Ticket, TicketStatus, TicketPriority, TicketType } from "@/lib/mock-tickets";
 import { TICKET_TYPE_LABEL } from "@/lib/mock-tickets";
 import { formatAbsoluteDate } from "@/lib/date-format";
+import { STATUS_FROM_DB, FALLBACK_TICKET_STATUSES, type TicketStatusOption } from "@/lib/tickets";
 
 // ── Error toast ───────────────────────────────────────────────────────────────
 // The Tickets module's write paths (inline edits, comments, time entries,
@@ -52,12 +53,12 @@ export const STATUS_CLASS: Record<TicketStatus, string> = {
   done:          "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400",
 };
 
-export function StatusBadge({ status }: { status: TicketStatus }) {
+export function StatusBadge({ status, label }: { status: TicketStatus; label?: string }) {
   return (
     <span
       className={`inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-semibold ${STATUS_CLASS[status]}`}
     >
-      {STATUS_LABEL[status]}
+      {label ?? STATUS_LABEL[status]}
     </span>
   );
 }
@@ -222,13 +223,51 @@ export function buildLabelCatalog(orgLabels: string[]): string[] {
 // ── Editable: Status badge (used in Ticket Detail's header and the preview
 // panel — same trigger + native <select> everywhere a Status badge appears) ──
 
-export function EditableStatusBadge({ value, onChange }: { value: TicketStatus; onChange: (v: TicketStatus) => void }) {
+export function EditableStatusBadge({
+  value,
+  statusId,
+  label,
+  statuses,
+  onChange,
+}: {
+  value: TicketStatus;
+  /** Real ticket_statuses.id (Fase 2.5) — the primary way to resolve which
+   *  option is currently selected. Undefined only for a mock/dev-fallback
+   *  ticket, which falls back to matching `value` against a status's
+   *  legacy_enum_value instead (works for every status this phase can
+   *  seed, all of which still have one; a hypothetical custom status has
+   *  no legacy equivalent to fall back to and simply can't be pre-selected
+   *  this way — not reachable without a status-creation UI, which doesn't
+   *  exist yet). */
+  statusId?: string;
+  /** Real ticket_statuses.name for the current value — falls back to
+   *  STATUS_LABEL[value] when not given (mock/legacy tickets). */
+  label?: string;
+  /** Real, ordered per-project ticket_statuses (Fase 2) — the select's own
+   *  options, so a project's own configured names/order show up here
+   *  instead of the old fixed 6-value enum. Undefined/empty falls back to
+   *  FALLBACK_TICKET_STATUSES (identical to the old hardcoded list) so this
+   *  never blanks out before the real list has loaded. */
+  statuses?: TicketStatusOption[];
+  /** Fires with the chosen real status row — `id` is what a caller should
+   *  now write (Ticket Detail/Preview's persist wrappers pass it straight
+   *  through as `statusId`), never just the legacy TicketStatus value. */
+  onChange: (option: TicketStatusOption) => void;
+}) {
   const [editing, setEditing] = useState(false);
   const selectRef = useRef<HTMLSelectElement>(null);
+  const options = statuses && statuses.length > 0 ? statuses : FALLBACK_TICKET_STATUSES;
 
   useEffect(() => { if (editing) selectRef.current?.focus(); }, [editing]);
 
   if (editing) {
+    // status_id (Fase 2.5) is the primary match — correct regardless of
+    // whether this status has a legacy equivalent. Falls back to matching
+    // by legacy value only for a mock/dev-fallback ticket (no real
+    // statusId at all).
+    const currentOption = statusId
+      ? options.find((option) => option.id === statusId)
+      : options.find((option) => option.legacyEnumValue && STATUS_FROM_DB[option.legacyEnumValue] === value);
     return (
       <select
         ref={selectRef}
@@ -237,13 +276,17 @@ export function EditableStatusBadge({ value, onChange }: { value: TicketStatus; 
           `border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 ` +
           `text-slate-800 dark:text-zinc-200`
         }
-        value={value}
-        onChange={(e) => { onChange(e.target.value as TicketStatus); setEditing(false); }}
+        value={currentOption?.id ?? value}
+        onChange={(e) => {
+          const chosen = options.find((option) => option.id === e.target.value);
+          if (chosen) onChange(chosen);
+          setEditing(false);
+        }}
         onBlur={() => setEditing(false)}
         onKeyDown={(e) => { if (e.key === "Escape") setEditing(false); }}
       >
-        {(Object.keys(STATUS_LABEL) as TicketStatus[]).map((k) => (
-          <option key={k} value={k}>{STATUS_LABEL[k]}</option>
+        {options.map((option) => (
+          <option key={option.id} value={option.id}>{option.name}</option>
         ))}
       </select>
     );
@@ -251,7 +294,7 @@ export function EditableStatusBadge({ value, onChange }: { value: TicketStatus; 
 
   return (
     <div className="group flex items-center gap-1 cursor-pointer" onClick={() => setEditing(true)}>
-      <StatusBadge status={value} />
+      <StatusBadge status={value} label={label} />
       <span className={EDIT_BTN.replace("ml-1.5", "")}>
         <PencilIcon className="w-2.5 h-2.5" />
       </span>

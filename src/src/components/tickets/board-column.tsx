@@ -3,9 +3,24 @@ import type { Ticket } from "@/lib/mock-tickets";
 import { TicketBoardCard } from "@/components/tickets/ticket-card";
 
 export interface ColumnDefinition {
+  /** The status's real name (Fase 2.5) — also used as the React key and
+   *  the drop zone's own data-column-id. Name, not a per-project
+   *  ticket_statuses.id, is the one thing that can validly represent the
+   *  same conceptual status across two different projects' own status
+   *  lists (enforced unique per project by a DB constraint) — needed so
+   *  the org-wide "all projects" Board can merge tickets from projects
+   *  with different (or identical) status configurations into the same
+   *  columns without assuming they share literal ids. */
   id: string;
+  /** Real ticket_statuses.name — the project's own configured label for
+   *  this status, not a hardcoded string. Identical to `id` above. */
   label: string;
-  statuses: Ticket["status"][];
+  /** The legacy `ticket_status` enum value this column corresponds to,
+   *  when it has one — null for a custom status with no legacy
+   *  equivalent (not creatable yet, but no longer assumed impossible).
+   *  Used only for this phase's still-hardcoded color palette and for
+   *  matching a mock/dev-fallback ticket (which has no real statusName). */
+  legacyValue: string | null;
   dotClass: string;
   countClass: string;
 }

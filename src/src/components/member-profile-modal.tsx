@@ -16,7 +16,7 @@ import type { User, UserStatus } from "@/lib/mock-users";
 import { fullName } from "@/lib/mock-users";
 import type { Role } from "@/lib/current-user";
 import { ROLE_LABELS, canManage } from "@/lib/current-user";
-import { loadProjectTickets, loadOrganizationTickets, loadUserActivity } from "@/lib/tickets";
+import { loadProjectTickets, loadOrganizationTickets, loadUserActivity, isTicketClosed } from "@/lib/tickets";
 import type { UserActivityEvent } from "@/lib/tickets";
 import { generatePasswordResetLink } from "@/lib/users";
 import { formatHours, round1 } from "@/components/time-tracking-screen";
@@ -251,7 +251,7 @@ export function MemberProfileModal({
         ]);
         if (cancelled || ticketsResult.status !== "ready") return;
         const activeTickets = ticketsResult.tickets.filter(
-          (t) => t.assigneeProfileId === realProfileId && t.status !== "done"
+          (t) => t.assigneeProfileId === realProfileId && !isTicketClosed(t)
         );
         const weeklyCapacity =
           teamResult.status === "ready"
@@ -265,7 +265,7 @@ export function MemberProfileModal({
         ]);
         if (cancelled || ticketsResult.status !== "ready") return;
         const activeTickets = ticketsResult.tickets.filter(
-          (t) => t.assigneeProfileId === realProfileId && t.status !== "done"
+          (t) => t.assigneeProfileId === realProfileId && !isTicketClosed(t)
         );
         const weeklyCapacity =
           capacitiesResult.status === "ready"
@@ -860,7 +860,7 @@ function ProjectsTabContent({ user }: { user: User }) {
 
   const activeByProjectSlug = new Map<string, Ticket[]>();
   for (const t of tickets) {
-    if (t.assigneeProfileId !== user.id || t.status === "done") continue;
+    if (t.assigneeProfileId !== user.id || isTicketClosed(t)) continue;
     const list = activeByProjectSlug.get(t.projectSlug) ?? [];
     list.push(t);
     activeByProjectSlug.set(t.projectSlug, list);

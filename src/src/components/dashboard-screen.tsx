@@ -21,6 +21,7 @@ import {
   loadOrganizationTickets,
   loadOrganizationLoggedMinutes,
   loadOrganizationActivity,
+  isTicketClosed,
 } from "@/lib/tickets";
 import type { OrganizationActivityEvent } from "@/lib/tickets";
 import { loadOrganizationWorkloadMembers } from "@/lib/projects";
@@ -591,7 +592,7 @@ function AdminDashboard() {
   // to, and the `?alerts=` filter applied on the destination Tickets page
   // all derive from this same list — never a second, independently
   // -filtered copy of it.
-  const assignedTickets = useMemo(() => scopedTickets.filter((t) => t.status !== "done"), [scopedTickets]);
+  const assignedTickets = useMemo(() => scopedTickets.filter((t) => !isTicketClosed(t)), [scopedTickets]);
   const assignedTicketsCount = assignedTickets.length;
 
   // "Assigned Tickets" card navigation — same single-ticket `?alerts=`
@@ -652,7 +653,7 @@ function AdminDashboard() {
   const hoursBurnHref = effectiveLoggedMinutes > 0 ? buildHoursBurnHref(selectedProjectSlug, todayISO) : undefined;
 
   const myActiveWork = useMemo(
-    () => (userId ? scopedTickets.filter((t) => t.assigneeProfileId === userId && t.status !== "done") : []),
+    () => (userId ? scopedTickets.filter((t) => t.assigneeProfileId === userId && !isTicketClosed(t)) : []),
     [scopedTickets, userId]
   );
 
@@ -679,7 +680,7 @@ function AdminDashboard() {
         // Projects") when this row is opened, from the same real tickets,
         // never a second/different calculation.
         const assignedHours = scopedTickets
-          .filter((t) => t.assigneeProfileId === member.id && t.status !== "done")
+          .filter((t) => t.assigneeProfileId === member.id && !isTicketClosed(t))
           .reduce((sum, t) => sum + (t.hours ?? 0), 0);
         const pct = utilizationOf({
           id: member.id,
@@ -738,7 +739,7 @@ function AdminDashboard() {
 
       const projectTickets = tickets.filter((t) => t.projectSlug === project.slug);
       const totalCount = projectTickets.length;
-      const completedCount = projectTickets.filter((t) => t.status === "done").length;
+      const completedCount = projectTickets.filter((t) => isTicketClosed(t)).length;
       const progressPct = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
 
       if (row.risk === "blocked") {
@@ -747,7 +748,7 @@ function AdminDashboard() {
       }
 
       const overdueCount = projectTickets.filter(
-        (t) => t.status !== "done" && t.dueDate && parseDisplayDate(t.dueDate) < todayISO
+        (t) => !isTicketClosed(t) && t.dueDate && parseDisplayDate(t.dueDate) < todayISO
       ).length;
       entries.push({ slug: project.slug, name: project.name, risk: "at-risk", affected: overdueCount, progressPct });
     }
@@ -791,7 +792,7 @@ function AdminDashboard() {
     return workloadMembers
       .map((member) => {
         const assignedHours = scopedTickets
-          .filter((t) => t.assigneeProfileId === member.id && t.status !== "done")
+          .filter((t) => t.assigneeProfileId === member.id && !isTicketClosed(t))
           .reduce((sum, t) => sum + (t.hours ?? 0), 0);
         const pct = utilizationOf({
           id: member.id,
@@ -818,7 +819,7 @@ function AdminDashboard() {
   // "this month", but there's no fabricated data involved).
   const completedThisMonthTickets = useMemo(() => {
     const monthPrefix = todayISO.slice(0, 7); // "YYYY-MM"
-    return scopedTickets.filter((t) => t.status === "done" && t.updatedAtISO?.slice(0, 7) === monthPrefix);
+    return scopedTickets.filter((t) => isTicketClosed(t) && t.updatedAtISO?.slice(0, 7) === monthPrefix);
   }, [scopedTickets, todayISO]);
   const completedThisMonthCount = completedThisMonthTickets.length;
   const completedThisMonthHref =

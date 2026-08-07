@@ -18,7 +18,7 @@ import { AdminProjectOverview } from "@/components/admin-project-overview";
 import { ProjectLeadProjectOverview } from "@/components/project-lead-project-overview";
 import { loadProjectDetail, loadProjectTeam } from "@/lib/projects";
 import type { ProjectDetail, ProjectTeamMember } from "@/lib/projects";
-import { loadProjectTickets, loadOrganizationActivity } from "@/lib/tickets";
+import { loadProjectTickets, loadOrganizationActivity, isTicketClosed } from "@/lib/tickets";
 import type { OrganizationActivityEvent } from "@/lib/tickets";
 import {
   PROJECT_ACTIVITY_PREVIEW_LIMIT,
@@ -478,14 +478,14 @@ export function ProjectOverview({ slug = "mobile-banking-app" }: { slug?: string
 
   // ── Scope everything to this member's own tickets in this project ────────
   const myTickets = tickets.filter((t) => t.assigneeProfileId === userId);
-  const myOpenTickets = myTickets.filter((t) => t.status !== "done");
+  const myOpenTickets = myTickets.filter((t) => !isTicketClosed(t));
   const myBlockedTickets = myOpenTickets.filter((t) => t.status === "blocked");
   // Same real "done this calendar month" signal Admin/Project Lead Project
   // Overview already use (a done ticket's own updated_at falling in the
   // current month) — not the mock's looser "every ticket of mine ever
   // marked Done" approximation.
   const myCompletedThisMonth = myTickets.filter(
-    (t) => t.status === "done" && t.updatedAtISO?.slice(0, 7) === monthPrefix
+    (t) => isTicketClosed(t) && t.updatedAtISO?.slice(0, 7) === monthPrefix
   ).length;
 
   const myOpenTicketsRanked = [...myOpenTickets].sort((a, b) => sortByProjectWorkRank(a, b, todayISO));

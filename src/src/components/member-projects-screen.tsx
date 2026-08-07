@@ -15,7 +15,7 @@ import {
   type BrowsableOrgProject,
   type ProjectAccessRequest,
 } from "@/lib/projects";
-import { loadProjectTickets } from "@/lib/tickets";
+import { loadProjectTickets, isTicketClosed } from "@/lib/tickets";
 import { getTodayISO, parseDisplayDate } from "@/components/tickets/ticket-ui";
 import { ErrorToast } from "@/components/tickets/ticket-ui";
 import { FALLBACK_AVATAR } from "@/lib/current-user";
@@ -126,7 +126,7 @@ export function MemberProjectsScreen() {
         const myTickets =
           ticketsResult.status === "ready" ? ticketsResult.tickets.filter((t) => t.assigneeProfileId === userId) : [];
         const dueThisWeekCount = myTickets.filter((t) => {
-          if (t.status === "done" || !t.dueDate) return false;
+          if (isTicketClosed(t) || !t.dueDate) return false;
           const iso = parseDisplayDate(t.dueDate);
           return Boolean(iso) && iso >= weekStart && iso <= weekEnd;
         }).length;

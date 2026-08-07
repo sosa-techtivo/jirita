@@ -22,6 +22,7 @@ import {
   loadProjectTickets,
   loadOrganizationActivity,
   loadOrganizationLoggedTimeForRange,
+  isTicketClosed,
 } from "@/lib/tickets";
 import type { OrganizationActivityEvent, OrganizationTimeEntry } from "@/lib/tickets";
 import {
@@ -568,11 +569,11 @@ export function AdminProjectOverview({ slug = "mobile-banking-app" }: { slug?: s
   const todayISO = getTodayISO();
   const monthPrefix = todayISO.slice(0, 7);
 
-  const openTickets = tickets.filter((t) => t.status !== "done");
+  const openTickets = tickets.filter((t) => !isTicketClosed(t));
   const blocked = tickets.filter((t) => t.status === "blocked");
   const inProgress = tickets.filter((t) => t.status === "in-progress");
   const inReview = tickets.filter((t) => t.status === "review");
-  const doneTickets = tickets.filter((t) => t.status === "done");
+  const doneTickets = tickets.filter((t) => isTicketClosed(t));
   // No completed_at column exists — same real signal the Admin Dashboard and
   // Delivery Reports' own KPI already use: a "done" ticket's own updated_at
   // falling in the real current calendar month.
@@ -585,7 +586,7 @@ export function AdminProjectOverview({ slug = "mobile-banking-app" }: { slug?: s
 
   const ticketsById = new Map(tickets.map((t) => [t.id, t]));
   const overdueTickets = tickets.filter(
-    (t) => t.status !== "done" && t.dueDate && parseDisplayDate(t.dueDate) < todayISO
+    (t) => !isTicketClosed(t) && t.dueDate && parseDisplayDate(t.dueDate) < todayISO
   );
   const overdueOpenCount = overdueTickets.length;
 

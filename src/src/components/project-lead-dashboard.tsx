@@ -34,7 +34,7 @@ import {
 import { useMemberProfile } from "@/components/member-profile";
 import { loadLeadProjects, loadProjectTeam, loadOrganizationMembers, addProjectMember } from "@/lib/projects";
 import type { LeadProject, ProjectTeamMember, OrgMember } from "@/lib/projects";
-import { loadProjectTickets, loadOrganizationLoggedMinutes, loadOrganizationLoggedTimeForRange, loadOrganizationActivity } from "@/lib/tickets";
+import { loadProjectTickets, loadOrganizationLoggedMinutes, loadOrganizationLoggedTimeForRange, loadOrganizationActivity, isTicketClosed } from "@/lib/tickets";
 import type { OrganizationActivityEvent, OrganizationTimeEntry } from "@/lib/tickets";
 import { AddTeamMemberModal } from "@/components/add-team-member-modal";
 import { NewNoteModal } from "@/components/notes-screen";
@@ -363,7 +363,7 @@ export function ProjectLeadDashboard() {
         return;
       }
       const projectTicketsReal = ticketsResult.status === "ready" ? ticketsResult.tickets : [];
-      const activeTicketIds = projectTicketsReal.filter((t) => t.status !== "done").map((t) => t.id);
+      const activeTicketIds = projectTicketsReal.filter((t) => !isTicketClosed(t)).map((t) => t.id);
       const allTicketIds = projectTicketsReal.map((t) => t.id);
       const todayISOForLoad = getTodayISO();
 
@@ -479,11 +479,11 @@ export function ProjectLeadDashboard() {
   const contextTitle = activeProject?.name ?? "Project";
 
   const totalTickets = tickets.length;
-  const completedTicketsList = tickets.filter((t) => t.status === "done");
+  const completedTicketsList = tickets.filter((t) => isTicketClosed(t));
   const completedTickets = completedTicketsList.length;
   const deliveryPct = totalTickets === 0 ? 0 : Math.round((completedTickets / totalTickets) * 100);
 
-  const activeTickets = useMemo(() => tickets.filter((t) => t.status !== "done"), [tickets]);
+  const activeTickets = useMemo(() => tickets.filter((t) => !isTicketClosed(t)), [tickets]);
   const estimatedActiveHours = useMemo(() => activeTickets.reduce((sum, t) => sum + (t.hours ?? 0), 0), [activeTickets]);
   // Never negative/NaN/Infinity: plain subtraction of two finite numbers,
   // clamped at 0 — same "remaining = estimated - logged, floored at 0"
@@ -659,7 +659,7 @@ export function ProjectLeadDashboard() {
   const deadlines = useMemo(
     () =>
       tickets
-        .filter((t) => t.status !== "done" && t.dueDate)
+        .filter((t) => !isTicketClosed(t) && t.dueDate)
         .slice()
         .sort((a, b) => parseDisplayDate(a.dueDate as string).localeCompare(parseDisplayDate(b.dueDate as string))),
     [tickets]

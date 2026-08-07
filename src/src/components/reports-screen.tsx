@@ -20,6 +20,7 @@ import {
   loadOrganizationLoggedTimeForRange,
   loadHoursAndAssigneeActivityForRange,
   loadTicketsCompletedInRange,
+  isTicketClosed,
 } from "@/lib/tickets";
 import type { OrganizationTimeEntry, HoursOrAssigneeActivityEvent } from "@/lib/tickets";
 import {
@@ -690,10 +691,10 @@ export function buildProjectHealthRows(
     const loggedHours = projectTickets.reduce((sum, t) => sum + (minutesByTicketId.get(t.id) ?? 0) / 60, 0);
     const completion = estimatedHours > 0 ? Math.min(100, Math.round((loggedHours / estimatedHours) * 100)) : 0;
 
-    const open = projectTickets.filter((t) => t.status !== "done").length;
+    const open = projectTickets.filter((t) => !isTicketClosed(t)).length;
     const blocked = projectTickets.filter((t) => t.status === "blocked").length;
     const overdueOpenCount = projectTickets.filter(
-      (t) => t.status !== "done" && t.dueDate && parseDisplayDate(t.dueDate) < todayISO
+      (t) => !isTicketClosed(t) && t.dueDate && parseDisplayDate(t.dueDate) < todayISO
     ).length;
 
     const risk: Risk = blocked > 0 ? "blocked" : overdueOpenCount > 0 ? "at-risk" : "on-track";
@@ -725,7 +726,7 @@ export function buildProjectHealthRows(
 // Projects list) reuses this one definition instead of a second/stale one.
 export function computeProjectProgressPct(tickets: Ticket[]): number {
   return tickets.length > 0
-    ? Math.round((tickets.filter((t) => t.status === "done").length / tickets.length) * 100)
+    ? Math.round((tickets.filter((t) => isTicketClosed(t)).length / tickets.length) * 100)
     : 0;
 }
 
@@ -773,7 +774,7 @@ export function buildDeliveryKpiSummary(
   completedInPeriodCount?: number
 ): DeliveryKpiSummary {
   const activeProjects = projects.filter((p) => p.status === "active").length;
-  const activeTickets = tickets.filter((t) => t.status !== "done").length;
+  const activeTickets = tickets.filter((t) => !isTicketClosed(t)).length;
 
   const estimatedHours = round1(tickets.reduce((sum, t) => sum + (t.hours ?? 0), 0));
   const loggedMinutes = timeEntries.reduce((sum, e) => sum + e.minutes, 0);
@@ -786,10 +787,10 @@ export function buildDeliveryKpiSummary(
   const completedThisMonth =
     completedInPeriodCount !== undefined
       ? completedInPeriodCount
-      : tickets.filter((t) => t.status === "done" && t.updatedAtISO?.slice(0, 7) === monthPrefix).length;
+      : tickets.filter((t) => isTicketClosed(t) && t.updatedAtISO?.slice(0, 7) === monthPrefix).length;
 
   const overdueTickets = tickets.filter(
-    (t) => t.status !== "done" && t.dueDate && parseDisplayDate(t.dueDate) < todayISO
+    (t) => !isTicketClosed(t) && t.dueDate && parseDisplayDate(t.dueDate) < todayISO
   ).length;
 
   return {
@@ -1138,7 +1139,7 @@ function buildWorkloadRows(
   const activeTicketById = new Map<string, Ticket>();
   const activeTicketsByAssignee = new Map<string, Ticket[]>();
   for (const ticket of tickets) {
-    if (ticket.status === "done" || !ticket.assigneeProfileId) continue;
+    if (isTicketClosed(ticket) || !ticket.assigneeProfileId) continue;
     activeTicketById.set(ticket.id, ticket);
     const list = activeTicketsByAssignee.get(ticket.assigneeProfileId) ?? [];
     list.push(ticket);
@@ -1342,7 +1343,7 @@ export function buildTicketsByMember(
     const loggedProfileIds = loggedProfileIdsByTicket.get(t.id);
 
     // Rule (a): currently assigned to a real member, and not Done.
-    if (t.assigneeProfileId && t.status !== "done") {
+    if (t.assigneeProfileId && !isTicketClosed(t)) {
       addTicketToGroup(t, t.assigneeProfileId, t.assigneeProfileId);
     }
 
@@ -1362,7 +1363,7 @@ export function buildTicketsByMember(
     // rules (a)/(b), just for "no one."
     if (t.assigneeProfileId == null && !loggedProfileIds) {
       const hasUnattributedHours = (minutesByTicketAndProfile.get(`${t.id}|`) ?? 0) > 0;
-      if (t.status !== "done" || hasUnattributedHours) {
+      if (!isTicketClosed(t) || hasUnattributedHours) {
         addTicketToGroup(t, "unassigned", null);
       }
     }
@@ -3028,7 +3029,7 @@ function AdminReportsScreen() {
                             {loggedHours}h
                           </span>
                           <PriorityBadge priority={t.priority} />
-                          <StatusBadge status={t.status} />
+                          <StatusBadge status={t.status} label={t.statusName} />
                         </button>
                       </li>
                     ))}

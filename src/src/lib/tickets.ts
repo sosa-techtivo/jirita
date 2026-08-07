@@ -27,7 +27,7 @@ import { createNotification } from "./notifications";
 import DOMPurify from "dompurify";
 
 export type TicketsResult =
-  | { status: "ready"; tickets: Ticket[] }
+  | { status: "ready"; tickets: Ticket[]; statuses: TicketStatusOption[] }
   | { status: "not-found" }
   | { status: "error"; message: string };
 
@@ -37,6 +37,12 @@ export interface CreateTicketInput {
   acceptanceCriteria?: string[];
   hours?: number;
   assigneeProfileId?: string;
+  /** Real ticket_statuses.id (Fase 2) — the preferred way to set a new
+   *  ticket's status; when omitted, createTicket resolves the project's own
+   *  is_default open status instead of a hardcoded "backlog". `status`
+   *  below is accepted only as a legacy fallback and ignored whenever
+   *  `statusId` is also given. */
+  statusId?: string;
   status?: TicketStatus;
   type?: TicketType;
   priority?: TicketPriority;
@@ -61,6 +67,19 @@ export const STATUS_FROM_DB: Record<string, TicketStatus> = {
   blocked: "blocked",
   done: "done",
 };
+
+// Open/closed (Fase 2.5) — the one correct, shared source for "is this
+// ticket open or closed" across the whole app, real ticket_statuses.
+// group_type, never the literal `status === "done"` enum comparison
+// (which breaks the moment a project has a custom closed status with no
+// legacy equivalent, or renames/reorders its statuses). Falls back to the
+// legacy literal only for mock/dev-fallback tickets, which never populate
+// statusGroupType. Never use this for a SPECIFIC comparison like
+// "blocked"/"in_review" — those intentionally keep reading `t.status`
+// (or, going forward, a status's own legacy_enum_value) directly.
+export function isTicketClosed(t: Ticket): boolean {
+  return t.statusGroupType ? t.statusGroupType === "closed" : t.status === "done";
+}
 
 const PRIORITY_VALUES: TicketPriority[] = ["highest", "high", "medium", "low"];
 
@@ -98,6 +117,7 @@ interface TicketRow {
   title: string;
   description: string | null;
   status: string;
+  status_id: string;
   priority: string;
   type: string;
   assignee_profile_id: string | null;
@@ -118,6 +138,277 @@ interface TicketRow {
   created_at: string;
 }
 
+// ── Per-project configurable ticket statuses (Fase 2) ──────────────────────
+// `ticket_statuses` (20260830000000 / 20260918000000) is the one real,
+// per-project status catalog — every project has exactly 6 rows today
+// (Backlog/To Do[default]/In Progress/Blocked/In Review/Done), ordered by
+// sort_order. Fetched as a flat, separate query (never an embedded
+// `tickets.select("...,ticket_statuses(...)")`) for the same reason
+// assignee profiles already are throughout this file: PostgREST's FK
+// relationship cache can lag behind a hand-applied migration, and
+// tickets.status_id -> ticket_statuses.id is exactly that — a brand new FK.
+export interface TicketStatusOption {
+  id: string;
+  name: string;
+  sortOrder: number;
+  groupType: "open" | "closed";
+  isDefault: boolean;
+  /** The legacy `ticket_status` enum value this status corresponds to.
+   *  Every status seeded so far has one (this phase builds no status-
+   *  creation UI); only ever null for a hypothetical future custom status
+   *  with no legacy equivalent. */
+  legacyEnumValue: string | null;
+}
+
+interface TicketStatusRow {
+  id: string;
+  name: string;
+  sort_order: number;
+  group_type: string;
+  is_default: boolean;
+  legacy_enum_value: string | null;
+}
+
+function rowToTicketStatusOption(row: TicketStatusRow): TicketStatusOption {
+  return {
+    id: row.id,
+    name: row.name,
+    sortOrder: row.sort_order,
+    groupType: row.group_type === "closed" ? "closed" : "open",
+    isDefault: row.is_default,
+    legacyEnumValue: row.legacy_enum_value,
+  };
+}
+
+export type TicketStatusesResult =
+  | { status: "ready"; statuses: TicketStatusOption[] }
+  | { status: "error"; message: string };
+
+// The same 6 legacy-linked statuses every project is seeded with — the one
+// shared fallback used wherever a real per-project list hasn't loaded yet
+// (or, for a mock/dev-fallback ticket, never will). Never shown as an
+// error state: visually identical to a real project's own 6 rows today, so
+// callers can render this during that window without anything appearing
+// to flicker once the real list arrives.
+export const FALLBACK_TICKET_STATUSES: TicketStatusOption[] = [
+  { id: "backlog", name: "Backlog", sortOrder: 1, groupType: "open", isDefault: false, legacyEnumValue: "backlog" },
+  { id: "to_do", name: "To Do", sortOrder: 2, groupType: "open", isDefault: true, legacyEnumValue: "to_do" },
+  { id: "in_progress", name: "In Progress", sortOrder: 3, groupType: "open", isDefault: false, legacyEnumValue: "in_progress" },
+  { id: "blocked", name: "Blocked", sortOrder: 4, groupType: "open", isDefault: false, legacyEnumValue: "blocked" },
+  { id: "review", name: "In Review", sortOrder: 5, groupType: "open", isDefault: false, legacyEnumValue: "review" },
+  { id: "done", name: "Done", sortOrder: 6, groupType: "closed", isDefault: false, legacyEnumValue: "done" },
+];
+
+// Real, ordered status catalog for one project — the source Board columns,
+// the status selector (New Ticket / Ticket Detail / Ticket Preview), and
+// the Status filter are all built from, instead of the old fixed 6-value
+// enum. Every caller here already has a resolved project id (never a slug)
+// since they all sit downstream of loadProjectTickets/loadTicketByCode.
+export async function loadProjectTicketStatuses(projectId: string): Promise<TicketStatusesResult> {
+  const supabase = getSupabaseBrowserClient();
+
+  const { data, error } = await supabase
+    .from("ticket_statuses")
+    .select("id, name, sort_order, group_type, is_default, legacy_enum_value")
+    .eq("project_id", projectId)
+    .order("sort_order", { ascending: true })
+    .returns<TicketStatusRow[]>();
+
+  if (error) {
+    logDev("ticket statuses query failed", error);
+    return { status: "error", message: error.message };
+  }
+
+  return { status: "ready", statuses: (data ?? []).map(rowToTicketStatusOption) };
+}
+
+// ── Fase 3: Project Settings → Statuses management ─────────────────────────
+// Create/rename are plain RLS-gated writes (ticket_statuses_insert/_update,
+// 20260920000000 — any org-wide Admin or Project Lead, same trust level
+// projects_update/tickets_insert already grant). Set default / change
+// group / reorder each touch more than one row's invariant-bearing column
+// at once, so each goes through its own SECURITY DEFINER RPC instead —
+// same shape update_own_weekly_capacity/restore_project_phase1 already
+// use in this schema. Delete is a plain RLS-gated delete; the real safety
+// rules (no tickets attached, never the default, never the last status in
+// its own group) live in a BEFORE DELETE trigger
+// (ticket_statuses_block_unsafe_delete), so its own error message is
+// already a clear, non-technical sentence — passed through as-is, same
+// convention removeProjectMember already uses for its own
+// trigger-blocked-delete case.
+//
+// Every one of these re-fetches and returns the project's full, fresh
+// ordered list on success, so a caller can just replace its local state
+// wholesale rather than hand-patching one row — the list is always small
+// (today: 6-ish rows per project), so this is never a real cost.
+
+export type TicketStatusMutationResult =
+  | { status: "success"; statuses: TicketStatusOption[] }
+  | { status: "error"; message: string };
+
+async function reloadTicketStatusesAfterMutation(projectId: string): Promise<TicketStatusMutationResult> {
+  const result = await loadProjectTicketStatuses(projectId);
+  if (result.status === "error") return result;
+  return { status: "success", statuses: result.statuses };
+}
+
+export async function createTicketStatus(
+  projectId: string,
+  name: string,
+  groupType: "open" | "closed"
+): Promise<TicketStatusMutationResult> {
+  const trimmed = name.trim();
+  if (trimmed.length === 0) {
+    return { status: "error", message: "Status name can't be empty." };
+  }
+
+  const supabase = getSupabaseBrowserClient();
+
+  const { data: lastStatus, error: lastStatusError } = await supabase
+    .from("ticket_statuses")
+    .select("sort_order")
+    .eq("project_id", projectId)
+    .order("sort_order", { ascending: false })
+    .limit(1)
+    .maybeSingle<{ sort_order: number }>();
+
+  if (lastStatusError) {
+    logDev("ticket status sort_order lookup failed", lastStatusError);
+    return { status: "error", message: lastStatusError.message };
+  }
+
+  const { error } = await supabase.from("ticket_statuses").insert({
+    project_id: projectId,
+    name: trimmed,
+    sort_order: (lastStatus?.sort_order ?? 0) + 1,
+    group_type: groupType,
+  });
+
+  if (error) {
+    logDev("ticket status creation failed", error);
+    // 23505 = unique_violation on (project_id, lower(trim(name))) — same
+    // case-insensitive duplicate-prevention convention as labels.
+    if (error.code === "23505") {
+      return { status: "error", message: "A status with this name already exists." };
+    }
+    return { status: "error", message: error.message };
+  }
+
+  return reloadTicketStatusesAfterMutation(projectId);
+}
+
+export async function renameTicketStatus(
+  statusId: string,
+  projectId: string,
+  name: string
+): Promise<TicketStatusMutationResult> {
+  const trimmed = name.trim();
+  if (trimmed.length === 0) {
+    return { status: "error", message: "Status name can't be empty." };
+  }
+
+  const supabase = getSupabaseBrowserClient();
+
+  const { error } = await supabase
+    .from("ticket_statuses")
+    .update({ name: trimmed })
+    .eq("id", statusId);
+
+  if (error) {
+    logDev("ticket status rename failed", error);
+    if (error.code === "23505") {
+      return { status: "error", message: "A status with this name already exists." };
+    }
+    return { status: "error", message: error.message };
+  }
+
+  return reloadTicketStatusesAfterMutation(projectId);
+}
+
+export async function setDefaultTicketStatus(
+  statusId: string,
+  projectId: string
+): Promise<TicketStatusMutationResult> {
+  const supabase = getSupabaseBrowserClient();
+
+  const { error } = await supabase.rpc("set_default_ticket_status", { p_status_id: statusId });
+
+  if (error) {
+    logDev("set default ticket status failed", error);
+    return { status: "error", message: error.message };
+  }
+
+  return reloadTicketStatusesAfterMutation(projectId);
+}
+
+// `newDefaultStatusId` is required by the RPC itself (change_ticket_status_group,
+// 20260920000000) only when moving the current default open status to
+// closed — every other open<->closed change ignores it. The UI only needs
+// to supply it in that one case (see the Statuses section's own "choose a
+// replacement default" prompt).
+export async function changeTicketStatusGroup(
+  statusId: string,
+  projectId: string,
+  newGroupType: "open" | "closed",
+  newDefaultStatusId?: string
+): Promise<TicketStatusMutationResult> {
+  const supabase = getSupabaseBrowserClient();
+
+  const { error } = await supabase.rpc("change_ticket_status_group", {
+    p_status_id: statusId,
+    p_new_group_type: newGroupType,
+    p_new_default_status_id: newDefaultStatusId ?? null,
+  });
+
+  if (error) {
+    logDev("change ticket status group failed", error);
+    return { status: "error", message: error.message };
+  }
+
+  return reloadTicketStatusesAfterMutation(projectId);
+}
+
+export async function reorderTicketStatuses(
+  projectId: string,
+  groupType: "open" | "closed",
+  orderedIds: string[]
+): Promise<TicketStatusMutationResult> {
+  const supabase = getSupabaseBrowserClient();
+
+  const { error } = await supabase.rpc("reorder_ticket_statuses", {
+    p_project_id: projectId,
+    p_group_type: groupType,
+    p_ordered_ids: orderedIds,
+  });
+
+  if (error) {
+    logDev("reorder ticket statuses failed", error);
+    return { status: "error", message: error.message };
+  }
+
+  return reloadTicketStatusesAfterMutation(projectId);
+}
+
+export async function deleteTicketStatus(
+  statusId: string,
+  projectId: string
+): Promise<TicketStatusMutationResult> {
+  const supabase = getSupabaseBrowserClient();
+
+  const { error } = await supabase.from("ticket_statuses").delete().eq("id", statusId);
+
+  if (error) {
+    logDev("ticket status delete failed", error);
+    // Includes the ticket_statuses_block_unsafe_delete trigger's own
+    // raised message when this deletion is actually blocked (tickets still
+    // assigned, is the default, or the last status in its own group) —
+    // surfaced as-is, same convention removeProjectMember already uses.
+    return { status: "error", message: error.message };
+  }
+
+  return reloadTicketStatusesAfterMutation(projectId);
+}
+
 interface AssigneeProfileRow {
   id: string;
   first_name: string | null;
@@ -127,7 +418,7 @@ interface AssigneeProfileRow {
 }
 
 const TICKET_COLUMNS =
-  "id, project_id, ticket_number, title, description, status, priority, type, assignee_profile_id, milestone, labels, acceptance_criteria, acceptance_criteria_done, story_points, hours, due_date, updated_at, created_by, created_at";
+  "id, project_id, ticket_number, title, description, status, status_id, priority, type, assignee_profile_id, milestone, labels, acceptance_criteria, acceptance_criteria_done, story_points, hours, due_date, updated_at, created_by, created_at";
 
 // Absolute, year-inclusive date — every date-parsing helper across the
 // ticket views (Calendar/Timeline/Insights) parses this exact "MMM D, YYYY"
@@ -164,11 +455,14 @@ function rowToTicket(
   row: TicketRow,
   projectSlug: string,
   assigneeRow: AssigneeProfileRow | undefined,
-  creatorRow?: AssigneeProfileRow
+  creatorRow?: AssigneeProfileRow,
+  statusesById?: Map<string, TicketStatusOption>
 ): Ticket {
   const assigneeName = assigneeRow
     ? [assigneeRow.first_name, assigneeRow.last_name].filter(Boolean).join(" ") || "Unnamed"
     : "Unassigned";
+
+  const statusOption = statusesById?.get(row.status_id);
 
   return {
     id: row.id,
@@ -177,6 +471,9 @@ function rowToTicket(
     title: row.title,
     description: row.description ?? "",
     status: STATUS_FROM_DB[row.status] ?? "backlog",
+    statusId: row.status_id,
+    statusName: statusOption?.name,
+    statusGroupType: statusOption?.groupType,
     priority: PRIORITY_VALUES.includes(row.priority as TicketPriority) ? (row.priority as TicketPriority) : "medium",
     type: TYPE_FROM_DB[row.type] ?? "TASK",
     assignee: {
@@ -258,15 +555,39 @@ export async function loadProjectTickets(organizationId: string, slug: string): 
     }
   }
 
+  const { list: statuses, byId: statusesById } = await loadProjectTicketStatusesData(supabase, project.id);
+
   const tickets: Ticket[] = (rows ?? []).map((row) =>
-    rowToTicket(row, slug, row.assignee_profile_id ? assigneesById.get(row.assignee_profile_id) : undefined)
+    rowToTicket(row, slug, row.assignee_profile_id ? assigneesById.get(row.assignee_profile_id) : undefined, undefined, statusesById)
   );
 
-  return { status: "ready", tickets };
+  return { status: "ready", tickets, statuses };
+}
+
+// Shared by loadProjectTickets/loadTicketByCode — same flat-query,
+// keyed-by-id shape as the assignee profile maps above.
+async function loadProjectTicketStatusesData(
+  supabase: ReturnType<typeof getSupabaseBrowserClient>,
+  projectId: string
+): Promise<{ list: TicketStatusOption[]; byId: Map<string, TicketStatusOption> }> {
+  const { data, error } = await supabase
+    .from("ticket_statuses")
+    .select("id, name, sort_order, group_type, is_default, legacy_enum_value")
+    .eq("project_id", projectId)
+    .order("sort_order", { ascending: true })
+    .returns<TicketStatusRow[]>();
+
+  if (error) {
+    logDev("ticket statuses query failed", error);
+    return { list: [], byId: new Map() };
+  }
+
+  const list = (data ?? []).map(rowToTicketStatusOption);
+  return { list, byId: new Map(list.map((option) => [option.id, option])) };
 }
 
 export type TicketByCodeResult =
-  | { status: "ready"; ticket: Ticket }
+  | { status: "ready"; ticket: Ticket; statuses: TicketStatusOption[] }
   | { status: "not-found" }
   | { status: "error"; message: string };
 
@@ -353,7 +674,9 @@ export async function loadTicketByCode(
     }
   }
 
-  return { status: "ready", ticket: rowToTicket(row, slug, assigneeRow, creatorRow) };
+  const { list: statuses, byId: statusesById } = await loadProjectTicketStatusesData(supabase, project.id);
+
+  return { status: "ready", ticket: rowToTicket(row, slug, assigneeRow, creatorRow, statusesById), statuses };
 }
 
 // Creates a ticket for the currently-open project only. Ticket Number is
@@ -423,24 +746,56 @@ export async function createTicket(
   const acceptanceCriteria =
     input.acceptanceCriteria && input.acceptanceCriteria.length > 0 ? input.acceptanceCriteria : null;
 
+  const { byId: statusesById } = await loadProjectTicketStatusesData(supabase, project.id);
+
+  // status_id (Fase 2.5) is the actual functional source now — written
+  // directly, never derived from a legacy enum value first. The
+  // tickets_sync_status_id trigger (20260919000000) mirrors it into the
+  // legacy `status` column only when the target status has a
+  // legacy_enum_value; a custom status (none yet possible without a
+  // status-management UI, but the write path itself no longer assumes
+  // one) simply leaves `status` at its column default. Prefers an
+  // explicit statusId (Board/status selector); falls back to the legacy
+  // `status` enum only for callers that haven't migrated (in which case
+  // the trigger itself derives status_id — nothing to resolve here); and
+  // otherwise defaults to the project's own is_default open status,
+  // never a hardcoded "backlog".
+  const insertPayload: Record<string, unknown> = {
+    project_id: project.id,
+    ticket_number: ticketNumber,
+    title: input.title,
+    description: input.description ?? null,
+    priority: input.priority ?? "medium",
+    type: input.type ? TYPE_TO_DB[input.type] : "task",
+    // NOT NULL column — must always be an array, never null/undefined,
+    // even when no labels were selected.
+    labels: input.labels ?? [],
+    acceptance_criteria: acceptanceCriteria,
+    hours: input.hours ?? null,
+    due_date: input.dueDate ?? null,
+    assignee_profile_id: input.assigneeProfileId ?? null,
+  };
+
+  if (input.statusId) {
+    if (!statusesById.has(input.statusId)) {
+      return { status: "error", message: "Invalid status for this project." };
+    }
+    insertPayload.status_id = input.statusId;
+  } else if (input.status) {
+    insertPayload.status = STATUS_TO_DB[input.status];
+  } else {
+    const defaultStatus = Array.from(statusesById.values()).find((option) => option.isDefault);
+    if (defaultStatus) {
+      insertPayload.status_id = defaultStatus.id;
+    }
+    // No default status resolved (shouldn't happen — enforced by a DB
+    // constraint) — omit both fields and let `status`'s own NOT NULL
+    // default ("backlog") apply, same safety net as before this phase.
+  }
+
   const { data: row, error } = await supabase
     .from("tickets")
-    .insert({
-      project_id: project.id,
-      ticket_number: ticketNumber,
-      title: input.title,
-      description: input.description ?? null,
-      status: input.status ? STATUS_TO_DB[input.status] : "backlog",
-      priority: input.priority ?? "medium",
-      type: input.type ? TYPE_TO_DB[input.type] : "task",
-      // NOT NULL column — must always be an array, never null/undefined,
-      // even when no labels were selected.
-      labels: input.labels ?? [],
-      acceptance_criteria: acceptanceCriteria,
-      hours: input.hours ?? null,
-      due_date: input.dueDate ?? null,
-      assignee_profile_id: input.assigneeProfileId ?? null,
-    })
+    .insert(insertPayload)
     .select(TICKET_COLUMNS)
     .single<TicketRow>();
 
@@ -469,7 +824,7 @@ export async function createTicket(
 
   return {
     status: "success",
-    ticket: rowToTicket(row, slug, assigneeRow),
+    ticket: rowToTicket(row, slug, assigneeRow, undefined, statusesById),
   };
 }
 
@@ -478,6 +833,15 @@ export async function createTicket(
 export interface UpdateTicketInput {
   title?: string;
   description?: string;
+  /** Real ticket_statuses.id (Fase 2) — the preferred way to change a
+   *  ticket's status: Board drag-and-drop, the status selector (Ticket
+   *  Detail/Preview), and quick status-change actions all resolve a target
+   *  status row and pass its id here. Writes both `status_id` and the
+   *  matching legacy `status` enum in the same update (the
+   *  tickets_sync_status_id trigger requires them to agree — see
+   *  20260830000000). `status` below is accepted only as a legacy
+   *  fallback and ignored whenever `statusId` is also given. */
+  statusId?: string;
   status?: TicketStatus;
   type?: TicketType;
   priority?: TicketPriority;
@@ -510,13 +874,13 @@ export async function updateTicket(
   // detect a genuine assignee/status change afterwards (never notify when
   // nothing actually changed). Only fetched when one of those two fields is
   // part of this edit.
-  let beforeRow: { project_id: string; status: string; assignee_profile_id: string | null } | undefined;
-  if (input.status !== undefined || input.assigneeProfileId !== undefined) {
+  let beforeRow: { project_id: string; status: string; status_id: string; assignee_profile_id: string | null } | undefined;
+  if (input.status !== undefined || input.statusId !== undefined || input.assigneeProfileId !== undefined) {
     const { data: existingRow, error: beforeError } = await supabase
       .from("tickets")
-      .select("project_id, status, assignee_profile_id")
+      .select("project_id, status, status_id, assignee_profile_id")
       .eq("id", ticketId)
-      .maybeSingle<{ project_id: string; status: string; assignee_profile_id: string | null }>();
+      .maybeSingle<{ project_id: string; status: string; status_id: string; assignee_profile_id: string | null }>();
     if (beforeError) {
       logDev("ticket lookup before update failed", beforeError);
       return { status: "error", message: beforeError.message };
@@ -547,7 +911,23 @@ export async function updateTicket(
   const patch: Record<string, unknown> = {};
   if (input.title !== undefined) patch.title = input.title;
   if (input.description !== undefined) patch.description = input.description;
-  if (input.status !== undefined) patch.status = STATUS_TO_DB[input.status];
+  if (input.statusId !== undefined && beforeRow) {
+    // status_id (Fase 2.5) is written alone — the tickets_sync_status_id
+    // trigger (20260919000000) mirrors it into the legacy `status` column
+    // itself when the target status has a legacy_enum_value, and leaves
+    // `status` untouched otherwise (a custom status, not yet reachable
+    // without a status-management UI, but the write path already supports
+    // it). Still validated client-side against this project's own real
+    // statuses first, for a friendlier error than the trigger's own
+    // project-mismatch exception.
+    const { byId: statusesById } = await loadProjectTicketStatusesData(supabase, beforeRow.project_id);
+    if (!statusesById.has(input.statusId)) {
+      return { status: "error", message: "Invalid status for this project." };
+    }
+    patch.status_id = input.statusId;
+  } else if (input.status !== undefined) {
+    patch.status = STATUS_TO_DB[input.status];
+  }
   if (input.type !== undefined) patch.type = TYPE_TO_DB[input.type];
   if (input.priority !== undefined) patch.priority = input.priority;
   if (input.assigneeProfileId !== undefined) patch.assignee_profile_id = input.assigneeProfileId;
@@ -587,18 +967,20 @@ export async function updateTicket(
     }
   }
 
+  const { byId: statusesById } = await loadProjectTicketStatusesData(supabase, row.project_id);
+
   // Fire-and-forget: never delays or can fail the already-successful update
   // above. Only reassignment (to a real, different profile) and a genuine
   // status change ever notify — see notifyTicketChange below for exactly
   // what's excluded (priority/due date/labels/description/estimate/etc, per
   // this feature's own scope).
   if (beforeRow) {
-    void notifyTicketChange(supabase, beforeRow, row, input).catch((err) => {
+    void notifyTicketChange(supabase, beforeRow, row, input, statusesById).catch((err) => {
       logDev("ticket change notification failed", err);
     });
   }
 
-  return { status: "success", ticket: rowToTicket(row, slug, assigneeRow) };
+  return { status: "success", ticket: rowToTicket(row, slug, assigneeRow, undefined, statusesById) };
 }
 
 // Real actor + project/ticket text for the two ticket-update notification
@@ -608,15 +990,20 @@ export async function updateTicket(
 // this logic themselves.
 async function notifyTicketChange(
   supabase: ReturnType<typeof getSupabaseBrowserClient>,
-  beforeRow: { project_id: string; status: string; assignee_profile_id: string | null },
+  beforeRow: { project_id: string; status: string; status_id: string; assignee_profile_id: string | null },
   row: TicketRow,
-  input: UpdateTicketInput
+  input: UpdateTicketInput,
+  statusesById: Map<string, TicketStatusOption>
 ): Promise<void> {
   const assigneeChanged =
     input.assigneeProfileId !== undefined &&
     row.assignee_profile_id !== null &&
     row.assignee_profile_id !== beforeRow.assignee_profile_id;
-  const statusChanged = input.status !== undefined && beforeRow.status !== row.status;
+  // status_id (Fase 2.5) is the real change signal — comparing the legacy
+  // `status` column alone would miss a genuine move between two custom
+  // statuses that share no legacy_enum_value (it never changes for either).
+  const statusChanged =
+    (input.status !== undefined || input.statusId !== undefined) && beforeRow.status_id !== row.status_id;
 
   if (!assigneeChanged && !statusChanged) return;
 
@@ -658,12 +1045,18 @@ async function notifyTicketChange(
   }
 
   if (statusChanged && row.assignee_profile_id) {
+    // Real ticket_statuses.name (Fase 2.5) — falls back to the legacy
+    // label only if a status id somehow isn't in this project's own
+    // current list (e.g. a race with a concurrent delete — defensive,
+    // not expected in practice, since no status deletion UI exists yet).
+    const fromLabel = statusesById.get(beforeRow.status_id)?.name ?? activityStatusLabel(beforeRow.status);
+    const toLabel = statusesById.get(row.status_id)?.name ?? activityStatusLabel(row.status);
     await createNotification({
       organizationId: projectRow.organization_id,
       recipientProfileId: row.assignee_profile_id,
       actorProfileId,
       type: "ticket_status_changed",
-      title: `${actorName} moved ${ticketCode} from ${activityStatusLabel(beforeRow.status)} to ${activityStatusLabel(row.status)}`,
+      title: `${actorName} moved ${ticketCode} from ${fromLabel} to ${toLabel}`,
       message: row.title,
       projectId: projectRow.id,
       ticketId: row.id,
@@ -3119,7 +3512,17 @@ export async function deleteTicketTimeEntry(entryId: string): Promise<DeleteTime
 // dashboards are untouched and keep reading their own mock data.
 
 export type OrganizationTicketsResult =
-  | { status: "ready"; tickets: Ticket[]; projects: { slug: string; name: string; status: ProjectStatus }[] }
+  | {
+      status: "ready";
+      tickets: Ticket[];
+      projects: { slug: string; name: string; status: ProjectStatus }[];
+      /** Each project's own real, ordered ticket_statuses — keyed by slug.
+       *  The org-wide "all projects" Board (tickets-screen.tsx) needs this
+       *  per-project (never a single shared list) since a drag-and-drop
+       *  move must resolve its target status_id within that ticket's own
+       *  project, not some other project's row with the same name. */
+      statusesBySlug: Record<string, TicketStatusOption[]>;
+    }
   | { status: "error"; message: string };
 
 // Composes two already-existing loaders (loadOrganizationProjects +
@@ -3141,9 +3544,14 @@ export async function loadOrganizationTickets(organizationId: string): Promise<O
   );
 
   const tickets: Ticket[] = [];
-  for (const result of perProject) {
+  const statusesBySlug: Record<string, TicketStatusOption[]> = {};
+  for (let i = 0; i < perProject.length; i++) {
+    const result = perProject[i];
     if (result.status === "error") return { status: "error", message: result.message };
-    if (result.status === "ready") tickets.push(...result.tickets);
+    if (result.status === "ready") {
+      tickets.push(...result.tickets);
+      statusesBySlug[projectsResult.projects[i].slug] = result.statuses;
+    }
   }
 
   return {
@@ -3154,6 +3562,7 @@ export async function loadOrganizationTickets(organizationId: string): Promise<O
       name: project.name,
       status: project.status,
     })),
+    statusesBySlug,
   };
 }
 

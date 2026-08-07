@@ -22,7 +22,7 @@ import { formatHours, round1 } from "@/components/time-tracking-screen";
 import { useMemberProfile } from "@/components/member-profile";
 import { Avatar } from "@/components/ui/avatar";
 import { loadProjectTeam, loadOrganizationMembers, addProjectMember } from "@/lib/projects";
-import { loadProjectTickets } from "@/lib/tickets";
+import { loadProjectTickets, isTicketClosed } from "@/lib/tickets";
 import { AddTeamMemberModal } from "@/components/add-team-member-modal";
 import type { AddTeamMemberCandidate } from "@/components/add-team-member-modal";
 
@@ -157,7 +157,7 @@ export function TeamScreen({ slug }: { slug: string }) {
 
         const realMembers: TeamMember[] = teamResult.members.map((member) => {
           const ownTickets = projectTickets.filter((t) => t.assigneeProfileId === member.id);
-          const activeTickets = ownTickets.filter((t) => t.status !== "done");
+          const activeTickets = ownTickets.filter((t) => !isTicketClosed(t));
           const assignedHours = activeTickets.reduce((sum, t) => sum + (t.hours ?? 0), 0);
           return {
             id: member.id,

@@ -17,11 +17,13 @@ const MAIN_NAV_BY_ROLE: Record<Role, MainNavKey[]> = {
 };
 
 // Per-project Settings (billing/category, archive, Repository Integration)
-// is Admin-only — Project Lead lost access to it (previously listed here in
-// error) and a Member never had it.
+// is Admin-only. Project Lead regained the link (Fase 3, configurable
+// ticket statuses) but the page itself only ever renders the Statuses
+// section for them — every other section stays Admin-only, gated inline
+// in project-settings-screen.tsx. A Member never had it.
 const PROJECT_NAV_BY_ROLE: Record<Role, ProjectNavKey[]> = {
   ADMIN: ["overview", "tickets", "notes", "team", "reports", "settings"],
-  PROJECT_LEAD: ["overview", "tickets", "notes", "team", "reports"],
+  PROJECT_LEAD: ["overview", "tickets", "notes", "team", "reports", "settings"],
   MEMBER: ["overview", "tickets", "notes"],
 };
 

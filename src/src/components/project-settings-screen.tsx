@@ -18,6 +18,7 @@ import {
   disconnectGitHubProjectConnectionAction,
   type GitHubConnectionStatus,
 } from "@/lib/server/github-repository-connection-actions";
+import { ProjectSettingsStatuses } from "@/components/project-settings-statuses";
 import { ArchiveProjectModal } from "@/components/archive-project-modal";
 import { DeleteProjectModal } from "@/components/delete-project-modal";
 import { AddClientModal } from "@/components/add-client-modal";
@@ -473,18 +474,22 @@ export function ProjectSettingsScreen({ slug }: { slug: string }) {
   // into polling or hammer GitHub on every tab switch.
   useRefreshOnFocusAndVisibility(refreshGithubStatus);
 
-  // Project Lead lost access to this screen (Admin-only now, see
-  // nav-config.ts) — this is real route protection, not just a hidden
-  // sidebar link, so a Project Lead who navigates here directly (typed URL,
-  // bookmark, back button) gets bounced to the project Overview instead of
-  // ever seeing settings content.
+  // Member never had access to this screen — real route protection, not
+  // just a hidden sidebar link, so a Member who navigates here directly
+  // (typed URL, bookmark, back button) gets bounced to the project
+  // Overview instead of ever seeing settings content. Project Lead
+  // regained access (Fase 3, see nav-config.ts) but only ever sees the
+  // Statuses section below — every other section (General/Billing/
+  // Repository Integration/Backup & Restore/Danger Zone) stays Admin-only,
+  // gated inline further down.
+  const isMember = user.role === "MEMBER";
   useEffect(() => {
-    if (isProjectLead) {
+    if (isMember) {
       router.replace(`/projects/${slug}`);
     }
-  }, [isProjectLead, router, slug]);
+  }, [isMember, router, slug]);
 
-  if (isProjectLead) {
+  if (isMember) {
     return null;
   }
 
@@ -709,10 +714,18 @@ export function ProjectSettingsScreen({ slug }: { slug: string }) {
         <ProjectCategoryBadge category={category} />
       </div>
       <p className="text-sm text-slate-500 mt-1 max-w-xl dark:text-zinc-400">
-        Manage project details, billing behavior and project-level configuration.
+        {isProjectLead
+          ? "Manage this project's ticket statuses."
+          : "Manage project details, billing behavior and project-level configuration."}
       </p>
 
       <div className="mt-8">
+        {/* Statuses (Fase 3) — the one section both Admin and Project Lead
+            can reach; everything else below stays Admin-only. */}
+        <ProjectSettingsStatuses projectId={project.id} />
+
+        {!isProjectLead && (
+        <>
         <SettingGroup title="General">
           <SettingRow label="Project Name">
             <TextField value={name} onChange={setName} width="w-64" />
@@ -1097,6 +1110,8 @@ export function ProjectSettingsScreen({ slug }: { slug: string }) {
             </div>
           )}
         </SettingGroup>
+        </>
+        )}
       </div>
 
       {showArchiveModal && (

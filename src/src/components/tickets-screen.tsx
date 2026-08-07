@@ -5,7 +5,17 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { tickets as MOCK_TICKETS, getTicketDisplayKey } from "@/lib/mock-tickets";
 import type { Ticket } from "@/lib/mock-tickets";
-import { loadProjectTickets, loadOrganizationTickets, loadOrganizationLabels, createOrganizationLabel, updateTicket } from "@/lib/tickets";
+import {
+  loadProjectTickets,
+  loadOrganizationTickets,
+  loadOrganizationLabels,
+  createOrganizationLabel,
+  updateTicket,
+  STATUS_FROM_DB,
+  FALLBACK_TICKET_STATUSES,
+  isTicketClosed,
+  type TicketStatusOption,
+} from "@/lib/tickets";
 import {
   loadOrganizationMembers,
   loadProjectTeam,
@@ -20,7 +30,7 @@ import { NewTicketModal } from "@/components/tickets/new-ticket-modal";
 import { ViewSwitcher, type ViewMode } from "@/components/tickets/view-switcher";
 import { FilterBar, type AddFilterKind } from "@/components/tickets/filter-bar";
 import { EMPTY_DATE_RANGE, type DateRangeValue } from "@/components/tickets/date-range-filter-dropdown";
-import { BoardView } from "@/components/tickets/board-view";
+import { BoardView, ticketColumnKey } from "@/components/tickets/board-view";
 import { ListView } from "@/components/tickets/list-view";
 import { CalendarView } from "@/components/tickets/calendar-view";
 import { TimelineView } from "@/components/tickets/timeline-view";
@@ -273,6 +283,14 @@ export function TicketsScreen({ slug, projectName }: { slug?: string; projectNam
   const [loadState, setLoadState] = useState<"loading" | "ready" | "error">(isDevFallback ? "ready" : "loading");
   const [loadErrorMessage, setLoadErrorMessage] = useState<string | null>(null);
   const [ticketList, setTicketList] = useState<Ticket[]>(initialDevTickets);
+  // Real, ordered per-project ticket_statuses (Fase 2) — Board columns, the
+  // Status filter, and the preview panel's status editor are all built from
+  // these instead of the old fixed 6-value enum. Single-project mode: this
+  // project's own list. Org-wide "all projects" mode: keyed by slug, since a
+  // drag-and-drop move must resolve its target status_id within that
+  // ticket's own project, never a different project's row.
+  const [statuses, setStatuses] = useState<TicketStatusOption[]>([]);
+  const [statusesBySlug, setStatusesBySlug] = useState<Record<string, TicketStatusOption[]>>({});
   // Real org members for the Assigned filter's dropdown options only — the
   // filter itself stays unwired (see FilterBar), this just replaces the
   // mock names it used to show. Dev fallback shows none, never mock names.
@@ -358,6 +376,11 @@ export function TicketsScreen({ slug, projectName }: { slug?: string; projectNam
       if (result.status === "ready") {
         hasLoadedRef.current = true;
         setTicketList(result.tickets);
+        if ("statuses" in result) {
+          setStatuses(result.statuses);
+        } else {
+          setStatusesBySlug(result.statusesBySlug);
+        }
         setLoadState("ready");
       } else if (result.status === "not-found") {
         hasLoadedRef.current = true;
@@ -454,6 +477,26 @@ export function TicketsScreen({ slug, projectName }: { slug?: string; projectNam
     [projectParam, availableProjects]
   );
   const projectFilter = useMemo(() => (selectedProjectSlug ? [selectedProjectSlug] : []), [selectedProjectSlug]);
+  // The Board's own column source (Fase 2.5). Single-project mode: this
+  // project's real statuses. Org-wide "all projects" mode: the union, by
+  // name, of every loaded project's own real statuses — never assumes two
+  // projects share the same list. A status name shared by several
+  // projects collapses into one column (today, every project happens to
+  // share the same 6 names, so this produces the exact same result as
+  // before); a name unique to one project gets its own column. First
+  // occurrence wins for display order (sort_order can differ slightly
+  // between projects only once real per-project customization exists).
+  const boardColumnStatuses = useMemo(() => {
+    if (slug) return statuses;
+    const byName = new Map<string, TicketStatusOption>();
+    for (const list of Object.values(statusesBySlug)) {
+      for (const option of list) {
+        if (!byName.has(option.name)) byName.set(option.name, option);
+      }
+    }
+    const merged = Array.from(byName.values()).sort((a, b) => a.sortOrder - b.sortOrder);
+    return merged.length > 0 ? merged : FALLBACK_TICKET_STATUSES;
+  }, [slug, statuses, statusesBySlug]);
   const onProjectChange = useCallback(
     (values: string[]) => {
       const params = new URLSearchParams(searchParams.toString());
@@ -555,7 +598,7 @@ export function TicketsScreen({ slug, projectName }: { slug?: string; projectNam
     const todayISO = getTodayISO();
     const dueSoonCutoffISO = getTodayISO(7);
     const isDueSoon = (t: Ticket) => {
-      if (t.status === "done" || !t.dueDate) return false;
+      if (isTicketClosed(t) || !t.dueDate) return false;
       const dueISO = parseDisplayDate(t.dueDate);
       if (!dueISO) return false;
       return dueISO >= todayISO && dueISO <= dueSoonCutoffISO;
@@ -572,8 +615,8 @@ export function TicketsScreen({ slug, projectName }: { slug?: string; projectNam
     };
 
     // Overdue — same real definition Project Overview's own Health Alerts
-    // already use (status !== done, a real due date, in the past).
-    const isOverdue = (t: Ticket) => t.status !== "done" && Boolean(t.dueDate) && parseDisplayDate(t.dueDate!) < todayISO;
+    // already use (not closed, a real due date, in the past).
+    const isOverdue = (t: Ticket) => !isTicketClosed(t) && Boolean(t.dueDate) && parseDisplayDate(t.dueDate!) < todayISO;
 
     // Due Today — the exact same real definition the Admin Dashboard's own
     // "Due Today" KPI already uses (a real due date equal to today, no
@@ -589,7 +632,7 @@ export function TicketsScreen({ slug, projectName }: { slug?: string; projectNam
     // dedicated completed_at column exists). Same todayISO, never a
     // second/different "this month".
     const monthPrefix = todayISO.slice(0, 7);
-    const isCompletedThisMonth = (t: Ticket) => t.status === "done" && t.updatedAtISO?.slice(0, 7) === monthPrefix;
+    const isCompletedThisMonth = (t: Ticket) => isTicketClosed(t) && t.updatedAtISO?.slice(0, 7) === monthPrefix;
 
     // Due This Week — the exact same real Monday–Sunday "this week"
     // convention already established by Projects/My Work/Member Dashboard/
@@ -606,7 +649,7 @@ export function TicketsScreen({ slug, projectName }: { slug?: string; projectNam
     const weekStartISO = toWeekBoundISO(weekMonday);
     const weekEndISO = toWeekBoundISO(weekSunday);
     const isDueThisWeek = (t: Ticket) => {
-      if (t.status === "done" || !t.dueDate) return false;
+      if (isTicketClosed(t) || !t.dueDate) return false;
       const dueISO = parseDisplayDate(t.dueDate);
       return Boolean(dueISO) && dueISO >= weekStartISO && dueISO <= weekEndISO;
     };
@@ -653,7 +696,10 @@ export function TicketsScreen({ slug, projectName }: { slug?: string; projectNam
       }
 
       if (priority.length > 0 && !priority.includes(t.priority)) return false;
-      if (status.length > 0 && !status.includes(t.status)) return false;
+      // Matched by real status name (Fase 3), never the legacy 6-value
+      // domain — a custom, non-legacy status has no TicketStatus
+      // equivalent at all, so `t.status` alone can't represent it.
+      if (status.length > 0 && !status.includes(ticketColumnKey(t) ?? "")) return false;
 
       // "Add Filter" filters.
       // Labels: matches if the ticket has at least one of the selected
@@ -751,15 +797,37 @@ export function TicketsScreen({ slug, projectName }: { slug?: string; projectNam
   // Uses ticket.projectSlug rather than this screen's own `slug`, since
   // this screen can also show every project's tickets at once (no `slug`
   // at all, e.g. a cross-project queue) — each ticket still knows its own.
+  //
+  // `nextStatusName` (Fase 2.5) is the dropped-on column's real
+  // ticket_statuses.name — resolved back to a real status_id within THIS
+  // ticket's own project (never assumed to share an id, or even a legacy
+  // enum value, with whatever other project's status the merged column
+  // happened to be built from). If this ticket's own project has no
+  // status by that exact name (two projects with genuinely different
+  // configurations), the move is rejected with a clear message instead of
+  // silently landing on the wrong status or corrupting the ticket.
   async function handleBoardMoveTicket(
     ticket: Ticket,
-    nextStatus: Ticket["status"]
+    nextStatusName: string
   ): Promise<{ success: boolean; message?: string }> {
+    const projectStatuses = slug ? statuses : statusesBySlug[ticket.projectSlug];
+    const options = projectStatuses && projectStatuses.length > 0 ? projectStatuses : FALLBACK_TICKET_STATUSES;
+    const target = options.find((option) => option.name === nextStatusName);
+    if (!target) {
+      return { success: false, message: "This status isn't available for that ticket's project." };
+    }
     if (isDevFallback) {
-      handleTicketUpdated({ ...ticket, status: nextStatus });
+      const nextStatus = target.legacyEnumValue ? STATUS_FROM_DB[target.legacyEnumValue] ?? ticket.status : ticket.status;
+      handleTicketUpdated({
+        ...ticket,
+        status: nextStatus,
+        statusId: target.id,
+        statusName: target.name,
+        statusGroupType: target.groupType,
+      });
       return { success: true };
     }
-    const result = await updateTicket(ticket.id, ticket.projectSlug, { status: nextStatus });
+    const result = await updateTicket(ticket.id, ticket.projectSlug, { statusId: target.id });
     if (result.status === "error") {
       return { success: false, message: result.message };
     }
@@ -868,6 +936,7 @@ export function TicketsScreen({ slug, projectName }: { slug?: string; projectNam
           onPriorityChange={setPriority}
           status={status}
           onStatusChange={setStatus}
+          statuses={boardColumnStatuses}
           activeAddFilters={activeAddFilters}
           onAddFilter={handleAddFilter}
           allLabels={allLabelOptions}
@@ -910,6 +979,7 @@ export function TicketsScreen({ slug, projectName }: { slug?: string; projectNam
           tickets={filteredTickets}
           onTicketClick={openPreview}
           dragAndDrop={{ onMoveTicket: handleBoardMoveTicket }}
+          statuses={boardColumnStatuses}
         />
       ) : view === "calendar" ? (
         <CalendarView tickets={filteredTickets} onTicketClick={openPreview} />
@@ -942,6 +1012,7 @@ export function TicketsScreen({ slug, projectName }: { slug?: string; projectNam
           allLabels={allLabelOptions}
           onCreateLabel={createLabel}
           onTicketUpdated={handleTicketUpdated}
+          statuses={slug ? statuses : statusesBySlug[previewTicket.projectSlug]}
         />
       )}
 
@@ -956,6 +1027,7 @@ export function TicketsScreen({ slug, projectName }: { slug?: string; projectNam
           onClose={() => setShowNewTicket(false)}
           onCreated={handleTicketCreated}
           onPreviewDuplicate={handlePreviewDuplicate}
+          statuses={statuses}
         />
       )}
     </div>

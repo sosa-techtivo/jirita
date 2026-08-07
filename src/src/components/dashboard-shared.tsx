@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { StatusBadge, TicketTypeIcon } from "@/components/tickets/ticket-ui";
 import type { Ticket } from "@/lib/mock-tickets";
 import { getTicketDisplayKey, getTicketById } from "@/lib/mock-tickets";
+import { isTicketClosed } from "@/lib/tickets";
 import { MemberTrigger } from "@/components/member-profile";
 import { Avatar } from "@/components/ui/avatar";
 
@@ -241,7 +242,7 @@ export function ActiveTicketRow({
   projectBadge?: ReactNode;
 }) {
   const isOverdue =
-    ticket.status !== "done" &&
+    !isTicketClosed(ticket) &&
     (ticket.dueDate === "Jun 28" || ticket.dueDate === "Jun 29" || ticket.dueDate === "Jun 30");
 
   return (

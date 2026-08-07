@@ -17,6 +17,7 @@ import {
   loadProfileLoggedTimeForDate,
   loadOrganizationLoggedTimeForRange,
   loadMemberAttentionEvents,
+  isTicketClosed,
 } from "@/lib/tickets";
 import type { ProfileTimeEntry, MemberAttentionEvent } from "@/lib/tickets";
 import { loadMemberProjects, loadProjectTeam } from "@/lib/projects";
@@ -486,7 +487,7 @@ export function MemberDashboard() {
       const myProjectTickets = ticketsResult.status === "ready" ? ticketsResult.tickets : [];
 
       const myActiveTicketIds = myProjectTickets
-        .filter((t) => t.assigneeProfileId === userId && t.status !== "done")
+        .filter((t) => t.assigneeProfileId === userId && !isTicketClosed(t))
         .map((t) => t.id);
       const allProjectTicketIds = myProjectTickets.map((t) => t.id);
 
@@ -564,7 +565,7 @@ export function MemberDashboard() {
   const activeWork = useMemo(
     () =>
       userId
-        ? tickets.filter((t) => t.assigneeProfileId === userId && t.status !== "done").sort((a, b) => compareWork(a, b, todayISO))
+        ? tickets.filter((t) => t.assigneeProfileId === userId && !isTicketClosed(t)).sort((a, b) => compareWork(a, b, todayISO))
         : [],
     [tickets, userId, todayISO]
   );

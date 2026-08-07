@@ -26,9 +26,11 @@ import {
   downloadTicketAttachment,
   loadProfileSummary,
   updateTicket,
+  STATUS_FROM_DB,
   type TicketComment,
   type TicketAttachment,
   type UpdateTicketInput,
+  type TicketStatusOption,
 } from "@/lib/tickets";
 import { MemberTrigger } from "@/components/member-profile";
 import { RichTextViewer } from "@/components/rich-text/rich-text-viewer";
@@ -428,11 +430,16 @@ export function TicketPreviewPanel({
   allLabels = [],
   onCreateLabel,
   onTicketUpdated,
+  statuses,
 }: {
   ticket: Ticket;
   slug: string;
   onClose: () => void;
   onBeforeNavigate?: () => void;
+  /** This ticket's own project's real, ordered ticket_statuses (Fase 2) —
+   *  the Status editor's options. Undefined falls back to
+   *  FALLBACK_TICKET_STATUSES (identical to the old fixed list). */
+  statuses?: TicketStatusOption[];
   /**
    * Enables inline editing of Title/Status/Priority/Assignee/Due Date —
    * reusing the exact same updateTicket() action and value domains as
@@ -665,10 +672,21 @@ export function TicketPreviewPanel({
             {editable ? (
               <EditableStatusBadge
                 value={t.status}
-                onChange={(v) => persistPatch({ status: v }, (prev) => ({ ...prev, status: v }))}
+                statusId={t.statusId}
+                label={t.statusName}
+                statuses={statuses}
+                onChange={(option) =>
+                  persistPatch({ statusId: option.id }, (prev) => ({
+                    ...prev,
+                    status: option.legacyEnumValue ? STATUS_FROM_DB[option.legacyEnumValue] ?? prev.status : prev.status,
+                    statusId: option.id,
+                    statusName: option.name,
+                    statusGroupType: option.groupType,
+                  }))
+                }
               />
             ) : (
-              <StatusBadge status={t.status} />
+              <StatusBadge status={t.status} label={t.statusName} />
             )}
           </div>
         </div>

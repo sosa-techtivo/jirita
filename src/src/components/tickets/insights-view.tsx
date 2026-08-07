@@ -3,6 +3,7 @@ import type { Ticket, TicketStatus, TicketPriority } from "@/lib/mock-tickets";
 import { getTicketDisplayKey } from "@/lib/mock-tickets";
 import type { OnTicketClick } from "@/components/tickets/board-column";
 import { TicketTypeIcon, PRIORITY_VALUES } from "@/components/tickets/ticket-ui";
+import { isTicketClosed } from "@/lib/tickets";
 import { MemberTrigger } from "@/components/member-profile";
 import { Avatar } from "@/components/ui/avatar";
 
@@ -57,7 +58,7 @@ function daysBetween(a: Date, b: Date): number {
 }
 
 function isOverdue(ticket: Ticket, today: Date): boolean {
-  if (ticket.status === "done" || !ticket.dueDate) return false;
+  if (isTicketClosed(ticket) || !ticket.dueDate) return false;
   const due = parseDue(ticket.dueDate);
   return due !== null && due < today;
 }
@@ -255,7 +256,7 @@ function MilestoneProgress({ tickets }: { tickets: Ticket[] }) {
   for (const t of tickets) {
     const m = map.get(t.milestone) ?? { done: 0, total: 0 };
     m.total++;
-    if (t.status === "done") m.done++;
+    if (isTicketClosed(t)) m.done++;
     map.set(t.milestone, m);
   }
   const milestones = Array.from(map.entries()).map(([name, { done, total }]) => ({
@@ -303,7 +304,7 @@ function UpcomingDueDates({
 }) {
   const today = new Date();
   const upcoming = tickets
-    .filter((t) => t.status !== "done" && t.dueDate)
+    .filter((t) => !isTicketClosed(t) && t.dueDate)
     .map((t) => ({ t, due: parseDue(t.dueDate!)! }))
     .filter((x) => x.due !== null)
     .sort((a, b) => a.due.getTime() - b.due.getTime())
@@ -370,7 +371,7 @@ function RecentlyCompleted({
   tickets: Ticket[];
   onTicketClick: OnTicketClick;
 }) {
-  const done = tickets.filter((t) => t.status === "done");
+  const done = tickets.filter((t) => isTicketClosed(t));
 
   return (
     <Card title="Recently Completed">
@@ -429,8 +430,8 @@ export function InsightsView({
 }) {
   const today = new Date();
   const total      = tickets.length;
-  const open       = tickets.filter((t) => t.status !== "done").length;
-  const completed  = tickets.filter((t) => t.status === "done").length;
+  const open       = tickets.filter((t) => !isTicketClosed(t)).length;
+  const completed  = tickets.filter((t) => isTicketClosed(t)).length;
   const blocked    = tickets.filter((t) => t.status === "blocked").length;
   const overdue    = tickets.filter((t) => isOverdue(t, today)).length;
 

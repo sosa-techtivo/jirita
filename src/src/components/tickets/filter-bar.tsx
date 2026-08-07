@@ -6,6 +6,7 @@ import { DateRangeFilterDropdown, type DateRangeValue } from "@/components/ticke
 import { PRIORITY_VALUES, PRIORITY_LABEL, STATUS_LABEL } from "@/components/tickets/ticket-ui";
 import type { TicketStatus } from "@/lib/mock-tickets";
 import type { OrgMember } from "@/lib/projects";
+import { FALLBACK_TICKET_STATUSES, type TicketStatusOption } from "@/lib/tickets";
 
 export type AddFilterKind = "labels" | "due-date" | "reporter" | "created-date" | "updated-date";
 
@@ -68,18 +69,22 @@ const PRIORITY_GROUPS: DropdownGroup[] = [
   },
 ];
 
-const STATUS_GROUPS: DropdownGroup[] = [
-  {
-    options: [
-      { value: "backlog",      label: "Backlog"     },
-      { value: "to-do",        label: "To Do"       },
-      { value: "in-progress",  label: "In Progress" },
-      { value: "blocked",      label: "Blocked"     },
-      { value: "review",       label: "In Review"   },
-      { value: "done",         label: "Done"        },
-    ],
-  },
-];
+// Real, ordered per-project ticket_statuses (Fase 3) — falls back to
+// FALLBACK_TICKET_STATUSES (identical values/order to the old hardcoded
+// list) when the caller hasn't loaded a real one yet. `value` is the
+// status's real name (matching tickets-screen.tsx's own ticketColumnKey-
+// based filter comparison), never the legacy TicketStatus domain value —
+// a custom status created via Project Settings → Statuses has no legacy
+// equivalent at all, so filtering by name is the only way every real
+// status (custom or not) can ever show up here.
+function buildStatusGroups(statuses?: TicketStatusOption[]): DropdownGroup[] {
+  const options = statuses && statuses.length > 0 ? statuses : FALLBACK_TICKET_STATUSES;
+  return [
+    {
+      options: options.map((option) => ({ value: option.name, label: option.name })),
+    },
+  ];
+}
 
 const ADD_FILTER_LABEL: Record<AddFilterKind, string> = {
   labels:        "Labels",
@@ -151,6 +156,7 @@ export function FilterBar({
   onUpdatedDateRangeChange,
   alertChipTypes,
   onRemoveAlertChip,
+  statuses,
 }: {
   activeChips: Set<string>;
   onToggleChip: (label: string) => void;
@@ -194,6 +200,10 @@ export function FilterBar({
    *  filters below, never a second chip design. */
   alertChipTypes: string[];
   onRemoveAlertChip: (type: string) => void;
+  /** Real, ordered per-project ticket_statuses (Fase 2) — the Status
+   *  filter's own options. Undefined falls back to FALLBACK_TICKET_STATUSES
+   *  (identical to the old fixed list). */
+  statuses?: TicketStatusOption[];
 }) {
   const assignedGroups = buildAssignedGroups(members);
   const reporterGroups: DropdownGroup[] = [
@@ -280,7 +290,7 @@ export function FilterBar({
         <FilterDropdown
           label="Status"
           mode="multi"
-          groups={STATUS_GROUPS}
+          groups={buildStatusGroups(statuses)}
           selected={status}
           onChange={onStatusChange}
         />

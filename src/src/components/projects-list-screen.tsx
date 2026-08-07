@@ -12,7 +12,7 @@ import { useCurrentUser } from "@/components/current-user-provider";
 import { useOrganizationProjects } from "@/components/organization-projects-provider";
 import { MemberTrigger } from "@/components/member-profile";
 import { Avatar } from "@/components/ui/avatar";
-import { loadOrganizationTickets } from "@/lib/tickets";
+import { loadOrganizationTickets, isTicketClosed } from "@/lib/tickets";
 import {
   loadProjectTeam,
   loadPendingAccessRequestsForLead,
@@ -444,7 +444,7 @@ function ManagedProjectsScreen() {
       const { start: weekStart, end: weekEnd } = getWeekRangeISO(getTodayISO());
       setDueThisWeekCount(
         result.tickets.filter((t) => {
-          if (t.status === "done" || !t.dueDate) return false;
+          if (isTicketClosed(t) || !t.dueDate) return false;
           const iso = parseDisplayDate(t.dueDate);
           return Boolean(iso) && iso >= weekStart && iso <= weekEnd;
         }).length
@@ -476,7 +476,7 @@ function ManagedProjectsScreen() {
 
           const assignedHoursByProfileId = new Map<string, number>();
           for (const ticket of ticketsByProjectSlug.get(p.slug) ?? []) {
-            if (ticket.status === "done" || !ticket.assigneeProfileId) continue;
+            if (isTicketClosed(ticket) || !ticket.assigneeProfileId) continue;
             assignedHoursByProfileId.set(
               ticket.assigneeProfileId,
               (assignedHoursByProfileId.get(ticket.assigneeProfileId) ?? 0) + (ticket.hours ?? 0)

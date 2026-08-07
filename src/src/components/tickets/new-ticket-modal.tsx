@@ -1,12 +1,18 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { Ticket, TicketStatus, TicketPriority, TicketType } from "@/lib/mock-tickets";
+import type { Ticket, TicketPriority, TicketType } from "@/lib/mock-tickets";
 import { getTicketDisplayKey } from "@/lib/mock-tickets";
-import { StatusBadge, STATUS_LABEL, TicketTypeIcon, TicketTypeSelect, PRIORITY_LABEL } from "@/components/tickets/ticket-ui";
+import { StatusBadge, TicketTypeIcon, TicketTypeSelect, PRIORITY_LABEL } from "@/components/tickets/ticket-ui";
 import { AcceptanceCriteriaFields } from "@/components/tickets/acceptance-criteria-fields";
 import { registerTicket, nextTicketNumber, titleToTicketId } from "@/lib/pending-tickets";
-import { createTicket, uploadTicketAttachment } from "@/lib/tickets";
+import {
+  createTicket,
+  uploadTicketAttachment,
+  STATUS_FROM_DB,
+  FALLBACK_TICKET_STATUSES,
+  type TicketStatusOption,
+} from "@/lib/tickets";
 import { useCurrentUser } from "@/components/current-user-provider";
 import { FALLBACK_AVATAR } from "@/lib/current-user";
 import type { OrgMember } from "@/lib/projects";
@@ -328,6 +334,7 @@ export function NewTicketModal({
   onClose,
   onCreated,
   onPreviewDuplicate,
+  statuses,
 }: {
   slug:               string;
   /** Current project's own tickets only — used for Possible Duplicates. */
@@ -337,6 +344,11 @@ export function NewTicketModal({
   onClose:            () => void;
   onCreated:          (ticket: Ticket) => void;
   onPreviewDuplicate: (ticket: Ticket) => void;
+  /** This project's real, ordered ticket_statuses (Fase 2) — the Status
+   *  select's own options, and where the initial selection (the project's
+   *  own is_default open status) comes from, instead of a hardcoded
+   *  "backlog". Undefined falls back to FALLBACK_TICKET_STATUSES. */
+  statuses?: TicketStatusOption[];
 }) {
   const { organization, isDevFallback } = useCurrentUser();
 
@@ -351,7 +363,13 @@ export function NewTicketModal({
   const [title, setTitle]               = useState("");
   const [description, setDescription]   = useState("");
   const [criteria, setCriteria]         = useState<string[]>([]);
-  const [status, setStatus]             = useState<TicketStatus>("backlog");
+  const statusOptions = statuses && statuses.length > 0 ? statuses : FALLBACK_TICKET_STATUSES;
+  // The project's own is_default open status (Fase 2) — never a hardcoded
+  // "backlog". Falls back to the first option if, somehow, no status is
+  // marked default (shouldn't happen — enforced by a DB constraint).
+  const [statusId, setStatusId] = useState(
+    () => statusOptions.find((option) => option.isDefault)?.id ?? statusOptions[0]?.id ?? ""
+  );
   const [priority, setPriority]         = useState<TicketPriority>("medium");
   const [ticketType, setTicketType]     = useState<TicketType>("TASK");
   const [assigneeId, setAssigneeId]     = useState("");
@@ -517,6 +535,8 @@ export function NewTicketModal({
     const member = members.find((m) => m.id === assigneeId);
     const assignee = member ? { name: member.name, avatar: member.avatar } : { name: "Unassigned", avatar: FALLBACK_AVATAR };
     const filledCriteria = criteria.filter((c) => c.trim().length > 0);
+    const selectedStatus = statusOptions.find((option) => option.id === statusId);
+    const status = (selectedStatus?.legacyEnumValue ? STATUS_FROM_DB[selectedStatus.legacyEnumValue] : undefined) ?? "backlog";
     return {
       id:           titleToTicketId(title),
       projectSlug:  slug,
@@ -524,6 +544,9 @@ export function NewTicketModal({
       title:       title.trim(),
       description: description.trim(),
       status,
+      statusId: selectedStatus?.id,
+      statusName: selectedStatus?.name,
+      statusGroupType: selectedStatus?.groupType,
       priority,
       type:        ticketType,
       assignee,
@@ -557,7 +580,7 @@ export function NewTicketModal({
         description: description.trim() || undefined,
         acceptanceCriteria: filledCriteria.length > 0 ? filledCriteria : undefined,
         assigneeProfileId: assigneeId || undefined,
-        status,
+        statusId,
         type: ticketType,
         priority,
         labels: labels.length > 0 ? labels : undefined,
@@ -699,9 +722,9 @@ export function NewTicketModal({
               </div>
               <div>
                 <label className={FIELD_LABEL}>Status</label>
-                <select value={status} onChange={(e) => setStatus(e.target.value as TicketStatus)} className={INPUT}>
-                  {(Object.keys(STATUS_LABEL) as TicketStatus[]).map((k) => (
-                    <option key={k} value={k}>{STATUS_LABEL[k]}</option>
+                <select value={statusId} onChange={(e) => setStatusId(e.target.value)} className={INPUT}>
+                  {statusOptions.map((option) => (
+                    <option key={option.id} value={option.id}>{option.name}</option>
                   ))}
                 </select>
               </div>
@@ -781,7 +804,7 @@ export function NewTicketModal({
                       <span className="font-mono text-[10px] font-semibold text-amber-700 dark:text-amber-500 flex-shrink-0">
                         {getTicketDisplayKey(t)}
                       </span>
-                      <StatusBadge status={t.status} />
+                      <StatusBadge status={t.status} label={t.statusName} />
                       <span className="text-[12px] text-slate-700 dark:text-zinc-300 truncate min-w-0">
                         {t.title}
                       </span>
