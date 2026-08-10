@@ -2,6 +2,15 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+// 1 year — same Cache-Control every real upload in the app (Cached Egress
+// Phase 3, src/lib/tickets.ts's ATTACHMENT_UPLOAD_CACHE_CONTROL) and the
+// historical live-data backfill already apply. Safe here for the identical
+// reason: every object this importer writes lands at a deterministic path
+// derived from the attachment's own unfuddle_id, and is never overwritten
+// (uploadAttachment always calls .upload with upsert: false, checked by
+// Storage idempotency beforehand — see check-attachment-storage-idempotency.ts).
+const ATTACHMENT_UPLOAD_CACHE_CONTROL = "31536000";
+
 export interface UploadAttachmentResult {
   ok: boolean;
   error: string | null;
@@ -34,7 +43,11 @@ export async function uploadAttachment(admin: SupabaseClient, bucketId: string, 
   }
 
   const storage = admin.storage.from(bucketId);
-  const { error: uploadError } = await storage.upload(storagePath, bytes, { contentType: mimeType ?? undefined, upsert: false });
+  const { error: uploadError } = await storage.upload(storagePath, bytes, {
+    contentType: mimeType ?? undefined,
+    cacheControl: ATTACHMENT_UPLOAD_CACHE_CONTROL,
+    upsert: false,
+  });
   if (uploadError) return { ok: false, error: `Upload failed: ${uploadError.message}`, remoteSize: null };
 
   const folder = storagePath.slice(0, storagePath.lastIndexOf("/"));
@@ -51,4 +64,29 @@ export async function uploadAttachment(admin: SupabaseClient, bucketId: string, 
   }
 
   return { ok: true, error: null, remoteSize };
+}
+
+export interface UploadAttachmentThumbnailResult {
+  ok: boolean;
+  error: string | null;
+}
+
+/**
+ * Uploads exactly one thumbnail's already-encoded WebP bytes (produced by
+ * plan-attachment-thumbnails.ts, never read from disk here) to its
+ * deterministic path — same `upsert: false` guarantee as uploadAttachment:
+ * never overwrites. A failure here is reported to the caller
+ * (apply-attachments.ts) but, unlike every other failure mode in this
+ * importer, must NOT stop the batch — the attachment's original still
+ * proceeds with thumbnail_path left NULL. See PlannedAttachmentFields /
+ * AttachmentApplyOutcome.thumbnailsFailed.
+ */
+export async function uploadAttachmentThumbnail(admin: SupabaseClient, bucketId: string, thumbnailPath: string, bytes: Buffer): Promise<UploadAttachmentThumbnailResult> {
+  const { error } = await admin.storage.from(bucketId).upload(thumbnailPath, bytes, {
+    contentType: "image/webp",
+    cacheControl: ATTACHMENT_UPLOAD_CACHE_CONTROL,
+    upsert: false,
+  });
+  if (error) return { ok: false, error: error.message };
+  return { ok: true, error: null };
 }

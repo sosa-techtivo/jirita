@@ -1,8 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { AttachmentApplyBatchSummary, AttachmentApplyOutcome, PlannedAttachmentFields, StorageObjectFinding } from "../types/phase6";
-import { uploadAttachment } from "./upload-attachment";
+import { uploadAttachment, uploadAttachmentThumbnail } from "./upload-attachment";
+import { planAttachmentThumbnail } from "./plan-attachment-thumbnails";
 
-const ATTACHMENT_ROW_COLUMNS = "id, ticket_id, comment_id, filename, storage_path, size_bytes, mime_type, uploaded_by, created_at, updated_at, unfuddle_id";
+const ATTACHMENT_ROW_COLUMNS = "id, ticket_id, comment_id, filename, storage_path, size_bytes, mime_type, uploaded_by, created_at, updated_at, unfuddle_id, thumbnail_path";
 const BATCH_SIZE = 10;
 
 function chunk<T>(items: T[], size: number): T[][] {
@@ -23,6 +24,7 @@ interface AttachmentRow {
   created_at: string;
   updated_at: string | null;
   unfuddle_id: string | null;
+  thumbnail_path: string | null;
 }
 
 function diffPlannedVsActual(planned: PlannedAttachmentFields, actual: AttachmentRow): string[] {
@@ -39,6 +41,7 @@ function diffPlannedVsActual(planned: PlannedAttachmentFields, actual: Attachmen
   const actualUpdated = actual.updated_at ? new Date(actual.updated_at).getTime() : null;
   if (plannedUpdated !== actualUpdated) diffs.push(`updated_at: expected ${planned.updated_at} got ${actual.updated_at}`);
   if (actual.unfuddle_id !== planned.unfuddle_id) diffs.push(`unfuddle_id: expected ${planned.unfuddle_id} got ${actual.unfuddle_id}`);
+  if ((actual.thumbnail_path ?? null) !== (planned.thumbnail_path ?? null)) diffs.push(`thumbnail_path: expected ${planned.thumbnail_path ?? null} got ${actual.thumbnail_path}`);
   return diffs;
 }
 
@@ -57,18 +60,42 @@ function diffPlannedVsActual(planned: PlannedAttachmentFields, actual: Attachmen
  * Only ever calls `.storage.upload(..., { upsert: false })` to write
  * objects (never overwrites, never uploads to a path already classified
  * `exists_matching`/`exists_differs`).
+ *
+ * `generateThumbnails` (default false — the already-completed KTVibe run
+ * never passes it, see runner/phase6-run.ts, which is left untouched and
+ * still calls this with 5 args) opts into Cached Egress support for a
+ * *future* project's own import: for each row, right after the original
+ * upload/exists-check succeeds, plan-attachment-thumbnails.ts decides
+ * whether to upload a physical WebP thumbnail (>600px raster), reuse the
+ * original as its own thumbnail (<=600px raster), or leave thumbnail_path
+ * NULL (non-image, or a thumbnail-specific failure). Unlike every other
+ * failure mode in this function, a thumbnail failure never stops the batch
+ * or the attachment's own upload/insert — it's recorded in
+ * thumbnailsFailed/thumbnailFailures and the row proceeds with
+ * thumbnail_path: null, exactly as if the attachment were a non-image.
  */
-export async function applyAttachments(admin: SupabaseClient, bucketId: string, mediaDir: string, newRows: PlannedAttachmentFields[], storageFindings: StorageObjectFinding[]): Promise<AttachmentApplyOutcome> {
+export async function applyAttachments(
+  admin: SupabaseClient,
+  bucketId: string,
+  mediaDir: string,
+  newRows: PlannedAttachmentFields[],
+  storageFindings: StorageObjectFinding[],
+  generateThumbnails = false
+): Promise<AttachmentApplyOutcome> {
   const findingByAttachmentId = new Map(storageFindings.map((f) => [f.attachmentUnfuddleId, f]));
 
   const insertedUnfuddleIds: string[] = [];
   const orphanObjects: AttachmentApplyOutcome["orphanObjects"] = [];
   const reconciliationDiffs: AttachmentApplyOutcome["reconciliationDiffs"] = [];
+  const thumbnailFailures: AttachmentApplyOutcome["thumbnailFailures"] = [];
   const batches: AttachmentApplyBatchSummary[] = [];
 
   let uploaded = 0;
   let inserted = 0;
   let reconciledOk = 0;
+  let thumbnailsCreated = 0;
+  let thumbnailsSelf = 0;
+  let thumbnailsFailed = 0;
   let stopError: string | null = null;
 
   const rowChunks = chunk(newRows, BATCH_SIZE);
@@ -80,6 +107,9 @@ export async function applyAttachments(admin: SupabaseClient, bucketId: string, 
     let batchUploaded = 0;
     let batchInserted = 0;
     let batchReconciled = 0;
+    let batchThumbnailsCreated = 0;
+    let batchThumbnailsSelf = 0;
+    let batchThumbnailsFailed = 0;
 
     for (const planned of batchRows) {
       const finding = findingByAttachmentId.get(planned.attachmentUnfuddleId);
@@ -107,7 +137,39 @@ export async function applyAttachments(admin: SupabaseClient, bucketId: string, 
       }
       // finding.status === "exists_matching": object already there and verified matching by the precheck — do not re-upload, proceed straight to the row insert (classification "B").
 
-      const { data: insertedRows, error: insertError } = await admin.rpc("insert_ticket_attachments_bypassing_activity_log", { attachment_rows: [planned] });
+      // Best-effort, never fatal to this attachment — see this function's
+      // own header comment. thumbnailPath stays null (the row's default)
+      // for every non-image, every decode failure, and every upload
+      // failure; only a genuine success ever sets it.
+      let thumbnailPath: string | null = null;
+      if (generateThumbnails) {
+        const plan = await planAttachmentThumbnail(mediaDir, planned);
+        if (plan.kind === "self") {
+          thumbnailPath = plan.thumbnailPath;
+          thumbnailsSelf++;
+          batchThumbnailsSelf++;
+        } else if (plan.kind === "physical" && plan.thumbnailPath && plan.thumbnailBuffer) {
+          const thumbUpload = await uploadAttachmentThumbnail(admin, bucketId, plan.thumbnailPath, plan.thumbnailBuffer);
+          if (thumbUpload.ok) {
+            thumbnailPath = plan.thumbnailPath;
+            thumbnailsCreated++;
+            batchThumbnailsCreated++;
+          } else {
+            thumbnailsFailed++;
+            batchThumbnailsFailed++;
+            thumbnailFailures.push({ attachmentUnfuddleId: planned.attachmentUnfuddleId, reason: `thumbnail upload failed: ${thumbUpload.error}` });
+          }
+        } else if (plan.kind === "error") {
+          thumbnailsFailed++;
+          batchThumbnailsFailed++;
+          thumbnailFailures.push({ attachmentUnfuddleId: planned.attachmentUnfuddleId, reason: plan.reason ?? "unknown thumbnail generation error" });
+        }
+        // plan.kind === "not-image": thumbnailPath stays null, nothing to count as a failure.
+      }
+
+      const plannedWithThumbnail: PlannedAttachmentFields = { ...planned, thumbnail_path: thumbnailPath };
+
+      const { data: insertedRows, error: insertError } = await admin.rpc("insert_ticket_attachments_bypassing_activity_log", { attachment_rows: [plannedWithThumbnail] });
       if (insertError || !insertedRows || insertedRows.length !== 1) {
         stopError = `Attachment ${planned.attachmentUnfuddleId}: row insert failed: ${insertError?.message ?? "no row returned"}`;
         batchErrors.push(stopError);
@@ -124,7 +186,7 @@ export async function applyAttachments(admin: SupabaseClient, bucketId: string, 
         batchErrors.push(stopError);
         break outer;
       }
-      const diffs = diffPlannedVsActual(planned, reread as AttachmentRow);
+      const diffs = diffPlannedVsActual(plannedWithThumbnail, reread as AttachmentRow);
       if (diffs.length === 0) {
         reconciledOk++;
         batchReconciled++;
@@ -144,6 +206,9 @@ export async function applyAttachments(admin: SupabaseClient, bucketId: string, 
       reconciled: batchReconciled,
       errors: batchErrors,
       durationMs: Date.now() - batchStart,
+      thumbnailsCreated: batchThumbnailsCreated,
+      thumbnailsSelf: batchThumbnailsSelf,
+      thumbnailsFailed: batchThumbnailsFailed,
     });
 
     if (stopError) break;
@@ -166,5 +231,9 @@ export async function applyAttachments(admin: SupabaseClient, bucketId: string, 
     reconciliationDiffs,
     batches,
     error: stopError,
+    thumbnailsCreated,
+    thumbnailsSelf,
+    thumbnailsFailed,
+    thumbnailFailures,
   };
 }

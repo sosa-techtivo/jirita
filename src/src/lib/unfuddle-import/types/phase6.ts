@@ -95,6 +95,47 @@ export interface PlannedAttachmentFields {
   uploaded_by: null;
   created_at: string;
   updated_at: string | null;
+  /** Optional and set only by a later, separate step (see
+   *  import-attachments/plan-attachment-thumbnails.ts) — mapAttachmentRows
+   *  itself never sets this key at all, so a planned row built the exact
+   *  same way the already-completed KTVibe import built it (never re-run)
+   *  omits the key entirely, and the RPC (20260923000000) inserts NULL for
+   *  it, unchanged from before this field existed. */
+  thumbnail_path?: string | null;
+}
+
+export type AttachmentThumbnailKind = "physical" | "self" | "not-image" | "error";
+
+/** Per-attachment outcome of import-attachments/plan-attachment-thumbnails.ts
+ *  — the single source of truth both the PREVIEW report and APPLY
+ *  (apply-attachments.ts) read from, so the two can never disagree about
+ *  which attachments get a thumbnail. */
+export interface AttachmentThumbnailPlanItem {
+  attachmentUnfuddleId: number;
+  kind: AttachmentThumbnailKind;
+  /** Set only when a raster image was successfully decoded (kind "physical" or "self"). */
+  width: number | null;
+  height: number | null;
+  /** kind "physical": the path a new WebP object would be uploaded to.
+   *  kind "self": the row's own storage_path — no new object, the
+   *  original doubles as its own thumbnail.
+   *  kind "not-image" | "error": null — thumbnail_path stays NULL. */
+  thumbnailPath: string | null;
+  /** Only populated for kind "physical" — the encoded WebP bytes, read
+   *  once and consumed by the very next step (APPLY's upload, or nothing
+   *  at all in PREVIEW) rather than retained across attachments. */
+  thumbnailBuffer: Buffer | null;
+  /** Always set for "not-image"/"error", null otherwise. */
+  reason: string | null;
+}
+
+export interface AttachmentThumbnailStats {
+  totalAttachments: number;
+  wouldCreatePhysicalThumbnail: number;
+  wouldUseOriginalAsThumbnail: number;
+  notImage: number;
+  errors: number;
+  errorDetails: { attachmentUnfuddleId: number; reason: string }[];
 }
 
 export interface ExistingAttachmentRow {
@@ -178,6 +219,12 @@ export interface AttachmentApplyBatchSummary {
   reconciled: number;
   errors: string[];
   durationMs: number;
+  /** Always 0 unless a thumbnailPlanByAttachmentId map was passed to
+   *  applyAttachments (opt-in — the already-completed KTVibe run never
+   *  passes one, see apply-attachments.ts). */
+  thumbnailsCreated: number;
+  thumbnailsSelf: number;
+  thumbnailsFailed: number;
 }
 
 export interface AttachmentApplyOutcome {
@@ -194,6 +241,15 @@ export interface AttachmentApplyOutcome {
   reconciliationDiffs: { unfuddleId: string; diffs: string[] }[];
   batches: AttachmentApplyBatchSummary[];
   error: string | null;
+  /** Physical WebP thumbnails uploaded (kind "physical" in the thumbnail plan). */
+  thumbnailsCreated: number;
+  /** Rows where thumbnail_path was set to the row's own storage_path (kind "self", <=600px). */
+  thumbnailsSelf: number;
+  /** A thumbnail failure never fails the attachment itself — the original
+   *  still uploads/inserts normally with thumbnail_path left NULL; this
+   *  only counts and records what happened. */
+  thumbnailsFailed: number;
+  thumbnailFailures: { attachmentUnfuddleId: number; reason: string }[];
 }
 
 export type Phase6Outcome = "preview_success" | "apply_success" | "failed";

@@ -30,3 +30,21 @@ function sanitizeFilename(filename: string): string {
 export function generateAttachmentObjectPath(ticketId: string, attachmentUnfuddleId: number, filename: string): string {
   return `${ticketId}/att-${attachmentUnfuddleId}-${sanitizeFilename(filename)}`;
 }
+
+/**
+ * Thumbnail sibling of generateAttachmentObjectPath — same
+ * "<ticket_id>/thumbnails/<same uuid/id-derived suffix>.webp" convention
+ * already used by both the live app (uploadTicketAttachment,
+ * src/lib/tickets.ts) and the historical live-data backfill
+ * (src/lib/attachment-thumbnail-backfill/process-candidate.ts): the
+ * thumbnail path is always the original's own path with a "thumbnails/"
+ * segment inserted after the ticket id and ".webp" appended, never an
+ * independently-generated name. Kept first-segment-identical to the
+ * original (`${ticketId}/...`) on purpose — the existing Storage RLS
+ * policies authorize by that first folder segment only, so no policy
+ * change is needed for this path to be readable/writable by the same
+ * people who can already read/write the original.
+ */
+export function generateAttachmentThumbnailObjectPath(ticketId: string, attachmentUnfuddleId: number, filename: string): string {
+  return `${ticketId}/thumbnails/att-${attachmentUnfuddleId}-${sanitizeFilename(filename)}.webp`;
+}
