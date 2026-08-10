@@ -24,7 +24,7 @@ import {
   loadOrganizationLoggedTimeForRange,
   isTicketClosed,
 } from "@/lib/tickets";
-import type { OrganizationActivityEvent, OrganizationTimeEntry } from "@/lib/tickets";
+import type { OrganizationActivityEvent, OrganizationTimeEntry, TicketStatusOption } from "@/lib/tickets";
 import {
   buildHoursByPersonRows,
   buildProjectHealthRows,
@@ -454,6 +454,11 @@ export function AdminProjectOverview({ slug = "mobile-banking-app" }: { slug?: s
   const [loadErrorMessage, setLoadErrorMessage] = useState<string | null>(null);
   const [project, setProject] = useState<ProjectDetail | null>(null);
   const [tickets, setTickets] = useState<Ticket[]>([]);
+  // Real, per-project ticket_statuses (same shape Tickets screen already
+  // loads) — needed so New Ticket's status selector here works with real
+  // ticket_statuses.id values instead of falling back to the legacy
+  // FALLBACK_TICKET_STATUSES ids, which createTicket rejects.
+  const [statuses, setStatuses] = useState<TicketStatusOption[]>([]);
   const [teamMembers, setTeamMembers] = useState<ProjectTeamMember[]>([]);
   const [activityEvents, setActivityEvents] = useState<OrganizationActivityEvent[]>([]);
   const [timeEntries, setTimeEntries] = useState<OrganizationTimeEntry[]>([]);
@@ -490,6 +495,7 @@ export function AdminProjectOverview({ slug = "mobile-banking-app" }: { slug?: s
         return;
       }
       const projectTickets = ticketsResult.status === "ready" ? ticketsResult.tickets : [];
+      const projectStatuses = ticketsResult.status === "ready" ? ticketsResult.statuses : [];
       const ticketIds = projectTickets.map((t) => t.id);
 
       const [teamResult, activityResult, timeResult] = await Promise.all([
@@ -521,6 +527,7 @@ export function AdminProjectOverview({ slug = "mobile-banking-app" }: { slug?: s
 
       setProject(projectResult.project);
       setTickets(projectTickets);
+      setStatuses(projectStatuses);
       setTeamMembers(teamResult.members);
       setActivityEvents(activityResult.events);
       setTimeEntries(timeResult.entries);
@@ -976,10 +983,11 @@ export function AdminProjectOverview({ slug = "mobile-banking-app" }: { slug?: s
         <NewTicketModal
           slug={slug}
           tickets={tickets}
-          members={[]}
+          members={teamMembers}
           onClose={() => setShowNewTicket(false)}
           onCreated={handleTicketCreated}
           onPreviewDuplicate={handlePreviewDuplicate}
+          statuses={statuses}
         />
       )}
 
