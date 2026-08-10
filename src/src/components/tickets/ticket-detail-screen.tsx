@@ -53,7 +53,7 @@ import {
   loadTicketAttachments,
   uploadTicketAttachment,
   downloadTicketAttachment,
-  getTicketAttachmentPreviewUrl,
+  resolveTicketAttachmentPreviewUrl,
   renameTicketAttachment,
   deleteTicketAttachment,
   loadTicketTimeEntries,
@@ -1166,6 +1166,7 @@ function CollapsibleSection({
   defaultOpen = true,
   forceOpenSignal,
   collapsible = true,
+  onOpenChange,
   children,
 }: {
   // ReactNode (not just string) so Development can prefix its own title
@@ -1186,6 +1187,12 @@ function CollapsibleSection({
   // Attachments passes this; every other caller keeps the default
   // (collapsible) behavior unchanged.
   collapsible?: boolean;
+  /** Optional — fires with the current open state on mount and on every
+   *  toggle. Lets a caller (e.g. CommentAttachmentsOverview) defer work
+   *  inside `children` until the section is actually expanded, without
+   *  turning this into a fully controlled component. Every other caller
+   *  omits it and renders exactly as before. */
+  onOpenChange?: (open: boolean) => void;
   children: ReactNode;
 }) {
   const [open, setOpen] = useState(defaultOpen);
@@ -1199,6 +1206,11 @@ function CollapsibleSection({
     }
     setOpen(true);
   }, [collapsible, forceOpenSignal]);
+
+  useEffect(() => {
+    onOpenChange?.(open);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   const isOpen = !collapsible || open;
 
@@ -1610,7 +1622,7 @@ function AttachmentRow({
   useEffect(() => {
     if (!isImage) return;
     let cancelled = false;
-    getTicketAttachmentPreviewUrl(file.storagePath).then((result) => {
+    resolveTicketAttachmentPreviewUrl(file.storagePath).then((result) => {
       if (cancelled) return;
       if (result.status === "error") { setInlineImageFailed(true); return; }
       setInlineImageUrl(result.url);
@@ -1840,7 +1852,7 @@ function AttachmentRow({
           <div className="w-full h-48 flex items-center justify-center bg-slate-100 dark:bg-zinc-900">
             {inlineImageUrl && (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={inlineImageUrl} alt={file.name} className="max-w-full max-h-full object-contain" />
+              <img src={inlineImageUrl} alt={file.name} loading="lazy" className="max-w-full max-h-full object-contain" />
             )}
             {!inlineImageUrl && !inlineImageFailed && (
               <svg className="w-4 h-4 animate-spin text-slate-300 dark:text-zinc-700" fill="none" viewBox="0 0 24 24">
@@ -2450,6 +2462,7 @@ function ReplyComposer({
 function CommentAttachmentRow({
   file,
   onRemove,
+  loadEnabled = true,
 }: {
   file: AttachmentItem;
   /** Only passed while editing an existing comment (see CommentItem) —
@@ -2458,6 +2471,12 @@ function CommentAttachmentRow({
    *  it untouched. Omitted everywhere else (view mode), which renders
    *  exactly as it always has. */
   onRemove?: () => void;
+  /** False only while this row's instance lives inside a collapsed
+   *  "Attachments from comments" accordion (see CommentAttachmentsOverview)
+   *  — defers resolving/downloading the image until the section is
+   *  actually expanded. Every other caller (a comment's own inline
+   *  attachments) omits this and keeps the original eager behavior. */
+  loadEnabled?: boolean;
 }) {
   const [previewOpen, setPreviewOpen] = useState(false);
   const [confirmingRemove, setConfirmingRemove] = useState(false);
@@ -2474,15 +2493,15 @@ function CommentAttachmentRow({
   const [inlineImageFailed, setInlineImageFailed] = useState(false);
 
   useEffect(() => {
-    if (!isImage) return;
+    if (!isImage || !loadEnabled) return;
     let cancelled = false;
-    getTicketAttachmentPreviewUrl(file.storagePath).then((result) => {
+    resolveTicketAttachmentPreviewUrl(file.storagePath).then((result) => {
       if (cancelled) return;
       if (result.status === "error") { setInlineImageFailed(true); return; }
       setInlineImageUrl(result.url);
     });
     return () => { cancelled = true; };
-  }, [isImage, file.storagePath]);
+  }, [isImage, loadEnabled, file.storagePath]);
 
   // Same behavior as before, just reused by both the image thumbnail and
   // the plain row below: opens the existing preview modal when available,
@@ -2535,7 +2554,7 @@ function CommentAttachmentRow({
           <div className="w-full h-48 flex items-center justify-center bg-slate-50 dark:bg-zinc-900">
             {inlineImageUrl && (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={inlineImageUrl} alt={file.name} className="max-w-full max-h-full object-contain" />
+              <img src={inlineImageUrl} alt={file.name} loading="lazy" className="max-w-full max-h-full object-contain" />
             )}
             {!inlineImageUrl && !inlineImageFailed && (
               <svg className="w-4 h-4 animate-spin text-slate-300 dark:text-zinc-700" fill="none" viewBox="0 0 24 24">
@@ -2665,7 +2684,7 @@ function AttachmentPreviewModal({
 
   useEffect(() => {
     let cancelled = false;
-    getTicketAttachmentPreviewUrl(file.storagePath).then((result) => {
+    resolveTicketAttachmentPreviewUrl(file.storagePath).then((result) => {
       if (cancelled) return;
       if (result.status === "error") { setFailed(true); return; }
       setUrl(result.url);
@@ -2776,6 +2795,15 @@ function CommentAttachmentsOverview({
     .flatMap(({ parent, replies }) => [parent, ...replies])
     .filter((c) => c.attachments.length > 0);
 
+  // Sticky once true: this section starts collapsed (defaultOpen={false}),
+  // so its own CommentAttachmentRow instances must not resolve a signed URL
+  // or download an image until the user actually expands it — every
+  // attachment here is also already rendered inline on its own comment
+  // above, so a closed accordion has zero reason to duplicate that fetch.
+  // Once opened it stays "loaded" even if collapsed again, instead of
+  // re-fetching on every expand.
+  const [everOpened, setEverOpened] = useState(false);
+
   if (commentsWithAttachments.length === 0) return null;
 
   const totalAttachments = commentsWithAttachments.reduce((sum, c) => sum + c.attachments.length, 0);
@@ -2785,6 +2813,7 @@ function CommentAttachmentsOverview({
       title="Attachments from comments"
       badge={`· ${totalAttachments} total`}
       defaultOpen={false}
+      onOpenChange={(open) => { if (open) setEverOpened(true); }}
     >
       <div className="space-y-5">
         {commentsWithAttachments.map((c) => (
@@ -2818,7 +2847,7 @@ function CommentAttachmentsOverview({
             </div>
             <div className="space-y-1.5">
               {c.attachments.map((a) => (
-                <CommentAttachmentRow key={a.id} file={toAttachmentItem(a)} />
+                <CommentAttachmentRow key={a.id} file={toAttachmentItem(a)} loadEnabled={everOpened} />
               ))}
             </div>
           </div>

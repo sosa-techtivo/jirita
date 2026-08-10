@@ -2992,6 +2992,41 @@ export async function getTicketAttachmentPreviewUrl(storagePath: string): Promis
   return { status: "success", url: data.signedUrl };
 }
 
+// Every attachment preview consumer (a comment's own inline attachments,
+// the "Attachments from comments" overview, the preview modal, and the
+// ticket preview panel) can render the very same storagePath at the same
+// time — without this, each one calls getTicketAttachmentPreviewUrl
+// independently and gets back a *different* signed URL (different token)
+// for the same object, so the browser can't reuse its HTTP cache and the
+// file is downloaded again per instance. Routing all of them through this
+// cache instead means concurrent/duplicate renders share one in-flight
+// request and, once resolved, the exact same URL string — letting the
+// browser's own cache (see the object's Cache-Control from upload) satisfy
+// the repeat instance for free. The TTL is kept comfortably under the
+// createSignedUrl(storagePath, 300) expiration above so a cached entry is
+// never handed out past the point Supabase would already reject it.
+const TICKET_ATTACHMENT_PREVIEW_URL_TTL_MS = 4 * 60 * 1000;
+const ticketAttachmentPreviewUrlCache = new Map<
+  string,
+  { promise: Promise<TicketAttachmentPreviewUrlResult>; fetchedAt: number }
+>();
+
+export function resolveTicketAttachmentPreviewUrl(storagePath: string): Promise<TicketAttachmentPreviewUrlResult> {
+  const cached = ticketAttachmentPreviewUrlCache.get(storagePath);
+  if (cached && Date.now() - cached.fetchedAt < TICKET_ATTACHMENT_PREVIEW_URL_TTL_MS) {
+    return cached.promise;
+  }
+
+  const promise = getTicketAttachmentPreviewUrl(storagePath);
+  ticketAttachmentPreviewUrlCache.set(storagePath, { promise, fetchedAt: Date.now() });
+  // An error isn't worth remembering for the full TTL — the next mount
+  // should get a fresh attempt rather than a cached failure.
+  promise.then((result) => {
+    if (result.status === "error") ticketAttachmentPreviewUrlCache.delete(storagePath);
+  });
+  return promise;
+}
+
 export type RenameTicketAttachmentResult =
   | { status: "success" }
   | { status: "error"; message: string };

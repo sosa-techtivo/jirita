@@ -22,7 +22,7 @@ import {
   loadTicketComments,
   groupCommentThreads,
   loadTicketAttachments,
-  getTicketAttachmentPreviewUrl,
+  resolveTicketAttachmentPreviewUrl,
   downloadTicketAttachment,
   loadProfileSummary,
   updateTicket,
@@ -84,8 +84,9 @@ function isPreviewableImage(attachment: TicketAttachment): boolean {
 }
 
 // Image attachment — fetches its own short-lived signed URL (same
-// getTicketAttachmentPreviewUrl used by AttachmentPreviewModal) and renders
-// it as an inline thumbnail: fit to width, aspect ratio preserved via
+// resolveTicketAttachmentPreviewUrl used by AttachmentPreviewModal, shared
+// and deduped across every instance of the same attachment) and renders it
+// as an inline thumbnail: fit to width, aspect ratio preserved via
 // object-contain inside a capped-height box, so it can never overflow the
 // panel regardless of the image's own dimensions.
 function PreviewAttachmentImageRow({ attachment }: { attachment: TicketAttachment }) {
@@ -94,7 +95,7 @@ function PreviewAttachmentImageRow({ attachment }: { attachment: TicketAttachmen
 
   useEffect(() => {
     let cancelled = false;
-    getTicketAttachmentPreviewUrl(attachment.storagePath).then((result) => {
+    resolveTicketAttachmentPreviewUrl(attachment.storagePath).then((result) => {
       if (cancelled) return;
       if (result.status === "error") { setFailed(true); return; }
       setUrl(result.url);
@@ -107,7 +108,7 @@ function PreviewAttachmentImageRow({ attachment }: { attachment: TicketAttachmen
       <div className="w-full h-48 flex items-center justify-center bg-slate-100 dark:bg-zinc-900">
         {url && (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={url} alt={attachment.filename} className="max-w-full max-h-full object-contain" />
+          <img src={url} alt={attachment.filename} loading="lazy" className="max-w-full max-h-full object-contain" />
         )}
         {!url && !failed && (
           <svg className="w-4 h-4 animate-spin text-slate-300 dark:text-zinc-700" fill="none" viewBox="0 0 24 24">
