@@ -19,6 +19,7 @@ import { loadOrganizationProjects } from "./projects";
 import type { ProjectStatus } from "./mock-projects";
 import { formatAbsoluteDate, formatAbsoluteDateTime } from "./date-format";
 import { createNotification } from "./notifications";
+import { generateAttachmentThumbnail } from "./attachment-thumbnail";
 // Plain, browser-only DOMPurify — same package/reasoning as
 // components/rich-text/rich-text-utils.ts (never "isomorphic-dompurify").
 // This module already only ever runs client-side (every function here
@@ -2798,6 +2799,14 @@ export interface TicketAttachment {
    *  restored from a Full Backup. The UI must never attempt a
    *  download/preview when this is false. */
   isAvailable: boolean;
+  /** Storage path of the pre-resized (max ~600px wide) derivative
+   *  generateAttachmentThumbnail produced at upload time — null for every
+   *  non-image attachment and for any image whose thumbnail generation
+   *  failed or was skipped (already narrower than the cap). Every inline-
+   *  thumbnail consumer resolves this path when present and falls back to
+   *  storagePath when it isn't; the full-size preview modal and download
+   *  always use storagePath, never this. */
+  thumbnailPath: string | null;
 }
 
 interface AttachmentRow {
@@ -2809,6 +2818,7 @@ interface AttachmentRow {
   uploaded_by: string | null;
   created_at: string;
   is_available: boolean;
+  thumbnail_path: string | null;
 }
 
 function rowToAttachment(row: AttachmentRow, uploaderRow: AssigneeProfileRow | undefined): TicketAttachment {
@@ -2824,6 +2834,7 @@ function rowToAttachment(row: AttachmentRow, uploaderRow: AssigneeProfileRow | u
     uploadedByProfileId: row.uploaded_by,
     uploadedAt: formatRelativeTime(row.created_at),
     isAvailable: row.is_available,
+    thumbnailPath: row.thumbnail_path,
   };
 }
 
@@ -2841,7 +2852,7 @@ export async function loadTicketAttachments(ticketId: string): Promise<TicketAtt
 
   const { data: rows, error } = await supabase
     .from("ticket_attachments")
-    .select("id, filename, storage_path, size_bytes, mime_type, uploaded_by, created_at, is_available")
+    .select("id, filename, storage_path, size_bytes, mime_type, uploaded_by, created_at, is_available, thumbnail_path")
     .eq("ticket_id", ticketId)
     .is("comment_id", null)
     .order("created_at", { ascending: false })
@@ -2888,13 +2899,39 @@ export async function uploadTicketAttachment(
   const supabase = getSupabaseBrowserClient();
 
   const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
-  const storagePath = `${ticketId}/${crypto.randomUUID()}-${safeName}`;
+  const uniquePrefix = crypto.randomUUID();
+  const storagePath = `${ticketId}/${uniquePrefix}-${safeName}`;
 
   const { error: uploadError } = await supabase.storage.from(ATTACHMENTS_BUCKET).upload(storagePath, file);
 
   if (uploadError) {
     logDev("attachment storage upload failed", uploadError);
     return { status: "error", message: uploadError.message };
+  }
+
+  // Best-effort, non-image-skipping, and never allowed to fail the upload
+  // itself — a thumbnail is purely an egress optimization for later reads,
+  // not something the original upload should ever depend on. Path is
+  // deterministically derived from the original's own uuid+filename, just
+  // under a "thumbnails/" subfolder (still "<ticket_id>/..." as its first
+  // segment, so it's covered by the same Storage RLS policies with no
+  // changes needed there).
+  let thumbnailPath: string | null = null;
+  try {
+    const thumbnail = await generateAttachmentThumbnail(file);
+    if (thumbnail) {
+      const candidatePath = `${ticketId}/thumbnails/${uniquePrefix}-${safeName}.${thumbnail.ext}`;
+      const { error: thumbnailUploadError } = await supabase.storage
+        .from(ATTACHMENTS_BUCKET)
+        .upload(candidatePath, thumbnail.blob, { contentType: thumbnail.blob.type });
+      if (thumbnailUploadError) {
+        logDev("attachment thumbnail upload failed", thumbnailUploadError);
+      } else {
+        thumbnailPath = candidatePath;
+      }
+    }
+  } catch (err) {
+    logDev("attachment thumbnail generation failed", err);
   }
 
   const { data: row, error: insertError } = await supabase
@@ -2906,15 +2943,17 @@ export async function uploadTicketAttachment(
       filename: file.name,
       size_bytes: file.size,
       mime_type: file.type || null,
+      thumbnail_path: thumbnailPath,
     })
-    .select("id, filename, storage_path, size_bytes, mime_type, uploaded_by, created_at, is_available")
+    .select("id, filename, storage_path, size_bytes, mime_type, uploaded_by, created_at, is_available, thumbnail_path")
     .single<AttachmentRow>();
 
   if (insertError) {
     logDev("attachment record insert failed", insertError);
     // Best-effort cleanup — don't leave an orphaned Storage object with no
     // corresponding row if the insert failed after the upload succeeded.
-    await supabase.storage.from(ATTACHMENTS_BUCKET).remove([storagePath]);
+    const orphanedPaths = thumbnailPath ? [storagePath, thumbnailPath] : [storagePath];
+    await supabase.storage.from(ATTACHMENTS_BUCKET).remove(orphanedPaths);
     return { status: "error", message: insertError.message };
   }
 
@@ -3027,6 +3066,72 @@ export function resolveTicketAttachmentPreviewUrl(storagePath: string): Promise<
   return promise;
 }
 
+// Inline thumbnails (the small image rows rendered in the Attachments
+// section, a comment's own attachments, "Attachments from comments", and
+// the Ticket Preview panel) never need the full original. Rather than
+// asking Supabase to transform the original on the fly (Image
+// Transformations — dropped: it requires a project-level feature/plan this
+// app can't assume is enabled, confirmed live by a correctly-formed
+// createSignedUrl(..., { transform }) call never coming back under
+// /render/image/sign/), uploadTicketAttachment below generates and stores a
+// real, separate, width-capped derivative object at upload time; this just
+// signs whichever object is the right one for the context — the physical
+// thumbnail when one exists, the original when it doesn't (non-image
+// attachments, or any image where thumbnail generation failed/was skipped).
+// This is a *distinct* object from the one getTicketAttachmentPreviewUrl
+// signs — never shares a cache entry with it (see the separate cache
+// below): reusing one URL for the other context would either hand the
+// full-size modal a downscaled image or hand a thumbnail row a needlessly
+// heavy original.
+export async function getTicketAttachmentThumbnailUrl(
+  storagePath: string,
+  thumbnailPath: string | null
+): Promise<TicketAttachmentPreviewUrlResult> {
+  const supabase = getSupabaseBrowserClient();
+  const targetPath = thumbnailPath ?? storagePath;
+
+  const { data, error } = await supabase.storage.from(ATTACHMENTS_BUCKET).createSignedUrl(targetPath, 300);
+
+  if (error || !data) {
+    logDev("attachment thumbnail signed url failed", error);
+    return { status: "error", message: error?.message ?? "Preview failed" };
+  }
+
+  return { status: "success", url: data.signedUrl };
+}
+
+// Mirrors resolveTicketAttachmentPreviewUrl's dedupe/TTL strategy exactly,
+// but keyed into its own Map — deliberately never the same cache as the
+// original-URL one above, so a thumbnail render can never be served the
+// original (defeating the point of a separate, smaller object) and the
+// full-size preview modal can never be served the downscaled thumbnail by
+// mistake. Keyed by whichever path is actually being signed (thumbnailPath
+// when present, storagePath otherwise) — that's the real identity for
+// dedup purposes, and it can never collide with a different attachment's
+// key since thumbnailPath/storagePath are both unique per object.
+const ticketAttachmentThumbnailUrlCache = new Map<
+  string,
+  { promise: Promise<TicketAttachmentPreviewUrlResult>; fetchedAt: number }
+>();
+
+export function resolveTicketAttachmentThumbnailUrl(
+  storagePath: string,
+  thumbnailPath: string | null
+): Promise<TicketAttachmentPreviewUrlResult> {
+  const cacheKey = thumbnailPath ?? storagePath;
+  const cached = ticketAttachmentThumbnailUrlCache.get(cacheKey);
+  if (cached && Date.now() - cached.fetchedAt < TICKET_ATTACHMENT_PREVIEW_URL_TTL_MS) {
+    return cached.promise;
+  }
+
+  const promise = getTicketAttachmentThumbnailUrl(storagePath, thumbnailPath);
+  ticketAttachmentThumbnailUrlCache.set(cacheKey, { promise, fetchedAt: Date.now() });
+  promise.then((result) => {
+    if (result.status === "error") ticketAttachmentThumbnailUrlCache.delete(cacheKey);
+  });
+  return promise;
+}
+
 export type RenameTicketAttachmentResult =
   | { status: "success" }
   | { status: "error"; message: string };
@@ -3073,7 +3178,8 @@ export type DeleteTicketAttachmentResult =
 // rather than a row that points at a missing file.
 export async function deleteTicketAttachment(
   attachmentId: string,
-  storagePath: string
+  storagePath: string,
+  thumbnailPath: string | null
 ): Promise<DeleteTicketAttachmentResult> {
   const supabase = getSupabaseBrowserClient();
 
@@ -3090,7 +3196,8 @@ export async function deleteTicketAttachment(
     return { status: "error", message: "You don't have permission to delete this attachment." };
   }
 
-  const { error: storageError } = await supabase.storage.from(ATTACHMENTS_BUCKET).remove([storagePath]);
+  const pathsToRemove = thumbnailPath ? [storagePath, thumbnailPath] : [storagePath];
+  const { error: storageError } = await supabase.storage.from(ATTACHMENTS_BUCKET).remove(pathsToRemove);
   if (storageError) {
     // The row is already gone (and the UI already reflects that) — log for
     // visibility but don't surface this as a failure of the delete action.

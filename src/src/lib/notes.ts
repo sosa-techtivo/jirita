@@ -19,6 +19,7 @@
 import { getSupabaseBrowserClient } from "./supabase-client";
 import { resolveAvatarUrl } from "./membership";
 import { FALLBACK_AVATAR } from "./current-user";
+import { generateAttachmentThumbnail } from "./attachment-thumbnail";
 import type { ProjectNote, ProjectNoteAttachment } from "./mock-notes";
 
 type SupabaseClient = ReturnType<typeof getSupabaseBrowserClient>;
@@ -129,6 +130,7 @@ interface NoteAttachmentRow {
   mime_type: string | null;
   uploaded_by: string | null;
   created_at: string;
+  thumbnail_path: string | null;
 }
 
 function rowToNoteAttachment(row: NoteAttachmentRow, uploaderRow: AuthorProfileRow | undefined): ProjectNoteAttachment {
@@ -146,6 +148,7 @@ function rowToNoteAttachment(row: NoteAttachmentRow, uploaderRow: AuthorProfileR
       (uploaderRow ? resolveAvatarUrl(uploaderRow.avatar_url, uploaderRow.updated_at) : null) ?? FALLBACK_AVATAR,
     uploadedByProfileId: row.uploaded_by,
     uploadedAt: formatUpdatedAt(row.created_at),
+    thumbnailPath: row.thumbnail_path,
   };
 }
 
@@ -200,7 +203,7 @@ export async function loadProjectNotes(organizationId: string, slug: string): Pr
   if (noteIds.length > 0) {
     const { data: attachmentRows, error: attachmentsError } = await supabase
       .from("project_note_attachments")
-      .select("id, filename, storage_path, size_bytes, mime_type, uploaded_by, created_at, note_id")
+      .select("id, filename, storage_path, size_bytes, mime_type, uploaded_by, created_at, thumbnail_path, note_id")
       .in("note_id", noteIds)
       .order("created_at", { ascending: true })
       .returns<(NoteAttachmentRow & { note_id: string })[]>();
@@ -356,9 +359,9 @@ export async function deleteNote(noteId: string): Promise<DeleteNoteResult> {
 
   const { data: attachmentRows } = await supabase
     .from("project_note_attachments")
-    .select("storage_path")
+    .select("storage_path, thumbnail_path")
     .eq("note_id", noteId)
-    .returns<{ storage_path: string }[]>();
+    .returns<{ storage_path: string; thumbnail_path: string | null }[]>();
 
   const { error } = await supabase.from("project_notes").delete().eq("id", noteId);
 
@@ -367,7 +370,9 @@ export async function deleteNote(noteId: string): Promise<DeleteNoteResult> {
     return { status: "error", message: error.message };
   }
 
-  const storagePaths = (attachmentRows ?? []).map((row) => row.storage_path);
+  const storagePaths = (attachmentRows ?? []).flatMap((row) =>
+    row.thumbnail_path ? [row.storage_path, row.thumbnail_path] : [row.storage_path]
+  );
   if (storagePaths.length > 0) {
     const { error: storageError } = await supabase.storage.from(NOTE_ATTACHMENTS_BUCKET).remove(storagePaths);
     if (storageError) {
@@ -394,13 +399,38 @@ export async function uploadProjectNoteAttachment(noteId: string, file: File): P
   const supabase = getSupabaseBrowserClient();
 
   const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
-  const storagePath = `${noteId}/${crypto.randomUUID()}-${safeName}`;
+  const uniquePrefix = crypto.randomUUID();
+  const storagePath = `${noteId}/${uniquePrefix}-${safeName}`;
 
   const { error: uploadError } = await supabase.storage.from(NOTE_ATTACHMENTS_BUCKET).upload(storagePath, file);
 
   if (uploadError) {
     logDev("note attachment storage upload failed", uploadError);
     return { status: "error", message: uploadError.message };
+  }
+
+  // Same best-effort thumbnail step as uploadTicketAttachment (lib/tickets.ts)
+  // — generation/upload failure never fails the already-succeeded original
+  // upload, it just leaves thumbnail_path null. Not yet consumed by the
+  // Notes UI (note-attachments.tsx still resolves storagePath directly, out
+  // of this task's scope) — stored now so a future pass can wire it up
+  // without a second upload-time backfill.
+  let thumbnailPath: string | null = null;
+  try {
+    const thumbnail = await generateAttachmentThumbnail(file);
+    if (thumbnail) {
+      const candidatePath = `${noteId}/thumbnails/${uniquePrefix}-${safeName}.${thumbnail.ext}`;
+      const { error: thumbnailUploadError } = await supabase.storage
+        .from(NOTE_ATTACHMENTS_BUCKET)
+        .upload(candidatePath, thumbnail.blob, { contentType: thumbnail.blob.type });
+      if (thumbnailUploadError) {
+        logDev("note attachment thumbnail upload failed", thumbnailUploadError);
+      } else {
+        thumbnailPath = candidatePath;
+      }
+    }
+  } catch (err) {
+    logDev("note attachment thumbnail generation failed", err);
   }
 
   const { data: row, error: insertError } = await supabase
@@ -411,15 +441,17 @@ export async function uploadProjectNoteAttachment(noteId: string, file: File): P
       filename: file.name,
       size_bytes: file.size,
       mime_type: file.type || null,
+      thumbnail_path: thumbnailPath,
     })
-    .select("id, filename, storage_path, size_bytes, mime_type, uploaded_by, created_at")
+    .select("id, filename, storage_path, size_bytes, mime_type, uploaded_by, created_at, thumbnail_path")
     .single<NoteAttachmentRow>();
 
   if (insertError) {
     logDev("note attachment record insert failed", insertError);
     // Best-effort cleanup — don't leave an orphaned Storage object with no
     // corresponding row if the insert failed after the upload succeeded.
-    await supabase.storage.from(NOTE_ATTACHMENTS_BUCKET).remove([storagePath]);
+    const orphanedPaths = thumbnailPath ? [storagePath, thumbnailPath] : [storagePath];
+    await supabase.storage.from(NOTE_ATTACHMENTS_BUCKET).remove(orphanedPaths);
     return { status: "error", message: insertError.message };
   }
 
@@ -490,7 +522,8 @@ export type DeleteNoteAttachmentResult = { status: "success" } | { status: "erro
 // required to tell "deleted" apart from "RLS silently matched zero rows."
 export async function deleteProjectNoteAttachment(
   attachmentId: string,
-  storagePath: string
+  storagePath: string,
+  thumbnailPath: string | null
 ): Promise<DeleteNoteAttachmentResult> {
   const supabase = getSupabaseBrowserClient();
 
@@ -504,7 +537,8 @@ export async function deleteProjectNoteAttachment(
     return { status: "error", message: "You don't have permission to delete this attachment." };
   }
 
-  const { error: storageError } = await supabase.storage.from(NOTE_ATTACHMENTS_BUCKET).remove([storagePath]);
+  const pathsToRemove = thumbnailPath ? [storagePath, thumbnailPath] : [storagePath];
+  const { error: storageError } = await supabase.storage.from(NOTE_ATTACHMENTS_BUCKET).remove(pathsToRemove);
   if (storageError) {
     logDev("note attachment storage cleanup failed", storageError);
   }

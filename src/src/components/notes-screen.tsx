@@ -181,7 +181,7 @@ export function NotesScreen({ slug }: { slug: string }) {
     let attachments = currentAttachments;
 
     for (const attachment of toRemove) {
-      const result = await deleteProjectNoteAttachment(attachment.id, attachment.storagePath);
+      const result = await deleteProjectNoteAttachment(attachment.id, attachment.storagePath, attachment.thumbnailPath);
       if (result.status === "error") {
         console.warn("[notes] attachment delete failed:", result.message);
         setErrorMessage(result.message);

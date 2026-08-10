@@ -54,6 +54,7 @@ import {
   uploadTicketAttachment,
   downloadTicketAttachment,
   resolveTicketAttachmentPreviewUrl,
+  resolveTicketAttachmentThumbnailUrl,
   renameTicketAttachment,
   deleteTicketAttachment,
   loadTicketTimeEntries,
@@ -1487,6 +1488,11 @@ type AttachmentItem = {
    *  physical file exists at storagePath. Download/Preview must never be
    *  attempted in that case (see AttachmentRow/CommentAttachmentRow). */
   isAvailable: boolean;
+  /** Storage path of the pre-resized inline-preview derivative, when one
+   *  exists — see TicketAttachment.thumbnailPath (lib/tickets.ts). Null
+   *  falls back to storagePath (resolveTicketAttachmentThumbnailUrl handles
+   *  that itself). */
+  thumbnailPath: string | null;
 };
 
 type UploadingItem = {
@@ -1622,13 +1628,13 @@ function AttachmentRow({
   useEffect(() => {
     if (!isImage) return;
     let cancelled = false;
-    resolveTicketAttachmentPreviewUrl(file.storagePath).then((result) => {
+    resolveTicketAttachmentThumbnailUrl(file.storagePath, file.thumbnailPath).then((result) => {
       if (cancelled) return;
       if (result.status === "error") { setInlineImageFailed(true); return; }
       setInlineImageUrl(result.url);
     });
     return () => { cancelled = true; };
-  }, [isImage, file.storagePath]);
+  }, [isImage, file.storagePath, file.thumbnailPath]);
   // Screen-space position for the portaled menu panel below — computed from
   // the trigger button at the moment the menu opens (see toggleMenu) so it
   // tracks the button correctly even though it's no longer a DOM descendant
@@ -1849,7 +1855,10 @@ function AttachmentRow({
     return (
       <>
         <li className="group rounded-lg border transition-colors border-slate-100 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-900/60 hover:border-slate-200 dark:hover:border-zinc-700 overflow-hidden">
-          <div className="w-full h-48 flex items-center justify-center bg-slate-100 dark:bg-zinc-900">
+          <div
+            className="w-full h-48 flex items-center justify-center bg-slate-100 dark:bg-zinc-900 cursor-pointer"
+            onClick={() => setPreviewOpen(true)}
+          >
             {inlineImageUrl && (
               // eslint-disable-next-line @next/next/no-img-element
               <img src={inlineImageUrl} alt={file.name} loading="lazy" className="max-w-full max-h-full object-contain" />
@@ -2495,13 +2504,13 @@ function CommentAttachmentRow({
   useEffect(() => {
     if (!isImage || !loadEnabled) return;
     let cancelled = false;
-    resolveTicketAttachmentPreviewUrl(file.storagePath).then((result) => {
+    resolveTicketAttachmentThumbnailUrl(file.storagePath, file.thumbnailPath).then((result) => {
       if (cancelled) return;
       if (result.status === "error") { setInlineImageFailed(true); return; }
       setInlineImageUrl(result.url);
     });
     return () => { cancelled = true; };
-  }, [isImage, loadEnabled, file.storagePath]);
+  }, [isImage, loadEnabled, file.storagePath, file.thumbnailPath]);
 
   // Same behavior as before, just reused by both the image thumbnail and
   // the plain row below: opens the existing preview modal when available,
@@ -2769,6 +2778,7 @@ function toAttachmentItem(a: TicketAttachment): AttachmentItem {
     uploadedAt: a.uploadedAt,
     storagePath: a.storagePath,
     isAvailable: a.isAvailable,
+    thumbnailPath: a.thumbnailPath,
   };
 }
 
@@ -3050,7 +3060,7 @@ const AttachmentsSection = forwardRef<
                   // Local state only updates after a successful delete, so a
                   // failed delete leaves the row (and its confirm prompt) in
                   // place instead of optimistically vanishing.
-                  deleteTicketAttachment(a.id, a.storagePath).then((result) => {
+                  deleteTicketAttachment(a.id, a.storagePath, a.thumbnailPath).then((result) => {
                     if (result.status === "error") {
                       console.warn("[ticket-detail] attachment delete failed:", result.message);
                       onError(result.message);
@@ -4938,7 +4948,7 @@ export function TicketDetailScreen({
   ): Promise<void> {
     let anyRemovalSucceeded = false;
     for (const attachment of toRemove) {
-      const result = await deleteTicketAttachment(attachment.id, attachment.storagePath);
+      const result = await deleteTicketAttachment(attachment.id, attachment.storagePath, attachment.thumbnailPath);
       if (result.status === "error") {
         console.warn("[ticket-detail] comment attachment delete failed:", result.message);
         showError(result.message);

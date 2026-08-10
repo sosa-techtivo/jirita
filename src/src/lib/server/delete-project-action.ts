@@ -196,10 +196,13 @@ export async function deleteProjectAction(params: {
     if (ticketIds.length > 0) {
       const { data: attachmentRows, error: attachmentsError } = await admin
         .from("ticket_attachments")
-        .select("storage_path")
+        .select("storage_path, thumbnail_path")
         .in("ticket_id", ticketIds);
       if (attachmentsError) throw attachmentsError;
-      attachmentPaths = (attachmentRows ?? []).map((a) => a.storage_path as string);
+      attachmentPaths = (attachmentRows ?? []).flatMap((a) => {
+        const thumbnailPath = a.thumbnail_path as string | null;
+        return thumbnailPath ? [a.storage_path as string, thumbnailPath] : [a.storage_path as string];
+      });
     }
   } catch (err) {
     logServerError("attachment-paths-lookup", err);

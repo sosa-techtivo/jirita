@@ -22,7 +22,7 @@ import {
   loadTicketComments,
   groupCommentThreads,
   loadTicketAttachments,
-  resolveTicketAttachmentPreviewUrl,
+  resolveTicketAttachmentThumbnailUrl,
   downloadTicketAttachment,
   loadProfileSummary,
   updateTicket,
@@ -83,25 +83,26 @@ function isPreviewableImage(attachment: TicketAttachment): boolean {
   return attachment.isAvailable && PREVIEWABLE_IMAGE_EXTS.has(getExt(attachment.filename));
 }
 
-// Image attachment — fetches its own short-lived signed URL (same
-// resolveTicketAttachmentPreviewUrl used by AttachmentPreviewModal, shared
-// and deduped across every instance of the same attachment) and renders it
-// as an inline thumbnail: fit to width, aspect ratio preserved via
-// object-contain inside a capped-height box, so it can never overflow the
-// panel regardless of the image's own dimensions.
+// Image attachment — fetches its own short-lived, width-capped signed URL
+// (same resolveTicketAttachmentThumbnailUrl every other inline thumbnail in
+// the app uses — Image Transformations, deduped/shared across every instance
+// of the same attachment) and renders it as an inline thumbnail: fit to
+// width, aspect ratio preserved via object-contain inside a capped-height
+// box, so it can never overflow the panel regardless of the image's own
+// dimensions.
 function PreviewAttachmentImageRow({ attachment }: { attachment: TicketAttachment }) {
   const [url, setUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-    resolveTicketAttachmentPreviewUrl(attachment.storagePath).then((result) => {
+    resolveTicketAttachmentThumbnailUrl(attachment.storagePath, attachment.thumbnailPath).then((result) => {
       if (cancelled) return;
       if (result.status === "error") { setFailed(true); return; }
       setUrl(result.url);
     });
     return () => { cancelled = true; };
-  }, [attachment.storagePath]);
+  }, [attachment.storagePath, attachment.thumbnailPath]);
 
   return (
     <div className="w-full rounded-lg border border-slate-100 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-900/60 overflow-hidden">

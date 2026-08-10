@@ -34,4 +34,10 @@ export interface ProjectNoteAttachment {
   uploadedByProfileId: string | null;
   /** Pre-formatted relative time ("3 days ago") — same convention as ProjectNote.updatedAt. */
   uploadedAt: string;
+  /** Storage path of the pre-resized (max ~600px wide) derivative generated
+   *  at upload time — null for non-image attachments and for any image
+   *  whose thumbnail generation failed or was skipped. Not yet consumed by
+   *  the Notes UI (note-attachments.tsx still resolves storagePath
+   *  directly) — see lib/notes.ts's uploadProjectNoteAttachment. */
+  thumbnailPath: string | null;
 }
