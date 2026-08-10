@@ -2777,6 +2777,12 @@ export async function loadTeamMemberWorkHistoryPageAcrossProjects(
 
 const ATTACHMENTS_BUCKET = "ticket-attachments";
 
+// Every attachment/thumbnail object is written once to a uuid-derived path
+// and never overwritten (uploadTicketAttachment always mints a fresh
+// crypto.randomUUID() prefix) — so a long Cache-Control is safe: there is
+// no "stale" version of a given path to ever serve. Cached Egress Phase 3.
+const ATTACHMENT_UPLOAD_CACHE_CONTROL = "31536000";
+
 export interface TicketAttachment {
   id: string;
   filename: string;
@@ -2902,7 +2908,9 @@ export async function uploadTicketAttachment(
   const uniquePrefix = crypto.randomUUID();
   const storagePath = `${ticketId}/${uniquePrefix}-${safeName}`;
 
-  const { error: uploadError } = await supabase.storage.from(ATTACHMENTS_BUCKET).upload(storagePath, file);
+  const { error: uploadError } = await supabase.storage
+    .from(ATTACHMENTS_BUCKET)
+    .upload(storagePath, file, { cacheControl: ATTACHMENT_UPLOAD_CACHE_CONTROL });
 
   if (uploadError) {
     logDev("attachment storage upload failed", uploadError);
@@ -2923,7 +2931,10 @@ export async function uploadTicketAttachment(
       const candidatePath = `${ticketId}/thumbnails/${uniquePrefix}-${safeName}.${thumbnail.ext}`;
       const { error: thumbnailUploadError } = await supabase.storage
         .from(ATTACHMENTS_BUCKET)
-        .upload(candidatePath, thumbnail.blob, { contentType: thumbnail.blob.type });
+        .upload(candidatePath, thumbnail.blob, {
+          contentType: thumbnail.blob.type,
+          cacheControl: ATTACHMENT_UPLOAD_CACHE_CONTROL,
+        });
       if (thumbnailUploadError) {
         logDev("attachment thumbnail upload failed", thumbnailUploadError);
       } else {
@@ -3016,12 +3027,13 @@ export type TicketAttachmentPreviewUrlResult =
 // needs a signed URL rather than getPublicUrl — createSignedUrl is gated by
 // the same ticket_attachments_storage_select RLS policy that already
 // authorizes loadTicketAttachments/downloadTicketAttachment for this object.
-// Short-lived on purpose: only needed for as long as the Preview modal
-// is open.
+// 3600s (Cached Egress Phase 3, up from an earlier 300s) — long enough that
+// a ticket left open for a while doesn't re-sign the same object, while the
+// in-memory cache below still expires (and re-signs) well before this.
 export async function getTicketAttachmentPreviewUrl(storagePath: string): Promise<TicketAttachmentPreviewUrlResult> {
   const supabase = getSupabaseBrowserClient();
 
-  const { data, error } = await supabase.storage.from(ATTACHMENTS_BUCKET).createSignedUrl(storagePath, 300);
+  const { data, error } = await supabase.storage.from(ATTACHMENTS_BUCKET).createSignedUrl(storagePath, 3600);
 
   if (error || !data) {
     logDev("attachment preview signed url failed", error);
@@ -3041,10 +3053,11 @@ export async function getTicketAttachmentPreviewUrl(storagePath: string): Promis
 // cache instead means concurrent/duplicate renders share one in-flight
 // request and, once resolved, the exact same URL string — letting the
 // browser's own cache (see the object's Cache-Control from upload) satisfy
-// the repeat instance for free. The TTL is kept comfortably under the
-// createSignedUrl(storagePath, 300) expiration above so a cached entry is
-// never handed out past the point Supabase would already reject it.
-const TICKET_ATTACHMENT_PREVIEW_URL_TTL_MS = 4 * 60 * 1000;
+// the repeat instance for free. 55 minutes — comfortably under the 3600s
+// createSignedUrl expiration above (both here and on the thumbnail
+// resolver's own cache further down) so a cached entry is never handed out
+// past the point Supabase would already reject it.
+const TICKET_ATTACHMENT_PREVIEW_URL_TTL_MS = 55 * 60 * 1000;
 const ticketAttachmentPreviewUrlCache = new Map<
   string,
   { promise: Promise<TicketAttachmentPreviewUrlResult>; fetchedAt: number }
@@ -3090,7 +3103,7 @@ export async function getTicketAttachmentThumbnailUrl(
   const supabase = getSupabaseBrowserClient();
   const targetPath = thumbnailPath ?? storagePath;
 
-  const { data, error } = await supabase.storage.from(ATTACHMENTS_BUCKET).createSignedUrl(targetPath, 300);
+  const { data, error } = await supabase.storage.from(ATTACHMENTS_BUCKET).createSignedUrl(targetPath, 3600);
 
   if (error || !data) {
     logDev("attachment thumbnail signed url failed", error);

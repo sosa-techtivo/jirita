@@ -31,6 +31,11 @@ type SupabaseClient = ReturnType<typeof getSupabaseBrowserClient>;
 // 20260917000000_add_project_note_attachments.sql.
 const NOTE_ATTACHMENTS_BUCKET = "project-note-attachments";
 
+// Same reasoning as ATTACHMENT_UPLOAD_CACHE_CONTROL (lib/tickets.ts): every
+// object here is written once to a uuid-derived path and never overwritten,
+// so a long Cache-Control is safe. Cached Egress Phase 3.
+const NOTE_ATTACHMENT_UPLOAD_CACHE_CONTROL = "31536000";
+
 export type NotesResult =
   | { status: "ready"; notes: ProjectNote[] }
   | { status: "error"; message: string };
@@ -402,7 +407,9 @@ export async function uploadProjectNoteAttachment(noteId: string, file: File): P
   const uniquePrefix = crypto.randomUUID();
   const storagePath = `${noteId}/${uniquePrefix}-${safeName}`;
 
-  const { error: uploadError } = await supabase.storage.from(NOTE_ATTACHMENTS_BUCKET).upload(storagePath, file);
+  const { error: uploadError } = await supabase.storage
+    .from(NOTE_ATTACHMENTS_BUCKET)
+    .upload(storagePath, file, { cacheControl: NOTE_ATTACHMENT_UPLOAD_CACHE_CONTROL });
 
   if (uploadError) {
     logDev("note attachment storage upload failed", uploadError);
@@ -422,7 +429,10 @@ export async function uploadProjectNoteAttachment(noteId: string, file: File): P
       const candidatePath = `${noteId}/thumbnails/${uniquePrefix}-${safeName}.${thumbnail.ext}`;
       const { error: thumbnailUploadError } = await supabase.storage
         .from(NOTE_ATTACHMENTS_BUCKET)
-        .upload(candidatePath, thumbnail.blob, { contentType: thumbnail.blob.type });
+        .upload(candidatePath, thumbnail.blob, {
+          contentType: thumbnail.blob.type,
+          cacheControl: NOTE_ATTACHMENT_UPLOAD_CACHE_CONTROL,
+        });
       if (thumbnailUploadError) {
         logDev("note attachment thumbnail upload failed", thumbnailUploadError);
       } else {
@@ -498,12 +508,14 @@ export async function downloadProjectNoteAttachment(
 export type NoteAttachmentPreviewUrlResult = { status: "success"; url: string } | { status: "error"; message: string };
 
 // The bucket is private, so previewing (embedding in an <img>/<iframe>)
-// needs a signed URL rather than getPublicUrl — same short-lived (5 min)
-// convention as getTicketAttachmentPreviewUrl (lib/tickets.ts).
+// needs a signed URL rather than getPublicUrl — same 3600s convention as
+// getTicketAttachmentPreviewUrl (lib/tickets.ts; Cached Egress Phase 3, up
+// from an earlier 300s). No in-memory cache layer here (unlike tickets.ts's
+// resolveTicketAttachmentPreviewUrl) — out of this phase's scope to add one.
 export async function getProjectNoteAttachmentPreviewUrl(storagePath: string): Promise<NoteAttachmentPreviewUrlResult> {
   const supabase = getSupabaseBrowserClient();
 
-  const { data, error } = await supabase.storage.from(NOTE_ATTACHMENTS_BUCKET).createSignedUrl(storagePath, 300);
+  const { data, error } = await supabase.storage.from(NOTE_ATTACHMENTS_BUCKET).createSignedUrl(storagePath, 3600);
 
   if (error || !data) {
     logDev("note attachment preview signed url failed", error);
