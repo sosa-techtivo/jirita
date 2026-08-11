@@ -1,0 +1,634 @@
+"use client";
+
+// Dedicated Hours Report page (/reports/hours) — the full experience the
+// Reports page's own "Hours Report" card (reports-screen.tsx) now just
+// links into. Everything here reuses existing, already-real building
+// blocks rather than inventing parallel ones:
+//   - loadOrganizationTickets / loadOrganizationMembers (lib/tickets.ts,
+//     lib/projects.ts) for the org-wide ticket/project/member universe —
+//     the exact same real queries Reports' own Delivery tab already uses.
+//   - loadOrganizationLoggedTimeForRange (lib/tickets.ts) for the real,
+//     work_date-filtered time entries — never ticket creation date or a
+//     time entry's own created_at.
+//   - buildHoursReportData / buildHoursReportWorkbookSheets (lib/hours-
+//     report.ts) for the Summary/Details shaping — the exact same
+//     functions the previous inline card used, now shared between the live
+//     preview below and the real .xlsx export, so the two can never
+//     disagree.
+//   - buildXlsxWorkbook (lib/xlsx-writer.ts) + downloadBinaryFile
+//     (reports-screen.tsx, exported for this reuse) for the real .xlsx
+//     bytes and the browser download.
+//   - PeriodKey/PERIOD_OPTIONS/CustomRange/realRangeForPeriod (reports-
+//     screen.tsx) for the exact same "This Month/Last Month/This
+//     Quarter/Custom Range" date math Reports' own period selectors
+//     already use — only the pill/inline-date UI here is new, not the date
+//     arithmetic.
+
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useCurrentUser } from "@/components/current-user-provider";
+import { Section } from "@/components/reports-shared";
+import { SkeletonBlock } from "@/components/dashboard-shared";
+import { getTodayISO } from "@/components/tickets/ticket-ui";
+import {
+  PERIOD_OPTIONS,
+  realRangeForPeriod,
+  downloadBinaryFile,
+} from "@/components/reports-screen";
+import type { PeriodKey, CustomRange } from "@/components/reports-screen";
+import { loadOrganizationTickets, loadOrganizationLoggedTimeForRange } from "@/lib/tickets";
+import { loadOrganizationMembers } from "@/lib/projects";
+import type { OrgMember } from "@/lib/projects";
+import { buildHoursReportData, buildHoursReportWorkbookSheets } from "@/lib/hours-report";
+import type { HoursReportData } from "@/lib/hours-report";
+import { buildXlsxWorkbook } from "@/lib/xlsx-writer";
+import { buildHoursReportPdf } from "@/lib/hours-report-pdf";
+import type { Ticket } from "@/lib/mock-tickets";
+
+interface ReportProject {
+  slug: string;
+  name: string;
+}
+
+const DATE_INPUT_CLASS =
+  "text-[16px] sm:text-sm bg-slate-50 dark:bg-zinc-800 text-slate-800 dark:text-zinc-100 rounded-md border border-slate-200 dark:border-zinc-700 px-2.5 py-1.5 outline-none focus:ring-2 focus:ring-brand-500/30 transition-colors";
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+// ── Date presets (pills) ──────────────────────────────────────────────────────
+// Same 4 PeriodKey values/labels Reports' own period selectors already use
+// (PERIOD_OPTIONS) — just rendered as a plain pill row with inline From/To
+// fields instead of a popover, per this page's own spec (dates only ever
+// show/editable when "Custom Range" is the active preset).
+function DatePresetBar({
+  period,
+  onPeriodChange,
+  customRange,
+  onCustomRangeChange,
+}: {
+  period: PeriodKey;
+  onPeriodChange: (key: PeriodKey) => void;
+  customRange: CustomRange;
+  onCustomRangeChange: (range: CustomRange) => void;
+}) {
+  return (
+    <div className="flex items-center gap-3 flex-wrap">
+      <div className="inline-flex items-center gap-0.5 rounded-lg border border-slate-200 dark:border-zinc-700 bg-slate-50 dark:bg-zinc-800/60 p-1">
+        {PERIOD_OPTIONS.map((option) => {
+          const active = option.key === period;
+          return (
+            <button
+              key={option.key}
+              type="button"
+              onClick={() => onPeriodChange(option.key)}
+              className={[
+                "text-xs font-medium px-2.5 py-1.5 rounded-md transition-colors duration-150 whitespace-nowrap cursor-pointer",
+                active
+                  ? "bg-white dark:bg-zinc-900 text-slate-900 dark:text-zinc-50 shadow-sm"
+                  : "text-slate-500 dark:text-zinc-400 hover:text-slate-700 dark:hover:text-zinc-200",
+              ].join(" ")}
+            >
+              {option.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {period === "custom" && (
+        <div className="flex items-end gap-3 flex-wrap">
+          <label className="block">
+            <span className="block text-xs font-medium text-slate-500 dark:text-zinc-400 mb-1">From</span>
+            <input
+              type="date"
+              value={customRange.from}
+              max={customRange.to || undefined}
+              onChange={(e) => onCustomRangeChange({ ...customRange, from: e.target.value })}
+              className={DATE_INPUT_CLASS}
+            />
+          </label>
+          <label className="block">
+            <span className="block text-xs font-medium text-slate-500 dark:text-zinc-400 mb-1">To</span>
+            <input
+              type="date"
+              value={customRange.to}
+              min={customRange.from || undefined}
+              onChange={(e) => onCustomRangeChange({ ...customRange, to: e.target.value })}
+              className={DATE_INPUT_CLASS}
+            />
+          </label>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Projects filter ───────────────────────────────────────────────────────────
+// Purpose-built rather than reusing tickets/filter-dropdown.tsx's generic
+// FilterDropdown: that component's "empty selection" means "no filter" (so
+// nothing shown as checked), which is the opposite of this task's own
+// "all accessible projects selected by default" — here `selected` always
+// holds the real, currently-included slugs, and an explicit "All Projects"
+// row selects/deselects every one of them at once.
+function ProjectsFilter({
+  projects,
+  selected,
+  onChange,
+}: {
+  projects: ReportProject[];
+  selected: string[];
+  onChange: (slugs: string[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onMouseDown(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onMouseDown);
+    return () => document.removeEventListener("mousedown", onMouseDown);
+  }, [open]);
+
+  const allSelected = projects.length > 0 && selected.length === projects.length;
+  const selectedSet = new Set(selected);
+
+  function toggleAll() {
+    onChange(allSelected ? [] : projects.map((p) => p.slug));
+  }
+
+  function toggleOne(slug: string) {
+    onChange(selectedSet.has(slug) ? selected.filter((s) => s !== slug) : [...selected, slug]);
+  }
+
+  const label = allSelected
+    ? "All projects"
+    : selected.length === 0
+    ? "No projects"
+    : `${selected.length} of ${projects.length} projects`;
+
+  return (
+    <div ref={ref} className="relative inline-block">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className={[
+          "inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border transition-colors duration-150 shadow-sm cursor-pointer",
+          allSelected
+            ? "border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-slate-600 dark:text-zinc-400 hover:bg-slate-50 dark:hover:bg-zinc-800"
+            : "border-brand-200 dark:border-brand-700/50 bg-brand-50/60 dark:bg-brand-500/10 text-brand-700 dark:text-brand-400",
+        ].join(" ")}
+      >
+        Projects: {label}
+        <svg
+          className={`w-3 h-3 text-slate-400 dark:text-zinc-600 mt-px transition-transform duration-150 ${open ? "-rotate-180" : ""}`}
+          fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"
+        >
+          <path d="M6 9l6 6 6-6" />
+        </svg>
+      </button>
+
+      {open && (
+        <div
+          role="dialog"
+          aria-label="Projects filter"
+          className="absolute left-0 top-full mt-1.5 z-30 w-64 max-h-80 overflow-y-auto rounded-xl border border-slate-200 dark:border-zinc-700/60 bg-white dark:bg-zinc-900 shadow-lg shadow-black/10 dark:shadow-black/40 py-1.5"
+        >
+          <button
+            type="button"
+            onClick={toggleAll}
+            className="w-full flex items-center gap-2.5 px-3 py-1.5 text-sm text-left text-slate-700 dark:text-zinc-300 hover:bg-slate-50 dark:hover:bg-zinc-800/60 transition-colors"
+          >
+            <span
+              className={[
+                "flex-shrink-0 w-4 h-4 rounded border flex items-center justify-center transition-colors",
+                allSelected
+                  ? "bg-brand-600 border-brand-600 dark:bg-brand-500 dark:border-brand-500"
+                  : "border-slate-300 dark:border-zinc-600",
+              ].join(" ")}
+            >
+              {allSelected && (
+                <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+                  <path d="M5 12l5 5L20 7" />
+                </svg>
+              )}
+            </span>
+            <span className="font-medium">All Projects</span>
+          </button>
+
+          <div className="my-1 mx-2 border-t border-slate-100 dark:border-zinc-800" />
+
+          {projects.map((project) => {
+            const isSelected = selectedSet.has(project.slug);
+            return (
+              <button
+                key={project.slug}
+                type="button"
+                onClick={() => toggleOne(project.slug)}
+                className={[
+                  "w-full flex items-center gap-2.5 px-3 py-1.5 text-sm text-left transition-colors",
+                  isSelected
+                    ? "text-brand-700 dark:text-brand-400 bg-brand-50/60 dark:bg-brand-500/10"
+                    : "text-slate-700 dark:text-zinc-300 hover:bg-slate-50 dark:hover:bg-zinc-800/60",
+                ].join(" ")}
+              >
+                <span
+                  className={[
+                    "flex-shrink-0 w-4 h-4 rounded border flex items-center justify-center transition-colors",
+                    isSelected
+                      ? "bg-brand-600 border-brand-600 dark:bg-brand-500 dark:border-brand-500"
+                      : "border-slate-300 dark:border-zinc-600",
+                  ].join(" ")}
+                >
+                  {isSelected && (
+                    <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+                      <path d="M5 12l5 5L20 7" />
+                    </svg>
+                  )}
+                </span>
+                <span className="truncate">{project.name}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Summary preview ───────────────────────────────────────────────────────────
+// Exact same grouping/subtotal/total shape as the Excel Summary sheet
+// (buildHoursReportWorkbookSheets) — rendered as a table instead of
+// worksheet rows, off the exact same HoursReportData.
+function SummaryPreview({ data }: { data: HoursReportData }) {
+  if (data.projectGroups.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center text-center py-16 px-4">
+        <div className="w-10 h-10 rounded-lg border border-slate-200 dark:border-zinc-700 flex items-center justify-center text-slate-400 dark:text-zinc-500 mb-3">
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+            <path d="M4 19V9M12 19V5M20 19v-7" />
+          </svg>
+        </div>
+        <h3 className="text-sm font-semibold text-slate-700 dark:text-zinc-200">No logged hours</h3>
+        <p className="text-sm text-slate-400 mt-1 max-w-xs dark:text-zinc-500">
+          No time was logged in the selected date range for the selected projects.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-slate-200 dark:border-zinc-700/70">
+            <th className="text-left pb-2 pr-3 text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600">Ticket</th>
+            <th className="text-left pb-2 pr-3 text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600">Summary</th>
+            <th className="text-right pb-2 text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600">Hours</th>
+          </tr>
+        </thead>
+        <tbody>
+          {data.projectGroups.map((group) => (
+            <TableFragmentGroup key={group.projectName} group={group} />
+          ))}
+          <tr>
+            <td colSpan={2} className="pt-3 pr-3 text-right text-sm font-bold text-slate-900 dark:text-zinc-50">
+              TOTAL HOURS
+            </td>
+            <td className="pt-3 text-right text-sm font-bold text-slate-900 dark:text-zinc-50 tabular-nums">
+              {round2(data.grandTotalHours)}
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function TableFragmentGroup({ group }: { group: HoursReportData["projectGroups"][number] }) {
+  return (
+    <>
+      <tr>
+        <td colSpan={3} className="pt-4 pb-1.5 text-xs font-bold text-slate-700 dark:text-zinc-200">
+          {group.projectName}
+        </td>
+      </tr>
+      {group.tickets.map((ticket) => (
+        <tr key={ticket.ticketKey} className="border-b border-slate-100 dark:border-zinc-800/70">
+          <td className="py-1.5 pr-3 text-slate-500 dark:text-zinc-400 whitespace-nowrap">{ticket.ticketKey}</td>
+          <td className="py-1.5 pr-3 text-slate-700 dark:text-zinc-300">{ticket.summary}</td>
+          <td className="py-1.5 text-right text-slate-700 dark:text-zinc-300 tabular-nums">{round2(ticket.hours)}</td>
+        </tr>
+      ))}
+      <tr>
+        <td colSpan={2} className="pt-1.5 pb-1 pr-3 text-right text-xs font-bold text-slate-600 dark:text-zinc-300">
+          Project Total
+        </td>
+        <td className="pt-1.5 pb-1 text-right text-xs font-bold text-slate-600 dark:text-zinc-300 tabular-nums">
+          {round2(group.totalHours)}
+        </td>
+      </tr>
+    </>
+  );
+}
+
+// ── Main screen ───────────────────────────────────────────────────────────────
+
+export function HoursReportScreen() {
+  const { user, organization } = useCurrentUser();
+  const isAdmin = user.role === "ADMIN";
+  // A plain id, not the `organization` object itself, is what the org-wide
+  // load effect below keys off of. CurrentUserProvider revalidates the
+  // session's membership (and so produces a brand-new `organization`
+  // object, even though nothing about it changed) on window focus regain —
+  // that's deliberate, global behavior this page must not alter, but this
+  // page's own report shouldn't silently refetch/reset its filters every
+  // time an Admin tabs back in. Keying off the id (a stable primitive)
+  // instead of the object reference means the effect still reruns for an
+  // actual org change or the page's own first mount, just never for a
+  // same-org focus-driven re-fetch upstream.
+  const organizationId = organization?.id;
+
+  const todayISO = getTodayISO();
+  const defaultRange = useMemo(() => realRangeForPeriod("this-month", { from: "", to: "" }, todayISO), [todayISO]);
+
+  const [period, setPeriod] = useState<PeriodKey>("this-month");
+  const [customRange, setCustomRange] = useState<CustomRange>(defaultRange);
+
+  const [rawTickets, setRawTickets] = useState<Ticket[]>([]);
+  const [rawProjects, setRawProjects] = useState<ReportProject[]>([]);
+  const [rawMembers, setRawMembers] = useState<OrgMember[]>([]);
+  const [orgLoadState, setOrgLoadState] = useState<"loading" | "ready" | "error">("loading");
+  const [orgLoadError, setOrgLoadError] = useState<string | null>(null);
+
+  const [selectedProjectSlugs, setSelectedProjectSlugs] = useState<string[]>([]);
+  // True only until the first real project list arrives — after that, the
+  // Admin's own (de)selections are authoritative and this never re-runs the
+  // "select everything" default again.
+  const projectsInitialized = useRef(false);
+
+  const [hoursData, setHoursData] = useState<HoursReportData | null>(null);
+  const [previewState, setPreviewState] = useState<"loading" | "ready" | "error">("loading");
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [downloadingExcel, setDownloadingExcel] = useState(false);
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
+  const [pdfError, setPdfError] = useState<string | null>(null);
+
+  // ── Org-wide load — page entry / actual org change only ────────────────────
+  // Deliberately keyed on `organizationId` (see its own comment above), not
+  // on `[isAdmin, organization]`: this effect now runs exactly once on
+  // mount (or if the Admin's org id itself genuinely changes) and never
+  // again on a window-focus-driven membership revalidation. Date/project
+  // filter changes still refresh the report — that's the separate preview
+  // effect below, keyed on `from`/`to`/`selectedProjectSlugs`, untouched by
+  // this.
+  useEffect(() => {
+    if (!isAdmin || !organizationId) return;
+    let cancelled = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: shows the loading state for this effect's own (rare) reruns — mount, or an actual org id change
+    setOrgLoadState("loading");
+
+    (async () => {
+      const [ticketsResult, membersResult] = await Promise.all([
+        loadOrganizationTickets(organizationId),
+        loadOrganizationMembers(organizationId),
+      ]);
+      if (cancelled) return;
+
+      if (ticketsResult.status === "error") {
+        setOrgLoadState("error");
+        setOrgLoadError(ticketsResult.message);
+        return;
+      }
+      if (membersResult.status === "error") {
+        setOrgLoadState("error");
+        setOrgLoadError(membersResult.message);
+        return;
+      }
+
+      const projects = ticketsResult.projects.map((p) => ({ slug: p.slug, name: p.name }));
+      const slugsWithTickets = new Set(ticketsResult.tickets.map((t) => t.projectSlug));
+
+      setRawTickets(ticketsResult.tickets);
+      setRawProjects(projects);
+      setRawMembers(membersResult.members);
+      setOrgLoadState("ready");
+
+      // Same-batch default selection — deliberately set here (not in a
+      // separate effect reacting to the derived project list) so a fresh
+      // "all selected" state and `orgLoadState: "ready"` always land in the
+      // same render. A separate effect would leave one intermediate render
+      // where the org data is ready but the selection hasn't caught up yet,
+      // which the preview fetch below would see and read as "0 projects
+      // selected" — a real, if brief, empty-report flash. `projectsInitialized`
+      // still guards this to "only ever once per this effect's lifetime" —
+      // now academic for focus (this effect no longer reruns on focus at
+      // all), but still correct if this effect ever reruns for a genuine
+      // org id change.
+      if (!projectsInitialized.current) {
+        projectsInitialized.current = true;
+        setSelectedProjectSlugs(projects.filter((p) => slugsWithTickets.has(p.slug)).map((p) => p.slug));
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isAdmin, organizationId]);
+
+  // Projects with at least one real ticket — same "only real, in-scope
+  // values" convention Reports' own Project filter already follows.
+  const projectsWithTickets = useMemo(() => {
+    const slugsWithTickets = new Set(rawTickets.map((t) => t.projectSlug));
+    return rawProjects.filter((p) => slugsWithTickets.has(p.slug));
+  }, [rawTickets, rawProjects]);
+
+  const { from, to } = realRangeForPeriod(period, customRange, todayISO);
+  const invalidRange = period === "custom" && Boolean(from) && Boolean(to) && from > to;
+
+  // ── Preview fetch — re-runs on date range / project selection change ───────
+  // Scopes the real query to only the tickets in the selected projects
+  // (rather than fetching every org ticket's entries and filtering after),
+  // so a Projects deselection is a smaller real query, not a client-side
+  // filter over a bigger one.
+  useEffect(() => {
+    if (!isAdmin || orgLoadState !== "ready" || invalidRange || !from || !to) return;
+    let cancelled = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: shows the preview's own loading state the instant filters change, before the async fetch resolves
+    setPreviewState("loading");
+
+    const selectedSlugSet = new Set(selectedProjectSlugs);
+    const scopedTickets = rawTickets.filter((t) => selectedSlugSet.has(t.projectSlug));
+    const ticketIds = scopedTickets.map((t) => t.id);
+
+    (async () => {
+      const result = await loadOrganizationLoggedTimeForRange(ticketIds, from, to);
+      if (cancelled) return;
+
+      if (result.status === "error") {
+        setPreviewState("error");
+        setPreviewError(result.message);
+        return;
+      }
+
+      const data = buildHoursReportData(
+        scopedTickets,
+        rawProjects,
+        rawMembers.map((m) => ({ id: m.id, name: m.name })),
+        result.entries
+      );
+      setHoursData(data);
+      setPreviewState("ready");
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isAdmin, orgLoadState, rawTickets, rawProjects, rawMembers, selectedProjectSlugs, from, to, invalidRange]);
+
+  function handleDownloadExcel() {
+    if (!hoursData || !from || !to) return;
+    setDownloadingExcel(true);
+    try {
+      const sheets = buildHoursReportWorkbookSheets(hoursData, from, to);
+      const bytes = buildXlsxWorkbook(sheets);
+      downloadBinaryFile(
+        `jirita-hours-report-${from}-to-${to}.xlsx`,
+        bytes,
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      );
+    } finally {
+      setDownloadingExcel(false);
+    }
+  }
+
+  // Same `hoursData`/`from`/`to` as handleDownloadExcel above — the PDF is
+  // never a separate query or a separately-filtered dataset, just a
+  // different rendering of the exact same already-computed Summary.
+  async function handleDownloadPdf() {
+    if (!hoursData || !from || !to) return;
+    setDownloadingPdf(true);
+    setPdfError(null);
+    try {
+      const bytes = await buildHoursReportPdf(hoursData, `${from} to ${to}`);
+      downloadBinaryFile(`jirita-hours-report-${from}-to-${to}.pdf`, bytes, "application/pdf");
+    } catch (err) {
+      setPdfError(err instanceof Error ? err.message : "Something went wrong generating the PDF.");
+    } finally {
+      setDownloadingPdf(false);
+    }
+  }
+
+  if (!isAdmin) {
+    return (
+      <div className="flex flex-col items-center justify-center text-center py-24 px-4">
+        <div className="w-10 h-10 rounded-lg border border-slate-200 flex items-center justify-center text-slate-400 mb-4 dark:border-zinc-700 dark:text-zinc-500">
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+            <rect x="3" y="11" width="18" height="10" rx="2" />
+            <path d="M7 11V7a5 5 0 0110 0v4" />
+          </svg>
+        </div>
+        <h3 className="text-sm font-semibold text-slate-700 dark:text-zinc-200">Admins only</h3>
+        <p className="text-sm text-slate-400 mt-1 max-w-xs dark:text-zinc-500">
+          The Hours Report is only available to Admins.
+        </p>
+      </div>
+    );
+  }
+
+  const hasReportData = Boolean(hoursData) && hoursData!.projectGroups.length > 0 && previewState === "ready";
+  const canDownloadExcel = hasReportData && !downloadingExcel;
+  const canDownloadPdf = hasReportData && !downloadingPdf;
+
+  return (
+    <div className="max-w-5xl mx-auto px-6 py-6 pb-16">
+      <div className="flex items-start justify-between mb-5 gap-4">
+        <div>
+          <h1 className="text-xl font-bold text-slate-900 dark:text-zinc-50 tracking-tight leading-none">
+            Hours Report
+          </h1>
+          <p className="text-xs text-slate-400 dark:text-zinc-500 mt-0.5">
+            Logged hours by project and ticket
+          </p>
+        </div>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <button
+            type="button"
+            onClick={handleDownloadPdf}
+            disabled={!canDownloadPdf}
+            className="inline-flex items-center gap-1.5 text-xs font-semibold px-3.5 py-2 rounded-lg border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-slate-600 dark:text-zinc-400 hover:bg-slate-50 dark:hover:bg-zinc-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm cursor-pointer"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+              <path d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+            </svg>
+            {downloadingPdf ? "Preparing…" : "Download PDF"}
+          </button>
+          <button
+            type="button"
+            onClick={handleDownloadExcel}
+            disabled={!canDownloadExcel}
+            className="inline-flex items-center gap-1.5 text-xs font-semibold px-3.5 py-2 rounded-lg bg-brand-500 hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed text-white transition-colors shadow-sm shadow-brand-500/30 cursor-pointer"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3" />
+            </svg>
+            {downloadingExcel ? "Preparing…" : "Download Excel"}
+          </button>
+        </div>
+      </div>
+
+      {pdfError && (
+        <div className="rounded-xl border border-red-200 dark:border-red-700/40 bg-red-50 dark:bg-red-500/10 px-4 py-3 text-sm text-red-700 dark:text-red-400 mb-3">
+          {pdfError}
+        </div>
+      )}
+
+      {orgLoadState === "error" ? (
+        <div className="rounded-xl border border-red-200 dark:border-red-700/40 bg-red-50 dark:bg-red-500/10 px-4 py-3 text-sm text-red-700 dark:text-red-400">
+          {orgLoadError ?? "Something went wrong loading the Hours Report."}
+        </div>
+      ) : (
+        <>
+          <div className="rounded-xl border border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900 px-4 py-3.5 shadow-sm shadow-slate-200/40 dark:shadow-black/20 mb-3">
+            <DatePresetBar
+              period={period}
+              onPeriodChange={setPeriod}
+              customRange={customRange}
+              onCustomRangeChange={setCustomRange}
+            />
+          </div>
+
+          <div className="flex items-center gap-2 mb-5">
+            <ProjectsFilter
+              projects={projectsWithTickets}
+              selected={selectedProjectSlugs}
+              onChange={setSelectedProjectSlugs}
+            />
+          </div>
+
+          {invalidRange && (
+            <p className="text-xs text-red-600 dark:text-red-400 mb-4">
+              The &quot;From&quot; date must be on or before the &quot;To&quot; date.
+            </p>
+          )}
+
+          <Section title="Summary">
+            {orgLoadState === "loading" || previewState === "loading" ? (
+              <div className="space-y-2">
+                <SkeletonBlock className="h-5 w-40" />
+                <SkeletonBlock className="h-24 w-full" />
+              </div>
+            ) : previewState === "error" ? (
+              <div className="rounded-lg border border-red-200 dark:border-red-700/40 bg-red-50 dark:bg-red-500/10 px-4 py-3 text-sm text-red-700 dark:text-red-400">
+                {previewError ?? "Something went wrong loading logged hours."}
+              </div>
+            ) : hoursData ? (
+              <SummaryPreview data={hoursData} />
+            ) : null}
+          </Section>
+        </>
+      )}
+    </div>
+  );
+}

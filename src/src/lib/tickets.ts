@@ -4206,6 +4206,16 @@ export interface OrganizationTimeEntry {
   ticketId: string;
   loggedBy: string | null;
   minutes: number;
+  /** The entry's own real work_date (yyyy-mm-dd) — already the column this
+   *  query filters by below, just also surfaced per-row for callers (e.g.
+   *  the Hours Report export) that need the effective work date on each
+   *  entry rather than just the aggregate range. */
+  workDate: string;
+  /** The entry's own free-text comment, if any — surfaced for the Hours
+   *  Report export's "Time Entry Description" column. Every existing caller
+   *  of this function ignores this field, so adding it is not a breaking
+   *  change. */
+  comment: string | null;
 }
 
 export type OrganizationLoggedTimeResult =
@@ -4228,11 +4238,11 @@ export async function loadOrganizationLoggedTimeForRange(
 
   const { data: rows, error } = await supabase
     .from("ticket_time_entries")
-    .select("ticket_id, logged_by, minutes")
+    .select("ticket_id, logged_by, minutes, work_date, comment")
     .in("ticket_id", ticketIds)
     .gte("work_date", startDate)
     .lte("work_date", endDate)
-    .returns<{ ticket_id: string; logged_by: string | null; minutes: number }[]>();
+    .returns<{ ticket_id: string; logged_by: string | null; minutes: number; work_date: string; comment: string | null }[]>();
 
   if (error) {
     logDev("organization logged time range query failed", error);
@@ -4241,7 +4251,13 @@ export async function loadOrganizationLoggedTimeForRange(
 
   return {
     status: "ready",
-    entries: (rows ?? []).map((row) => ({ ticketId: row.ticket_id, loggedBy: row.logged_by, minutes: row.minutes })),
+    entries: (rows ?? []).map((row) => ({
+      ticketId: row.ticket_id,
+      loggedBy: row.logged_by,
+      minutes: row.minutes,
+      workDate: row.work_date,
+      comment: row.comment,
+    })),
   };
 }
 

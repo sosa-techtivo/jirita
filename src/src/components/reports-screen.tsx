@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo, useRef } from "react";
+import Link from "next/link";
 import { FilterDropdown } from "@/components/tickets/filter-dropdown";
 import type { DropdownGroup } from "@/components/tickets/filter-dropdown";
 import { useCurrentUser } from "@/components/current-user-provider";
@@ -1711,6 +1712,26 @@ function downloadTextFile(filename: string, content: string, mimeType: string) {
   URL.revokeObjectURL(url);
 }
 
+// Same download mechanics as downloadTextFile above, just for real binary
+// bytes (the Hours Report's .xlsx) instead of text content.
+// Exported so the dedicated Hours Report page (hours-report-screen.tsx) can
+// reuse the exact same download mechanics for its real .xlsx export.
+export function downloadBinaryFile(filename: string, bytes: Uint8Array, mimeType: string) {
+  // fflate's zipSync types its output as Uint8Array<ArrayBufferLike>, which
+  // Blob's constructor (typed against plain ArrayBuffer) rejects — copying
+  // into a fresh, plain-ArrayBuffer-backed view satisfies that without
+  // altering a single byte.
+  const blob = new Blob([new Uint8Array(bytes)], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 // No PDF-generation library exists in this app (adding one would be an
 // architecture change) — this reuses the browser's own native print-to-PDF
 // pipeline instead: a plain printable HTML view the user's browser can
@@ -1867,6 +1888,34 @@ function ExportDropdown({
         </div>
       </div>
     </div>
+  );
+}
+
+// ── Hours Report (Admin-only) — entry point card ────────────────────────────
+// Purely presentational now: the actual date/project filters, live preview,
+// and real .xlsx export all moved to their own dedicated route
+// (/reports/hours → hours-report-screen.tsx) so the report gets real room
+// instead of squeezing into a toolbar-sized card. This card is just the
+// doorway into it.
+function HoursReportEntryCard() {
+  return (
+    <Section title="Hours Report">
+      <div className="flex items-center justify-between gap-4 flex-wrap">
+        <p className="text-xs text-slate-500 dark:text-zinc-400 max-w-md">
+          Logged hours by project and ticket for a selected period — grouped,
+          totaled, and exportable as a real Excel workbook.
+        </p>
+        <Link
+          href="/reports/hours"
+          className="inline-flex items-center gap-1.5 text-xs font-semibold px-3.5 py-2 rounded-lg bg-brand-500 hover:bg-brand-600 text-white transition-colors shadow-sm shadow-brand-500/30 cursor-pointer flex-shrink-0"
+        >
+          View Report
+          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M14 5l7 7m0 0l-7 7m7-7H3" />
+          </svg>
+        </Link>
+      </div>
+    </Section>
   );
 }
 
@@ -2419,6 +2468,13 @@ function AdminReportsScreen() {
         </div>
         <ExportDropdown tab={tab} deliveryData={deliveryExportData} financeData={financeExportData} />
       </div>
+
+      {/* ── Hours Report (Admin only) — entry point card ─────────────────────── */}
+      {isAdmin && (
+        <div className="mb-5">
+          <HoursReportEntryCard />
+        </div>
+      )}
 
       {/* ── Report tabs (Admin only — Project Lead only ever sees Delivery) ─── */}
       {isAdmin && (
