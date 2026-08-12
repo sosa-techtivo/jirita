@@ -2,8 +2,9 @@
 // workbook needs by hand and zips them with `fflate` (already a dependency,
 // used the same way by build-project-backup-zip.ts) instead of pulling in a
 // new spreadsheet library. Deliberately narrow: multiple sheets, per-cell
-// bold + a single "0.00" number format, and per-column widths — exactly what
-// the Hours Report needs, nothing more.
+// bold + a single "0.00" number format, per-column widths, and (per sheet)
+// one floating logo image anchored at A1 — exactly what the Hours Report
+// needs, nothing more.
 
 import { strToU8, zipSync } from "fflate";
 
@@ -23,11 +24,29 @@ export interface XlsxCell {
 
 export type XlsxRow = XlsxCell[];
 
+export interface XlsxImage {
+  /** Raw image bytes — PNG only (the one format this writer declares in
+   *  [Content_Types].xml). */
+  data: Uint8Array;
+  /** Display size in pixels, converted internally to EMU. A *floating*
+   *  drawing anchored at A1 (oneCellAnchor) — Excel never resizes any row
+   *  or column to fit it, so a fixed size here can't distort the sheet's
+   *  own row heights/column widths/layout; it simply overlays whatever
+   *  sits underneath (which is why callers should leave the first couple
+   *  of rows empty, same as a real header banner). */
+  widthPx: number;
+  heightPx: number;
+}
+
 export interface XlsxSheet {
   name: string;
   rows: XlsxRow[];
   /** Character-unit width per column, same convention Excel itself uses. */
   columnWidths?: number[];
+  /** A single floating image anchored at this sheet's A1 — omitted
+   *  entirely for a sheet with no image (e.g. Details), so no drawing/
+   *  media parts are ever written for it. */
+  image?: XlsxImage;
 }
 
 const XML_INVALID_CONTROL_CHARS = new RegExp(
@@ -101,17 +120,30 @@ function sheetToXml(sheet: XlsxSheet): string {
     })
     .join("");
 
+  // The <drawing> element (only present when this sheet has an image) must
+  // come after <sheetData> per the worksheet schema's fixed child order —
+  // `r:id` requires the relationships namespace, declared here regardless
+  // of whether this particular sheet uses it (harmless on a sheet with no
+  // drawing).
+  const drawingXml = sheet.image ? `<drawing r:id="rId1"/>` : "";
+
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">${colsXml}<sheetData>${rowsXml}</sheetData></worksheet>`;
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">${colsXml}<sheetData>${rowsXml}</sheetData>${drawingXml}</worksheet>`;
 }
 
-const CONTENT_TYPES_XML = (sheetCount: number) => `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+// `imageSheetIndexes` — 0-based indexes (into `sheets`) of every sheet that
+// carries an image, in order. One drawing part per entry, numbered
+// consecutively (drawing1.xml, drawing2.xml, ...) regardless of which
+// sheet it belongs to.
+const CONTENT_TYPES_XML = (sheetCount: number, imageSheetIndexes: number[]) => `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
 <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
 <Default Extension="xml" ContentType="application/xml"/>
+${imageSheetIndexes.length > 0 ? `<Default Extension="png" ContentType="image/png"/>` : ""}
 <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
 ${Array.from({ length: sheetCount }, (_, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join("\n")}
 <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
+${imageSheetIndexes.map((_, drawingIndex) => `<Override PartName="/xl/drawings/drawing${drawingIndex + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/>`).join("\n")}
 </Types>`;
 
 const ROOT_RELS_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -136,6 +168,53 @@ function workbookRelsXml(sheetCount: number): string {
   const stylesRel = `<Relationship Id="rId${sheetCount + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>`;
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${sheetRels}${stylesRel}</Relationships>`;
+}
+
+// ── Drawings (floating images) ───────────────────────────────────────────────
+// One PNG per sheet at most, anchored at A1 with an absolute pixel size —
+// exactly what the Hours Report's Summary-sheet logo needs, nothing more
+// general (no cell-to-cell stretch, no multiple images per sheet).
+
+// 96 DPI (Excel/OOXML's own default) — 1 pixel = 9525 EMU.
+const EMU_PER_PIXEL = 9525;
+
+// A worksheet's own relationship to its one drawing part — always rId1
+// since a sheet here has at most one relationship of any kind.
+function sheetRelsXml(drawingFileName: string): string {
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/${drawingFileName}"/>
+</Relationships>`;
+}
+
+// The drawing's own relationship to the actual image bytes in xl/media/.
+function drawingRelsXml(mediaFileName: string): string {
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/${mediaFileName}"/>
+</Relationships>`;
+}
+
+// A single oneCellAnchor floating picture, sized in EMU from the image's
+// own real pixel dimensions — Excel never resizes a row/column to fit a
+// floating drawing, so this can't distort the sheet's own layout; it only
+// ever overlays whatever cells happen to sit underneath it.
+function drawingXml(image: XlsxImage): string {
+  const cx = Math.round(image.widthPx * EMU_PER_PIXEL);
+  const cy = Math.round(image.heightPx * EMU_PER_PIXEL);
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+<xdr:oneCellAnchor>
+<xdr:from><xdr:col>0</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>0</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from>
+<xdr:ext cx="${cx}" cy="${cy}"/>
+<xdr:pic>
+<xdr:nvPicPr><xdr:cNvPr id="1" name="Logo"/><xdr:cNvPicPr/></xdr:nvPicPr>
+<xdr:blipFill><a:blip r:embed="rId1"/><a:stretch><a:fillRect/></a:stretch></xdr:blipFill>
+<xdr:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></xdr:spPr>
+</xdr:pic>
+<xdr:clientData/>
+</xdr:oneCellAnchor>
+</xdr:wsDr>`;
 }
 
 // numFmtId 164+ are the ids OOXML reserves for custom formats.
@@ -166,8 +245,13 @@ export function buildXlsxWorkbook(sheets: XlsxSheet[]): Uint8Array {
     throw new Error("[buildXlsxWorkbook] at least one sheet is required.");
   }
 
+  const imageSheetIndexes: number[] = [];
+  sheets.forEach((sheet, i) => {
+    if (sheet.image) imageSheetIndexes.push(i);
+  });
+
   const files: Record<string, Uint8Array> = {
-    "[Content_Types].xml": strToU8(CONTENT_TYPES_XML(sheets.length)),
+    "[Content_Types].xml": strToU8(CONTENT_TYPES_XML(sheets.length, imageSheetIndexes)),
     "_rels/.rels": strToU8(ROOT_RELS_XML),
     "xl/workbook.xml": strToU8(workbookXml(sheets)),
     "xl/_rels/workbook.xml.rels": strToU8(workbookRelsXml(sheets.length)),
@@ -176,6 +260,19 @@ export function buildXlsxWorkbook(sheets: XlsxSheet[]): Uint8Array {
 
   sheets.forEach((sheet, i) => {
     files[`xl/worksheets/sheet${i + 1}.xml`] = strToU8(sheetToXml(sheet));
+  });
+
+  // One drawing + one media entry per image-bearing sheet, numbered by
+  // their order in `imageSheetIndexes` (never by the sheet's own index —
+  // a workbook with an image only on its second sheet still gets
+  // drawing1.xml/image1.png, not drawing2.xml/image2.png).
+  imageSheetIndexes.forEach((sheetIndex, drawingIndex) => {
+    const image = sheets[sheetIndex].image!;
+    const n = drawingIndex + 1;
+    files[`xl/worksheets/_rels/sheet${sheetIndex + 1}.xml.rels`] = strToU8(sheetRelsXml(`drawing${n}.xml`));
+    files[`xl/drawings/drawing${n}.xml`] = strToU8(drawingXml(image));
+    files[`xl/drawings/_rels/drawing${n}.xml.rels`] = strToU8(drawingRelsXml(`image${n}.png`));
+    files[`xl/media/image${n}.png`] = image.data;
   });
 
   return zipSync(files, { level: 6 });

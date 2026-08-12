@@ -693,11 +693,11 @@ export function HoursReportScreen() {
     };
   }, [canAccessReport, orgLoadState, rawTickets, rawProjects, rawMembers, selectedProjectSlugs, from, to, invalidRange, canViewFinancials]);
 
-  function handleDownloadExcel() {
+  async function handleDownloadExcel() {
     if (!hoursData || !from || !to) return;
     setDownloadingExcel(true);
     try {
-      const sheets = buildHoursReportWorkbookSheets(hoursData, from, to);
+      const sheets = await buildHoursReportWorkbookSheets(hoursData, from, to);
       const bytes = buildXlsxWorkbook(sheets);
       downloadBinaryFile(
         `jirita-hours-report-${from}-to-${to}.xlsx`,

@@ -12,6 +12,7 @@ import type { Ticket } from "@/lib/mock-tickets";
 import type { ProjectCategory } from "@/lib/mock-projects";
 import type { OrganizationTimeEntry } from "@/lib/tickets";
 import type { XlsxSheet } from "@/lib/xlsx-writer";
+import { HOURS_REPORT_BRANDING } from "@/lib/hours-report-branding";
 
 export interface HoursReportTicketRow {
   ticketKey: string;
@@ -243,7 +244,36 @@ function amountCell(amount: number | null, bold: boolean): XlsxSheet["rows"][num
   return { value: amount, bold, currency: true };
 }
 
-export function buildHoursReportWorkbookSheets(data: HoursReportData, fromISO: string, toISO: string): XlsxSheet[] {
+// Fixed on-sheet display size for the Summary header logo — small enough
+// to sit comfortably within the two blank rows reserved for it below,
+// large enough to actually read as a logo. This is a *floating* image
+// (see xlsx-writer.ts's XlsxImage) — Excel never resizes a row/column to
+// fit it, so this fixed size can't distort the sheet's own layout.
+const LOGO_HEIGHT_PX = 34;
+const LOGO_WIDTH_PX = Math.round(LOGO_HEIGHT_PX * (HOURS_REPORT_BRANDING.logoWidthPx / HOURS_REPORT_BRANDING.logoHeightPx));
+
+// Same real logo asset the PDF header already uses (hours-report-branding.ts
+// is the one shared place naming it) — fetched fresh per export rather than
+// cached, since this runs rarely (once per Download Excel click). A logo
+// that fails to fetch (offline, asset moved) degrades to a Summary sheet
+// with no image rather than failing the whole export — the report itself
+// never depends on the image loading, same resilience the PDF's own logo
+// fetch already has.
+async function loadLogoBytes(url: string): Promise<Uint8Array | null> {
+  try {
+    const response = await fetch(url);
+    const buffer = await response.arrayBuffer();
+    return new Uint8Array(buffer);
+  } catch {
+    return null;
+  }
+}
+
+export async function buildHoursReportWorkbookSheets(
+  data: HoursReportData,
+  fromISO: string,
+  toISO: string
+): Promise<XlsxSheet[]> {
   // The one place this workbook decides whether a `$`/Amount column exists
   // at all — reads `data.includesFinancials` (set once, by
   // buildHoursReportData's own authorization parameter) rather than
@@ -252,6 +282,7 @@ export function buildHoursReportWorkbookSheets(data: HoursReportData, fromISO: s
   // either sheet — never a dash, never a $0 — Hours/Ticket/Summary/
   // grouping/Project Total/TOTAL HOURS are otherwise identical.
   const includeFinancials = data.includesFinancials;
+  const logoBytes = await loadLogoBytes(HOURS_REPORT_BRANDING.logoUrl);
 
   const summaryHeader: XlsxSheet["rows"][number] = [
     { value: "Ticket", bold: true },
@@ -260,8 +291,17 @@ export function buildHoursReportWorkbookSheets(data: HoursReportData, fromISO: s
   ];
   if (includeFinancials) summaryHeader.push({ value: "$", bold: true });
 
+  // Summary-only header block: two blank rows reserved for the floating
+  // logo (it doesn't occupy cell content, so these rows just give it clear
+  // space to sit in — see xlsx-writer.ts's XlsxImage), then the title,
+  // then the period (same "<from> to <to>" format the PDF header already
+  // uses), then one blank row as the small gap before the first
+  // project/table. Details intentionally starts straight at its own title
+  // row, with no logo and no reserved rows — see its own rows below.
   const summaryRows: XlsxSheet["rows"] = [
-    [{ value: "Jirita — Hours Report", bold: true }],
+    [],
+    [],
+    [{ value: "HOURS REPORT", bold: true }],
     [{ value: `Period: ${fromISO} to ${toISO}` }],
     [],
     summaryHeader,
@@ -328,7 +368,13 @@ export function buildHoursReportWorkbookSheets(data: HoursReportData, fromISO: s
   ];
 
   return [
-    { name: "Summary", rows: summaryRows, columnWidths: includeFinancials ? [14, 50, 12, 14] : [14, 50, 12] },
+    {
+      name: "Summary",
+      rows: summaryRows,
+      columnWidths: includeFinancials ? [14, 50, 12, 14] : [14, 50, 12],
+      // Details never gets this — only Summary carries the logo header.
+      image: logoBytes ? { data: logoBytes, widthPx: LOGO_WIDTH_PX, heightPx: LOGO_HEIGHT_PX } : undefined,
+    },
     {
       name: "Details",
       rows: detailRows,

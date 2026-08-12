@@ -12,23 +12,17 @@ import autoTable from "jspdf-autotable";
 import type { RowInput } from "jspdf-autotable";
 import type { HoursReportData } from "@/lib/hours-report";
 import { formatCurrencyAmount } from "@/lib/hours-report";
+import { HOURS_REPORT_BRANDING } from "@/lib/hours-report-branding";
+import type { HoursReportBranding } from "@/lib/hours-report-branding";
 
 // ── Branding ──────────────────────────────────────────────────────────────────
-// The one place the header's logo is named. Swapping the PDF header to
-// LendingPoint's logo later is a one-line change to this constant (and, if
-// its aspect ratio differs, its width/height) — nothing in buildHoursReportPdf
-// below reads a brand asset path directly.
-export interface HoursReportPdfBranding {
-  logoUrl: string;
-  logoWidthPx: number;
-  logoHeightPx: number;
-}
-
-export const HOURS_REPORT_PDF_BRANDING: HoursReportPdfBranding = {
-  logoUrl: "/img/jirita-logo.png",
-  logoWidthPx: 217,
-  logoHeightPx: 47,
-};
+// The logo itself is named once, in hours-report-branding.ts, and shared
+// with the Excel Summary sheet's own header — never a second/duplicate
+// asset declaration here. Swapping the report's branding later (e.g. to
+// LendingPoint's logo) is a one-line edit to that shared constant; nothing
+// in buildHoursReportPdf below reads a brand asset path directly.
+export type HoursReportPdfBranding = HoursReportBranding;
+export const HOURS_REPORT_PDF_BRANDING: HoursReportPdfBranding = HOURS_REPORT_BRANDING;
 
 // The report's own fixed title — independent of the logo above, so
 // swapping the brand's logo never touches this text.
