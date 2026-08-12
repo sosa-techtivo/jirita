@@ -5,6 +5,8 @@ import type { Ticket, TicketPriority, TicketType } from "@/lib/mock-tickets";
 import { getTicketDisplayKey } from "@/lib/mock-tickets";
 import { StatusBadge, TicketTypeIcon, TicketTypeSelect, PRIORITY_LABEL } from "@/components/tickets/ticket-ui";
 import { AcceptanceCriteriaFields } from "@/components/tickets/acceptance-criteria-fields";
+import { RichTextEditor } from "@/components/rich-text/rich-text-editor";
+import { sanitizeRichTextHtml, isRichTextEmpty } from "@/components/rich-text/rich-text-utils";
 import { registerTicket, nextTicketNumber, titleToTicketId } from "@/lib/pending-tickets";
 import {
   createTicket,
@@ -381,7 +383,6 @@ export function NewTicketModal({
   const [error, setError]               = useState<string | null>(null);
 
   const titleRef        = useRef<HTMLInputElement>(null);
-  const textareaRef     = useRef<HTMLTextAreaElement>(null);
   const criteriaRefs    = useRef<(HTMLInputElement | null)[]>([]);
   const justAddedCrit   = useRef(false);
   const fileInputRef    = useRef<HTMLInputElement>(null);
@@ -542,7 +543,7 @@ export function NewTicketModal({
       projectSlug:  slug,
       ticketNumber: nextTicketNumber(slug),
       title:       title.trim(),
-      description: description.trim(),
+      description: sanitizeRichTextHtml(description),
       status,
       statusId: selectedStatus?.id,
       statusName: selectedStatus?.name,
@@ -577,7 +578,7 @@ export function NewTicketModal({
       const filledCriteria = criteria.filter((c) => c.trim().length > 0);
       const result = await createTicket(organization.id, slug, {
         title: title.trim(),
-        description: description.trim() || undefined,
+        description: isRichTextEmpty(description) ? undefined : sanitizeRichTextHtml(description),
         acceptanceCriteria: filledCriteria.length > 0 ? filledCriteria : undefined,
         assigneeProfileId: assigneeId || undefined,
         statusId,
@@ -632,13 +633,6 @@ export function NewTicketModal({
     return () => document.removeEventListener("keydown", handler);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [submitting]);
-
-  const autoResizeTextarea = () => {
-    const el = textareaRef.current;
-    if (!el) return;
-    el.style.height = "auto";
-    el.style.height = `${el.scrollHeight}px`;
-  };
 
   // ── Render ──────────────────────────────────────────────────────────────────
 
@@ -765,19 +759,11 @@ export function NewTicketModal({
                   optional
                 </span>
               </label>
-              <textarea
-                ref={textareaRef}
+              <RichTextEditor
+                content={description}
+                onChange={setDescription}
                 placeholder="Add context, steps to reproduce, or requirements…"
-                value={description}
-                onChange={(e) => { setDescription(e.target.value); autoResizeTextarea(); }}
-                onKeyDown={(e) => {
-                  if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-                    e.preventDefault();
-                    submitRef.current();
-                  }
-                }}
-                rows={3}
-                className={INPUT + " resize-none leading-relaxed py-2.5 overflow-hidden"}
+                contentClassName="sm:text-[14px]"
               />
             </div>
 

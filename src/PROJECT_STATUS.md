@@ -1,4 +1,4 @@
-> Last Updated: July 30, 2026
+> Last Updated: August 12, 2026
 
 ---
 
@@ -130,6 +130,20 @@ After that, **Fase 2.5** (`20260919000000_ticket_status_id_functional_source.sql
 
 Most recently, a final polish/smoke-fix pass closed out the feature. One real, pre-existing bug was found and fixed: My Work's own Status filter (`my-work-screen.tsx`) built its options from `boardColumnStatuses.filter((s) => present.has(s.name))` — the same "only values that actually occur among this member's own tickets" convention Priority/Project correctly still use there, but wrong for Status specifically, since a real, admin-configured status with zero tickets right now would never appear as a filter option at all. Fixed to list every one of `boardColumnStatuses` unfiltered, matching Tickets' own `tickets-screen.tsx` Status filter, which already sourced from the real, unfiltered per-project `ticket_statuses` list and needed no change. A full code-level audit of the rest of the feature (Board/Ticket Detail/Ticket Preview/New Ticket's default-status resolution/drag-and-drop status moves/the delete-blocked-by-tickets trigger/Project Lead's Statuses-only Settings access/Member's full lockout) found everything else already correctly wired to real `ticket_statuses` data — no other bugs. This pass was a static/code review only, not a live-browser click-through (no test credentials for the three roles were available and creating/using real user credentials was out of scope for this session) — same "should work, not yet verified live" status as most of the rest of this document. `tsc --noEmit`, `eslint .`, and `next build` all pass clean.
 
+After that, two small follow-ups closed out JIR-18 for real: the Board column header (`board-column.tsx`) switched from `truncate` to `line-clamp-2` so a longer custom status name (now realistic, since Admin/Project Lead can rename statuses freely via Project Settings → Statuses) wraps onto a second line instead of being cut off with an ellipsis; and a new migration, `20260921000000_ticket_statuses_new_project_seed.sql`, replaced `seed_default_ticket_statuses()` again — by explicit product decision, every **new** project now seeds an 8-status flow (Backlog [default] → In Progress → Resolved in Dev → Approved to Staging → Resolved in Staging → Approved to Go Live, all `open`; Resolved Live → Closed, both `closed`) instead of the earlier 6-status Backlog/To Do/In Progress/Blocked/In Review/Done flow. Only `Backlog`/`In Progress` keep a `legacy_enum_value` (the two names with a real, literal match in the old fixed enum); the other six are left `null`, same "never fabricate a legacy equivalence" rule `20260919000000` established. This only replaces the seed function itself — every already-existing project's own `ticket_statuses` rows (hand-edited or not) are completely untouched.
+
+Most recently, JIRITA gained real **attachment thumbnails** ("Cached Egress") across four phases, addressing a real Storage-egress cost: every inline attachment thumbnail (Attachments section, a comment's own inline attachments, "Attachments from comments," the Ticket Preview panel) was rendering the full-resolution original. The team's first approach, Supabase Image Transformations, was tried and confirmed broken in production (a correctly-formed `createSignedUrl(..., { transform })` call never came back under `/render/image/sign/` — this app's Supabase plan doesn't support it), so **Fase 2** pivoted to physically pre-resized derivatives instead: a new nullable `thumbnail_path` column (`20260922000000_add_attachment_thumbnails.sql`) on both `ticket_attachments` and `project_note_attachments`, populated at upload time by a new browser-only `generateAttachmentThumbnail` (`lib/attachment-thumbnail.ts` — `createImageBitmap` + canvas, 600px max width, WebP @ 0.82 quality, raster formats only, SVG deliberately skipped since it's already resolution-independent), best-effort and never able to fail the underlying upload. **Fase 1** first laid groundwork purely client-side: a signed-URL dedup/cache (`resolveTicketAttachmentPreviewUrl`) so the same object rendered twice never mints two different signed-URL tokens, plus deferred-loading for the collapsed "Attachments from comments" accordion. **Fase 3** ("Cached Egress Phase 3") raised signed-URL TTLs (300s → 3600s) and Storage `cacheControl` to 1 year (safe, since every object lives at a uuid-derived path and is never overwritten), and added a standalone Node CLI (`lib/attachment-thumbnail-backfill/`, `npm run backfill:thumbnails:preview`/`:apply`, defaulting to preview/dry-run) to generate thumbnails for every attachment uploaded *before* this feature landed — implemented, but with no evidence it has actually been run against production yet, so pre-existing attachments still fall back to their original file until it is. **Fase 4** added the same capability, purely as scaffolding, to a hypothetical *future* Unfuddle historical import (`unfuddle-import/import-attachments/plan-attachment-thumbnails.ts`, a new optional `generateThumbnails` param on `applyAttachments`, a read-only preview CLI) — explicitly verified to never touch or re-run the already-certified, completed KTVibe migration. One real, still-open, explicitly-documented gap: Project Notes' own upload path (`uploadProjectNoteAttachment`) generates and persists a thumbnail exactly like Tickets does, but `note-attachments.tsx` — the component that actually renders them — was never updated to consume it, so Notes attachments still always render full-size regardless of `thumbnail_path`. See Architecture Status → "Attachment Thumbnails (Cached Egress)" for the full phase-by-phase breakdown.
+
+Separately, a real, pre-existing bug was found and fixed in both the **Admin** and **Project Lead** Project Overview pages (`admin-project-overview.tsx`/`project-lead-project-overview.tsx`): New Ticket, opened from either page's own "+ New Ticket" button, always passed `members={[]}` and no `statuses` prop to `NewTicketModal` — so its Assignee list was always empty and its Status selector fell back to the legacy `FALLBACK_TICKET_STATUSES` ids, which `createTicket` rejects outright once a project has real, per-project `ticket_statuses` rows (every project does, post-JIR-18) — ticket creation from either Overview page failed every time. Both pages already loaded the real team roster and now also load the real per-project statuses (`ticketsResult.statuses`, the same result `loadProjectTickets` already returns) and pass both through correctly; the equivalent New Ticket entry point on the Tickets screen itself was unaffected and needed no change.
+
+Most recently, JIRITA gained a dedicated **Admin Hours Report** page (`/reports/hours`, `hours-report-screen.tsx`) with real Excel and PDF export, built up over four passes. Originally Admin-only, it now (by explicit product decision) opens to **Project Leads too — but strictly scoped to the projects they lead** (`loadLeadProjects` + per-project `loadProjectTickets`/`loadProjectTeam`, never the org-wide loaders an Admin uses), with a Period selector (This Month/Last Month/This Quarter/Custom Range, reusing Reports' own `PERIOD_OPTIONS`), a Projects multi-select, and a live project-grouped Summary preview (per-ticket rows, a Project Total row, a grand TOTAL HOURS/`$` footer) that both exports render from unchanged — preview and exports can never disagree, since all three read the exact same `HoursReportData` built once by `buildHoursReportData` (`lib/hours-report.ts`). **Excel** (`lib/xlsx-writer.ts`) is a real, from-scratch OOXML (.xlsx) writer — not a spreadsheet library — hand-templating the XML parts a workbook needs and zipping them with `fflate` (already used by Project Backup); it produces a real two-sheet workbook (Summary + a full Details sheet, one row per real time entry). **PDF** (`hours-report-pdf.ts`) is real generated PDF drawing via `jspdf`/`jspdf-autotable` (new dependencies) — deliberately not the existing `window.print()`-based Export PDF the rest of Reports already uses, per this feature's own "clean client-facing report" requirement — Summary-only, with a logo header, per-project tables, and page-number footers. One pitfall was caught and fixed proactively rather than shipped and found later: the org-wide load effect was keyed on the `organization` object itself, which `current-user-provider.tsx` replaces with a new reference on every focus-regain session revalidation — fixed by keying on the stable `organizationId` primitive instead, so tabbing back into the browser can't silently reset the Projects filter.
+
+Alongside it, JIRITA gained a real **financial-access permission** — a new `organization_memberships.financial_access boolean not null default false` column (`20260924000000_add_organization_membership_financial_access.sql`, every existing row including every current Project Lead defaulting to `false`, so no one's access silently expanded) letting an Admin selectively grant a specific Project Lead visibility into dollar/cost figures, via a real ARIA-switch toggle in Invite/Edit User (`invite-user-modal.tsx`, shown only when Role is Project Lead, cleared automatically the moment Role is changed away from it). A single new function, `hasFinancialAccess(role, financialAccess)` (`lib/current-user.ts`), is the one real gate every financial surface checks — Admin always passes, a Project Lead only with the flag set — and it's re-derived server-side on every save (`edit-user-action.ts`/`invite-user-action.ts`), never trusted from the client. It deliberately controls *visibility of `$`*, not *which projects* are reachable (project scope is identical for a financial and non-financial Project Lead) and not report *access* (every Project Lead can open the Hours Report; only a financially-privileged one sees any `$` in it). Three surfaces respect it: the Hours Report's `$`/Amount columns (entirely absent, not just hidden, when the flag is off — `HoursReportData.includesFinancials` gates whether `defaultHourlyRate` is even read, and a project's own real Internal-category `null` "$ not applicable" stays visually distinct, an em dash, from a genuine `$0.00`); Project Settings → Billing (invisible to a non-financial Project Lead, read-only-not-editable to a financial one, still fully editable for Admin); and Project Lead Time Tracking's new "Estimated Revenue" KPI (reuses the existing `financeSummary.estimatedRevenue` already computed there, no new query). A final pass added a shared branding module (`hours-report-branding.ts`, the one place the Jirita logo constant lives now, so rebranding is a one-line change) and gave the Excel export the same embedded logo image the PDF already had, via real OOXML floating-image support added to `xlsx-writer.ts`. Both this feature and the Hours Report above are implemented and internally consistent but have no indication of having been clicked through against a live Supabase project yet. See Architecture Status → "Admin Hours Report & Financial Access" for the full detail.
+
+Most recently, JIRITA gained **persistent ticket subscribers** — a durable "has this user meaningfully interacted with this ticket" list, built on top of a read-only audit that first confirmed no such concept existed anywhere (not in `ticket_activity`, not in the notification recipient logic) and that notification recipients were always derived from the *current* assignee/creator only, never anyone historical. A new table, `ticket_subscribers(ticket_id, profile_id, created_at)` (`20260925000000_add_ticket_subscribers.sql`, unique `(ticket_id, profile_id)`), is additive/persistent — reassigning a ticket never removes a past subscriber — and is populated automatically when a user creates a ticket, becomes its assignee, comments/replies on it, is validly @mentioned in a comment, or logs time on it (all via idempotent `upsert(..., ignoreDuplicates: true)`, so no interaction can ever create a duplicate row), plus backfilled for every pre-existing ticket from six historical sources (creator, current assignee, comment/reply authors, time-entry loggers — all FK-backed — plus historical assignees from `ticket_activity` and mentioned-user ids regex-recovered from comments' own saved HTML, both guarded against a since-deleted profile). Three new notification types (`ticket_field_changed`, `ticket_attachment_added`, `ticket_time_logged`) let subscribers hear about assignment/status/priority/dates/description/Acceptance-Criteria/label changes, new attachments, and new time entries, while every existing specific notification (`ticket_assigned`, `ticket_status_changed`, `comment_mention`, `comment_reply`, `ticket_comment`) keeps its original wording for its original specific recipient — subscriber fan-out is always a second, lower tier, built as "existing recipients + remaining subscribers, deduplicated" via a shared `loadRemainingTicketSubscribers` helper and a per-event `alreadyNotified` set, never a separate mechanism. This also fixed a real, pre-existing duplicate-notification bug: a ticket's assignee who was also @mentioned in the same comment previously received two separate notifications (`ticket_comment` and `comment_mention`) for one action — the new unified `notifyNewComment` resolves recipients in one priority-ordered pass (mentions → reply-parent-author → assignee → remaining subscribers) so each person is notified at most once per event, through whichever tier reaches them first. All of this — the table, RLS, backfill, and every auto-subscribe/fan-out call site — was implemented, then verified end-to-end with `tsc`/`eslint`/`next build`, entirely from two read-only audits (time-entry ownership, then notification/subscription behavior) performed first and explicitly not allowed to touch any code — see Architecture Status → "Ticket Subscribers (persistent + manual)" for the full breakdown.
+
+A follow-up pass then added the missing **manual** half: a small outline eye icon next to the ticket's Status field (Ticket Detail's right-column sidebar, immediately right of the status badge — an earlier placement in the top `Ticket ID | Status` header row was moved here one iteration later, presentation-only) lets any user who can already view a ticket subscribe or unsubscribe from it with one click, regardless of whether they've ever interacted with it — `Eye` (filled/active) = subscribed, `EyeOff` (muted) = not, with the same `title`/`aria-label` tooltip convention (`"Subscribe to this ticket"`/`"Unsubscribe from this ticket"`) the rest of this app already uses (there is no dedicated Tooltip component anywhere in JIRITA). Because `ticket_subscribers` had already shipped to the live Supabase project select/insert-only, unsubscribing needed a second, separate migration rather than an edit to the applied one — `20260926000000_ticket_subscribers_self_delete.sql` adds a `ticket_subscribers_delete` RLS policy and grant restricted to `profile_id = auth.uid()`, so a user can only ever remove their own subscription, never anyone else's, and removing one never touches ticket/project access. `setTicketSubscription`/`loadTicketSubscriptionState` (`lib/tickets.ts`) are the only two new functions — the toggle is optimistic (flips immediately, rolls back on a failed write) and deliberately silent: subscribing/unsubscribing never itself sends a notification, and every automatic subscribe rule above is completely unchanged, so a manual unsubscribe stays respected until the user re-subscribes (viewing/refreshing a ticket has never triggered a subscription).
+
 ---
 
 # Repository Structure
@@ -220,6 +234,7 @@ Route: `/projects/[slug]/settings`, Admin/Project Lead only. Previously a fully 
 - **+ Add new client** (`add-client-modal.tsx`): minimal name-only creation, backed by a new `clients` table (see Architecture Status) — created immediately and selected in the form; persisted to the project on the next Save like any other field. Basic per-organization duplicate names are rejected.
 - Danger Zone's Archive/Restore reuses `archive-project-modal.tsx`/`restoreProject` exactly as on the Projects list — no separate implementation
 - **New: Repository Integration** — Repository Provider (`repository_provider`, real and nullable on `projects`: `null` means "None", `github`/`gitlab` the only other storable values, two `CHECK` constraints enforce both that and its pairing with `repository_url`) and Repository URL (`repository_url`, hidden entirely when Provider is "None", required and format-validated — `https://github.com/owner/repository` (exactly two segments, host anchored) / `https://gitlab.com/group/project` (two or more segments — subgroups allowed) — via one shared, pure `validateRepositoryUrl` (`lib/projects.ts`) called both client-side and inside `updateProjectSettings` itself, never connected to/synced/OAuth'd). No OAuth/sync/commit-reads/webhooks/Connect-Disconnect-Test-Connection buttons exist; this is deliberately just the persisted configuration. A small status line reads the real, persisted `project.repositoryProvider`/`repositoryUrl` ("Not connected" / "GitHub connected" / "GitLab connected"), with an "Open Repository" link (new tab) shown only once a real URL is saved. Replaces the old org-wide Settings → Integrations mock section outright — see Architecture Status → Removed (Settings → Integrations).
+- **New: Statuses** (`project-settings-statuses.tsx`) — the only section a **Project Lead** can also reach here (they regained a Project Settings link for this reason alone; every other section stays Admin-only). Real, per-project `ticket_statuses`: create, rename, reorder within a group (plain Up/Down buttons, no drag-and-drop), move a status between Open/Closed, and set/change the default open status — all backed by real RLS/`SECURITY DEFINER` RPCs and a database-level delete guard (no tickets attached, never the default, never the last status in its own group). Every ticket-status surface in the app (Board columns, the Status selector/badge everywhere, Status filters, open/closed KPIs) reads this same real per-project list — see Overall Progress and Architecture Status for the full multi-phase history.
 - **Removed**: General's "Project Lead" picker (and the `loadOrganizationMembers` fetch that only existed to populate it) — it read/wrote the older `projects.owner_profile_id`, which is not the same field as Team's real `project_memberships.project_role` (see Team below). Project Lead is now set exclusively via Team's "Make Project Lead" action. **Resolved**: the `/projects` list's own Lead column/filter has since been reconciled onto `project_memberships.project_role` too (see the new subsection below) — `ProjectSummary.owner`/`owner_profile_id` no longer has any Lead-column reader anywhere in the app (Member's "My Projects" was already on `project_role`; see Architecture Status → Projects).
 
 #### Health, Progress, Ticket Counters & Tab-Regain Refresh (real, Admin/Project Lead) — `projects-list-screen.tsx`
@@ -406,6 +421,7 @@ The route `/projects/[slug]/tickets/[ticketCode]` renders a complete ticket work
 - Two-column layout: main content left, metadata sidebar right
 - Main content: issue key, title, status badge, description, Acceptance Criteria, Attachments (upload, rename, delete, download, and Preview for images/PDF — all real), Time Tracking, comments, activity timeline
 - Sidebar: editable status, type, priority, assignee, due date, labels, Estimated hours, Related Tickets (real — link/search/remove, with the correct inverse relation kept automatically on the other ticket). Milestone and Story Points fields exist in code but are dead — defined, never rendered
+- Sidebar's Status field has a real subscribe/unsubscribe eye icon next to the status badge — any user who can view the ticket can manually opt in/out of its notifications regardless of prior interaction; see Architecture Status → "Ticket Subscribers (persistent + manual)"
 - Every save on this page (fields, comments, time entries, attachments, related tickets) now shows a real error toast on failure instead of only logging to the console, and a failed inline edit reverts to its previous value rather than leaving an unsaved change on screen
 
 #### Backend Integration
@@ -546,6 +562,7 @@ Company-wide Delivery/Finance view. **Now backed by real Supabase data end-to-en
 - **Member Profile Modal triggers** (Hours by Person, Workload, Recent Changes, Billable Hours by Member) now all pass a real `profileId`/`projectSlug` (see Architecture Status → Member Profile Modal) instead of resolving by name.
 - **Fixed a hydration bug**: Hours Distribution's "Total" line wrapped a `SkeletonBlock` (which renders a `<div>`) inside a `<p>`, which the DOM doesn't allow — the wrapper is now a `<div>` with the same classes.
 - **Full structural skeleton loaders** for both tabs (`SkeletonBlock`-built, matching the real KPI strip/tables/filters) plus a real refresh on returning to a backgrounded browser tab, same precedent as the Dashboards/Projects list.
+- **New: Hours Report** (`/reports/hours`) — a dedicated, project-grouped hours report with real Excel and PDF export, reachable via a "View Report" doorway card on this screen and, since a later pass, on the Project Lead's own Reports screen too (scoped to their own led projects). Whether `$` figures appear in it is gated by a separate new `financial_access` permission, Admin-configurable per Project Lead. See Architecture Status → "Admin Hours Report & Financial Access" for the full detail.
 
 #### Project Lead — `project-lead-reports-screen.tsx`
 
@@ -613,7 +630,7 @@ A dedicated top-level management module, replacing the old Settings → People p
 - **Filters**: Search, Role, Status, Project (multi-select dropdowns, same `FilterDropdown` component used across Tickets/Team/Time Tracking)
 - **Table columns**: Avatar + Name, Email, Role, Status (Active/Invited/Disabled), Projects (count, clickable — opens the Projects tab), Weekly Capacity, Last Login (real, via the Auth Admin API), Actions
 - **Row actions (⋯)**: View Profile, Edit User (real), Reset Password (Active only, real — generates a link, see below), Resend Invitation (Invited only — still mock, toast-only), Copy Invitation Link (Invited only), Disable/Enable User (real), **Delete User (real — Active/Disabled/Invited alike, not gated to Disabled-only; server-verified eligibility, permanent, confirmation modal identifies the user by name and email; see Architecture Status → Users → Delete User)**
-- **Invite User modal** (`invite-user-modal.tsx`): **Generate Invite Link only** — the "Send by email" method (and its pill toggle) was removed outright; the form now opens directly to the link-generation fields with no method selector, mints a single-use link, and shows a Copy Link success view instead of closing. First/Last Name, Email, Role, Weekly Capacity. The same component also powers **Edit User** via an `editingUser` prop (pre-filled, "Save Changes" — real: first/last name, role, and weekly capacity persist; the email field still doesn't). The underlying email-invite Server Action (`inviteUserAction`/`inviteOrganizationUser`) still exists, just unreachable from this modal — see Architecture Status → Users → Delete User for the same pass's full detail.
+- **Invite User modal** (`invite-user-modal.tsx`): **Generate Invite Link only** — the "Send by email" method (and its pill toggle) was removed outright; the form now opens directly to the link-generation fields with no method selector, mints a single-use link, and shows a Copy Link success view instead of closing. First/Last Name, Email, Role, Weekly Capacity, and (when Role is Project Lead) a real **Financial access** toggle — real, ARIA-`switch`-based, off by default, cleared automatically the moment Role is changed away from Project Lead, re-derived server-side on every save (never trusted from the client) via a new `financial_access` column on `organization_memberships`; see Architecture Status → "Admin Hours Report & Financial Access". The same component also powers **Edit User** via an `editingUser` prop (pre-filled, "Save Changes" — real: first/last name, role, weekly capacity, and financial access all persist; the email field still doesn't). The underlying email-invite Server Action (`inviteUserAction`/`inviteOrganizationUser`) still exists, just unreachable from this modal — see Architecture Status → Users → Delete User for the same pass's full detail.
 - **Reset Password**: generates a single-use link (`reset-password-link-modal.tsx`, shared with the Member Profile Modal's Security tab below) instead of sending an email — no email is sent by this action
 - **Disable/Enable User**: real — flips `organization_memberships.status` only, never touches `profiles`/`auth.users`; a disabled user's own open session is signed out immediately if they're still logged in, and a re-enabled user can log back in correctly (a real bug — stale client-side auth state surviving the disable/enable cycle — was fixed here)
 - Every privileged write above (Invite, Disable/Enable, Edit, Reset Password link) goes through its own Server Action (`src/lib/server/*.ts`) using the Supabase service-role key, because `organization_memberships` has no direct `UPDATE`/`INSERT` grant for the `authenticated` role — RLS alone was never the gate, Postgres checks table privileges first — and because each write re-verifies the caller server-side (active org admin, same organization) rather than trusting the browser
@@ -3008,6 +3025,270 @@ never a silent drop and never a rollback of siblings.
   section of any kind (general or comment-level), so adding comment
   attachments there would be new scope, not a fix.
 
+---
+
+## Attachment Thumbnails (Cached Egress)
+
+Four phases, addressing a real Storage-egress cost: every inline
+attachment thumbnail (Attachments section, a comment's own inline
+attachments, "Attachments from comments," the Ticket Preview panel) was
+rendering the full-resolution original. Supabase Image Transformations
+(on-the-fly resizing via `createSignedUrl(..., { transform })`) was tried
+first and confirmed broken in production — a correctly-formed call never
+came back under `/render/image/sign/`, this app's Supabase plan doesn't
+support it — so the feature pivoted to physically pre-resized derivative
+files instead.
+
+- **Fase 1** — client-side groundwork only, no schema change: a signed-URL
+  dedup/cache (`resolveTicketAttachmentPreviewUrl`, `lib/tickets.ts`) so
+  the same object rendered in two places at once (e.g. inline on a
+  comment and again inside the collapsed "Attachments from comments"
+  accordion) never mints two different signed-URL tokens for it, plus
+  deferred loading (`loadEnabled`) so that same collapsed accordion
+  doesn't fetch anything until actually opened.
+- **Fase 2** — the real thumbnails: a new nullable `thumbnail_path` column
+  (`20260922000000_add_attachment_thumbnails.sql`) on both
+  `ticket_attachments` and `project_note_attachments`; a new
+  browser-only `generateAttachmentThumbnail` (`lib/attachment-thumbnail.ts`
+  — `createImageBitmap` + canvas, 600px max width, WebP @ 0.82 quality,
+  raster formats only, SVG deliberately skipped since it's already
+  resolution-independent). `uploadTicketAttachment` generates and uploads
+  one best-effort, alongside the original, at upload time — a thumbnail
+  failure never fails the attachment upload itself. Every real
+  Ticket-side thumbnail render site was rewired onto a new
+  `resolveTicketAttachmentThumbnailUrl` (its own separate cache — never
+  shares an entry with the full-size preview cache, so the full-size
+  Preview modal/Download can never accidentally be served a downscaled
+  thumbnail). `uploadProjectNoteAttachment` (`lib/notes.ts`) generates and
+  persists a thumbnail the same way, but **`note-attachments.tsx` — the
+  component that actually renders Notes attachments — was never updated
+  to consume it**, an explicitly-documented, still-open gap: Notes
+  attachments always render full-size today regardless of
+  `thumbnail_path`.
+- **Fase 3** ("Cached Egress Phase 3") — raised signed-URL TTLs (300s →
+  3600s, both Tickets and Notes) and Storage `cacheControl` to 1 year
+  (safe: every object lives at a uuid-derived path, never overwritten).
+  Added a standalone Node CLI, `lib/attachment-thumbnail-backfill/`
+  (`npm run backfill:thumbnails:preview`/`:apply`, defaulting to a
+  dry-run preview that reads/decodes real objects for accurate counts but
+  writes nothing), to generate thumbnails for every attachment uploaded
+  *before* this feature existed — implemented, keyset-paginated, resumable
+  (each row is only reprocessed while its `thumbnail_path` stays `null`),
+  but with **no evidence it has actually been run against production
+  yet** — pre-existing attachments still fall back to their original file
+  until it is.
+- **Fase 4** — the same capability as pure scaffolding for a *future*
+  Unfuddle historical import (`unfuddle-import/import-attachments/
+  plan-attachment-thumbnails.ts`, a new optional `generateThumbnails` flag
+  on `applyAttachments`, a read-only preview CLI reporting how many
+  attachments would get a physical thumbnail). Explicitly verified never
+  to touch or re-run the already-certified, completed KTVibe migration —
+  its own runner still calls `applyAttachments` with the flag omitted
+  (defaulting `false`).
+
+Purely additive throughout: `thumbnail_path` is nullable everywhere, and
+every real consumer falls back to the original `storage_path` when it's
+null — no existing column, RLS policy, or upload/delete flow was removed.
+Implemented and presumably type/build-clean per this codebase's own
+convention, but not confirmed clicked-through live, and the historical
+backfill has not been run.
+
+---
+
+## Admin Hours Report & Financial Access
+
+A dedicated report page (`/reports/hours`, `hours-report-screen.tsx`) with
+real Excel and PDF export, plus a new per-membership permission
+controlling who can see dollar figures in it — four passes, one
+continuous feature.
+
+**Access vs. financial visibility are two separate questions.**
+`canAccessReport = isAdmin || isProjectLead` (a Member is blocked
+outright); `canViewFinancials = hasFinancialAccess(user.role,
+user.financialAccess)`. Every Project Lead can open the report; only a
+financially-privileged one (or an Admin) sees any `$` in it.
+
+- **Data scope**: Admin is org-wide (`loadOrganizationTickets`/
+  `loadOrganizationProjects`/`loadOrganizationMembers`); a Project Lead is
+  always scoped to only the projects they actually lead
+  (`loadLeadProjects`, then per-project `loadProjectTickets`/
+  `loadProjectTeam` — never the org-wide loaders), regardless of
+  financial access. For a non-financial Project Lead, `defaultHourlyRate`
+  is never even fetched into this screen's state, not fetched-then-hidden.
+- **Excel** (`lib/xlsx-writer.ts`) is a real, from-scratch OOXML (.xlsx)
+  writer — no spreadsheet library — hand-templating the XML parts a
+  workbook needs and zipping them with `fflate` (already used by Project
+  Backup). Two sheets: Summary (project-grouped, Project Total/TOTAL
+  HOURS rows) and Details (one row per real time entry).
+- **PDF** (`lib/hours-report-pdf.ts`) is real generated PDF drawing via
+  `jspdf`/`jspdf-autotable` (new dependencies) — deliberately not the
+  existing `window.print()`-based Export PDF the rest of Reports already
+  uses, per this feature's own "clean client-facing report" requirement.
+  Summary-only (no Details), with a logo header, per-project tables, and
+  page-number footers.
+- Preview and both exports read from one shared `HoursReportData`
+  (`buildHoursReportData`, `lib/hours-report.ts`) — they can never
+  disagree about what a period/project selection actually totals.
+- A `null` vs. `undefined` amount is a deliberate three-state distinction
+  carried through all three renderers: `undefined` means "no `$` concept
+  here at all" (financials off — no column rendered); `null` means "this
+  project is Internal-category, so its `$` is genuinely not applicable"
+  (rendered as an em dash, never a misleading `$0.00`).
+
+**The permission itself** — a new `organization_memberships.
+financial_access boolean not null default false` column
+(`20260924000000_add_organization_membership_financial_access.sql`; every
+existing row, including every current Project Lead, defaults `false`, so
+no one's access silently expanded). `hasFinancialAccess(role,
+financialAccess)` (`lib/current-user.ts`) is the single real gate every
+financial surface checks (Admin always passes; a Project Lead only with
+the flag set) — re-derived server-side on every save
+(`edit-user-action.ts`/`invite-user-action.ts`), never trusted from the
+client. An Admin grants it per-Project-Lead via a real ARIA-switch toggle
+in Invite/Edit User (`invite-user-modal.tsx`), shown only when Role is
+Project Lead and cleared automatically the instant Role changes away from
+it. It governs *visibility of `$`* only — never which projects are
+reachable, and never report access itself. Three surfaces respect it:
+the Hours Report's `$`/Amount columns; Project Settings → Billing
+(invisible to a non-financial Project Lead, read-only for a financial
+one, still fully editable for Admin); and Project Lead Time Tracking's
+new "Estimated Revenue" KPI (reuses the existing
+`financeSummary.estimatedRevenue` already computed there — no new query).
+
+A final polish pass added a shared branding module
+(`lib/hours-report-branding.ts`, the one place the Jirita logo constant
+now lives, so rebranding is a one-line change) and gave the Excel export
+the same embedded logo image the PDF already had, via real OOXML
+floating-image support added to `xlsx-writer.ts` (per-sheet drawing
+relationships/media parts, `buildHoursReportWorkbookSheets` made `async`
+to fetch the logo).
+
+One pitfall was caught and fixed proactively, before it ever shipped
+broken, rather than found live later: the org-wide load effect was
+originally going to key on the `organization` object itself, which
+`current-user-provider.tsx` replaces with a new reference on every
+focus-regain session revalidation even when nothing changed — fixed by
+keying on the stable `organizationId` primitive instead, so tabbing back
+into the browser can't silently reset the Projects filter.
+
+Implemented and internally consistent (shared data across preview/PDF/
+Excel, server-side re-derivation of the permission on every save), but
+there is no indication either surface has been clicked through against a
+live Supabase project yet. `docs/SUPABASE_MVP_SCHEMA.md` has not been
+updated with the new `financial_access` column.
+
+---
+
+## Ticket Subscribers (persistent + manual)
+
+Two read-only audits ran first, by explicit instruction, before any code
+was written: one confirmed logged-hours attribution is permanent
+(`ticket_time_entries.logged_by`, never derived from the current
+assignee — reassigning a ticket never rewrites historical time-entry
+ownership); the other confirmed no "who has touched this ticket" concept
+existed anywhere, and that every notification recipient was always
+derived from the *current* assignee/creator only.
+
+**Schema** — `20260925000000_add_ticket_subscribers.sql`:
+
+- `ticket_subscribers(ticket_id, profile_id, created_at)`, PK on
+  `(ticket_id, profile_id)` — the real uniqueness/idempotency guarantee.
+  Both FKs cascade on delete.
+- `ticket_subscribers_select`: same `can_view_project` gate every other
+  ticket-scoped table already uses.
+- `ticket_subscribers_insert`: a caller may always subscribe *themselves*
+  to any ticket they can view; subscribing someone else is only allowed
+  when that profile is already a real member of the ticket's own project
+  — this can never grant new project access.
+- Backfilled from six sources for every pre-existing ticket: creator,
+  current assignee, comment/reply authors, time-entry loggers (all
+  FK-backed, inserted directly), plus historical assignees
+  (`ticket_activity.old_value`/`new_value` for `assignee_changed`) and
+  mentioned-user ids regex-recovered from comments' saved
+  `<span data-type="mention" data-id="...">` HTML — both of the latter
+  guarded with `exists (select 1 from profiles ...)` since those source
+  columns carry no FK of their own.
+- Widens `notifications.type` (same drop/re-add `CHECK` pattern used
+  twice before) to add three new subscriber-only fan-out types:
+  `ticket_field_changed`, `ticket_attachment_added`, `ticket_time_logged`.
+
+**Automatic subscription** (`lib/tickets.ts`, all via idempotent
+`upsert(..., { onConflict: "ticket_id,profile_id", ignoreDuplicates: true })`
+— `subscribeToTicket`/`subscribeManyToTicket`) fires on: `createTicket`
+(creator + initial assignee), `updateTicket` when the assignee actually
+changes (the new assignee), `createTicketComment`/`updateTicketComment`
+(the comment's author, and every validly @mentioned profile —
+re-validated server-side against real `project_memberships`, never
+trusted from the editor's own suggestion list), and `logTicketTime` (the
+logger). No interaction ever removes a subscription automatically.
+
+**Notification fan-out** — one recipient set per event, built as
+"existing specific recipients + remaining subscribers, deduplicated,"
+never a parallel mechanism:
+
+- A shared `loadRemainingTicketSubscribers(supabase, ticketId,
+  alreadyNotified)` helper is the single place that difference is
+  computed, called once per event after that event's own specific-rule
+  recipients are already known.
+- Every pre-existing specific notification (`ticket_assigned` to the new
+  assignee, `ticket_status_changed` to the current assignee,
+  `comment_mention`, `comment_reply`) keeps its exact original wording
+  for its exact original recipient — subscriber fan-out is always a
+  lower, second tier (`ticket_field_changed` for
+  reassignment/priority/due-date/description/labels/Acceptance-Criteria,
+  bundled into one notification per update rather than one per field;
+  `ticket_attachment_added`; `ticket_time_logged`).
+- `notifyNewComment` replaced the three previously-separate
+  `notifyTicketComment`/`notifyCommentMentions`/`notifyCommentReply`
+  functions with one priority-ordered pass (mentions → reply-parent-author
+  → assignee → remaining subscribers, via a running `alreadyNotified` set)
+  — this is also the fix for a real, pre-existing bug: an assignee who was
+  also @mentioned in the same comment previously received two separate
+  notifications for one action.
+- The actor is never notified about their own action (both locally, via
+  each tier's own set, and centrally, via `createNotification`'s existing
+  actor === recipient guard) — the same double-enforced rule the rest of
+  the notification system already relies on.
+
+**Manual subscribe/unsubscribe** — added in a follow-up pass, entirely
+UI/RLS, no change to any of the automatic rules above:
+
+- A small outline eye icon sits immediately right of the status badge in
+  Ticket Detail's right-column **Status** field (`EditableSidebarStatus`,
+  `ticket-detail-screen.tsx`) — `Eye` (brand-colored) = subscribed,
+  `EyeOff` (muted) = not, `title`/`aria-label` = "Subscribe to this
+  ticket" / "Unsubscribe from this ticket". An earlier placement in the
+  top `Ticket ID | Status` header row was moved here one iteration later
+  — presentation-only, no logic changed by the move.
+- `loadTicketSubscriptionState`/`setTicketSubscription` (`lib/tickets.ts`)
+  are the only two new functions: the former reads whether the signed-in
+  viewer has their own row for this ticket; the latter upserts (subscribe)
+  or deletes (unsubscribe) only that viewer's own row. A user may
+  subscribe to any ticket they can already view, with zero prior
+  interaction. Neither function ever calls `createNotification` —
+  subscribing/unsubscribing is silent by design.
+- The icon toggles optimistically (flips immediately, rolls back and
+  shows the shared error toast if the write fails) and is hidden entirely
+  until the real state has loaded (never guesses).
+- **`ticket_subscribers` had already shipped to the live Supabase project**
+  select/insert-only, so unsubscribing needed its own new migration rather
+  than an edit to the applied one: `20260926000000_ticket_subscribers_
+  self_delete.sql` adds a `ticket_subscribers_delete` RLS policy and grant
+  restricted to `profile_id = auth.uid()` — a user can only ever remove
+  their own subscription, never anyone else's, and doing so never touches
+  ticket/project access.
+- Because viewing/loading a ticket has never itself called any subscribe
+  function, a manual unsubscribe stays respected across refreshes — it's
+  only overridden if a real automatic-subscribe interaction (reassignment
+  to that user, a new comment/mention from them, logging time) fires
+  afterward, exactly as the automatic rules already behaved before this
+  pass.
+
+No unsubscribe/watcher-list/subscriber-count UI exists beyond the single
+toggle icon — explicitly out of scope. `tsc --noEmit`, `eslint`, and
+`next build` all pass clean for every file this feature touched; not yet
+clicked through in a live browser.
+
 ## Metadata — Open Graph / Twitter previews (reset-password, accept-invite)
 
 Fixes a real, reported bug: sharing a `/reset-password` or `/accept-invite`
@@ -3761,7 +4042,7 @@ Current known items:
 
 Planned future work:
 
-- Live verification (click through each in a browser against a real Supabase project) of Users, the **Admin** Project Overview (including its new Project Activity history page), per-project Reports, Time Tracking (Admin/Member/Project Lead), the Dashboard's org-wide Activity History page, the Project Lead's and Member's own Project Overview, all three Dashboards' project scope selectors, My Work (Member, including its own KPI click-through and skeleton loader), ticket-assignment restriction, Member's own `/projects` ("My Projects"), global Search, the Project Lead's own scoped Reports (Delivery + Team, including its KPI click-throughs), the `/projects` list's Project Lead KPI band, the Reports/Time Tracking Member Profile Modal trigger fixes, and the new fixed Time Tracking rules (estimate required before In Progress/In Review/Done in `updateTicket`, 15-minute always-round-up in `logTicketTime`) — the immediate next step, ahead of any new backend seam
+- Live verification (click through each in a browser against a real Supabase project) of Users, the **Admin** Project Overview (including its new Project Activity history page), per-project Reports, Time Tracking (Admin/Member/Project Lead), the Dashboard's org-wide Activity History page, the Project Lead's and Member's own Project Overview, all three Dashboards' project scope selectors, My Work (Member, including its own KPI click-through and skeleton loader), ticket-assignment restriction, Member's own `/projects` ("My Projects"), global Search, the Project Lead's own scoped Reports (Delivery + Team, including its KPI click-throughs), the `/projects` list's Project Lead KPI band, the Reports/Time Tracking Member Profile Modal trigger fixes, the new fixed Time Tracking rules (estimate required before In Progress/In Review/Done in `updateTicket`, 15-minute always-round-up in `logTicketTime`), per-project configurable ticket statuses (Project Settings → Statuses and every status-consuming surface, per its own static-review-only caveat), the four-phase attachment thumbnails feature (including actually running the historical backfill CLI, and still-pending Notes UI wiring — see Architecture Status → "Attachment Thumbnails (Cached Egress)"), the Admin Hours Report + Project Lead financial-access permission (Excel/PDF export, the Invite/Edit User toggle), and persistent + manual ticket subscribers — the immediate next step, ahead of any new backend seam
 - **No longer applicable**: this used to track backend integration for "the rest of Settings," but the workspace-wide Settings screen was retired outright instead — JIRITA is single-tenant, so that configuration isn't meant to be Admin-editable through the UI (see Architecture Status → Removed (Settings → General & Danger Zone)). Every other screen this line used to cover (the Project Lead's own scoped Reports and Time Tracking views) is done — see Architecture Status.
 - API layer
 - Real drag & drop (Kanban)

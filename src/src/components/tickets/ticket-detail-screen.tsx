@@ -4494,6 +4494,11 @@ export function TicketDetailScreen({
   // (loadTicketSubscriptionState below), so the icon can stay hidden rather
   // than briefly rendering the wrong state.
   const [isSubscribed, setIsSubscribed] = useState<boolean | null>(null);
+  // Small "Enlace al ticket copiado" tooltip shown briefly after clicking
+  // the ticket key (JIR-50, etc.) — never a toast, just this one flag.
+  const [linkCopied, setLinkCopied] = useState(false);
+  const linkCopiedTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (linkCopiedTimeoutRef.current) clearTimeout(linkCopiedTimeoutRef.current); }, []);
   const [addingComment, setAddingComment] = useState(false);
   const [commentDraft, setCommentDraft] = useState("");
   const [submittingComment, setSubmittingComment] = useState(false);
@@ -5129,6 +5134,26 @@ export function TicketDetailScreen({
     });
   }
 
+  // Copies the current, real ticket URL (window.location.href — whatever
+  // route/host this page is actually being viewed at, never a hardcoded
+  // domain) to the clipboard, then shows a small "Enlace al ticket
+  // copiado" tooltip near the ticket key for a couple seconds. Clipboard
+  // access can fail (no permission, insecure context, older browser) —
+  // caught and logged only; the page/UI never breaks over it.
+  function copyTicketLink() {
+    if (!navigator.clipboard) {
+      console.warn("[ticket-detail] copy ticket link failed: clipboard API unavailable");
+      return;
+    }
+    navigator.clipboard.writeText(window.location.href).then(() => {
+      setLinkCopied(true);
+      if (linkCopiedTimeoutRef.current) clearTimeout(linkCopiedTimeoutRef.current);
+      linkCopiedTimeoutRef.current = setTimeout(() => setLinkCopied(false), 1800);
+    }).catch((err) => {
+      console.warn("[ticket-detail] copy ticket link failed:", err);
+    });
+  }
+
   // Manual subscribe/unsubscribe toggle — entirely separate from the
   // automatic subscribe rules (create/assign/comment/mention/log-time),
   // which keep firing unchanged. Optimistic: flips isSubscribed immediately
@@ -5239,9 +5264,22 @@ export function TicketDetailScreen({
             {/* Title */}
             <header className="order-[10]">
               <div className="flex items-center gap-2.5 mb-3">
-                <span className="flex items-center gap-1.5 font-mono text-[12px] font-semibold tracking-wider text-slate-400 dark:text-zinc-500">
-                  <TicketTypeIcon type={ticket.type} className="w-3.5 h-3.5" />
-                  {getTicketDisplayKey(ticket)}
+                <span className="relative inline-flex">
+                  <button
+                    type="button"
+                    onClick={copyTicketLink}
+                    aria-label="Copy link to this ticket"
+                    title="Copy link to this ticket"
+                    className="flex items-center gap-1.5 font-mono text-[12px] font-semibold tracking-wider text-slate-400 dark:text-zinc-500 cursor-pointer rounded hover:text-slate-600 dark:hover:text-zinc-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/50"
+                  >
+                    <TicketTypeIcon type={ticket.type} className="w-3.5 h-3.5" />
+                    {getTicketDisplayKey(ticket)}
+                  </button>
+                  {linkCopied && (
+                    <span className="absolute left-0 top-full mt-1 whitespace-nowrap bg-slate-900 dark:bg-zinc-800 text-white text-[11px] font-medium px-2 py-1 rounded shadow-md z-10">
+                      Enlace al ticket copiado
+                    </span>
+                  )}
                 </span>
                 <EditableStatusBadge
                   value={ticket.status}

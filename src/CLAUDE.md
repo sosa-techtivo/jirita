@@ -320,20 +320,19 @@ Admin-editable through the UI. "Settings" no longer appears in the
 sidebar; `/settings` and every subroute now just redirect to the
 Dashboard. Project Settings is unaffected.
 
-Since then: Ticket Comments gained one-level-deep reply threads, Like/Dislike
-reactions, and add/remove attachments when editing an existing comment — all
-enforced by real RLS, never just hidden in the UI. Time Tracking gained real
-edit/delete for a logged entry (Admin may manage any entry in their
-organization; Project Lead/Member only their own) and a real bug fix: a
-mandatory 15-minute rounding that silently altered every logged duration was
-removed, so an entry now persists the exact minutes entered. Profile gained a
-"My Profile" entry in the account menu for every role (previously missing
-for Member on Desktop), and Weekly Capacity is now Admin/Project-Lead-editable
-only, read-only for Member. Project Notes gained real attachments (images
-previewed inline, other files downloadable) and a real rich-text Details
-field, reusing the same editor as Ticket Description/Comments. A real bug
-was also fixed where Project → Team and Project → Notes always showed a
-hardcoded mock project name in their breadcrumb instead of the real one.
+Since then: Ticket Comments/Time Tracking/Profile/Project Notes gained the
+real functionality (reply threads, reactions, comment attachments, entry
+edit/delete, a rounding-bug fix, per-role Weekly Capacity edit rights, note
+attachments/rich-text) described in full in `PROJECT_STATUS.md`. Tickets
+also gained real, per-project configurable Statuses (create/rename/reorder/
+default, Project Settings → Statuses, Admin/Project Lead), real thumbnails
+for image attachments (Tickets fully wired; Project Notes upload-side only,
+UI wiring still pending), and persistent ticket subscribers — auto-tracked
+per ticket interaction plus a manual subscribe/unsubscribe icon next to the
+Status field, fanning out through the existing notification system. Reports
+gained a dedicated Admin/Project-Lead-scoped Hours Report with real Excel/PDF
+export, gated by a new Admin-configurable per-Project-Lead financial-access
+permission that also governs Project Settings → Billing visibility.
 
 **For the authoritative, feature-by-feature breakdown — every Server
 Action, migration, and real bug fixed along the way, and the exact
