@@ -11,6 +11,7 @@ import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import type { RowInput } from "jspdf-autotable";
 import type { HoursReportData } from "@/lib/hours-report";
+import { formatCurrencyAmount } from "@/lib/hours-report";
 
 // ── Branding ──────────────────────────────────────────────────────────────────
 // The one place the header's logo is named. Swapping the PDF header to
@@ -31,11 +32,12 @@ export const HOURS_REPORT_PDF_BRANDING: HoursReportPdfBranding = {
 
 // The report's own fixed title — independent of the logo above, so
 // swapping the brand's logo never touches this text.
-const REPORT_TITLE = "TECHTIVO HOURS REPORT";
+const REPORT_TITLE = "HOURS REPORT";
 
 const PAGE_MARGIN = 40;
 const BOTTOM_MARGIN = 40;
-const HOURS_COL_WIDTH = 60;
+const HOURS_COL_WIDTH = 55;
+const AMOUNT_COL_WIDTH = 65;
 const TICKET_COL_WIDTH = 75;
 
 // Rough minimum vertical space (heading + repeated table header + at least
@@ -60,6 +62,13 @@ const BRAND_500: [number, number, number] = [102, 85, 238];
 
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
+}
+
+// An em dash for a `null` (Internal-category) amount instead of a
+// currency-formatted `0` — Internal hours are never billable, so they must
+// never read as "billed at $0."
+function formatAmount(amount: number | null): string {
+  return amount === null ? "—" : formatCurrencyAmount(round2(amount));
 }
 
 async function loadLogoDataUrl(url: string): Promise<string> {
@@ -95,7 +104,9 @@ export async function buildHoursReportPdf(
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
   const tableWidth = pageWidth - PAGE_MARGIN * 2;
-  const hoursColRight = pageWidth - PAGE_MARGIN;
+  const amountColRight = pageWidth - PAGE_MARGIN;
+  const amountColLeft = amountColRight - AMOUNT_COL_WIDTH;
+  const hoursColRight = amountColLeft;
   const hoursColLeft = hoursColRight - HOURS_COL_WIDTH;
 
   // A logo that fails to fetch (offline, asset moved) degrades to a
@@ -145,24 +156,33 @@ export async function buildHoursReportPdf(
     doc.setFontSize(11);
     doc.setTextColor(...SLATE_800);
     doc.text(group.projectName, PAGE_MARGIN, cursorY);
+    if (group.isInternal) {
+      const nameWidth = doc.getTextWidth(group.projectName);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      doc.setTextColor(...SLATE_400);
+      doc.text("Internal", PAGE_MARGIN + nameWidth + 8, cursorY);
+    }
     cursorY += 10;
 
     const body: RowInput[] = group.tickets.map((ticket) => [
       ticket.ticketKey,
       ticket.summary,
       round2(ticket.hours).toFixed(2),
+      formatAmount(ticket.amount),
     ]);
     body.push([
       "",
       { content: "Project Total", styles: { fontStyle: "bold", halign: "right" } },
       { content: round2(group.totalHours).toFixed(2), styles: { fontStyle: "bold", halign: "right" } },
+      { content: formatAmount(group.totalAmount), styles: { fontStyle: "bold", halign: "right" } },
     ]);
 
     autoTable(doc, {
       startY: cursorY,
       margin: { left: PAGE_MARGIN, right: PAGE_MARGIN, bottom: BOTTOM_MARGIN, top: PAGE_MARGIN },
       tableWidth,
-      head: [["Ticket", "Summary", "Hours"]],
+      head: [["Ticket", "Summary", "Hours", "$"]],
       body,
       showHead: "everyPage",
       rowPageBreak: "avoid",
@@ -183,8 +203,9 @@ export async function buildHoursReportPdf(
       },
       columnStyles: {
         0: { cellWidth: TICKET_COL_WIDTH },
-        1: { cellWidth: tableWidth - TICKET_COL_WIDTH - HOURS_COL_WIDTH },
+        1: { cellWidth: tableWidth - TICKET_COL_WIDTH - HOURS_COL_WIDTH - AMOUNT_COL_WIDTH },
         2: { cellWidth: HOURS_COL_WIDTH, halign: "right" },
+        3: { cellWidth: AMOUNT_COL_WIDTH, halign: "right" },
       },
     });
 
@@ -206,6 +227,7 @@ export async function buildHoursReportPdf(
   doc.setTextColor(...SLATE_900);
   doc.text("TOTAL HOURS", hoursColLeft - 8, cursorY, { align: "right" });
   doc.text(round2(data.grandTotalHours).toFixed(2), hoursColRight, cursorY, { align: "right" });
+  doc.text(formatCurrencyAmount(round2(data.grandTotalAmount)), amountColRight, cursorY, { align: "right" });
 
   // Footer page numbers — added last, once the real page count is known,
   // rather than guessed while drawing (this report's own length isn't known

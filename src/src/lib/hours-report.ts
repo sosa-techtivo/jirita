@@ -9,6 +9,7 @@
 
 import { getTicketDisplayKey } from "@/lib/mock-tickets";
 import type { Ticket } from "@/lib/mock-tickets";
+import type { ProjectCategory } from "@/lib/mock-projects";
 import type { OrganizationTimeEntry } from "@/lib/tickets";
 import type { XlsxSheet } from "@/lib/xlsx-writer";
 
@@ -16,12 +17,27 @@ export interface HoursReportTicketRow {
   ticketKey: string;
   summary: string;
   hours: number;
+  /** hours * the ticket's own project.defaultHourlyRate — the same real
+   *  Project Settings rate Reports' Finance tab already bills hours
+   *  against, never a new rate/calculation of its own. `null` (never `0`)
+   *  for an Internal-category project: Internal work is never billable
+   *  regardless of what rate (if any) happens to be stored, so it must
+   *  read as "not applicable," not "billed at $0." */
+  amount: number | null;
 }
 
 export interface HoursReportProjectGroup {
   projectName: string;
+  /** Project Settings' own real category — the sole source of truth for
+   *  whether this project's hours are billable. Never inferred from
+   *  `defaultHourlyRate` being 0/unset (a Client project can legitimately
+   *  have no rate set yet and must still show `$0.00`, not `—`). */
+  isInternal: boolean;
   tickets: HoursReportTicketRow[];
   totalHours: number;
+  /** Sum of the group's own ticket amounts — `null` whenever `isInternal`
+   *  is true (every ticket in the group is `null` for the same reason). */
+  totalAmount: number | null;
 }
 
 export interface HoursReportDetailRow {
@@ -32,12 +48,28 @@ export interface HoursReportDetailRow {
   workDate: string;
   description: string;
   hours: number;
+  /** Same Internal-category → `null` rule as HoursReportTicketRow.amount. */
+  amount: number | null;
 }
 
 export interface HoursReportData {
   projectGroups: HoursReportProjectGroup[];
+  /** Every project's hours, Client and Internal alike — category never
+   *  excludes a project from the hours total. */
   grandTotalHours: number;
+  /** Client-category projects only — every Internal group's `totalAmount`
+   *  is `null` and contributes nothing here, never $0 "counted in." */
+  grandTotalAmount: number;
   detailRows: HoursReportDetailRow[];
+}
+
+// $, formatted consistently (symbol + thousands separators + exactly 2
+// decimals) everywhere it's shown outside a real numeric spreadsheet cell
+// (the web preview and the PDF — Excel instead applies its own native
+// "$#,##0.00" cell format in xlsx-writer.ts, so the two are visually
+// identical without sharing this string helper).
+export function formatCurrencyAmount(amount: number): string {
+  return `$${amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 // Real per-ticket, per-project consolidation for the Summary sheet, and a
@@ -47,9 +79,19 @@ export interface HoursReportData {
 // in `timeEntries` (the caller has already scoped that array to the
 // selected From/To range by work_date), so a project or ticket with zero
 // hours in range is simply absent — never a zero-hours row.
+//
+// `$` follows the exact same filtering/consolidation as hours: each
+// Client-category project's own real `defaultHourlyRate` (Project
+// Settings — the same rate Finance's own billing widgets already multiply
+// hours by, see buildFinanceKpiSummary/buildBillingOverviewRows in
+// reports-screen.tsx) is applied per entry, summed into the same
+// ticket/project/grand groupings hours already use — never a separate rate
+// model, and never rounded before it's summed. An Internal-category
+// project's hours flow through those exact same groupings unchanged; only
+// its `amount` fields are forced to `null` instead of being computed.
 export function buildHoursReportData(
   tickets: Ticket[],
-  projects: { slug: string; name: string }[],
+  projects: { slug: string; name: string; category: ProjectCategory; defaultHourlyRate?: number | null }[],
   members: { id: string; name: string }[],
   timeEntries: OrganizationTimeEntry[]
 ): HoursReportData {
@@ -75,26 +117,34 @@ export function buildHoursReportData(
   for (const [slug, ticketIds] of ticketIdsByProjectSlug) {
     const project = projectBySlug.get(slug);
     if (!project) continue; // no real project left to attribute these hours to
+    const isInternal = project.category !== "client";
+    const rate = project.defaultHourlyRate ?? 0;
 
     const ticketRows = Array.from(ticketIds)
       .map((id) => {
         const ticket = ticketById.get(id)!;
+        const hours = (minutesByTicketId.get(id) ?? 0) / 60;
         return {
           ticketNumber: ticket.ticketNumber,
           ticketKey: getTicketDisplayKey(ticket),
           summary: ticket.title,
-          hours: (minutesByTicketId.get(id) ?? 0) / 60,
+          hours,
+          amount: isInternal ? null : hours * rate,
         };
       })
       .sort((a, b) => a.ticketNumber - b.ticketNumber)
-      .map(({ ticketKey, summary, hours }) => ({ ticketKey, summary, hours }));
+      .map(({ ticketKey, summary, hours, amount }) => ({ ticketKey, summary, hours, amount }));
 
     const totalHours = ticketRows.reduce((sum, row) => sum + row.hours, 0);
-    projectGroups.push({ projectName: project.name, tickets: ticketRows, totalHours });
+    const totalAmount = isInternal ? null : ticketRows.reduce((sum, row) => sum + (row.amount ?? 0), 0);
+    projectGroups.push({ projectName: project.name, isInternal, tickets: ticketRows, totalHours, totalAmount });
   }
   projectGroups.sort((a, b) => a.projectName.localeCompare(b.projectName));
 
   const grandTotalHours = projectGroups.reduce((sum, group) => sum + group.totalHours, 0);
+  // Internal groups' `totalAmount` is `null`, so `?? 0` correctly leaves
+  // them out of this sum entirely rather than counting them as $0.
+  const grandTotalAmount = projectGroups.reduce((sum, group) => sum + (group.totalAmount ?? 0), 0);
 
   const detailRows: (HoursReportDetailRow & { ticketNumber: number })[] = [];
   for (const entry of timeEntries) {
@@ -103,6 +153,8 @@ export function buildHoursReportData(
     const project = projectBySlug.get(ticket.projectSlug);
     if (!project) continue;
     const member = entry.loggedBy ? memberById.get(entry.loggedBy) : undefined;
+    const hours = entry.minutes / 60;
+    const isInternal = project.category !== "client";
 
     detailRows.push({
       projectName: project.name,
@@ -111,7 +163,8 @@ export function buildHoursReportData(
       memberName: member?.name ?? "Unknown Member",
       workDate: entry.workDate,
       description: entry.comment ?? "",
-      hours: entry.minutes / 60,
+      hours,
+      amount: isInternal ? null : hours * (project.defaultHourlyRate ?? 0),
       ticketNumber: ticket.ticketNumber,
     });
   }
@@ -124,6 +177,7 @@ export function buildHoursReportData(
   return {
     projectGroups,
     grandTotalHours,
+    grandTotalAmount,
     detailRows: detailRows.map((row) => ({
       projectName: row.projectName,
       ticketKey: row.ticketKey,
@@ -132,6 +186,7 @@ export function buildHoursReportData(
       workDate: row.workDate,
       description: row.description,
       hours: row.hours,
+      amount: row.amount,
     })),
   };
 }
@@ -141,23 +196,42 @@ export function buildHoursReportData(
 // row and ends with a bold overall "TOTAL HOURS" row; Details lists every
 // individual entry. Both read from the exact same `data`, so they can never
 // disagree with each other or with the on-screen totals.
+// `$` cell for a possibly-`null` amount (Internal-category rows) — an
+// em dash, plain-styled, instead of a currency-formatted `0`, so Internal
+// hours never read as "billed at $0."
+function amountCell(amount: number | null, bold: boolean): XlsxSheet["rows"][number][number] {
+  if (amount === null) return { value: "—", bold };
+  return { value: amount, bold, currency: true };
+}
+
 export function buildHoursReportWorkbookSheets(data: HoursReportData, fromISO: string, toISO: string): XlsxSheet[] {
   const summaryRows: XlsxSheet["rows"] = [
     [{ value: "Jirita — Hours Report", bold: true }],
     [{ value: `Period: ${fromISO} to ${toISO}` }],
     [],
-    [{ value: "Ticket", bold: true }, { value: "Summary", bold: true }, { value: "Hours", bold: true }],
+    [
+      { value: "Ticket", bold: true },
+      { value: "Summary", bold: true },
+      { value: "Hours", bold: true },
+      { value: "$", bold: true },
+    ],
   ];
 
   for (const group of data.projectGroups) {
-    summaryRows.push([{ value: group.projectName, bold: true }]);
+    summaryRows.push([{ value: group.isInternal ? `${group.projectName} (Internal)` : group.projectName, bold: true }]);
     for (const ticket of group.tickets) {
-      summaryRows.push([{ value: ticket.ticketKey }, { value: ticket.summary }, { value: ticket.hours, decimal: true }]);
+      summaryRows.push([
+        { value: ticket.ticketKey },
+        { value: ticket.summary },
+        { value: ticket.hours, decimal: true },
+        amountCell(ticket.amount, false),
+      ]);
     }
     summaryRows.push([
       { value: "" },
       { value: "Project Total", bold: true },
       { value: group.totalHours, bold: true, decimal: true },
+      amountCell(group.totalAmount, true),
     ]);
     summaryRows.push([]);
   }
@@ -166,6 +240,7 @@ export function buildHoursReportWorkbookSheets(data: HoursReportData, fromISO: s
     { value: "" },
     { value: "TOTAL HOURS", bold: true },
     { value: data.grandTotalHours, bold: true, decimal: true },
+    { value: data.grandTotalAmount, bold: true, currency: true },
   ]);
 
   const detailRows: XlsxSheet["rows"] = [
@@ -180,6 +255,7 @@ export function buildHoursReportWorkbookSheets(data: HoursReportData, fromISO: s
       { value: "Work Date", bold: true },
       { value: "Time Entry Description", bold: true },
       { value: "Hours", bold: true },
+      { value: "$", bold: true },
     ],
     ...data.detailRows.map((row): XlsxSheet["rows"][number] => [
       { value: row.projectName },
@@ -189,11 +265,12 @@ export function buildHoursReportWorkbookSheets(data: HoursReportData, fromISO: s
       { value: row.workDate },
       { value: row.description },
       { value: row.hours, decimal: true },
+      amountCell(row.amount, false),
     ]),
   ];
 
   return [
-    { name: "Summary", rows: summaryRows, columnWidths: [14, 50, 12] },
-    { name: "Details", rows: detailRows, columnWidths: [22, 12, 40, 20, 12, 40, 12] },
+    { name: "Summary", rows: summaryRows, columnWidths: [14, 50, 12, 14] },
+    { name: "Details", rows: detailRows, columnWidths: [22, 12, 40, 20, 12, 40, 12, 14] },
   ];
 }

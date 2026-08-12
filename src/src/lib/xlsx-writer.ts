@@ -14,6 +14,11 @@ export interface XlsxCell {
    *  still stored at full precision; this only controls how Excel renders
    *  it, so no accuracy is lost. */
   decimal?: boolean;
+  /** Two-decimal currency display ("$#,##0.00") — same full-precision
+   *  underlying value as `decimal`, just with a "$" prefix and thousands
+   *  separators. Mutually exclusive with `decimal` (currency wins if both
+   *  are set). */
+  currency?: boolean;
 }
 
 export type XlsxRow = XlsxCell[];
@@ -62,8 +67,11 @@ const STYLE_PLAIN = 0;
 const STYLE_BOLD = 1;
 const STYLE_DECIMAL = 2;
 const STYLE_BOLD_DECIMAL = 3;
+const STYLE_CURRENCY = 4;
+const STYLE_BOLD_CURRENCY = 5;
 
 function styleIndexFor(cell: XlsxCell): number {
+  if (cell.currency) return cell.bold ? STYLE_BOLD_CURRENCY : STYLE_CURRENCY;
   if (cell.decimal) return cell.bold ? STYLE_BOLD_DECIMAL : STYLE_DECIMAL;
   return cell.bold ? STYLE_BOLD : STYLE_PLAIN;
 }
@@ -130,10 +138,10 @@ function workbookRelsXml(sheetCount: number): string {
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${sheetRels}${stylesRel}</Relationships>`;
 }
 
-// numFmtId 164 is the first id OOXML reserves for custom formats.
+// numFmtId 164+ are the ids OOXML reserves for custom formats.
 const STYLES_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-<numFmts count="1"><numFmt numFmtId="164" formatCode="0.00"/></numFmts>
+<numFmts count="2"><numFmt numFmtId="164" formatCode="0.00"/><numFmt numFmtId="165" formatCode="&quot;$&quot;#,##0.00"/></numFmts>
 <fonts count="2">
 <font><sz val="10"/><name val="Calibri"/></font>
 <font><b/><sz val="10"/><name val="Calibri"/></font>
@@ -141,11 +149,13 @@ const STYLES_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>
 <borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>
 <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
-<cellXfs count="4">
+<cellXfs count="6">
 <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
 <xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/>
 <xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>
 <xf numFmtId="164" fontId="1" fillId="0" borderId="0" xfId="0" applyNumberFormat="1" applyFont="1"/>
+<xf numFmtId="165" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>
+<xf numFmtId="165" fontId="1" fillId="0" borderId="0" xfId="0" applyNumberFormat="1" applyFont="1"/>
 </cellXfs>
 <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
 </styleSheet>`;

@@ -36,17 +36,34 @@ import {
 } from "@/components/reports-screen";
 import type { PeriodKey, CustomRange } from "@/components/reports-screen";
 import { loadOrganizationTickets, loadOrganizationLoggedTimeForRange } from "@/lib/tickets";
-import { loadOrganizationMembers } from "@/lib/projects";
+import { loadOrganizationProjects, loadOrganizationMembers } from "@/lib/projects";
 import type { OrgMember } from "@/lib/projects";
-import { buildHoursReportData, buildHoursReportWorkbookSheets } from "@/lib/hours-report";
+import { buildHoursReportData, buildHoursReportWorkbookSheets, formatCurrencyAmount } from "@/lib/hours-report";
 import type { HoursReportData } from "@/lib/hours-report";
 import { buildXlsxWorkbook } from "@/lib/xlsx-writer";
 import { buildHoursReportPdf } from "@/lib/hours-report-pdf";
 import type { Ticket } from "@/lib/mock-tickets";
+import type { ProjectCategory } from "@/lib/mock-projects";
 
 interface ReportProject {
   slug: string;
   name: string;
+  /** Project Settings' own real category — Client or Internal. The sole
+   *  source of truth for whether this project's hours are billable (see
+   *  buildHoursReportData); never inferred from `defaultHourlyRate`. */
+  category: ProjectCategory;
+  /** Project Settings' own real hourly rate (Client-category projects only)
+   *  — the exact same rate Reports' Finance tab already bills hours
+   *  against, never a new rate model. null/undefined for a project with no
+   *  rate set (contributes $0, same as Finance's own rule). */
+  defaultHourlyRate?: number | null;
+}
+
+// $ display for a possibly-null (Internal-category) amount — an em dash
+// instead of a currency-formatted 0, so Internal hours never read as
+// "billed at $0."
+function formatAmountOrDash(amount: number | null): string {
+  return amount === null ? "—" : formatCurrencyAmount(round2(amount));
 }
 
 const DATE_INPUT_CLASS =
@@ -285,7 +302,8 @@ function SummaryPreview({ data }: { data: HoursReportData }) {
           <tr className="border-b border-slate-200 dark:border-zinc-700/70">
             <th className="text-left pb-2 pr-3 text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600">Ticket</th>
             <th className="text-left pb-2 pr-3 text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600">Summary</th>
-            <th className="text-right pb-2 text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600">Hours</th>
+            <th className="text-right pb-2 pr-3 text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600">Hours</th>
+            <th className="text-right pb-2 text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600">$</th>
           </tr>
         </thead>
         <tbody>
@@ -296,8 +314,11 @@ function SummaryPreview({ data }: { data: HoursReportData }) {
             <td colSpan={2} className="pt-3 pr-3 text-right text-sm font-bold text-slate-900 dark:text-zinc-50">
               TOTAL HOURS
             </td>
-            <td className="pt-3 text-right text-sm font-bold text-slate-900 dark:text-zinc-50 tabular-nums">
+            <td className="pt-3 pr-3 text-right text-sm font-bold text-slate-900 dark:text-zinc-50 tabular-nums">
               {round2(data.grandTotalHours)}
+            </td>
+            <td className="pt-3 text-right text-sm font-bold text-slate-900 dark:text-zinc-50 tabular-nums">
+              {formatCurrencyAmount(round2(data.grandTotalAmount))}
             </td>
           </tr>
         </tbody>
@@ -310,23 +331,32 @@ function TableFragmentGroup({ group }: { group: HoursReportData["projectGroups"]
   return (
     <>
       <tr>
-        <td colSpan={3} className="pt-4 pb-1.5 text-xs font-bold text-slate-700 dark:text-zinc-200">
+        <td colSpan={4} className="pt-4 pb-1.5 text-xs font-bold text-slate-700 dark:text-zinc-200">
           {group.projectName}
+          {group.isInternal && (
+            <span className="ml-2 text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-zinc-500 bg-slate-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded-full align-middle">
+              Internal
+            </span>
+          )}
         </td>
       </tr>
       {group.tickets.map((ticket) => (
         <tr key={ticket.ticketKey} className="border-b border-slate-100 dark:border-zinc-800/70">
           <td className="py-1.5 pr-3 text-slate-500 dark:text-zinc-400 whitespace-nowrap">{ticket.ticketKey}</td>
           <td className="py-1.5 pr-3 text-slate-700 dark:text-zinc-300">{ticket.summary}</td>
-          <td className="py-1.5 text-right text-slate-700 dark:text-zinc-300 tabular-nums">{round2(ticket.hours)}</td>
+          <td className="py-1.5 pr-3 text-right text-slate-700 dark:text-zinc-300 tabular-nums">{round2(ticket.hours)}</td>
+          <td className="py-1.5 text-right text-slate-700 dark:text-zinc-300 tabular-nums">{formatAmountOrDash(ticket.amount)}</td>
         </tr>
       ))}
       <tr>
         <td colSpan={2} className="pt-1.5 pb-1 pr-3 text-right text-xs font-bold text-slate-600 dark:text-zinc-300">
           Project Total
         </td>
-        <td className="pt-1.5 pb-1 text-right text-xs font-bold text-slate-600 dark:text-zinc-300 tabular-nums">
+        <td className="pt-1.5 pb-1 pr-3 text-right text-xs font-bold text-slate-600 dark:text-zinc-300 tabular-nums">
           {round2(group.totalHours)}
+        </td>
+        <td className="pt-1.5 pb-1 text-right text-xs font-bold text-slate-600 dark:text-zinc-300 tabular-nums">
+          {formatAmountOrDash(group.totalAmount)}
         </td>
       </tr>
     </>
@@ -390,8 +420,9 @@ export function HoursReportScreen() {
     setOrgLoadState("loading");
 
     (async () => {
-      const [ticketsResult, membersResult] = await Promise.all([
+      const [ticketsResult, projectsResult, membersResult] = await Promise.all([
         loadOrganizationTickets(organizationId),
+        loadOrganizationProjects(organizationId),
         loadOrganizationMembers(organizationId),
       ]);
       if (cancelled) return;
@@ -401,13 +432,34 @@ export function HoursReportScreen() {
         setOrgLoadError(ticketsResult.message);
         return;
       }
+      if (projectsResult.status === "error") {
+        setOrgLoadState("error");
+        setOrgLoadError(projectsResult.message);
+        return;
+      }
       if (membersResult.status === "error") {
         setOrgLoadState("error");
         setOrgLoadError(membersResult.message);
         return;
       }
 
-      const projects = ticketsResult.projects.map((p) => ({ slug: p.slug, name: p.name }));
+      // The real Project Settings hourly rate and category both live on
+      // loadOrganizationProjects' own ProjectSummary (loadOrganizationTickets
+      // only forwards a slug/name/status subset) — pulled in here for the
+      // `$` column and its Client/Internal billing rule, same real
+      // rate/category Finance's own billing widgets already read.
+      const projectDetailsBySlug = new Map(
+        projectsResult.projects.map((p) => [p.slug, { category: p.category, defaultHourlyRate: p.defaultHourlyRate ?? null }])
+      );
+      const projects = ticketsResult.projects.map((p) => {
+        const details = projectDetailsBySlug.get(p.slug);
+        return {
+          slug: p.slug,
+          name: p.name,
+          category: details?.category ?? "internal",
+          defaultHourlyRate: details?.defaultHourlyRate ?? null,
+        };
+      });
       const slugsWithTickets = new Set(ticketsResult.tickets.map((t) => t.projectSlug));
 
       setRawTickets(ticketsResult.tickets);
