@@ -1,0 +1,31 @@
+-- Optional financial-access permission for Project Lead users — lets an
+-- Admin grant a specific Project Lead visibility into their own projects'
+-- financial data (upcoming: Hours Report $ amounts, billing screens, etc.)
+-- without promoting them to Admin. Admin already has financial access
+-- unconditionally by role; Member never does — this flag is only ever
+-- meaningful for a project_lead-role membership.
+--
+-- Lives on organization_memberships, not profiles — same reasoning `role`
+-- itself already follows (see docs/SUPABASE_MVP_SCHEMA.md's `profiles`
+-- note): this is an access-level concern scoped to a person's membership
+-- in *this* organization, not part of their identity.
+--
+-- `not null default false` — every existing row (every current Project
+-- Lead included) gets `false` applied by the column default as part of
+-- this migration, so no one's access silently expands; an Admin has to
+-- explicitly flip it on per person via Edit User.
+--
+-- The "only meaningful for project_lead" rule and the "clear it when a
+-- Project Lead is moved to another role" cleanup are both enforced in
+-- application code (see lib/current-user.ts's hasFinancialAccess and the
+-- Edit/Invite User Server Actions), not a CHECK constraint here — same
+-- division of responsibility already used for every other business rule
+-- in this schema that depends on more than one column's own value.
+--
+-- No RLS/GRANT changes needed: organization_memberships already has a
+-- blanket `grant select on public.organization_memberships to authenticated`
+-- (20260708010000) and its own row-level SELECT policy, both of which
+-- apply to this new column automatically; every write path here already
+-- goes through a service-role Server Action, which bypasses RLS entirely.
+alter table public.organization_memberships
+  add column if not exists financial_access boolean not null default false;

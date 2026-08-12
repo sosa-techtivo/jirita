@@ -41,6 +41,7 @@ import {
   PeriodSelector,
   DEFAULT_CUSTOM_RANGE,
   realRangeForPeriod,
+  HoursReportEntryCard,
 } from "@/components/reports-screen";
 import type { Risk, PeriodKey, CustomRange } from "@/components/reports-screen";
 
@@ -919,6 +920,14 @@ export function ProjectLeadReportsScreen() {
           Reports
         </h1>
         <p className="text-xs text-slate-400 dark:text-zinc-500 mt-0.5">{formatHeaderDate(todayISO)}</p>
+      </div>
+
+      {/* ── Hours Report — entry point card ─────────────────────────────────── */}
+      {/* Every Project Lead can reach the report (access is role-based, not
+          financial_access-based); the report page itself decides whether
+          `$` is shown, via hasFinancialAccess. */}
+      <div className="mb-5">
+        <HoursReportEntryCard />
       </div>
 
       {/* ── Tabs ─────────────────────────────────────────────────────────── */}

@@ -98,6 +98,7 @@ export async function editUserAction(params: {
   lastName: string;
   role: Role;
   weeklyCapacity: number;
+  financialAccess: boolean;
 }): Promise<EditUserResult> {
   const firstName = params.firstName.trim();
   const lastName = params.lastName.trim();
@@ -203,12 +204,22 @@ export async function editUserAction(params: {
     return { status: "error", message: "This user's profile couldn't be found." };
   }
 
-  // organization_memberships: role + weekly_capacity only, scoped to this
-  // exact org + profile — never status (Disable/Enable's own job, untouched
-  // here), never a different organization's row.
+  // organization_memberships: role + weekly_capacity + financial_access
+  // only, scoped to this exact org + profile — never status (Disable/
+  // Enable's own job, untouched here), never a different organization's
+  // row. financial_access is only ever meaningful for a project_lead-role
+  // membership (Admin has financial access unconditionally by role, Member
+  // never does — see current-user.ts's hasFinancialAccess), so it's forced
+  // to false here whenever the role being saved isn't PROJECT_LEAD —
+  // never trusting the client's own flag for that case. This is also what
+  // satisfies "moved from Project Lead to another role clears financial
+  // access": every save re-derives this from the role actually being
+  // persisted, so there's no separate "was this a role change" branch to
+  // get wrong.
+  const financialAccess = params.role === "PROJECT_LEAD" && params.financialAccess;
   const { data: membershipUpdated, error: membershipError } = await admin
     .from("organization_memberships")
-    .update({ role: ROLE_TO_DB[params.role], weekly_capacity: weeklyCapacity })
+    .update({ role: ROLE_TO_DB[params.role], weekly_capacity: weeklyCapacity, financial_access: financialAccess })
     .eq("organization_id", params.organizationId)
     .eq("profile_id", params.targetProfileId)
     .select("profile_id")

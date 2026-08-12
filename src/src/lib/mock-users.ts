@@ -26,6 +26,10 @@ export interface User {
   status: UserStatus;
   /** Total hours/week this person is available for, across all projects. */
   weeklyCapacity: number;
+  /** organization_memberships.financial_access — only ever meaningful (and
+   *  editable) when role is PROJECT_LEAD; see current-user.ts's
+   *  hasFinancialAccess. Always false for Admin/Member. */
+  financialAccess: boolean;
   /** project slugs this person is staffed on. */
   projectSlugs: string[];
   /** Display string; null means never logged in (e.g. still pending an invite). */

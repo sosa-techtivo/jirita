@@ -55,6 +55,10 @@ export interface Membership {
   organization: Organization;
   role: Role;
   weeklyCapacity: number | null;
+  /** organization_memberships.financial_access — see
+   *  current-user.ts's hasFinancialAccess for how this is meant to be
+   *  checked (never read on its own without also checking `role`). */
+  financialAccess: boolean;
 }
 
 export type MembershipResult =
@@ -103,6 +107,7 @@ interface MembershipRow {
   organization_id: string;
   role: string;
   weekly_capacity: number | null;
+  financial_access: boolean;
 }
 
 // Dev-only visibility: an "error" and a genuinely empty "no-membership"
@@ -139,7 +144,7 @@ export async function loadMembership(userId: string): Promise<MembershipResult> 
   // which is far less likely to be stale.
   const { data: membershipRow, error: membershipError } = await supabase
     .from("organization_memberships")
-    .select("organization_id, role, weekly_capacity")
+    .select("organization_id, role, weekly_capacity, financial_access")
     .eq("profile_id", userId)
     .eq("status", "active")
     .limit(1)
@@ -204,6 +209,7 @@ export async function loadMembership(userId: string): Promise<MembershipResult> 
       organization,
       role,
       weeklyCapacity: membershipRow.weekly_capacity,
+      financialAccess: membershipRow.financial_access,
     },
   };
 }

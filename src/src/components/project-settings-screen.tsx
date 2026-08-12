@@ -8,6 +8,7 @@ import type { ProjectCategory, ProjectStatus } from "@/lib/mock-projects";
 import { statusMeta, ProjectCategoryBadge } from "@/components/status-badge";
 import { SettingGroup, SettingRow, TextField, NumberField, SelectField } from "@/components/settings-ui";
 import { useCurrentUser } from "@/components/current-user-provider";
+import { hasFinancialAccess } from "@/lib/current-user";
 import { useOrganizationProjects } from "@/components/organization-projects-provider";
 import { useRefreshOnFocusAndVisibility } from "@/components/member-profile-modal";
 import { loadProjectDetail, loadOrganizationClients, createOrganizationClient, validateRepositoryUrl } from "@/lib/projects";
@@ -207,6 +208,10 @@ function toDetail(project: ProjectDetail | null): DetailState {
 export function ProjectSettingsScreen({ slug }: { slug: string }) {
   const { user, organization, isDevFallback } = useCurrentUser();
   const isProjectLead = user.role === "PROJECT_LEAD";
+  // Admin always qualifies too (hasFinancialAccess), but Admin already sees
+  // Billing unconditionally below via `!isProjectLead` — this flag only
+  // ever changes what a Project Lead sees.
+  const canViewFinancials = hasFinancialAccess(user.role, user.financialAccess);
   const {
     projects: sharedProjects,
     updateProjectSettings,
@@ -479,9 +484,10 @@ export function ProjectSettingsScreen({ slug }: { slug: string }) {
   // (typed URL, bookmark, back button) gets bounced to the project
   // Overview instead of ever seeing settings content. Project Lead
   // regained access (Fase 3, see nav-config.ts) but only ever sees the
-  // Statuses section below — every other section (General/Billing/
-  // Repository Integration/Backup & Restore/Danger Zone) stays Admin-only,
-  // gated inline further down.
+  // Statuses section below, plus — read-only — Billing when they carry the
+  // financial_access permission (canViewFinancials); every other section
+  // (General/Repository Integration/Backup & Restore/Danger Zone) stays
+  // Admin-only, gated inline further down.
   const isMember = user.role === "MEMBER";
   useEffect(() => {
     if (isMember) {
@@ -715,13 +721,17 @@ export function ProjectSettingsScreen({ slug }: { slug: string }) {
       </div>
       <p className="text-sm text-slate-500 mt-1 max-w-xl dark:text-zinc-400">
         {isProjectLead
-          ? "Manage this project's ticket statuses."
+          ? canViewFinancials
+            ? "Manage this project's ticket statuses. Billing information is shown below for reference."
+            : "Manage this project's ticket statuses."
           : "Manage project details, billing behavior and project-level configuration."}
       </p>
 
       <div className="mt-8">
         {/* Statuses (Fase 3) — the one section both Admin and Project Lead
-            can reach; everything else below stays Admin-only. */}
+            can reach; everything else below stays Admin-only, except
+            Billing, which a financially-privileged Project Lead can also
+            view (read-only — see canViewFinancials below). */}
         <ProjectSettingsStatuses projectId={project.id} />
 
         {!isProjectLead && (
@@ -756,32 +766,58 @@ export function ProjectSettingsScreen({ slug }: { slug: string }) {
             />
           </SettingRow>
         </SettingGroup>
+        </>
+        )}
 
+        {/* Billing — Admin (editable, as before) or a financially-privileged
+            Project Lead (read-only: the permission's own copy is "Can view
+            financial information," never "can edit," and editing a
+            project's billing configuration is exactly the kind of
+            unrelated Admin capability this permission must not grant). */}
+        {(!isProjectLead || canViewFinancials) && (
         <SettingGroup title="Billing">
           <SettingRow label="Project Category" hint="Determines whether time logged on this project is billable">
-            <CategoryToggle value={category} onChange={setCategory} />
+            {isProjectLead ? (
+              <span className="text-[13px] font-medium text-slate-700 dark:text-zinc-300">
+                {isClient ? "Client" : "Internal"}
+              </span>
+            ) : (
+              <CategoryToggle value={category} onChange={setCategory} />
+            )}
           </SettingRow>
           <SettingRow
             label="Client"
             hint={isClient ? "Required for client projects" : "Not applicable — this project is internal"}
           >
-            <SelectField
-              value={isClient ? client : ""}
-              onChange={handleClientChange}
-              options={clientOptions}
-              disabled={!isClient}
-            />
+            {isProjectLead ? (
+              <span className="text-[13px] font-medium text-slate-700 dark:text-zinc-300">
+                {isClient ? client || "—" : "—"}
+              </span>
+            ) : (
+              <SelectField
+                value={isClient ? client : ""}
+                onChange={handleClientChange}
+                options={clientOptions}
+                disabled={!isClient}
+              />
+            )}
           </SettingRow>
           <SettingRow
             label="Billing Rate"
             hint={isClient ? "Used to estimate billing in Time Tracking" : "Not applicable — this project is internal"}
           >
-            <NumberField
-              value={isClient ? billingRate : 0}
-              onChange={setBillingRate}
-              suffix="$ / hour"
-              disabled={!isClient}
-            />
+            {isProjectLead ? (
+              <span className="text-[13px] font-medium text-slate-700 dark:text-zinc-300">
+                {isClient ? `$${billingRate} / hour` : "—"}
+              </span>
+            ) : (
+              <NumberField
+                value={isClient ? billingRate : 0}
+                onChange={setBillingRate}
+                suffix="$ / hour"
+                disabled={!isClient}
+              />
+            )}
           </SettingRow>
 
           <div className="py-3.5">
@@ -799,7 +835,10 @@ export function ProjectSettingsScreen({ slug }: { slug: string }) {
             </p>
           </div>
         </SettingGroup>
+        )}
 
+        {!isProjectLead && (
+        <>
         <SettingGroup title="Repository Integration">
           <SettingRow label="Repository Provider">
             <SelectField

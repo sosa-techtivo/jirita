@@ -23,9 +23,26 @@
 //     Quarter/Custom Range" date math Reports' own period selectors
 //     already use — only the pill/inline-date UI here is new, not the date
 //     arithmetic.
+//
+// Access: any Admin or Project Lead can reach this report at all (Member
+// still cannot) — that's `canAccessReport` below, a plain role check, never
+// financial_access. Whether the report carries `$` at all is a completely
+// separate question, answered once by hasFinancialAccess (lib/current-user.ts,
+// `canViewFinancials` below) and threaded into buildHoursReportData's own
+// `includeFinancials` parameter — every renderer (this screen's preview,
+// the PDF, both Excel sheets) reads the resulting `data.includesFinancials`
+// flag rather than re-deriving the permission itself. An Admin still gets
+// the org-wide universe above; any Project Lead (financial or not) instead
+// gets only the projects loadLeadProjects says they lead, fanned out
+// per-project via loadProjectTickets/loadProjectTeam (never the org-wide
+// loaders) — so project scope is always the same for a Project Lead
+// regardless of financial_access, and a non-financial Project Lead's own
+// real hourly rate is never even carried into this screen's state (see the
+// data-scope effect below), not just hidden from the rendered columns.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useCurrentUser } from "@/components/current-user-provider";
+import { hasFinancialAccess } from "@/lib/current-user";
 import { Section } from "@/components/reports-shared";
 import { SkeletonBlock } from "@/components/dashboard-shared";
 import { getTodayISO } from "@/components/tickets/ticket-ui";
@@ -35,8 +52,8 @@ import {
   downloadBinaryFile,
 } from "@/components/reports-screen";
 import type { PeriodKey, CustomRange } from "@/components/reports-screen";
-import { loadOrganizationTickets, loadOrganizationLoggedTimeForRange } from "@/lib/tickets";
-import { loadOrganizationProjects, loadOrganizationMembers } from "@/lib/projects";
+import { loadOrganizationTickets, loadOrganizationLoggedTimeForRange, loadProjectTickets } from "@/lib/tickets";
+import { loadOrganizationProjects, loadOrganizationMembers, loadLeadProjects, loadProjectTeam } from "@/lib/projects";
 import type { OrgMember } from "@/lib/projects";
 import { buildHoursReportData, buildHoursReportWorkbookSheets, formatCurrencyAmount } from "@/lib/hours-report";
 import type { HoursReportData } from "@/lib/hours-report";
@@ -61,9 +78,11 @@ interface ReportProject {
 
 // $ display for a possibly-null (Internal-category) amount — an em dash
 // instead of a currency-formatted 0, so Internal hours never read as
-// "billed at $0."
-function formatAmountOrDash(amount: number | null): string {
-  return amount === null ? "—" : formatCurrencyAmount(round2(amount));
+// "billed at $0." Only ever called from inside a `data.includesFinancials`
+// branch, so `amount` is really just `number | null` there — `undefined`
+// is accepted only so callers don't need an extra cast.
+function formatAmountOrDash(amount: number | null | undefined): string {
+  return amount === null || amount === undefined ? "—" : formatCurrencyAmount(round2(amount));
 }
 
 const DATE_INPUT_CLASS =
@@ -295,6 +314,8 @@ function SummaryPreview({ data }: { data: HoursReportData }) {
     );
   }
 
+  const includeFinancials = data.includesFinancials;
+
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
@@ -302,24 +323,28 @@ function SummaryPreview({ data }: { data: HoursReportData }) {
           <tr className="border-b border-slate-200 dark:border-zinc-700/70">
             <th className="text-left pb-2 pr-3 text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600">Ticket</th>
             <th className="text-left pb-2 pr-3 text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600">Summary</th>
-            <th className="text-right pb-2 pr-3 text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600">Hours</th>
-            <th className="text-right pb-2 text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600">$</th>
+            <th className={`text-right pb-2 ${includeFinancials ? "pr-3" : ""} text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600`}>Hours</th>
+            {includeFinancials && (
+              <th className="text-right pb-2 text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600">$</th>
+            )}
           </tr>
         </thead>
         <tbody>
           {data.projectGroups.map((group) => (
-            <TableFragmentGroup key={group.projectName} group={group} />
+            <TableFragmentGroup key={group.projectName} group={group} includeFinancials={includeFinancials} />
           ))}
           <tr>
             <td colSpan={2} className="pt-3 pr-3 text-right text-sm font-bold text-slate-900 dark:text-zinc-50">
               TOTAL HOURS
             </td>
-            <td className="pt-3 pr-3 text-right text-sm font-bold text-slate-900 dark:text-zinc-50 tabular-nums">
+            <td className={`pt-3 ${includeFinancials ? "pr-3" : ""} text-right text-sm font-bold text-slate-900 dark:text-zinc-50 tabular-nums`}>
               {round2(data.grandTotalHours)}
             </td>
-            <td className="pt-3 text-right text-sm font-bold text-slate-900 dark:text-zinc-50 tabular-nums">
-              {formatCurrencyAmount(round2(data.grandTotalAmount))}
-            </td>
+            {includeFinancials && (
+              <td className="pt-3 text-right text-sm font-bold text-slate-900 dark:text-zinc-50 tabular-nums">
+                {formatCurrencyAmount(round2(data.grandTotalAmount ?? 0))}
+              </td>
+            )}
           </tr>
         </tbody>
       </table>
@@ -327,11 +352,17 @@ function SummaryPreview({ data }: { data: HoursReportData }) {
   );
 }
 
-function TableFragmentGroup({ group }: { group: HoursReportData["projectGroups"][number] }) {
+function TableFragmentGroup({
+  group,
+  includeFinancials,
+}: {
+  group: HoursReportData["projectGroups"][number];
+  includeFinancials: boolean;
+}) {
   return (
     <>
       <tr>
-        <td colSpan={4} className="pt-4 pb-1.5 text-xs font-bold text-slate-700 dark:text-zinc-200">
+        <td colSpan={includeFinancials ? 4 : 3} className="pt-4 pb-1.5 text-xs font-bold text-slate-700 dark:text-zinc-200">
           {group.projectName}
           {group.isInternal && (
             <span className="ml-2 text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-zinc-500 bg-slate-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded-full align-middle">
@@ -344,20 +375,24 @@ function TableFragmentGroup({ group }: { group: HoursReportData["projectGroups"]
         <tr key={ticket.ticketKey} className="border-b border-slate-100 dark:border-zinc-800/70">
           <td className="py-1.5 pr-3 text-slate-500 dark:text-zinc-400 whitespace-nowrap">{ticket.ticketKey}</td>
           <td className="py-1.5 pr-3 text-slate-700 dark:text-zinc-300">{ticket.summary}</td>
-          <td className="py-1.5 pr-3 text-right text-slate-700 dark:text-zinc-300 tabular-nums">{round2(ticket.hours)}</td>
-          <td className="py-1.5 text-right text-slate-700 dark:text-zinc-300 tabular-nums">{formatAmountOrDash(ticket.amount)}</td>
+          <td className={`py-1.5 ${includeFinancials ? "pr-3" : ""} text-right text-slate-700 dark:text-zinc-300 tabular-nums`}>{round2(ticket.hours)}</td>
+          {includeFinancials && (
+            <td className="py-1.5 text-right text-slate-700 dark:text-zinc-300 tabular-nums">{formatAmountOrDash(ticket.amount)}</td>
+          )}
         </tr>
       ))}
       <tr>
         <td colSpan={2} className="pt-1.5 pb-1 pr-3 text-right text-xs font-bold text-slate-600 dark:text-zinc-300">
           Project Total
         </td>
-        <td className="pt-1.5 pb-1 pr-3 text-right text-xs font-bold text-slate-600 dark:text-zinc-300 tabular-nums">
+        <td className={`pt-1.5 pb-1 ${includeFinancials ? "pr-3" : ""} text-right text-xs font-bold text-slate-600 dark:text-zinc-300 tabular-nums`}>
           {round2(group.totalHours)}
         </td>
-        <td className="pt-1.5 pb-1 text-right text-xs font-bold text-slate-600 dark:text-zinc-300 tabular-nums">
-          {formatAmountOrDash(group.totalAmount)}
-        </td>
+        {includeFinancials && (
+          <td className="pt-1.5 pb-1 text-right text-xs font-bold text-slate-600 dark:text-zinc-300 tabular-nums">
+            {formatAmountOrDash(group.totalAmount)}
+          </td>
+        )}
       </tr>
     </>
   );
@@ -366,8 +401,21 @@ function TableFragmentGroup({ group }: { group: HoursReportData["projectGroups"]
 // ── Main screen ───────────────────────────────────────────────────────────────
 
 export function HoursReportScreen() {
-  const { user, organization } = useCurrentUser();
+  const { user, organization, userId } = useCurrentUser();
   const isAdmin = user.role === "ADMIN";
+  const isProjectLead = user.role === "PROJECT_LEAD";
+  // Reachability — any Admin or Project Lead, regardless of financial
+  // access. A Member still can't reach this report at all.
+  const canAccessReport = isAdmin || isProjectLead;
+  // The one centralized check (reused, never a second isAdmin-or-flag
+  // condition of this screen's own) that decides whether the report
+  // carries `$` at all — Admin always qualifies; a Project Lead only
+  // qualifies with their own real financial_access grant. This is fed
+  // straight into buildHoursReportData's own `includeFinancials`
+  // parameter below; every renderer (this screen, the PDF, both Excel
+  // sheets) then reads the resulting `data.includesFinancials` rather than
+  // re-deriving this itself.
+  const canViewFinancials = hasFinancialAccess(user.role, user.financialAccess);
   // A plain id, not the `organization` object itself, is what the org-wide
   // load effect below keys off of. CurrentUserProvider revalidates the
   // session's membership (and so produces a brand-new `organization`
@@ -405,89 +453,189 @@ export function HoursReportScreen() {
   const [downloadingPdf, setDownloadingPdf] = useState(false);
   const [pdfError, setPdfError] = useState<string | null>(null);
 
-  // ── Org-wide load — page entry / actual org change only ────────────────────
+  // ── Data-scope load — page entry / actual org change only ──────────────────
   // Deliberately keyed on `organizationId` (see its own comment above), not
   // on `[isAdmin, organization]`: this effect now runs exactly once on
-  // mount (or if the Admin's org id itself genuinely changes) and never
+  // mount (or if the org id / caller identity genuinely changes) and never
   // again on a window-focus-driven membership revalidation. Date/project
   // filter changes still refresh the report — that's the separate preview
   // effect below, keyed on `from`/`to`/`selectedProjectSlugs`, untouched by
   // this.
+  //
+  // Two data scopes, gated by `isAdmin` (never by `canAccessReport` alone,
+  // which only decides *whether* this page is reachable at all — see the
+  // render gate further down, and never by `canViewFinancials`, which
+  // never changes *which projects* are loaded, only whether a real rate
+  // ever enters this screen's state at all — see below):
+  //   - Admin: every real org project/ticket/member, exactly as before.
+  //   - Project Lead (financial or not): only the projects
+  //     `loadLeadProjects` says this exact profile leads
+  //     (project_memberships.project_role = 'lead') — the same real
+  //     "projects I'm staffed on as lead" primitive
+  //     project-lead-time-tracking-screen.tsx already uses, fanned out with
+  //     loadProjectTickets/loadProjectTeam per led project rather than the
+  //     org-wide loaders. This is what keeps the report from ever
+  //     expanding project scope: a Project Lead can only ever see hours
+  //     (and, if authorized, $) for projects they already lead, never the
+  //     whole org — identical for a financial and a non-financial Project
+  //     Lead, since this scoping is about role, not about the money
+  //     permission.
   useEffect(() => {
-    if (!isAdmin || !organizationId) return;
+    if (!canAccessReport || !organizationId || (!isAdmin && !userId)) return;
     let cancelled = false;
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: shows the loading state for this effect's own (rare) reruns — mount, or an actual org id change
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: shows the loading state for this effect's own (rare) reruns — mount, or an actual org id/identity change
     setOrgLoadState("loading");
 
-    (async () => {
-      const [ticketsResult, projectsResult, membersResult] = await Promise.all([
-        loadOrganizationTickets(organizationId),
-        loadOrganizationProjects(organizationId),
-        loadOrganizationMembers(organizationId),
-      ]);
-      if (cancelled) return;
-
-      if (ticketsResult.status === "error") {
-        setOrgLoadState("error");
-        setOrgLoadError(ticketsResult.message);
-        return;
-      }
-      if (projectsResult.status === "error") {
-        setOrgLoadState("error");
-        setOrgLoadError(projectsResult.message);
-        return;
-      }
-      if (membersResult.status === "error") {
-        setOrgLoadState("error");
-        setOrgLoadError(membersResult.message);
-        return;
-      }
-
-      // The real Project Settings hourly rate and category both live on
-      // loadOrganizationProjects' own ProjectSummary (loadOrganizationTickets
-      // only forwards a slug/name/status subset) — pulled in here for the
-      // `$` column and its Client/Internal billing rule, same real
-      // rate/category Finance's own billing widgets already read.
-      const projectDetailsBySlug = new Map(
-        projectsResult.projects.map((p) => [p.slug, { category: p.category, defaultHourlyRate: p.defaultHourlyRate ?? null }])
-      );
-      const projects = ticketsResult.projects.map((p) => {
-        const details = projectDetailsBySlug.get(p.slug);
-        return {
-          slug: p.slug,
-          name: p.name,
-          category: details?.category ?? "internal",
-          defaultHourlyRate: details?.defaultHourlyRate ?? null,
-        };
-      });
-      const slugsWithTickets = new Set(ticketsResult.tickets.map((t) => t.projectSlug));
-
-      setRawTickets(ticketsResult.tickets);
+    // Shared tail for both scopes below — the exact same "apply real
+    // tickets/projects/members, flip to ready, seed the one-time default
+    // Projects selection" sequence, so the two data paths can never diverge
+    // in how they finish.
+    function applyLoadedScope(tickets: Ticket[], projects: ReportProject[], members: OrgMember[]) {
+      const slugsWithTickets = new Set(tickets.map((t) => t.projectSlug));
+      setRawTickets(tickets);
       setRawProjects(projects);
-      setRawMembers(membersResult.members);
+      setRawMembers(members);
       setOrgLoadState("ready");
 
       // Same-batch default selection — deliberately set here (not in a
       // separate effect reacting to the derived project list) so a fresh
       // "all selected" state and `orgLoadState: "ready"` always land in the
       // same render. A separate effect would leave one intermediate render
-      // where the org data is ready but the selection hasn't caught up yet,
-      // which the preview fetch below would see and read as "0 projects
-      // selected" — a real, if brief, empty-report flash. `projectsInitialized`
-      // still guards this to "only ever once per this effect's lifetime" —
-      // now academic for focus (this effect no longer reruns on focus at
-      // all), but still correct if this effect ever reruns for a genuine
-      // org id change.
+      // where the org data is ready but the selection hasn't caught up
+      // yet, which the preview fetch below would see and read as "0
+      // projects selected" — a real, if brief, empty-report flash.
+      // `projectsInitialized` still guards this to "only ever once per
+      // this effect's lifetime" — now academic for focus (this effect no
+      // longer reruns on focus at all), but still correct if this effect
+      // ever reruns for a genuine org id/identity change.
       if (!projectsInitialized.current) {
         projectsInitialized.current = true;
         setSelectedProjectSlugs(projects.filter((p) => slugsWithTickets.has(p.slug)).map((p) => p.slug));
       }
+    }
+
+    (async () => {
+      if (isAdmin) {
+        const [ticketsResult, projectsResult, membersResult] = await Promise.all([
+          loadOrganizationTickets(organizationId),
+          loadOrganizationProjects(organizationId),
+          loadOrganizationMembers(organizationId),
+        ]);
+        if (cancelled) return;
+
+        if (ticketsResult.status === "error") {
+          setOrgLoadState("error");
+          setOrgLoadError(ticketsResult.message);
+          return;
+        }
+        if (projectsResult.status === "error") {
+          setOrgLoadState("error");
+          setOrgLoadError(projectsResult.message);
+          return;
+        }
+        if (membersResult.status === "error") {
+          setOrgLoadState("error");
+          setOrgLoadError(membersResult.message);
+          return;
+        }
+
+        // The real Project Settings hourly rate and category both live on
+        // loadOrganizationProjects' own ProjectSummary (loadOrganizationTickets
+        // only forwards a slug/name/status subset) — pulled in here for the
+        // `$` column and its Client/Internal billing rule, same real
+        // rate/category Finance's own billing widgets already read.
+        const projectDetailsBySlug = new Map(
+          projectsResult.projects.map((p) => [p.slug, { category: p.category, defaultHourlyRate: p.defaultHourlyRate ?? null }])
+        );
+        const projects = ticketsResult.projects.map((p) => {
+          const details = projectDetailsBySlug.get(p.slug);
+          return {
+            slug: p.slug,
+            name: p.name,
+            category: details?.category ?? "internal",
+            defaultHourlyRate: details?.defaultHourlyRate ?? null,
+          };
+        });
+
+        applyLoadedScope(ticketsResult.tickets, projects, membersResult.members);
+        return;
+      }
+
+      // Project Lead (financial or not) — scoped to exactly the projects
+      // they lead, same as the financial case; only the rate below differs.
+      const leadResult = await loadLeadProjects(organizationId, userId!);
+      if (cancelled) return;
+      if (leadResult.status === "error") {
+        setOrgLoadState("error");
+        setOrgLoadError(leadResult.message);
+        return;
+      }
+
+      const ledSlugs = leadResult.projects.map((p) => p.slug);
+      if (ledSlugs.length === 0) {
+        applyLoadedScope([], [], []);
+        return;
+      }
+
+      const [projectsResult, ticketsPerProject, teamPerProject] = await Promise.all([
+        loadOrganizationProjects(organizationId),
+        Promise.all(ledSlugs.map((slug) => loadProjectTickets(organizationId, slug))),
+        Promise.all(ledSlugs.map((slug) => loadProjectTeam(organizationId, slug))),
+      ]);
+      if (cancelled) return;
+
+      if (projectsResult.status === "error") {
+        setOrgLoadState("error");
+        setOrgLoadError(projectsResult.message);
+        return;
+      }
+      const failedTickets = ticketsPerProject.find((r) => r.status === "error");
+      if (failedTickets && failedTickets.status === "error") {
+        setOrgLoadState("error");
+        setOrgLoadError(failedTickets.message);
+        return;
+      }
+      const failedTeam = teamPerProject.find((r) => r.status === "error");
+      if (failedTeam && failedTeam.status === "error") {
+        setOrgLoadState("error");
+        setOrgLoadError(failedTeam.message);
+        return;
+      }
+
+      const ledSlugSet = new Set(ledSlugs);
+      // Category always flows through (it's not itself a monetary value —
+      // the "Internal" label stays visible regardless), but the real rate
+      // is only ever carried into this screen's own state when this exact
+      // viewer has financial access — never fetched-then-hidden. A
+      // non-financial Project Lead's session simply never holds a real
+      // rate number, which is what keeps this from being enforcement by
+      // UI/export formatting alone.
+      const projects = projectsResult.projects
+        .filter((p) => ledSlugSet.has(p.slug))
+        .map((p) => ({
+          slug: p.slug,
+          name: p.name,
+          category: p.category,
+          defaultHourlyRate: canViewFinancials ? p.defaultHourlyRate ?? null : null,
+        }));
+      const tickets = ticketsPerProject.flatMap((r) => (r.status === "ready" ? r.tickets : []));
+      const memberById = new Map<string, OrgMember>();
+      for (const teamResult of teamPerProject) {
+        if (teamResult.status !== "ready") continue;
+        for (const member of teamResult.members) {
+          if (!memberById.has(member.id)) {
+            memberById.set(member.id, { id: member.id, name: member.name, avatar: member.avatar });
+          }
+        }
+      }
+
+      applyLoadedScope(tickets, projects, Array.from(memberById.values()));
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [isAdmin, organizationId]);
+  }, [canAccessReport, isAdmin, organizationId, userId, canViewFinancials]);
 
   // Projects with at least one real ticket — same "only real, in-scope
   // values" convention Reports' own Project filter already follows.
@@ -505,7 +653,7 @@ export function HoursReportScreen() {
   // so a Projects deselection is a smaller real query, not a client-side
   // filter over a bigger one.
   useEffect(() => {
-    if (!isAdmin || orgLoadState !== "ready" || invalidRange || !from || !to) return;
+    if (!canAccessReport || orgLoadState !== "ready" || invalidRange || !from || !to) return;
     let cancelled = false;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: shows the preview's own loading state the instant filters change, before the async fetch resolves
     setPreviewState("loading");
@@ -524,11 +672,17 @@ export function HoursReportScreen() {
         return;
       }
 
+      // `canViewFinancials` is this function's own authorization gate
+      // (buildHoursReportData's `includeFinancials` parameter) — the
+      // single point the resulting HoursReportData's `includesFinancials`
+      // flag comes from, which the preview below, handleDownloadExcel, and
+      // handleDownloadPdf all read instead of re-deciding this themselves.
       const data = buildHoursReportData(
         scopedTickets,
         rawProjects,
         rawMembers.map((m) => ({ id: m.id, name: m.name })),
-        result.entries
+        result.entries,
+        canViewFinancials
       );
       setHoursData(data);
       setPreviewState("ready");
@@ -537,7 +691,7 @@ export function HoursReportScreen() {
     return () => {
       cancelled = true;
     };
-  }, [isAdmin, orgLoadState, rawTickets, rawProjects, rawMembers, selectedProjectSlugs, from, to, invalidRange]);
+  }, [canAccessReport, orgLoadState, rawTickets, rawProjects, rawMembers, selectedProjectSlugs, from, to, invalidRange, canViewFinancials]);
 
   function handleDownloadExcel() {
     if (!hoursData || !from || !to) return;
@@ -572,7 +726,7 @@ export function HoursReportScreen() {
     }
   }
 
-  if (!isAdmin) {
+  if (!canAccessReport) {
     return (
       <div className="flex flex-col items-center justify-center text-center py-24 px-4">
         <div className="w-10 h-10 rounded-lg border border-slate-200 flex items-center justify-center text-slate-400 mb-4 dark:border-zinc-700 dark:text-zinc-500">
@@ -581,9 +735,9 @@ export function HoursReportScreen() {
             <path d="M7 11V7a5 5 0 0110 0v4" />
           </svg>
         </div>
-        <h3 className="text-sm font-semibold text-slate-700 dark:text-zinc-200">Admins only</h3>
+        <h3 className="text-sm font-semibold text-slate-700 dark:text-zinc-200">Not available</h3>
         <p className="text-sm text-slate-400 mt-1 max-w-xs dark:text-zinc-500">
-          The Hours Report is only available to Admins.
+          The Hours Report is only available to Admins and Project Leads.
         </p>
       </div>
     );

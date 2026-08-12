@@ -255,7 +255,10 @@ export function formatHoursMaybe(h: string | undefined): string | undefined {
   return h === undefined ? undefined : formatHours(Number(h));
 }
 
-function formatCurrency(amount: number): string {
+// Exported so project-lead-time-tracking-screen.tsx can render the same
+// $ formatting for its own financial-access-gated Estimated Revenue KPI,
+// rather than a second copy of this string format.
+export function formatCurrency(amount: number): string {
   return `$${amount.toLocaleString("en-US")}`;
 }
 

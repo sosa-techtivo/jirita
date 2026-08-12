@@ -1891,19 +1891,23 @@ function ExportDropdown({
   );
 }
 
-// ── Hours Report (Admin-only) — entry point card ────────────────────────────
+// ── Hours Report — entry point card ─────────────────────────────────────────
 // Purely presentational now: the actual date/project filters, live preview,
-// and real .xlsx export all moved to their own dedicated route
-// (/reports/hours → hours-report-screen.tsx) so the report gets real room
-// instead of squeezing into a toolbar-sized card. This card is just the
-// doorway into it.
-function HoursReportEntryCard() {
+// and real .xlsx/.pdf export all moved to their own dedicated route
+// (/reports/hours → hours-report-screen.tsx), which enforces its own real
+// access independently of this card — any Admin or Project Lead can reach
+// the report itself; whether it carries `$` is a separate, later check
+// (hasFinancialAccess) that page makes on its own. Exported so both
+// AdminReportsScreen below and ProjectLeadReportsScreen (every Project
+// Lead, financial or not) can link to the exact same doorway rather than
+// each rendering a slightly different copy of it.
+export function HoursReportEntryCard() {
   return (
     <Section title="Hours Report">
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <p className="text-xs text-slate-500 dark:text-zinc-400 max-w-md">
           Logged hours by project and ticket for a selected period — grouped,
-          totaled, and exportable as a real Excel workbook.
+          totaled, and exportable.
         </p>
         <Link
           href="/reports/hours"

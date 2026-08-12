@@ -70,6 +70,7 @@ interface MembershipRow {
   role: string;
   status: string;
   weekly_capacity: number | null;
+  financial_access: boolean;
   created_at: string;
 }
 
@@ -110,7 +111,7 @@ export async function loadOrganizationUsers(organizationId: string): Promise<Org
 
   const { data: membershipRows, error: membershipError } = await supabase
     .from("organization_memberships")
-    .select("profile_id, role, status, weekly_capacity, created_at")
+    .select("profile_id, role, status, weekly_capacity, financial_access, created_at")
     .eq("organization_id", organizationId)
     .returns<MembershipRow[]>();
 
@@ -216,6 +217,7 @@ export async function loadOrganizationUsers(organizationId: string): Promise<Org
         role,
         status,
         weeklyCapacity: membership.weekly_capacity ?? 0,
+        financialAccess: membership.financial_access,
         projectSlugs: projectSlugsByProfile.get(profile.id) ?? [],
         // Real — see the lastSignInByProfileId lookup above. Only ever
         // null when Supabase Auth itself has no last_sign_in_at for this
@@ -290,7 +292,7 @@ export async function updateOrganizationMember(
 export async function editOrganizationMember(
   organizationId: string,
   profileId: string,
-  fields: { firstName: string; lastName: string; role: Role; weeklyCapacity: number }
+  fields: { firstName: string; lastName: string; role: Role; weeklyCapacity: number; financialAccess: boolean }
 ): Promise<WriteResult> {
   const supabase = getSupabaseBrowserClient();
   const {
@@ -363,7 +365,7 @@ export async function enableOrganizationMember(organizationId: string, profileId
 // hardcoded URL or a new env var.
 export async function inviteOrganizationUser(
   organizationId: string,
-  fields: { firstName: string; lastName: string; email: string; role: Role; weeklyCapacity: number }
+  fields: { firstName: string; lastName: string; email: string; role: Role; weeklyCapacity: number; financialAccess: boolean }
 ): Promise<InviteUserResult> {
   const supabase = getSupabaseBrowserClient();
   const {
@@ -388,7 +390,7 @@ export async function inviteOrganizationUser(
 // rather than the admin's own browser origin.
 export async function generateOrganizationInviteLink(
   organizationId: string,
-  fields: { firstName: string; lastName: string; email: string; role: Role; weeklyCapacity: number }
+  fields: { firstName: string; lastName: string; email: string; role: Role; weeklyCapacity: number; financialAccess: boolean }
 ): Promise<GenerateInviteLinkResult> {
   const supabase = getSupabaseBrowserClient();
   const {

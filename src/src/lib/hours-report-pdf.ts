@@ -66,9 +66,11 @@ function round2(n: number): number {
 
 // An em dash for a `null` (Internal-category) amount instead of a
 // currency-formatted `0` — Internal hours are never billable, so they must
-// never read as "billed at $0."
-function formatAmount(amount: number | null): string {
-  return amount === null ? "—" : formatCurrencyAmount(round2(amount));
+// never read as "billed at $0." Only ever called once `data.includesFinancials`
+// has already gated whether the `$` column exists at all — see below —
+// so `amount` here is really just `number | null`.
+function formatAmount(amount: number | null | undefined): string {
+  return amount === null || amount === undefined ? "—" : formatCurrencyAmount(round2(amount));
 }
 
 async function loadLogoDataUrl(url: string): Promise<string> {
@@ -100,13 +102,21 @@ export async function buildHoursReportPdf(
   periodLabel: string,
   branding: HoursReportPdfBranding = HOURS_REPORT_PDF_BRANDING
 ): Promise<Uint8Array> {
+  // The one place this PDF decides whether a `$` column exists at all —
+  // reads `data.includesFinancials` (set once, by buildHoursReportData's
+  // own authorization parameter) rather than re-deriving a role/permission
+  // check here. A Project Lead without financial_access gets a PDF with no
+  // `$` column whatsoever — never a dash, never a $0 — Hours/Ticket/
+  // Summary/grouping/Project Total/TOTAL HOURS are otherwise identical.
+  const includeFinancials = data.includesFinancials;
+
   const doc = new jsPDF({ unit: "pt", format: "a4" });
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
   const tableWidth = pageWidth - PAGE_MARGIN * 2;
   const amountColRight = pageWidth - PAGE_MARGIN;
   const amountColLeft = amountColRight - AMOUNT_COL_WIDTH;
-  const hoursColRight = amountColLeft;
+  const hoursColRight = includeFinancials ? amountColLeft : pageWidth - PAGE_MARGIN;
   const hoursColLeft = hoursColRight - HOURS_COL_WIDTH;
 
   // A logo that fails to fetch (offline, asset moved) degrades to a
@@ -165,24 +175,28 @@ export async function buildHoursReportPdf(
     }
     cursorY += 10;
 
-    const body: RowInput[] = group.tickets.map((ticket) => [
-      ticket.ticketKey,
-      ticket.summary,
-      round2(ticket.hours).toFixed(2),
-      formatAmount(ticket.amount),
-    ]);
-    body.push([
+    const body: RowInput[] = group.tickets.map((ticket) => {
+      const row: RowInput = [ticket.ticketKey, ticket.summary, round2(ticket.hours).toFixed(2)];
+      if (includeFinancials) row.push(formatAmount(ticket.amount));
+      return row;
+    });
+    const totalRow: RowInput = [
       "",
       { content: "Project Total", styles: { fontStyle: "bold", halign: "right" } },
       { content: round2(group.totalHours).toFixed(2), styles: { fontStyle: "bold", halign: "right" } },
-      { content: formatAmount(group.totalAmount), styles: { fontStyle: "bold", halign: "right" } },
-    ]);
+    ];
+    if (includeFinancials) totalRow.push({ content: formatAmount(group.totalAmount), styles: { fontStyle: "bold", halign: "right" } });
+    body.push(totalRow);
+
+    const summaryColWidth = includeFinancials
+      ? tableWidth - TICKET_COL_WIDTH - HOURS_COL_WIDTH - AMOUNT_COL_WIDTH
+      : tableWidth - TICKET_COL_WIDTH - HOURS_COL_WIDTH;
 
     autoTable(doc, {
       startY: cursorY,
       margin: { left: PAGE_MARGIN, right: PAGE_MARGIN, bottom: BOTTOM_MARGIN, top: PAGE_MARGIN },
       tableWidth,
-      head: [["Ticket", "Summary", "Hours", "$"]],
+      head: [includeFinancials ? ["Ticket", "Summary", "Hours", "$"] : ["Ticket", "Summary", "Hours"]],
       body,
       showHead: "everyPage",
       rowPageBreak: "avoid",
@@ -201,12 +215,18 @@ export async function buildHoursReportPdf(
         fontStyle: "bold",
         fontSize: 8,
       },
-      columnStyles: {
-        0: { cellWidth: TICKET_COL_WIDTH },
-        1: { cellWidth: tableWidth - TICKET_COL_WIDTH - HOURS_COL_WIDTH - AMOUNT_COL_WIDTH },
-        2: { cellWidth: HOURS_COL_WIDTH, halign: "right" },
-        3: { cellWidth: AMOUNT_COL_WIDTH, halign: "right" },
-      },
+      columnStyles: includeFinancials
+        ? {
+            0: { cellWidth: TICKET_COL_WIDTH },
+            1: { cellWidth: summaryColWidth },
+            2: { cellWidth: HOURS_COL_WIDTH, halign: "right" },
+            3: { cellWidth: AMOUNT_COL_WIDTH, halign: "right" },
+          }
+        : {
+            0: { cellWidth: TICKET_COL_WIDTH },
+            1: { cellWidth: summaryColWidth },
+            2: { cellWidth: HOURS_COL_WIDTH, halign: "right" },
+          },
     });
 
     cursorY = lastAutoTableFinalY(doc, cursorY) + 22;
@@ -227,7 +247,9 @@ export async function buildHoursReportPdf(
   doc.setTextColor(...SLATE_900);
   doc.text("TOTAL HOURS", hoursColLeft - 8, cursorY, { align: "right" });
   doc.text(round2(data.grandTotalHours).toFixed(2), hoursColRight, cursorY, { align: "right" });
-  doc.text(formatCurrencyAmount(round2(data.grandTotalAmount)), amountColRight, cursorY, { align: "right" });
+  if (includeFinancials) {
+    doc.text(formatCurrencyAmount(round2(data.grandTotalAmount ?? 0)), amountColRight, cursorY, { align: "right" });
+  }
 
   // Footer page numbers — added last, once the real page count is known,
   // rather than guessed while drawing (this report's own length isn't known

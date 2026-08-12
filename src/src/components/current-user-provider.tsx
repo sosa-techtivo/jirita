@@ -140,6 +140,7 @@ function neutralUser(role: Role): CurrentUser {
     weeklyCapacity: 0,
     memberSince: "—",
     lastLogin: "—",
+    financialAccess: false,
   };
 }
 
@@ -157,7 +158,7 @@ function formatDate(iso: string): string {
 // `discipline` has no real column (see current-user.ts) — a real member's
 // discipline is just their role label.
 function realUser(membership: Membership, lastSignInAt: string | null): CurrentUser {
-  const { profile, role, weeklyCapacity } = membership;
+  const { profile, role, weeklyCapacity, financialAccess } = membership;
   const emailHandle = profile.email.split("@")[0] || profile.email;
   const firstName = profile.firstName.trim() || emailHandle;
   const lastName = profile.lastName.trim();
@@ -173,6 +174,7 @@ function realUser(membership: Membership, lastSignInAt: string | null): CurrentU
     weeklyCapacity: weeklyCapacity ?? 0,
     memberSince: formatDate(profile.createdAt),
     lastLogin: lastSignInAt ? formatDate(lastSignInAt) : "—",
+    financialAccess,
   };
 }
 

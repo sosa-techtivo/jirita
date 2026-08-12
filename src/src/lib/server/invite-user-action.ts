@@ -322,7 +322,8 @@ async function finalizeInviteRecords(
   email: string,
   organizationId: string,
   role: Role,
-  weeklyCapacity: number
+  weeklyCapacity: number,
+  financialAccess: boolean
 ): Promise<{ status: "error"; message: string } | null> {
   // Never overwrites an unrelated existing profile (onConflict targets this
   // exact id, which is either brand new from the invite/link above or the
@@ -337,13 +338,17 @@ async function finalizeInviteRecords(
   }
 
   // Workspace membership only — never project_memberships, never touching
-  // the inviting admin's own row.
+  // the inviting admin's own row. financial_access is only ever meaningful
+  // for a project_lead-role membership (see current-user.ts's
+  // hasFinancialAccess) — forced to false for any other role regardless of
+  // what the client sent, same rule editUserAction enforces on every save.
   const { error: membershipError } = await admin.from("organization_memberships").insert({
     organization_id: organizationId,
     profile_id: invitedUserId,
     role: ROLE_TO_DB[role],
     status: "invited",
     weekly_capacity: weeklyCapacity,
+    financial_access: role === "PROJECT_LEAD" && financialAccess,
   });
 
   if (membershipError) {
@@ -368,6 +373,7 @@ export async function inviteUserAction(params: {
   email: string;
   role: Role;
   weeklyCapacity: number;
+  financialAccess: boolean;
 }): Promise<InviteUserResult> {
   const prepared = await prepareInvite(params);
   if (prepared.status === "error") return prepared;
@@ -429,7 +435,8 @@ export async function inviteUserAction(params: {
     email,
     params.organizationId,
     params.role,
-    weeklyCapacity
+    weeklyCapacity,
+    params.financialAccess
   );
   if (finalizeError) {
     return { status: "error", message: `Invitation sent, but ${finalizeError.message.charAt(0).toLowerCase()}${finalizeError.message.slice(1)}` };
@@ -458,6 +465,7 @@ export async function generateInviteLinkAction(params: {
   email: string;
   role: Role;
   weeklyCapacity: number;
+  financialAccess: boolean;
 }): Promise<GenerateInviteLinkResult> {
   const prepared = await prepareInvite(params);
   if (prepared.status === "error") return prepared;
@@ -531,7 +539,8 @@ export async function generateInviteLinkAction(params: {
     email,
     params.organizationId,
     params.role,
-    weeklyCapacity
+    weeklyCapacity,
+    params.financialAccess
   );
   if (finalizeError) return finalizeError;
 

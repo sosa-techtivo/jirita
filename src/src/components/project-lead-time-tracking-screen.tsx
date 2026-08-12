@@ -12,6 +12,7 @@ import {
   StatusPill,
   CapacityCell,
   formatHours,
+  formatCurrency,
   periodSubLabel,
   getCurrentWeekRange,
   getCurrentMonthRange,
@@ -29,6 +30,7 @@ import type { Ticket } from "@/lib/mock-tickets";
 import { getTodayISO } from "@/components/tickets/ticket-ui";
 import { MemberTrigger } from "@/components/member-profile";
 import { useCurrentUser } from "@/components/current-user-provider";
+import { hasFinancialAccess } from "@/lib/current-user";
 import { loadLeadProjects, loadOrganizationProjects, loadProjectTeam } from "@/lib/projects";
 import type { LeadProject, ProjectTeamMember } from "@/lib/projects";
 import { loadProjectTickets, loadOrganizationLoggedTimeForRange, isTicketClosed } from "@/lib/tickets";
@@ -302,7 +304,8 @@ function ProjectLeadTimeTrackingLoadingSkeleton() {
 }
 
 export function ProjectLeadTimeTrackingScreen() {
-  const { organization, userId, isDevFallback } = useCurrentUser();
+  const { user, organization, userId, isDevFallback } = useCurrentUser();
+  const canViewFinancials = hasFinancialAccess(user.role, user.financialAccess);
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -758,6 +761,17 @@ export function ProjectLeadTimeTrackingScreen() {
           sub="team members overloaded"
           danger={overCapacityCount > 0}
         />
+        {/* Financial access only — a Project Lead without it never sees $,
+            same real financeSummary.estimatedRevenue the KPI row above's
+            "Internal Hours" already reads from, no separate query. */}
+        {canViewFinancials && (
+          <KpiCard
+            label="Estimated Revenue"
+            value={formatCurrency(financeSummary.estimatedRevenue)}
+            sub={periodSubLabel(period, customRange)}
+            accent
+          />
+        )}
       </div>
 
       {/* ── Timesheets ───────────────────────────────────────────────────── */}

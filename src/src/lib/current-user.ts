@@ -23,6 +23,11 @@ export interface CurrentUser {
   memberSince: string;
   /** Display string, read-only in the Profile page's Account section. */
   lastLogin: string;
+  /** organization_memberships.financial_access — an optional, Admin-granted
+   *  permission for Project Lead users only (see hasFinancialAccess below).
+   *  Always false for Admin/Member; irrelevant for Admin since that role
+   *  already has financial access unconditionally. */
+  financialAccess: boolean;
 }
 
 const avatar = (id: number) => `https://i.pravatar.cc/64?img=${id}`;
@@ -52,6 +57,7 @@ export const MOCK_USERS: Record<Role, CurrentUser> = {
     weeklyCapacity: 40,
     memberSince: "Jan 8, 2025",
     lastLogin: "Just now",
+    financialAccess: false,
   },
   PROJECT_LEAD: {
     firstName: "Sarah",
@@ -64,6 +70,7 @@ export const MOCK_USERS: Record<Role, CurrentUser> = {
     weeklyCapacity: 40,
     memberSince: "Mar 3, 2025",
     lastLogin: "2 hours ago",
+    financialAccess: false,
   },
   MEMBER: {
     firstName: "David",
@@ -76,6 +83,7 @@ export const MOCK_USERS: Record<Role, CurrentUser> = {
     weeklyCapacity: 32,
     memberSince: "Jun 2, 2025",
     lastLogin: "3 hours ago",
+    financialAccess: false,
   },
 };
 
@@ -91,4 +99,22 @@ export const ROLE_LABELS: Record<Role, string> = {
 // (New Project, New Ticket, Add Member, etc).
 export function canManage(role: Role): boolean {
   return role === "ADMIN" || role === "PROJECT_LEAD";
+}
+
+// Centralized financial-data authorization — the one place every current
+// and future financial screen/query (Hours Report, billing, Time Tracking
+// $ values, etc.) should check, rather than each re-deriving its own
+// isAdmin-or-flag condition. Admin always has financial access by role;
+// a Project Lead only has it when their own organization_memberships.
+// financial_access is explicitly true (see the 20260924000000 migration and
+// Edit/Invite User's own persistence of that flag); Member never does.
+//
+// Deliberately says nothing about *which* projects — this only answers
+// "can this person see financial numbers at all," never "for which
+// projects." Every real caller must still scope the underlying query/UI to
+// the projects this person already has access to (their own
+// project_memberships, same as every other Project Lead screen already
+// enforces) — this permission can never expand project scope on its own.
+export function hasFinancialAccess(role: Role, financialAccess: boolean): boolean {
+  return role === "ADMIN" || (role === "PROJECT_LEAD" && financialAccess);
 }

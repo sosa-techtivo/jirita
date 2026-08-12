@@ -22,8 +22,14 @@ export interface HoursReportTicketRow {
    *  against, never a new rate/calculation of its own. `null` (never `0`)
    *  for an Internal-category project: Internal work is never billable
    *  regardless of what rate (if any) happens to be stored, so it must
-   *  read as "not applicable," not "billed at $0." */
-  amount: number | null;
+   *  read as "not applicable," not "billed at $0." `undefined` — a
+   *  distinct state from `null` — when the caller (buildHoursReportData)
+   *  was told the viewer has no financial access at all: no rate is ever
+   *  read/multiplied in that case, so there's no `$` column concept to
+   *  show as either a number or a dash. See HoursReportData.includesFinancials,
+   *  the one flag every renderer (preview/PDF/Excel) reads to decide
+   *  whether a `$` column exists at all. */
+  amount: number | null | undefined;
 }
 
 export interface HoursReportProjectGroup {
@@ -31,13 +37,16 @@ export interface HoursReportProjectGroup {
   /** Project Settings' own real category — the sole source of truth for
    *  whether this project's hours are billable. Never inferred from
    *  `defaultHourlyRate` being 0/unset (a Client project can legitimately
-   *  have no rate set yet and must still show `$0.00`, not `—`). */
+   *  have no rate set yet and must still show `$0.00`, not `—`). Kept
+   *  (and the "Internal" label built from it) regardless of financial
+   *  access — a project's category is not itself a monetary value. */
   isInternal: boolean;
   tickets: HoursReportTicketRow[];
   totalHours: number;
   /** Sum of the group's own ticket amounts — `null` whenever `isInternal`
-   *  is true (every ticket in the group is `null` for the same reason). */
-  totalAmount: number | null;
+   *  is true, `undefined` whenever the viewer has no financial access at
+   *  all (see HoursReportTicketRow.amount). */
+  totalAmount: number | null | undefined;
 }
 
 export interface HoursReportDetailRow {
@@ -48,18 +57,29 @@ export interface HoursReportDetailRow {
   workDate: string;
   description: string;
   hours: number;
-  /** Same Internal-category → `null` rule as HoursReportTicketRow.amount. */
-  amount: number | null;
+  /** Same null/undefined rules as HoursReportTicketRow.amount. */
+  amount: number | null | undefined;
 }
 
 export interface HoursReportData {
+  /** The one authoritative "does this report carry any $ at all" flag —
+   *  every renderer (the web preview, the PDF, both Excel sheets) reads
+   *  this exactly once to decide whether a `$`/Amount column exists,
+   *  rather than each re-deriving its own financial-access check. False
+   *  for a Project Lead without financial_access; true for Admin and a
+   *  financial Project Lead. Set once, here, by buildHoursReportData's own
+   *  `includeFinancials` parameter — never re-computed downstream. */
+  includesFinancials: boolean;
   projectGroups: HoursReportProjectGroup[];
   /** Every project's hours, Client and Internal alike — category never
-   *  excludes a project from the hours total. */
+   *  excludes a project from the hours total. Always a real number,
+   *  regardless of `includesFinancials`. */
   grandTotalHours: number;
   /** Client-category projects only — every Internal group's `totalAmount`
-   *  is `null` and contributes nothing here, never $0 "counted in." */
-  grandTotalAmount: number;
+   *  is `null` and contributes nothing here, never $0 "counted in."
+   *  `undefined` (not 0) when `includesFinancials` is false — there is no
+   *  real total to report, not a real total that happens to be zero. */
+  grandTotalAmount: number | undefined;
   detailRows: HoursReportDetailRow[];
 }
 
@@ -89,11 +109,22 @@ export function formatCurrencyAmount(amount: number): string {
 // model, and never rounded before it's summed. An Internal-category
 // project's hours flow through those exact same groupings unchanged; only
 // its `amount` fields are forced to `null` instead of being computed.
+//
+// `includeFinancials` is this function's own authorization gate — the
+// single point every one of this report's three renderers (web preview,
+// PDF, Excel) ultimately defers to via the `includesFinancials` flag on
+// the object this returns, rather than each independently re-deciding
+// whether to show `$`. When false (a Project Lead without financial_access),
+// `defaultHourlyRate` is never read and no `amount` is ever computed —
+// callers should also avoid passing a real rate through `projects` at all
+// in that case (see hours-report-screen.tsx), so the number never even
+// reaches this function, not just never reaches the screen.
 export function buildHoursReportData(
   tickets: Ticket[],
   projects: { slug: string; name: string; category: ProjectCategory; defaultHourlyRate?: number | null }[],
   members: { id: string; name: string }[],
-  timeEntries: OrganizationTimeEntry[]
+  timeEntries: OrganizationTimeEntry[],
+  includeFinancials: boolean
 ): HoursReportData {
   const ticketById = new Map(tickets.map((t) => [t.id, t]));
   const projectBySlug = new Map(projects.map((p) => [p.slug, p]));
@@ -118,7 +149,7 @@ export function buildHoursReportData(
     const project = projectBySlug.get(slug);
     if (!project) continue; // no real project left to attribute these hours to
     const isInternal = project.category !== "client";
-    const rate = project.defaultHourlyRate ?? 0;
+    const rate = includeFinancials ? project.defaultHourlyRate ?? 0 : 0;
 
     const ticketRows = Array.from(ticketIds)
       .map((id) => {
@@ -129,14 +160,18 @@ export function buildHoursReportData(
           ticketKey: getTicketDisplayKey(ticket),
           summary: ticket.title,
           hours,
-          amount: isInternal ? null : hours * rate,
+          amount: !includeFinancials ? undefined : isInternal ? null : hours * rate,
         };
       })
       .sort((a, b) => a.ticketNumber - b.ticketNumber)
       .map(({ ticketKey, summary, hours, amount }) => ({ ticketKey, summary, hours, amount }));
 
     const totalHours = ticketRows.reduce((sum, row) => sum + row.hours, 0);
-    const totalAmount = isInternal ? null : ticketRows.reduce((sum, row) => sum + (row.amount ?? 0), 0);
+    const totalAmount = !includeFinancials
+      ? undefined
+      : isInternal
+      ? null
+      : ticketRows.reduce((sum, row) => sum + (row.amount ?? 0), 0);
     projectGroups.push({ projectName: project.name, isInternal, tickets: ticketRows, totalHours, totalAmount });
   }
   projectGroups.sort((a, b) => a.projectName.localeCompare(b.projectName));
@@ -144,7 +179,9 @@ export function buildHoursReportData(
   const grandTotalHours = projectGroups.reduce((sum, group) => sum + group.totalHours, 0);
   // Internal groups' `totalAmount` is `null`, so `?? 0` correctly leaves
   // them out of this sum entirely rather than counting them as $0.
-  const grandTotalAmount = projectGroups.reduce((sum, group) => sum + (group.totalAmount ?? 0), 0);
+  const grandTotalAmount = includeFinancials
+    ? projectGroups.reduce((sum, group) => sum + (group.totalAmount ?? 0), 0)
+    : undefined;
 
   const detailRows: (HoursReportDetailRow & { ticketNumber: number })[] = [];
   for (const entry of timeEntries) {
@@ -164,7 +201,7 @@ export function buildHoursReportData(
       workDate: entry.workDate,
       description: entry.comment ?? "",
       hours,
-      amount: isInternal ? null : hours * (project.defaultHourlyRate ?? 0),
+      amount: !includeFinancials ? undefined : isInternal ? null : hours * (project.defaultHourlyRate ?? 0),
       ticketNumber: ticket.ticketNumber,
     });
   }
@@ -175,6 +212,7 @@ export function buildHoursReportData(
   });
 
   return {
+    includesFinancials: includeFinancials,
     projectGroups,
     grandTotalHours,
     grandTotalAmount,
@@ -198,79 +236,103 @@ export function buildHoursReportData(
 // disagree with each other or with the on-screen totals.
 // `$` cell for a possibly-`null` amount (Internal-category rows) — an
 // em dash, plain-styled, instead of a currency-formatted `0`, so Internal
-// hours never read as "billed at $0."
+// hours never read as "billed at $0." Only ever called once `includesFinancials`
+// has already gated whether a `$` column exists at all — see below.
 function amountCell(amount: number | null, bold: boolean): XlsxSheet["rows"][number][number] {
   if (amount === null) return { value: "—", bold };
   return { value: amount, bold, currency: true };
 }
 
 export function buildHoursReportWorkbookSheets(data: HoursReportData, fromISO: string, toISO: string): XlsxSheet[] {
+  // The one place this workbook decides whether a `$`/Amount column exists
+  // at all — reads `data.includesFinancials` (set once, by
+  // buildHoursReportData's own authorization parameter) rather than
+  // re-deriving a role/permission check here. A Project Lead without
+  // financial_access gets a workbook with no `$` column whatsoever in
+  // either sheet — never a dash, never a $0 — Hours/Ticket/Summary/
+  // grouping/Project Total/TOTAL HOURS are otherwise identical.
+  const includeFinancials = data.includesFinancials;
+
+  const summaryHeader: XlsxSheet["rows"][number] = [
+    { value: "Ticket", bold: true },
+    { value: "Summary", bold: true },
+    { value: "Hours", bold: true },
+  ];
+  if (includeFinancials) summaryHeader.push({ value: "$", bold: true });
+
   const summaryRows: XlsxSheet["rows"] = [
     [{ value: "Jirita — Hours Report", bold: true }],
     [{ value: `Period: ${fromISO} to ${toISO}` }],
     [],
-    [
-      { value: "Ticket", bold: true },
-      { value: "Summary", bold: true },
-      { value: "Hours", bold: true },
-      { value: "$", bold: true },
-    ],
+    summaryHeader,
   ];
 
   for (const group of data.projectGroups) {
     summaryRows.push([{ value: group.isInternal ? `${group.projectName} (Internal)` : group.projectName, bold: true }]);
     for (const ticket of group.tickets) {
-      summaryRows.push([
+      const row: XlsxSheet["rows"][number] = [
         { value: ticket.ticketKey },
         { value: ticket.summary },
         { value: ticket.hours, decimal: true },
-        amountCell(ticket.amount, false),
-      ]);
+      ];
+      if (includeFinancials) row.push(amountCell(ticket.amount ?? null, false));
+      summaryRows.push(row);
     }
-    summaryRows.push([
+    const totalRow: XlsxSheet["rows"][number] = [
       { value: "" },
       { value: "Project Total", bold: true },
       { value: group.totalHours, bold: true, decimal: true },
-      amountCell(group.totalAmount, true),
-    ]);
+    ];
+    if (includeFinancials) totalRow.push(amountCell(group.totalAmount ?? null, true));
+    summaryRows.push(totalRow);
     summaryRows.push([]);
   }
 
-  summaryRows.push([
+  const grandTotalRow: XlsxSheet["rows"][number] = [
     { value: "" },
     { value: "TOTAL HOURS", bold: true },
     { value: data.grandTotalHours, bold: true, decimal: true },
-    { value: data.grandTotalAmount, bold: true, currency: true },
-  ]);
+  ];
+  if (includeFinancials) grandTotalRow.push({ value: data.grandTotalAmount ?? 0, bold: true, currency: true });
+  summaryRows.push(grandTotalRow);
+
+  const detailHeader: XlsxSheet["rows"][number] = [
+    { value: "Project", bold: true },
+    { value: "Ticket", bold: true },
+    { value: "Summary", bold: true },
+    { value: "Member", bold: true },
+    { value: "Work Date", bold: true },
+    { value: "Time Entry Description", bold: true },
+    { value: "Hours", bold: true },
+  ];
+  if (includeFinancials) detailHeader.push({ value: "$", bold: true });
 
   const detailRows: XlsxSheet["rows"] = [
     [{ value: "Jirita — Hours Report (Details)", bold: true }],
     [{ value: `Period: ${fromISO} to ${toISO}` }],
     [],
-    [
-      { value: "Project", bold: true },
-      { value: "Ticket", bold: true },
-      { value: "Summary", bold: true },
-      { value: "Member", bold: true },
-      { value: "Work Date", bold: true },
-      { value: "Time Entry Description", bold: true },
-      { value: "Hours", bold: true },
-      { value: "$", bold: true },
-    ],
-    ...data.detailRows.map((row): XlsxSheet["rows"][number] => [
-      { value: row.projectName },
-      { value: row.ticketKey },
-      { value: row.summary },
-      { value: row.memberName },
-      { value: row.workDate },
-      { value: row.description },
-      { value: row.hours, decimal: true },
-      amountCell(row.amount, false),
-    ]),
+    detailHeader,
+    ...data.detailRows.map((row): XlsxSheet["rows"][number] => {
+      const cells: XlsxSheet["rows"][number] = [
+        { value: row.projectName },
+        { value: row.ticketKey },
+        { value: row.summary },
+        { value: row.memberName },
+        { value: row.workDate },
+        { value: row.description },
+        { value: row.hours, decimal: true },
+      ];
+      if (includeFinancials) cells.push(amountCell(row.amount ?? null, false));
+      return cells;
+    }),
   ];
 
   return [
-    { name: "Summary", rows: summaryRows, columnWidths: [14, 50, 12, 14] },
-    { name: "Details", rows: detailRows, columnWidths: [22, 12, 40, 20, 12, 40, 12, 14] },
+    { name: "Summary", rows: summaryRows, columnWidths: includeFinancials ? [14, 50, 12, 14] : [14, 50, 12] },
+    {
+      name: "Details",
+      rows: detailRows,
+      columnWidths: includeFinancials ? [22, 12, 40, 20, 12, 40, 12, 14] : [22, 12, 40, 20, 12, 40, 12],
+    },
   ];
 }

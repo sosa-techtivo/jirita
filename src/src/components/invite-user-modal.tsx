@@ -63,7 +63,7 @@ function CopyFeedback({ message, onDismiss }: { message: string; onDismiss: () =
 // button), just reached without the name/email/role form: the profile
 // already exists, so this skips straight to minting a fresh token via
 // regenerateInvitationLink (never inviteUserByEmail — no email is ever
-// sent) and shows the result. Never touches role/weeklyCapacity/projects.
+// sent) and shows the result. Never touches role/weeklyCapacity/financialAccess/projects.
 export function InviteUserModal({
   editingUser,
   regeneratingUser,
@@ -102,6 +102,12 @@ export function InviteUserModal({
   const [weeklyCapacity, setWeeklyCapacity] = useState(
     String(editingUser?.weeklyCapacity ?? organization?.defaultWeeklyCapacity ?? 40)
   );
+  // Off by default for a brand-new invite regardless of role (no
+  // organization-level default exists for this, unlike role/capacity above
+  // — every new Project Lead starts with no financial access until an
+  // Admin explicitly grants it). Editing an existing user starts from their
+  // own real, already-persisted value.
+  const [financialAccess, setFinancialAccess] = useState(editingUser?.financialAccess ?? false);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [inviteLink, setInviteLink] = useState<string | null>(null);
@@ -173,6 +179,11 @@ export function InviteUserModal({
   async function handleSubmit() {
     if (!canSubmit || submitting) return;
     const capacity = Math.max(0, parseInt(weeklyCapacity, 10) || 0);
+    // Financial access is only ever meaningful for Project Lead — mirrors
+    // the same server-side derivation (editUserAction/finalizeInviteRecords)
+    // so the optimistic onEdited update below can never claim a value the
+    // server itself wouldn't have persisted.
+    const effectiveFinancialAccess = role === "PROJECT_LEAD" && financialAccess;
 
     if (editingUser) {
       setFormError(null);
@@ -187,6 +198,7 @@ export function InviteUserModal({
         lastName: lastName.trim(),
         role,
         weeklyCapacity: capacity,
+        financialAccess: effectiveFinancialAccess,
       });
       setSubmitting(false);
 
@@ -202,6 +214,7 @@ export function InviteUserModal({
         email: email.trim(),
         role,
         weeklyCapacity: capacity,
+        financialAccess: effectiveFinancialAccess,
       });
       handleClose();
       return;
@@ -219,6 +232,7 @@ export function InviteUserModal({
       email: email.trim(),
       role,
       weeklyCapacity: capacity,
+      financialAccess: effectiveFinancialAccess,
     };
 
     setSubmitting(true);
@@ -374,7 +388,20 @@ export function InviteUserModal({
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className={FIELD_LABEL}>Role</label>
-                    <select value={role} onChange={(e) => setRole(e.target.value as Role)} className={INPUT}>
+                    <select
+                      value={role}
+                      onChange={(e) => {
+                        const nextRole = e.target.value as Role;
+                        setRole(nextRole);
+                        // Financial access only ever applies to Project
+                        // Lead — clearing it here the instant the role
+                        // changes away avoids a stale "on" switch quietly
+                        // sitting behind a hidden field if the admin picks
+                        // Project Lead again later in this same form.
+                        if (nextRole !== "PROJECT_LEAD") setFinancialAccess(false);
+                      }}
+                      className={INPUT}
+                    >
                       {ROLE_OPTIONS.map((r) => (
                         <option key={r} value={r}>{ROLE_LABELS[r]}</option>
                       ))}
@@ -396,6 +423,37 @@ export function InviteUserModal({
                     </div>
                   </div>
                 </div>
+
+                {/* Financial access — Project Lead only; Admin already has
+                    financial access unconditionally by role, and Member
+                    never does, so the switch simply doesn't exist for
+                    either (see current-user.ts's hasFinancialAccess). */}
+                {role === "PROJECT_LEAD" && (
+                  <div className="flex items-start justify-between gap-3 rounded-lg border border-slate-200 dark:border-zinc-700 px-3 py-2.5">
+                    <div className="pr-2">
+                      <p className="text-[13px] font-medium text-slate-700 dark:text-zinc-200">Financial access</p>
+                      <p className="text-[12px] text-slate-400 dark:text-zinc-500 mt-0.5">
+                        Can view financial information for their projects.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={financialAccess}
+                      aria-label="Financial access"
+                      onClick={() => setFinancialAccess((v) => !v)}
+                      className={`relative inline-flex h-5 w-9 flex-shrink-0 items-center rounded-full transition-colors mt-0.5 ${
+                        financialAccess ? "bg-brand-600 dark:bg-brand-500" : "bg-slate-200 dark:bg-zinc-700"
+                      }`}
+                    >
+                      <span
+                        className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+                          financialAccess ? "translate-x-4" : "translate-x-0.5"
+                        }`}
+                      />
+                    </button>
+                  </div>
+                )}
               </>
             )}
           </div>
