@@ -30,6 +30,12 @@ const NOTIFICATION_TYPES = [
   "project_access_requested",
   "project_access_rejected",
   "comment_reply",
+  // Subscriber fan-out types (20260925000000) — sent to a ticket's
+  // persistent subscribers, never to a specific assignee/mention/reply
+  // recipient (those keep using the five ticket_*/comment_* types above).
+  "ticket_field_changed",
+  "ticket_attachment_added",
+  "ticket_time_logged",
 ] as const;
 
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number];

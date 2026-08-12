@@ -13,7 +13,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
-import { ThumbsUp, ThumbsDown } from "lucide-react";
+import { ThumbsUp, ThumbsDown, Eye, EyeOff } from "lucide-react";
 import type { Ticket, TicketStatus, TicketPriority, TicketType } from "@/lib/mock-tickets";
 import { tickets as ALL_TICKETS, getTicketDisplayKey } from "@/lib/mock-tickets";
 import {
@@ -65,6 +65,8 @@ import {
   loadTicketRelations,
   createTicketRelation,
   deleteTicketRelation,
+  loadTicketSubscriptionState,
+  setTicketSubscription,
   formatRelativeTime,
   STATUS_FROM_DB,
   FALLBACK_TICKET_STATUSES,
@@ -267,6 +269,8 @@ function EditableSidebarStatus({
   label,
   statuses,
   onChange,
+  isSubscribed,
+  onToggleSubscribe,
 }: {
   value: TicketStatus;
   /** Real ticket_statuses.id (Fase 2.5) — see EditableStatusBadge's own doc
@@ -284,6 +288,12 @@ function EditableSidebarStatus({
    *  onChange doc (ticket-ui.tsx) for why this is a full option, not just
    *  the legacy TicketStatus value. */
   onChange: (option: TicketStatusOption) => void;
+  /** The viewer's own manual ticket_subscribers state — null while not yet
+   *  loaded (icon hidden, same as its previous home in the header row). */
+  isSubscribed?: boolean | null;
+  /** Toggles the viewer's own subscription — undefined/omitted hides the
+   *  icon entirely (never rendered mid-way through a missing handler). */
+  onToggleSubscribe?: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   const ref = useRef<HTMLSelectElement>(null);
@@ -319,6 +329,20 @@ function EditableSidebarStatus({
       ) : (
         <div className="group flex items-center gap-1.5 cursor-pointer" onClick={() => setEditing(true)}>
           <StatusBadge status={value} label={label} />
+          {isSubscribed !== null && isSubscribed !== undefined && onToggleSubscribe && (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onToggleSubscribe(); }}
+              aria-label={isSubscribed ? "Unsubscribe from this ticket" : "Subscribe to this ticket"}
+              aria-pressed={isSubscribed}
+              title={isSubscribed ? "Unsubscribe from this ticket" : "Subscribe to this ticket"}
+              className={`flex items-center justify-center p-1 rounded-md transition-colors hover:bg-slate-100 dark:hover:bg-zinc-800 ${
+                isSubscribed ? "text-brand-600 dark:text-brand-400" : "text-slate-400 dark:text-zinc-600"
+              }`}
+            >
+              {isSubscribed ? <Eye className="w-4 h-4" strokeWidth={2} /> : <EyeOff className="w-4 h-4" strokeWidth={2} />}
+            </button>
+          )}
           <button className={EDIT_BTN} aria-label="Edit status"><PencilIcon /></button>
         </div>
       )}
@@ -4465,6 +4489,11 @@ export function TicketDetailScreen({
   // exist, in every mode (including dev fallback — no mock people, ever).
   const [comments, setComments] = useState<TicketComment[]>([]);
   const [activityLog, setActivityLog] = useState<TicketActivityEvent[]>([]);
+  // The viewer's own manual subscription state (Ticket Detail's
+  // subscribe/unsubscribe icon) — null until the real row is loaded
+  // (loadTicketSubscriptionState below), so the icon can stay hidden rather
+  // than briefly rendering the wrong state.
+  const [isSubscribed, setIsSubscribed] = useState<boolean | null>(null);
   const [addingComment, setAddingComment] = useState(false);
   const [commentDraft, setCommentDraft] = useState("");
   const [submittingComment, setSubmittingComment] = useState(false);
@@ -4543,6 +4572,9 @@ export function TicketDetailScreen({
         });
         loadTicketTimeEntries(result.ticket.id).then((r) => {
           if (detailRequestIdRef.current === requestId) setLoggedEntries(r.status === "ready" ? r.entries.map(toTimeEntry) : []);
+        });
+        loadTicketSubscriptionState(result.ticket.id).then((r) => {
+          if (detailRequestIdRef.current === requestId) setIsSubscribed(r.status === "ready" ? r.subscribed : false);
         });
       } else if (result.status === "not-found") {
         setLoadState("not-found");
@@ -5097,6 +5129,29 @@ export function TicketDetailScreen({
     });
   }
 
+  // Manual subscribe/unsubscribe toggle — entirely separate from the
+  // automatic subscribe rules (create/assign/comment/mention/log-time),
+  // which keep firing unchanged. Optimistic: flips isSubscribed immediately
+  // for a responsive icon, then rolls back to the pre-toggle value if the
+  // write fails. A failed toggle never leaves the icon claiming a state
+  // that isn't actually persisted.
+  function toggleSubscription() {
+    if (!ticket || isSubscribed === null) return;
+    const next = !isSubscribed;
+    setIsSubscribed(next);
+    setTicketSubscription(ticket.id, next).then((result) => {
+      if (result.status === "error") {
+        console.warn("[ticket-detail] subscription toggle failed:", result.message);
+        showError(result.message);
+        setIsSubscribed(!next);
+      }
+    }).catch((err) => {
+      console.warn("[ticket-detail] subscription toggle failed:", err);
+      showError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
+      setIsSubscribed(!next);
+    });
+  }
+
   // Like/Dislike a comment (parent or reply alike) — pressing the already-
   // active reaction removes it, pressing the other one switches it.
   // currentReaction comes from this exact comment's own already-loaded
@@ -5498,6 +5553,8 @@ export function TicketDetailScreen({
               label={ticket.statusName}
               statuses={statuses}
               onChange={updateStatus}
+              isSubscribed={isSubscribed}
+              onToggleSubscribe={toggleSubscription}
             />
 
             <EditableSidebarAssignee

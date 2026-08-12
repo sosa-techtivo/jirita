@@ -807,6 +807,20 @@ export async function createTicket(
 
   registerProjectCode(slug, project.project_code);
 
+  // The creator (and, if one was set at creation, the initial assignee)
+  // become this ticket's first real subscribers — fire-and-forget, same
+  // resilience as every other notification-adjacent side effect here: a
+  // failed subscribe must never fail or roll back the ticket that was just
+  // created.
+  void subscribeToTicket(supabase, row.id, row.created_by).catch((err) => {
+    logDev("ticket subscribe (creator) failed", err);
+  });
+  if (row.assignee_profile_id) {
+    void subscribeToTicket(supabase, row.id, row.assignee_profile_id).catch((err) => {
+      logDev("ticket subscribe (initial assignee) failed", err);
+    });
+  }
+
   // Resolve the assignee's real name/avatar for the ticket handed back to
   // the UI immediately — same lookup shape loadProjectTickets uses on read.
   let assigneeRow: AssigneeProfileRow | undefined;
@@ -863,6 +877,22 @@ export type UpdateTicketResult =
   | { status: "success"; ticket: Ticket }
   | { status: "error"; message: string };
 
+// Every field notifyTicketChange below needs to diff against — see
+// updateTicket's own "before" fetch for why this is wider than just
+// status/assignee.
+interface TicketChangeBeforeSnapshot {
+  project_id: string;
+  status: string;
+  status_id: string;
+  assignee_profile_id: string | null;
+  priority: string;
+  due_date: string | null;
+  description: string | null;
+  labels: string[] | null;
+  acceptance_criteria: string[] | null;
+  acceptance_criteria_done: boolean[] | null;
+}
+
 export async function updateTicket(
   ticketId: string,
   slug: string,
@@ -870,18 +900,33 @@ export async function updateTicket(
 ): Promise<UpdateTicketResult> {
   const supabase = getSupabaseBrowserClient();
 
-  // Real "before" snapshot of the fields a notification could care about —
+  // Real "before" snapshot of every field a notification could care about —
   // needed both for the existing assignee-membership check below and to
-  // detect a genuine assignee/status change afterwards (never notify when
-  // nothing actually changed). Only fetched when one of those two fields is
-  // part of this edit.
-  let beforeRow: { project_id: string; status: string; status_id: string; assignee_profile_id: string | null } | undefined;
-  if (input.status !== undefined || input.statusId !== undefined || input.assigneeProfileId !== undefined) {
+  // detect a genuine change afterwards (never notify when nothing actually
+  // changed). Widened beyond status/assignee so subscriber fan-out
+  // (notifyTicketChange below) can also detect a real priority/due-date/
+  // description/labels/acceptance-criteria change — only fetched when at
+  // least one notification-relevant field is part of this edit.
+  const notifiableFieldsTouched =
+    input.status !== undefined ||
+    input.statusId !== undefined ||
+    input.assigneeProfileId !== undefined ||
+    input.priority !== undefined ||
+    input.dueDate !== undefined ||
+    input.description !== undefined ||
+    input.labels !== undefined ||
+    input.acceptanceCriteria !== undefined ||
+    input.acceptanceCriteriaDone !== undefined;
+
+  let beforeRow: TicketChangeBeforeSnapshot | undefined;
+  if (notifiableFieldsTouched) {
     const { data: existingRow, error: beforeError } = await supabase
       .from("tickets")
-      .select("project_id, status, status_id, assignee_profile_id")
+      .select(
+        "project_id, status, status_id, assignee_profile_id, priority, due_date, description, labels, acceptance_criteria, acceptance_criteria_done"
+      )
       .eq("id", ticketId)
-      .maybeSingle<{ project_id: string; status: string; status_id: string; assignee_profile_id: string | null }>();
+      .maybeSingle<TicketChangeBeforeSnapshot>();
     if (beforeError) {
       logDev("ticket lookup before update failed", beforeError);
       return { status: "error", message: beforeError.message };
@@ -970,11 +1015,23 @@ export async function updateTicket(
 
   const { byId: statusesById } = await loadProjectTicketStatusesData(supabase, row.project_id);
 
+  // Whoever is now assigned becomes a real, permanent subscriber —
+  // regardless of whether this counts as a genuine *change* for
+  // notification purposes below (idempotent either way: re-saving the same
+  // assignee is a harmless no-op insert). This is what keeps a later
+  // reassignment away from them from ever erasing their own history on
+  // this ticket.
+  if (input.assigneeProfileId !== undefined && row.assignee_profile_id) {
+    void subscribeToTicket(supabase, row.id, row.assignee_profile_id).catch((err) => {
+      logDev("ticket subscribe (assignee) failed", err);
+    });
+  }
+
   // Fire-and-forget: never delays or can fail the already-successful update
-  // above. Only reassignment (to a real, different profile) and a genuine
-  // status change ever notify — see notifyTicketChange below for exactly
-  // what's excluded (priority/due date/labels/description/estimate/etc, per
-  // this feature's own scope).
+  // above. Reassignment, a genuine status change, or a genuine change to
+  // priority/due date/description/labels/acceptance criteria all notify —
+  // see notifyTicketChange below for exactly what's excluded (title/type/
+  // estimate, per this feature's own scope) and how subscribers factor in.
   if (beforeRow) {
     void notifyTicketChange(supabase, beforeRow, row, input, statusesById).catch((err) => {
       logDev("ticket change notification failed", err);
@@ -984,14 +1041,184 @@ export async function updateTicket(
   return { status: "success", ticket: rowToTicket(row, slug, assigneeRow, undefined, statusesById) };
 }
 
-// Real actor + project/ticket text for the two ticket-update notification
-// types (ticket_assigned, ticket_status_changed) — the one place either is
-// ever composed, so Ticket Detail's inline edits and the Ticket Preview
-// panel (updateTicket's only two callers) can never diverge or duplicate
-// this logic themselves.
+// ── Ticket subscribers ───────────────────────────────────────────────────────
+// Persistent, additive "who has meaningfully interacted with this ticket"
+// list (20260925000000) — a row here is never removed or moved when a
+// ticket is reassigned, unlike tickets.assignee_profile_id itself, which is
+// simply overwritten. Every write below is idempotent (INSERT ... ON
+// CONFLICT DO NOTHING via Supabase's own upsert + ignoreDuplicates), so
+// repeated interactions (logging time twice, re-mentioning the same
+// person, re-saving the same assignee) never error or create a duplicate
+// row — the table's own (ticket_id, profile_id) primary key is what makes
+// that possible.
+
+async function subscribeToTicket(
+  supabase: ReturnType<typeof getSupabaseBrowserClient>,
+  ticketId: string,
+  profileId: string | null | undefined
+): Promise<void> {
+  if (!profileId) return;
+  const { error } = await supabase
+    .from("ticket_subscribers")
+    .upsert({ ticket_id: ticketId, profile_id: profileId }, { onConflict: "ticket_id,profile_id", ignoreDuplicates: true });
+  if (error) logDev("ticket subscribe failed", error);
+}
+
+// Same idempotent insert, for more than one profile at once (e.g. every
+// real @mention in a single comment).
+async function subscribeManyToTicket(
+  supabase: ReturnType<typeof getSupabaseBrowserClient>,
+  ticketId: string,
+  profileIds: string[]
+): Promise<void> {
+  const rows = Array.from(new Set(profileIds.filter((id): id is string => Boolean(id)))).map((profile_id) => ({
+    ticket_id: ticketId,
+    profile_id,
+  }));
+  if (rows.length === 0) return;
+  const { error } = await supabase
+    .from("ticket_subscribers")
+    .upsert(rows, { onConflict: "ticket_id,profile_id", ignoreDuplicates: true });
+  if (error) logDev("ticket subscribe (many) failed", error);
+}
+
+// Every real subscriber for a ticket, minus whoever a more specific rule
+// for this exact event already notified (the ticket's current assignee, a
+// specific @mention, a reply's parent author) and minus the acting user —
+// createNotification's own actor-guard would catch the latter too, but
+// excluding it here avoids sending (and immediately discarding) a
+// notification for no reason. This is the one place "existing recipients +
+// subscribers, deduplicated" actually happens — every call site below
+// builds its own `alreadyNotified` set first, then calls this once.
+async function loadRemainingTicketSubscribers(
+  supabase: ReturnType<typeof getSupabaseBrowserClient>,
+  ticketId: string,
+  alreadyNotified: Set<string>
+): Promise<string[]> {
+  const { data, error } = await supabase
+    .from("ticket_subscribers")
+    .select("profile_id")
+    .eq("ticket_id", ticketId)
+    .returns<{ profile_id: string }[]>();
+  if (error) {
+    logDev("ticket subscribers lookup failed", error);
+    return [];
+  }
+  return (data ?? []).map((r) => r.profile_id).filter((id) => !alreadyNotified.has(id));
+}
+
+export type TicketSubscriptionStateResult =
+  | { status: "ready"; subscribed: boolean }
+  | { status: "error"; message: string };
+
+// Whether the signed-in viewer has their own row in ticket_subscribers for
+// this ticket — the one read Ticket Detail's manual subscribe/unsubscribe
+// icon needs to render its current state, and only that read (never
+// inferred from whether the viewer happens to be the assignee/creator/a
+// commenter — a subscription is either a real row or it isn't).
+export async function loadTicketSubscriptionState(ticketId: string): Promise<TicketSubscriptionStateResult> {
+  const supabase = getSupabaseBrowserClient();
+
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { status: "ready", subscribed: false };
+
+  const { data, error } = await supabase
+    .from("ticket_subscribers")
+    .select("ticket_id")
+    .eq("ticket_id", ticketId)
+    .eq("profile_id", user.id)
+    .maybeSingle();
+
+  if (error) {
+    logDev("ticket subscription state lookup failed", error);
+    return { status: "error", message: error.message };
+  }
+
+  return { status: "ready", subscribed: data !== null };
+}
+
+export type SetTicketSubscriptionResult = { status: "success" } | { status: "error"; message: string };
+
+// Manual subscribe/unsubscribe — the viewer's own toggle on Ticket Detail,
+// entirely separate from the automatic subscribe points above (create/
+// assign/comment/mention/log-time keep firing exactly as before; this is
+// the only place a row is ever removed). A user may subscribe to any ticket
+// they can already view even with zero prior interaction — ticket_subscribers_
+// insert's own `profile_id = auth.uid()` branch allows that; unsubscribing
+// only ever removes the caller's own row (ticket_subscribers_delete: same
+// `profile_id = auth.uid()` restriction), so it can never touch another
+// user's subscription and never changes ticket/project access either way.
+// Deliberately never notifies anyone — subscribing/unsubscribing is a
+// silent preference change, not an event subscribers themselves get told
+// about.
+export async function setTicketSubscription(ticketId: string, subscribed: boolean): Promise<SetTicketSubscriptionResult> {
+  const supabase = getSupabaseBrowserClient();
+
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { status: "error", message: "Your session has expired. Please sign in again." };
+
+  if (subscribed) {
+    const { error } = await supabase
+      .from("ticket_subscribers")
+      .upsert({ ticket_id: ticketId, profile_id: user.id }, { onConflict: "ticket_id,profile_id", ignoreDuplicates: true });
+    if (error) {
+      logDev("manual ticket subscribe failed", error);
+      return { status: "error", message: error.message };
+    }
+  } else {
+    const { error } = await supabase
+      .from("ticket_subscribers")
+      .delete()
+      .eq("ticket_id", ticketId)
+      .eq("profile_id", user.id);
+    if (error) {
+      logDev("manual ticket unsubscribe failed", error);
+      return { status: "error", message: error.message };
+    }
+  }
+
+  return { status: "success" };
+}
+
+// Order-insensitive — label order isn't meaningful, so reordering the same
+// set is never treated as a change.
+function labelSetsEqual(a: string[] | null | undefined, b: string[] | null | undefined): boolean {
+  const x = new Set(a ?? []);
+  const y = new Set(b ?? []);
+  if (x.size !== y.size) return false;
+  for (const v of x) if (!y.has(v)) return false;
+  return true;
+}
+
+// Order-sensitive — used for Acceptance Criteria's own ordered text list
+// and its aligned done-flags, where position matters.
+function orderedArraysEqual<T>(a: T[] | null | undefined, b: T[] | null | undefined): boolean {
+  const x = a ?? [];
+  const y = b ?? [];
+  return x.length === y.length && x.every((v, i) => v === y[i]);
+}
+
+// Real actor + project/ticket text for every ticket-update notification
+// type — the one place any of them is ever composed, so Ticket Detail's
+// inline edits and the Ticket Preview panel (updateTicket's only two
+// callers) can never diverge or duplicate this logic themselves.
+//
+// Two recipient tiers, in priority order:
+//   1. The existing specific-rule recipient for reassignment
+//      (ticket_assigned, to the new assignee) and status change
+//      (ticket_status_changed, to the current assignee) — wording and
+//      audience unchanged from before this feature.
+//   2. This ticket's persistent subscribers (ticket_subscribers), minus
+//      whoever tier 1 already notified for this exact update and minus the
+//      actor — status reuses its own tier-1 wording verbatim (it never
+//      says "you", so it reads correctly for anyone); reassignment and
+//      every other tracked field (priority/due date/description/labels/
+//      acceptance criteria) share one bundled ticket_field_changed
+//      notification per update, so changing several fields at once can't
+//      spam a subscriber with one notification per field.
 async function notifyTicketChange(
   supabase: ReturnType<typeof getSupabaseBrowserClient>,
-  beforeRow: { project_id: string; status: string; status_id: string; assignee_profile_id: string | null },
+  beforeRow: TicketChangeBeforeSnapshot,
   row: TicketRow,
   input: UpdateTicketInput,
   statusesById: Map<string, TicketStatusOption>
@@ -1005,8 +1232,21 @@ async function notifyTicketChange(
   // statuses that share no legacy_enum_value (it never changes for either).
   const statusChanged =
     (input.status !== undefined || input.statusId !== undefined) && beforeRow.status_id !== row.status_id;
+  const priorityChanged = input.priority !== undefined && input.priority !== beforeRow.priority;
+  const dueDateChanged = input.dueDate !== undefined && (row.due_date ?? null) !== (beforeRow.due_date ?? null);
+  const descriptionChanged =
+    input.description !== undefined && (row.description ?? "") !== (beforeRow.description ?? "");
+  const labelsChanged = input.labels !== undefined && !labelSetsEqual(row.labels, beforeRow.labels);
+  const acceptanceCriteriaChanged =
+    (input.acceptanceCriteria !== undefined &&
+      !orderedArraysEqual(row.acceptance_criteria, beforeRow.acceptance_criteria)) ||
+    (input.acceptanceCriteriaDone !== undefined &&
+      !orderedArraysEqual(row.acceptance_criteria_done, beforeRow.acceptance_criteria_done));
 
-  if (!assigneeChanged && !statusChanged) return;
+  const otherFieldsChanged =
+    priorityChanged || dueDateChanged || descriptionChanged || labelsChanged || acceptanceCriteriaChanged;
+
+  if (!assigneeChanged && !statusChanged && !otherFieldsChanged) return;
 
   const {
     data: { user: authUser },
@@ -1032,6 +1272,9 @@ async function notifyTicketChange(
     actorName = resolveProfileName(actorsById.get(actorProfileId)) ?? "Someone";
   }
 
+  const alreadyNotified = new Set<string>();
+  if (actorProfileId) alreadyNotified.add(actorProfileId);
+
   if (assigneeChanged && row.assignee_profile_id) {
     await createNotification({
       organizationId: projectRow.organization_id,
@@ -1043,8 +1286,10 @@ async function notifyTicketChange(
       projectId: projectRow.id,
       ticketId: row.id,
     });
+    alreadyNotified.add(row.assignee_profile_id);
   }
 
+  let statusTitle: string | null = null;
   if (statusChanged && row.assignee_profile_id) {
     // Real ticket_statuses.name (Fase 2.5) — falls back to the legacy
     // label only if a status id somehow isn't in this project's own
@@ -1052,16 +1297,65 @@ async function notifyTicketChange(
     // not expected in practice, since no status deletion UI exists yet).
     const fromLabel = statusesById.get(beforeRow.status_id)?.name ?? activityStatusLabel(beforeRow.status);
     const toLabel = statusesById.get(row.status_id)?.name ?? activityStatusLabel(row.status);
+    statusTitle = `${actorName} moved ${ticketCode} from ${fromLabel} to ${toLabel}`;
     await createNotification({
       organizationId: projectRow.organization_id,
       recipientProfileId: row.assignee_profile_id,
       actorProfileId,
       type: "ticket_status_changed",
-      title: `${actorName} moved ${ticketCode} from ${fromLabel} to ${toLabel}`,
+      title: statusTitle,
       message: row.title,
       projectId: projectRow.id,
       ticketId: row.id,
     });
+    alreadyNotified.add(row.assignee_profile_id);
+  }
+
+  // Tier 2 — this ticket's remaining subscribers.
+  const subscriberIds = await loadRemainingTicketSubscribers(supabase, row.id, alreadyNotified);
+  if (subscriberIds.length === 0) return;
+
+  if (statusChanged && statusTitle) {
+    await Promise.all(
+      subscriberIds.map((recipientProfileId) =>
+        createNotification({
+          organizationId: projectRow.organization_id,
+          recipientProfileId,
+          actorProfileId,
+          type: "ticket_status_changed",
+          title: statusTitle!,
+          message: row.title,
+          projectId: projectRow.id,
+          ticketId: row.id,
+        })
+      )
+    );
+  }
+
+  const changedFieldLabels: string[] = [];
+  if (assigneeChanged) changedFieldLabels.push("Assignee");
+  if (priorityChanged) changedFieldLabels.push("Priority");
+  if (dueDateChanged) changedFieldLabels.push("Due Date");
+  if (descriptionChanged) changedFieldLabels.push("Description");
+  if (labelsChanged) changedFieldLabels.push("Labels");
+  if (acceptanceCriteriaChanged) changedFieldLabels.push("Acceptance Criteria");
+
+  if (changedFieldLabels.length > 0) {
+    const title = `${actorName} updated ${changedFieldLabels.join(", ")} on ${ticketCode}`;
+    await Promise.all(
+      subscriberIds.map((recipientProfileId) =>
+        createNotification({
+          organizationId: projectRow.organization_id,
+          recipientProfileId,
+          actorProfileId,
+          type: "ticket_field_changed",
+          title,
+          message: row.title,
+          projectId: projectRow.id,
+          ticketId: row.id,
+        })
+      )
+    );
   }
 }
 
@@ -1635,33 +1929,30 @@ export async function createTicketComment(
   }
 
   // Fire-and-forget: never delays or can fail the already-successful post
-  // above. Only notifies when this ticket is currently assigned to someone
-  // other than the comment's own author — the central actor===recipient
-  // guard in createNotification would skip a self-comment anyway, but the
-  // explicit check here also avoids the extra lookups when there's no
-  // assignee at all to notify.
+  // above. notifyNewComment is the single place that resolves every
+  // possible recipient for a brand-new comment/reply (a specific @mention,
+  // the parent comment's own author, the ticket's current assignee, and
+  // this ticket's remaining subscribers) with the priority/dedup rules
+  // that keep any one of them from ever being notified twice for this one
+  // comment — see its own header comment.
   if (row.author_profile_id) {
-    void notifyTicketComment(supabase, ticketId, row.author_profile_id, trimmed, authorRow).catch((err) => {
-      logDev("ticket comment notification failed", err);
-    });
-
     // Every real @mention in a brand-new comment is a new mention by
     // definition — no "already existed" set to diff against, unlike edits.
     const mentionedProfileIds = extractMentionedProfileIds(trimmed);
-    if (mentionedProfileIds.length > 0) {
-      void notifyCommentMentions(supabase, ticketId, row.author_profile_id, mentionedProfileIds, trimmed, authorRow).catch((err) => {
-        logDev("comment mention notification failed", err);
-      });
-    }
-
     // row.parent_comment_id reflects whatever the DB actually stored — the
     // flatten-depth trigger (20260912000000) may have re-pointed it at a
     // different (the real top-level) comment than what was passed in.
-    if (row.parent_comment_id) {
-      void notifyCommentReply(supabase, ticketId, row.parent_comment_id, row.author_profile_id, trimmed, authorRow, mentionedProfileIds).catch((err) => {
-        logDev("comment reply notification failed", err);
-      });
-    }
+    void notifyNewComment(
+      supabase,
+      ticketId,
+      row.author_profile_id,
+      trimmed,
+      authorRow,
+      row.parent_comment_id,
+      mentionedProfileIds
+    ).catch((err) => {
+      logDev("comment notification failed", err);
+    });
   }
 
   return {
@@ -1747,7 +2038,7 @@ export async function updateTicketComment(commentId: string, body: string): Prom
     const oldMentionIds = new Set(beforeRow ? extractMentionedProfileIds(beforeRow.body) : []);
     const newMentionIds = extractMentionedProfileIds(trimmed).filter((id) => !oldMentionIds.has(id));
     if (newMentionIds.length > 0) {
-      void notifyCommentMentions(supabase, row.ticket_id, row.author_profile_id, newMentionIds, trimmed, authorRow).catch((err) => {
+      void notifyEditedCommentMentions(supabase, row.ticket_id, row.author_profile_id, newMentionIds, trimmed, authorRow).catch((err) => {
         logDev("comment mention notification failed", err);
       });
     }
@@ -1789,53 +2080,6 @@ export async function deleteTicketComment(commentId: string): Promise<DeleteTick
   return { status: "success" };
 }
 
-// Notifies the ticket's current assignee that someone commented — the one
-// place this is composed, so every real caller of createTicketComment
-// shares it rather than duplicating the lookup/text. @mentions are handled
-// entirely separately, by notifyCommentMentions below (a real mention is
-// now a real Mention node — <span data-type="mention" data-id="...">,
-// see components/rich-text/mention-suggestion.ts — never resolved by
-// name-matching).
-async function notifyTicketComment(
-  supabase: ReturnType<typeof getSupabaseBrowserClient>,
-  ticketId: string,
-  authorProfileId: string,
-  commentBody: string,
-  authorRow: AssigneeProfileRow | undefined
-): Promise<void> {
-  const { data: ticketRow, error: ticketError } = await supabase
-    .from("tickets")
-    .select("assignee_profile_id, project_id, ticket_number")
-    .eq("id", ticketId)
-    .maybeSingle<{ assignee_profile_id: string | null; project_id: string; ticket_number: number }>();
-
-  if (ticketError || !ticketRow || !ticketRow.assignee_profile_id || ticketRow.assignee_profile_id === authorProfileId) {
-    return;
-  }
-
-  const { data: projectRow, error: projectError } = await supabase
-    .from("projects")
-    .select("id, organization_id, project_code")
-    .eq("id", ticketRow.project_id)
-    .maybeSingle<{ id: string; organization_id: string; project_code: string }>();
-
-  if (projectError || !projectRow) return;
-
-  const ticketCode = `${projectRow.project_code}-${ticketRow.ticket_number}`;
-  const authorName = resolveProfileName(authorRow) ?? "Someone";
-
-  await createNotification({
-    organizationId: projectRow.organization_id,
-    recipientProfileId: ticketRow.assignee_profile_id,
-    actorProfileId: authorProfileId,
-    type: "ticket_comment",
-    title: `${authorName} commented on ${ticketCode}`,
-    message: commentBody.length > 300 ? `${commentBody.slice(0, 300)}…` : commentBody,
-    projectId: projectRow.id,
-    ticketId,
-  });
-}
-
 // The real profiles.id of every @mention in a saved comment's HTML —
 // Mention's own default markup (<span data-type="mention" data-id="...">,
 // see components/rich-text/mention-suggestion.ts), never resolved by
@@ -1863,35 +2107,94 @@ function plainTextExcerpt(html: string, maxLength = 300): string {
   return text.length > maxLength ? `${text.slice(0, maxLength)}…` : text;
 }
 
-// Notifies every real, currently-active member of this exact project
-// @mentioned in a comment (create or edit — both callers already dedupe/
-// diff before calling this, see createTicketComment/updateTicketComment
-// above). Never trusts the editor's own suggestion list at face value:
-// the mention picker is already scoped to real project members
-// (mentionCandidates, threaded from loadProjectTeam), but this re-checks
-// every mentioned id against a fresh project_memberships query before
-// sending anything — the actual server-side validation this feature
-// requires, not just a client-side restriction on what the picker offers.
-// The author is excluded up front (never self-notifies, and skips the
-// membership check/DB round trip entirely when there's nothing real left
-// to verify) — createNotification's own actor===recipient guard would
-// catch it too, but this avoids the redundant work.
-async function notifyCommentMentions(
+// Validates candidate @mention ids against real, currently-active
+// project_memberships for this ticket's project, then notifies each
+// survivor — never trusts the editor's own suggestion list at face value
+// (mentionCandidates, threaded from loadProjectTeam, is already scoped to
+// real project members, but this re-checks server-side regardless). Used
+// by both a brand-new comment (notifyNewComment below) and an edit that
+// adds new mentions (notifyEditedCommentMentions below), so the two can
+// never validate/word this differently. Returns the ids actually notified,
+// so callers can subscribe them and exclude them from other recipient
+// tiers for the same comment.
+async function notifyValidMentions(
+  supabase: ReturnType<typeof getSupabaseBrowserClient>,
+  ticketId: string,
+  projectId: string,
+  organizationId: string,
+  ticketCode: string,
+  authorProfileId: string,
+  candidateIds: string[],
+  commentBody: string,
+  authorName: string
+): Promise<string[]> {
+  if (candidateIds.length === 0) return [];
+
+  const { data: memberRows, error: memberError } = await supabase
+    .from("project_memberships")
+    .select("profile_id")
+    .eq("project_id", projectId)
+    .in("profile_id", candidateIds)
+    .returns<{ profile_id: string }[]>();
+
+  if (memberError || !memberRows || memberRows.length === 0) return [];
+
+  const message = plainTextExcerpt(commentBody);
+
+  await Promise.all(
+    memberRows.map((member) =>
+      createNotification({
+        organizationId,
+        recipientProfileId: member.profile_id,
+        actorProfileId: authorProfileId,
+        type: "comment_mention",
+        title: `${authorName} mentioned you in ${ticketCode}`,
+        message,
+        projectId,
+        ticketId,
+      })
+    )
+  );
+
+  return memberRows.map((m) => m.profile_id);
+}
+
+// The single place a brand-new comment or reply resolves every possible
+// recipient and sends at most one notification per person — the fix for
+// the previous behavior where an assignee who was also @mentioned in the
+// same comment received two separate notifications (comment_mention and
+// ticket_comment) for one action.
+//
+// Recipients, in priority order (first match wins — `alreadyNotified`
+// tracks who's already been sent something for this exact comment):
+//   1. Every validated @mention — the most deliberate, targeted signal.
+//   2. A reply's parent-comment author (skipped if already mentioned above
+//      — same rule the previous notifyCommentReply already enforced).
+//   3. The ticket's current assignee (skipped if already covered by 1 or 2
+//      — this is the actual fix for the assignee+mention duplicate).
+//   4. This ticket's remaining persistent subscribers (ticket_subscribers)
+//      — everyone tier 1-3 already reached is excluded here too, so a
+//      subscriber who's also the assignee, a mention, or the parent author
+//      never gets a second, generic "commented on" notification on top of
+//      their more specific one.
+// The comment's own author is always subscribed (a real, permanent
+// interaction), and every validated @mention is subscribed alongside their
+// notification — both fire-and-forget, same resilience as every other
+// notification-adjacent side effect in this file.
+async function notifyNewComment(
   supabase: ReturnType<typeof getSupabaseBrowserClient>,
   ticketId: string,
   authorProfileId: string,
-  mentionedProfileIds: string[],
   commentBody: string,
-  authorRow: AssigneeProfileRow | undefined
+  authorRow: AssigneeProfileRow | undefined,
+  parentCommentId: string | null,
+  mentionedProfileIds: string[]
 ): Promise<void> {
-  const candidateIds = mentionedProfileIds.filter((id) => id !== authorProfileId);
-  if (candidateIds.length === 0) return;
-
   const { data: ticketRow, error: ticketError } = await supabase
     .from("tickets")
-    .select("project_id, ticket_number")
+    .select("assignee_profile_id, project_id, ticket_number")
     .eq("id", ticketId)
-    .maybeSingle<{ project_id: string; ticket_number: number }>();
+    .maybeSingle<{ assignee_profile_id: string | null; project_id: string; ticket_number: number }>();
 
   if (ticketError || !ticketRow) return;
 
@@ -1903,28 +2206,94 @@ async function notifyCommentMentions(
 
   if (projectError || !projectRow) return;
 
-  const { data: memberRows, error: memberError } = await supabase
-    .from("project_memberships")
-    .select("profile_id")
-    .eq("project_id", ticketRow.project_id)
-    .in("profile_id", candidateIds)
-    .returns<{ profile_id: string }[]>();
-
-  if (memberError || !memberRows || memberRows.length === 0) return;
-
   const ticketCode = `${projectRow.project_code}-${ticketRow.ticket_number}`;
   const authorName = resolveProfileName(authorRow) ?? "Someone";
-  const message = plainTextExcerpt(commentBody);
+
+  void subscribeToTicket(supabase, ticketId, authorProfileId).catch((err) => {
+    logDev("ticket subscribe (comment author) failed", err);
+  });
+
+  const alreadyNotified = new Set<string>([authorProfileId]);
+
+  // Tier 1: @mentions.
+  const candidateMentionIds = mentionedProfileIds.filter((id) => !alreadyNotified.has(id));
+  const validMentionIds = await notifyValidMentions(
+    supabase,
+    ticketId,
+    ticketRow.project_id,
+    projectRow.organization_id,
+    ticketCode,
+    authorProfileId,
+    candidateMentionIds,
+    commentBody,
+    authorName
+  );
+  validMentionIds.forEach((id) => alreadyNotified.add(id));
+  if (validMentionIds.length > 0) {
+    void subscribeManyToTicket(supabase, ticketId, validMentionIds).catch((err) => {
+      logDev("ticket subscribe (mentions) failed", err);
+    });
+  }
+
+  // Tier 2: reply's parent-comment author. Only ever called with the
+  // DB-flattened parent id (see createTicketComment), so this is always
+  // the real top-level ancestor, never a second level of nesting.
+  if (parentCommentId) {
+    const { data: parentRow, error: parentError } = await supabase
+      .from("ticket_comments")
+      .select("author_profile_id")
+      .eq("id", parentCommentId)
+      .maybeSingle<{ author_profile_id: string | null }>();
+
+    if (!parentError && parentRow?.author_profile_id && !alreadyNotified.has(parentRow.author_profile_id)) {
+      await createNotification({
+        organizationId: projectRow.organization_id,
+        recipientProfileId: parentRow.author_profile_id,
+        actorProfileId: authorProfileId,
+        type: "comment_reply",
+        title: `${authorName} replied to your comment on ${ticketCode}`,
+        message: plainTextExcerpt(commentBody),
+        projectId: projectRow.id,
+        ticketId,
+      });
+      alreadyNotified.add(parentRow.author_profile_id);
+    }
+  }
+
+  const commentTitle = `${authorName} commented on ${ticketCode}`;
+  const commentMessage = commentBody.length > 300 ? `${commentBody.slice(0, 300)}…` : commentBody;
+
+  // Tier 3: the ticket's current assignee.
+  if (ticketRow.assignee_profile_id && !alreadyNotified.has(ticketRow.assignee_profile_id)) {
+    await createNotification({
+      organizationId: projectRow.organization_id,
+      recipientProfileId: ticketRow.assignee_profile_id,
+      actorProfileId: authorProfileId,
+      type: "ticket_comment",
+      title: commentTitle,
+      message: commentMessage,
+      projectId: projectRow.id,
+      ticketId,
+    });
+    alreadyNotified.add(ticketRow.assignee_profile_id);
+  }
+
+  // Tier 4: remaining subscribers — same generic "commented on" wording
+  // whether this was a fresh top-level comment or a reply; from a
+  // subscriber's point of view (as opposed to the parent author's) it's
+  // just new comment activity on a ticket they're already following.
+  const subscriberIds = await loadRemainingTicketSubscribers(supabase, ticketId, alreadyNotified);
+  if (subscriberIds.length === 0) return;
 
   await Promise.all(
-    memberRows.map((member) =>
+    subscriberIds.map((recipientProfileId) =>
       createNotification({
         organizationId: projectRow.organization_id,
-        recipientProfileId: member.profile_id,
+        recipientProfileId,
         actorProfileId: authorProfileId,
-        type: "comment_mention",
-        title: `${authorName} mentioned you in ${ticketCode}`,
-        message,
+        type: "ticket_comment",
+        title: commentTitle,
+        message: commentMessage,
         projectId: projectRow.id,
         ticketId,
       })
@@ -1932,32 +2301,20 @@ async function notifyCommentMentions(
   );
 }
 
-// Notifies a top-level comment's own author that someone replied to it.
-// Only ever called with the DB-flattened parent id (see createTicketComment
-// above), so this is always the real top-level ancestor, never a second
-// level of nesting. Skips a self-reply the same way notifyTicketComment
-// does, and also skips when the parent's author is already @mentioned in
-// this same reply — they'd otherwise get both a comment_mention and a
-// comment_reply notification for the identical action.
-async function notifyCommentReply(
+// Edit-time mention notify only — resolves ticket/project itself (unlike
+// notifyNewComment above, which already has both resolved for everything
+// else it does at creation time), then defers to the same
+// notifyValidMentions used there, plus the same subscribe-the-validated-
+// mentions side effect. Never re-runs the assignee/reply/subscriber tiers
+// on an edit — those already fired once, at creation.
+async function notifyEditedCommentMentions(
   supabase: ReturnType<typeof getSupabaseBrowserClient>,
   ticketId: string,
-  parentCommentId: string,
   authorProfileId: string,
+  candidateIds: string[],
   commentBody: string,
-  authorRow: AssigneeProfileRow | undefined,
-  mentionedProfileIds: string[]
+  authorRow: AssigneeProfileRow | undefined
 ): Promise<void> {
-  const { data: parentRow, error: parentError } = await supabase
-    .from("ticket_comments")
-    .select("author_profile_id")
-    .eq("id", parentCommentId)
-    .maybeSingle<{ author_profile_id: string | null }>();
-
-  if (parentError || !parentRow?.author_profile_id) return;
-  if (parentRow.author_profile_id === authorProfileId) return;
-  if (mentionedProfileIds.includes(parentRow.author_profile_id)) return;
-
   const { data: ticketRow, error: ticketError } = await supabase
     .from("tickets")
     .select("project_id, ticket_number")
@@ -1977,16 +2334,22 @@ async function notifyCommentReply(
   const ticketCode = `${projectRow.project_code}-${ticketRow.ticket_number}`;
   const authorName = resolveProfileName(authorRow) ?? "Someone";
 
-  await createNotification({
-    organizationId: projectRow.organization_id,
-    recipientProfileId: parentRow.author_profile_id,
-    actorProfileId: authorProfileId,
-    type: "comment_reply",
-    title: `${authorName} replied to your comment on ${ticketCode}`,
-    message: plainTextExcerpt(commentBody),
-    projectId: projectRow.id,
+  const validIds = await notifyValidMentions(
+    supabase,
     ticketId,
-  });
+    ticketRow.project_id,
+    projectRow.organization_id,
+    ticketCode,
+    authorProfileId,
+    candidateIds.filter((id) => id !== authorProfileId),
+    commentBody,
+    authorName
+  );
+  if (validIds.length > 0) {
+    void subscribeManyToTicket(supabase, ticketId, validIds).catch((err) => {
+      logDev("ticket subscribe (mentions) failed", err);
+    });
+  }
 }
 
 // Newest first. Every real action (create, field edits, labels, acceptance
@@ -2982,7 +3345,64 @@ export async function uploadTicketAttachment(
     }
   }
 
+  if (row.uploaded_by) {
+    void notifyTicketAttachmentAdded(supabase, ticketId, row.uploaded_by, row.filename, uploaderRow).catch((err) => {
+      logDev("ticket attachment notify failed", err);
+    });
+  }
+
   return { status: "success", attachment: rowToAttachment(row, uploaderRow) };
+}
+
+// Fans an attachment upload out to this ticket's remaining subscribers
+// (excluding the uploader). The uploader is deliberately not auto-subscribed
+// here — attaching a file isn't in the task's list of subscribe-triggering
+// interactions (create/assign/comment/mention/log-time), unlike every other
+// notifyTicketAttachmentAdded-adjacent write in this file.
+async function notifyTicketAttachmentAdded(
+  supabase: ReturnType<typeof getSupabaseBrowserClient>,
+  ticketId: string,
+  uploaderProfileId: string,
+  filename: string,
+  uploaderRow: AssigneeProfileRow | undefined
+): Promise<void> {
+  const alreadyNotified = new Set<string>([uploaderProfileId]);
+  const subscriberIds = await loadRemainingTicketSubscribers(supabase, ticketId, alreadyNotified);
+  if (subscriberIds.length === 0) return;
+
+  const { data: ticketRow, error: ticketError } = await supabase
+    .from("tickets")
+    .select("project_id, ticket_number")
+    .eq("id", ticketId)
+    .maybeSingle<{ project_id: string; ticket_number: number }>();
+
+  if (ticketError || !ticketRow) return;
+
+  const { data: projectRow, error: projectError } = await supabase
+    .from("projects")
+    .select("id, organization_id, project_code")
+    .eq("id", ticketRow.project_id)
+    .maybeSingle<{ id: string; organization_id: string; project_code: string }>();
+
+  if (projectError || !projectRow) return;
+
+  const ticketCode = `${projectRow.project_code}-${ticketRow.ticket_number}`;
+  const uploaderName = resolveProfileName(uploaderRow) ?? "Someone";
+
+  await Promise.all(
+    subscriberIds.map((recipientProfileId) =>
+      createNotification({
+        organizationId: projectRow.organization_id,
+        recipientProfileId,
+        actorProfileId: uploaderProfileId,
+        type: "ticket_attachment_added",
+        title: `${uploaderName} added an attachment on ${ticketCode}`,
+        message: filename,
+        projectId: projectRow.id,
+        ticketId,
+      })
+    )
+  );
 }
 
 export type DownloadTicketAttachmentResult =
@@ -3585,7 +4005,68 @@ export async function logTicketTime(ticketId: string, input: LogTimeInput): Prom
     }
   }
 
+  if (row.logged_by) {
+    void subscribeToTicket(supabase, ticketId, row.logged_by).catch((err) => {
+      logDev("ticket subscribe (time logger) failed", err);
+    });
+    void notifyTicketTimeLogged(supabase, ticketId, row.logged_by, row.minutes, loggerRow).catch((err) => {
+      logDev("ticket time log notify failed", err);
+    });
+  }
+
   return { status: "success", entry: rowToTimeEntryRecord(row, loggerRow) };
+}
+
+// Fans a new time entry out to this ticket's remaining subscribers
+// (excluding the logger, who's already been subscribed above). Only
+// logTicketTime calls this — updateTicketTimeEntry edits an existing
+// entry's own minutes/comment/date and never creates a new subscription
+// or notification of its own.
+async function notifyTicketTimeLogged(
+  supabase: ReturnType<typeof getSupabaseBrowserClient>,
+  ticketId: string,
+  loggerProfileId: string,
+  minutes: number,
+  loggerRow: AssigneeProfileRow | undefined
+): Promise<void> {
+  const alreadyNotified = new Set<string>([loggerProfileId]);
+  const subscriberIds = await loadRemainingTicketSubscribers(supabase, ticketId, alreadyNotified);
+  if (subscriberIds.length === 0) return;
+
+  const { data: ticketRow, error: ticketError } = await supabase
+    .from("tickets")
+    .select("project_id, ticket_number")
+    .eq("id", ticketId)
+    .maybeSingle<{ project_id: string; ticket_number: number }>();
+
+  if (ticketError || !ticketRow) return;
+
+  const { data: projectRow, error: projectError } = await supabase
+    .from("projects")
+    .select("id, organization_id, project_code")
+    .eq("id", ticketRow.project_id)
+    .maybeSingle<{ id: string; organization_id: string; project_code: string }>();
+
+  if (projectError || !projectRow) return;
+
+  const ticketCode = `${projectRow.project_code}-${ticketRow.ticket_number}`;
+  const loggerName = resolveProfileName(loggerRow) ?? "Someone";
+  const hours = (minutes / 60).toFixed(minutes % 60 === 0 ? 0 : 2);
+
+  await Promise.all(
+    subscriberIds.map((recipientProfileId) =>
+      createNotification({
+        organizationId: projectRow.organization_id,
+        recipientProfileId,
+        actorProfileId: loggerProfileId,
+        type: "ticket_time_logged",
+        title: `${loggerName} logged ${hours}h on ${ticketCode}`,
+        message: null,
+        projectId: projectRow.id,
+        ticketId,
+      })
+    )
+  );
 }
 
 // Edits an already-logged time entry's own minutes/comment/work date —
