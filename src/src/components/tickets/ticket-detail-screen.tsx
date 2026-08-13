@@ -32,6 +32,7 @@ import {
   formatISODate,
   getTodayISO,
   EditableStatusBadge,
+  EditableDescription,
   ErrorToast,
 } from "@/components/tickets/ticket-ui";
 import { BackToTicketsButton } from "@/components/tickets/back-to-tickets-button";
@@ -168,92 +169,6 @@ function EditableTitle({ value, onChange }: { value: string; onChange: (v: strin
         className={EDIT_BTN + " mt-1"}
         onClick={() => { setDraft(value); setEditing(true); }}
         aria-label="Edit title"
-      >
-        <PencilIcon />
-      </button>
-    </div>
-  );
-}
-
-// ── Editable: Description ─────────────────────────────────────────────────────
-
-function EditableDescription({ value, onSave }: { value: string; onSave: (v: string) => Promise<boolean> }) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(value);
-  const [saving, setSaving] = useState(false);
-  // Bumped every time editing starts — remounts RichTextEditor with a fresh
-  // instance loaded from the latest real `value`, the same role a plain
-  // <textarea>'s own `value` reset already played before this change.
-  const [editorKey, setEditorKey] = useState(0);
-
-  const startEditing = () => {
-    setDraft(value);
-    setEditorKey((k) => k + 1);
-    setEditing(true);
-  };
-
-  // Stays in edit mode with the typed draft intact on failure — the parent's
-  // shared ErrorToast surfaces the reason — so a rejected save never loses
-  // what was typed. Only exits edit mode once the save is confirmed.
-  // Sanitized here (not just in RichTextViewer at render time) so nothing
-  // unsafe is ever actually persisted, regardless of how it's later read.
-  const save = async () => {
-    setSaving(true);
-    const ok = await onSave(sanitizeRichTextHtml(draft));
-    setSaving(false);
-    if (ok) setEditing(false);
-  };
-  const cancel = () => { setDraft(value); setEditing(false); };
-
-  if (editing) {
-    return (
-      <div>
-        <RichTextEditor
-          key={editorKey}
-          content={value}
-          onChange={setDraft}
-          placeholder="Add a description…"
-          autoFocus
-          contentClassName="sm:text-[14px]"
-        />
-        <div className="flex items-center justify-end gap-2 mt-2">
-          <button
-            type="button"
-            onClick={cancel}
-            disabled={saving}
-            className="px-3.5 py-1.5 text-[13px] font-medium text-slate-600 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={save}
-            disabled={saving}
-            className={[
-              "px-3.5 py-1.5 text-[13px] font-semibold rounded-lg transition-all",
-              saving
-                ? "bg-slate-100 dark:bg-zinc-800 text-slate-400 dark:text-zinc-600 cursor-not-allowed"
-                : "bg-brand-500 hover:bg-brand-600 text-white shadow-sm shadow-brand-500/30 cursor-pointer",
-            ].join(" ")}
-          >
-            Save
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="group relative cursor-text" onClick={startEditing}>
-      {value ? (
-        <RichTextViewer content={value} className="text-[14px] text-slate-700 dark:text-zinc-300" />
-      ) : (
-        <p className="text-[14px] text-slate-400 dark:text-zinc-600 italic leading-relaxed">Add a description...</p>
-      )}
-      <button
-        className={EDIT_BTN + " absolute -top-0.5 -right-5"}
-        onClick={(e) => { e.stopPropagation(); startEditing(); }}
-        aria-label="Edit description"
       >
         <PencilIcon />
       </button>

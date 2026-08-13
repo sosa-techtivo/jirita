@@ -9,6 +9,7 @@ import {
   PriorityBadge,
   TicketTypeIcon,
   EditableStatusBadge,
+  EditableDescription,
   PRIORITY_LABEL,
   EDIT_BTN,
   INPUT_BASE,
@@ -443,11 +444,13 @@ export function TicketPreviewPanel({
    *  FALLBACK_TICKET_STATUSES (identical to the old fixed list). */
   statuses?: TicketStatusOption[];
   /**
-   * Enables inline editing of Title/Status/Priority/Assignee/Due Date —
-   * reusing the exact same updateTicket() action and value domains as
-   * Ticket Detail's own inline edits (see persistPatch below). Only screens
-   * with real backing data (currently the Tickets board) pass this; every
-   * other caller omits it and keeps the original read-only panel, unchanged.
+   * Enables inline editing of Title/Status/Priority/Assignee/Hours/Due Date/
+   * Description — reusing the exact same updateTicket() action, value
+   * domains, and (for Description) RichTextEditor component as Ticket
+   * Detail's own inline edits (see persistPatch below and
+   * EditableDescription in ticket-ui.tsx). Only screens with real backing
+   * data (currently the Tickets board) pass this; every other caller omits
+   * it and keeps the original read-only panel, unchanged.
    */
   editable?: boolean;
   isDevFallback?: boolean;
@@ -495,10 +498,21 @@ export function TicketPreviewPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ticket.id]);
 
-  // ESC key to close
+  // ESC key to close — but not while an inline field edit is focused (an
+  // <input>/<select> or the Description RichTextEditor's contentEditable
+  // area). Those already own Escape themselves (cancel the local edit, or
+  // no-op for Description, matching Ticket Detail's own editor there); this
+  // must never also close the whole panel and discard whatever the user was
+  // mid-typing along with it.
   useEffect(() => {
     function onKeyDown(e: globalThis.KeyboardEvent) {
-      if (e.key === "Escape") handleClose();
+      if (e.key !== "Escape") return;
+      const target = e.target as HTMLElement | null;
+      const isFieldEdit =
+        target &&
+        (target.tagName === "INPUT" || target.tagName === "SELECT" || target.tagName === "TEXTAREA" || target.isContentEditable);
+      if (isFieldEdit) return;
+      handleClose();
     }
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
@@ -552,22 +566,29 @@ export function TicketPreviewPanel({
   // value on screen — the field just keeps showing whatever was last
   // actually saved. applyLocally covers only the dev-fallback path (no real
   // ticket row to write to).
-  function persistPatch(patch: UpdateTicketInput, applyLocally: (prev: Ticket) => Ticket) {
+  // Returns whether the save actually succeeded — EditableDescription (a
+  // Save/Cancel flow, unlike every other field here) needs this to know
+  // whether to leave edit mode, the same contract ticket-detail-screen.tsx's
+  // own persist() already gives it. Every other field below fires this
+  // without awaiting the result, which remains valid: a plain unused Promise.
+  function persistPatch(patch: UpdateTicketInput, applyLocally: (prev: Ticket) => Ticket): Promise<boolean> {
     if (isDevFallback) {
       setDisplayedTicket(applyLocally);
-      return;
+      return Promise.resolve(true);
     }
-    updateTicket(t.id, slug, patch).then((result) => {
+    return updateTicket(t.id, slug, patch).then((result) => {
       if (result.status === "error") {
         console.warn("[ticket-preview] failed to save change:", result.message);
         setErrorMessage(result.message);
-        return;
+        return false;
       }
       setDisplayedTicket(result.ticket);
       onTicketUpdated?.(result.ticket);
+      return true;
     }).catch((err) => {
       console.warn("[ticket-preview] failed to save change:", err);
       setErrorMessage(err instanceof Error ? err.message : "Something went wrong. Please try again.");
+      return false;
     });
   }
 
@@ -829,7 +850,17 @@ export function TicketPreviewPanel({
           {/* ── Description ──────────────────────────────────────────────────── */}
           <div className="px-5 pt-4 pb-5 border-t border-slate-100 dark:border-zinc-800">
             <p className={`${FIELD_LABEL} mb-2.5`}>Description</p>
-            <RichTextViewer content={t.description} className="text-[13px] text-slate-700 dark:text-zinc-300" />
+            {editable ? (
+              <EditableDescription
+                value={t.description}
+                onSave={(v) => persistPatch({ description: v }, (prev) => ({ ...prev, description: v }))}
+                viewerClassName="text-[13px] text-slate-700 dark:text-zinc-300"
+                emptyClassName="text-[13px] text-slate-400 dark:text-zinc-600 italic leading-relaxed"
+                editorContentClassName="sm:text-[13px]"
+              />
+            ) : (
+              <RichTextViewer content={t.description} className="text-[13px] text-slate-700 dark:text-zinc-300" />
+            )}
           </div>
 
           {/* ── Acceptance Criteria ──────────────────────────────────────────── */}

@@ -6,6 +6,9 @@ import type { Ticket, TicketStatus, TicketPriority, TicketType } from "@/lib/moc
 import { TICKET_TYPE_LABEL } from "@/lib/mock-tickets";
 import { formatAbsoluteDate } from "@/lib/date-format";
 import { STATUS_FROM_DB, FALLBACK_TICKET_STATUSES, type TicketStatusOption } from "@/lib/tickets";
+import { RichTextEditor } from "@/components/rich-text/rich-text-editor";
+import { RichTextViewer } from "@/components/rich-text/rich-text-viewer";
+import { sanitizeRichTextHtml } from "@/components/rich-text/rich-text-utils";
 
 // ── Error toast ───────────────────────────────────────────────────────────────
 // The Tickets module's write paths (inline edits, comments, time entries,
@@ -154,6 +157,111 @@ export function CalendarIcon() {
       <rect x="3" y="4" width="18" height="18" rx="2" />
       <path d="M16 2v4M8 2v4M3 10h18" />
     </svg>
+  );
+}
+
+// ── Editable: Description (Rich Text) ────────────────────────────────────────
+// Used by both Ticket Detail and the Quick Ticket Preview — same
+// click-to-edit / RichTextEditor / Save-Cancel interaction and the same
+// sanitizeRichTextHtml() call right before persistence in both places, so
+// there is exactly one implementation of "edit a ticket's description",
+// never two independently-behaving ones. viewerClassName/emptyClassName/
+// editorContentClassName let each caller keep its own existing text size
+// (Ticket Detail's 14px sidebar-less layout vs. the Preview panel's more
+// compact 13px) without forking the interaction logic itself.
+export function EditableDescription({
+  value,
+  onSave,
+  viewerClassName = "text-[14px] text-slate-700 dark:text-zinc-300",
+  emptyClassName = "text-[14px] text-slate-400 dark:text-zinc-600 italic leading-relaxed",
+  editorContentClassName = "sm:text-[14px]",
+}: {
+  value: string;
+  onSave: (v: string) => Promise<boolean>;
+  viewerClassName?: string;
+  emptyClassName?: string;
+  editorContentClassName?: string;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+  const [saving, setSaving] = useState(false);
+  // Bumped every time editing starts — remounts RichTextEditor with a fresh
+  // instance loaded from the latest real `value`, the same role a plain
+  // <textarea>'s own `value` reset already played before this change.
+  const [editorKey, setEditorKey] = useState(0);
+
+  const startEditing = () => {
+    setDraft(value);
+    setEditorKey((k) => k + 1);
+    setEditing(true);
+  };
+
+  // Stays in edit mode with the typed draft intact on failure — the parent's
+  // shared ErrorToast surfaces the reason — so a rejected save never loses
+  // what was typed. Only exits edit mode once the save is confirmed.
+  // Sanitized here (not just in RichTextViewer at render time) so nothing
+  // unsafe is ever actually persisted, regardless of how it's later read.
+  const save = async () => {
+    setSaving(true);
+    const ok = await onSave(sanitizeRichTextHtml(draft));
+    setSaving(false);
+    if (ok) setEditing(false);
+  };
+  const cancel = () => { setDraft(value); setEditing(false); };
+
+  if (editing) {
+    return (
+      <div>
+        <RichTextEditor
+          key={editorKey}
+          content={value}
+          onChange={setDraft}
+          placeholder="Add a description…"
+          autoFocus
+          contentClassName={editorContentClassName}
+        />
+        <div className="flex items-center justify-end gap-2 mt-2">
+          <button
+            type="button"
+            onClick={cancel}
+            disabled={saving}
+            className="px-3.5 py-1.5 text-[13px] font-medium text-slate-600 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={save}
+            disabled={saving}
+            className={[
+              "px-3.5 py-1.5 text-[13px] font-semibold rounded-lg transition-all",
+              saving
+                ? "bg-slate-100 dark:bg-zinc-800 text-slate-400 dark:text-zinc-600 cursor-not-allowed"
+                : "bg-brand-500 hover:bg-brand-600 text-white shadow-sm shadow-brand-500/30 cursor-pointer",
+            ].join(" ")}
+          >
+            Save
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="group relative cursor-text" onClick={startEditing}>
+      {value ? (
+        <RichTextViewer content={value} className={viewerClassName} />
+      ) : (
+        <p className={emptyClassName}>Add a description...</p>
+      )}
+      <button
+        className={EDIT_BTN + " absolute -top-0.5 -right-5"}
+        onClick={(e) => { e.stopPropagation(); startEditing(); }}
+        aria-label="Edit description"
+      >
+        <PencilIcon />
+      </button>
+    </div>
   );
 }
 
