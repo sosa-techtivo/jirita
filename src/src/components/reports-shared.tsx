@@ -53,6 +53,22 @@ const STATUS_TEXT: Record<StatusItem["level"], string> = {
   ok: "text-emerald-700 dark:text-emerald-500",
 };
 
+// ── Shared "this KPI is clickable" affordance ────────────────────────────────
+// The one hover/focus treatment every actually-interactive KPI card in the
+// app uses — this file's own KpiCard below, plus the role dashboards' own
+// local KPI/AttentionCard components and hero-stat buttons (dashboard-screen.tsx,
+// project-lead-dashboard.tsx, member-dashboard.tsx, my-work-screen.tsx) — so
+// "clickable KPI" always reads as the exact same subtle affordance
+// everywhere, never a slightly different one per screen. Deliberately mild:
+// a barely-there lift (shadow + 1px translate) plus a max 1% scale, both
+// pure `transform`/`box-shadow` so nothing here ever reflows a neighbor.
+// `focus-visible` mirrors `hover` so keyboard users get the same cue without
+// touching the browser's own default focus outline.
+export const KPI_INTERACTIVE_CLASS =
+  "cursor-pointer transition-all duration-150 " +
+  "hover:shadow-md hover:-translate-y-px hover:scale-[1.01] " +
+  "focus-visible:shadow-md focus-visible:-translate-y-px focus-visible:scale-[1.01]";
+
 export function ReportStatusBar({ items }: { items: StatusItem[] }) {
   return (
     <div className="flex flex-col sm:flex-row sm:items-center sm:justify-center gap-y-2 px-5 py-2.5 min-h-[44px] rounded-xl border border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900 shadow-sm shadow-slate-200/40 dark:shadow-black/20">
@@ -120,11 +136,11 @@ export function KpiCard({
   danger?: boolean;
   progress?: number;
   /** True when there's nothing real to navigate to (e.g. "My Projects" with
-   *  zero real projects) — suppresses the hover/lift affordance below and
-   *  is never wrapped in a button, so it never shows a cursor or responds
-   *  to a click. Only "My Projects" (Project Lead Reports) passes this
-   *  today; every other card omits both this and `onClick` and keeps its
-   *  existing plain, non-interactive rendering exactly as before. */
+   *  zero real projects) — suppresses KPI_INTERACTIVE_CLASS below and is
+   *  never wrapped in a button, so it never shows a cursor, hover lift, or
+   *  responds to a click. Only "My Projects" (Project Lead Reports) passes
+   *  this today; every other card omits both this and `onClick` and keeps
+   *  its existing plain, non-interactive rendering exactly as before. */
   disabled?: boolean;
   /** Real navigation handler — when present (and not `disabled`), the whole
    *  card becomes a single clickable surface instead of a plain block. */
@@ -163,17 +179,15 @@ export function KpiCard({
 
   const baseClassName = [
     "rounded-xl border px-5 pt-4 shadow-sm shadow-slate-200/40 dark:shadow-black/20",
-    "transition-all duration-200",
     progress !== undefined ? "pb-3" : "pb-4",
     accent
       ? "border-brand-100 dark:border-brand-700/40 bg-brand-50/40 dark:bg-brand-500/5"
       : "border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900",
-    disabled ? "" : "hover:shadow-md hover:-translate-y-px",
   ].join(" ");
 
   if (onClick && !disabled) {
     return (
-      <button type="button" onClick={onClick} className={`${baseClassName} text-left w-full`}>
+      <button type="button" onClick={onClick} className={`${baseClassName} text-left w-full ${KPI_INTERACTIVE_CLASS}`}>
         {content}
       </button>
     );

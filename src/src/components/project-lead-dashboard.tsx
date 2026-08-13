@@ -40,6 +40,7 @@ import { AddTeamMemberModal } from "@/components/add-team-member-modal";
 import { NewNoteModal } from "@/components/notes-screen";
 import { createNote } from "@/lib/notes";
 import { NewTicketModal } from "@/components/tickets/new-ticket-modal";
+import { KPI_INTERACTIVE_CLASS } from "@/components/reports-shared";
 
 // ── Data ──────────────────────────────────────────────────────────────────────
 // Current Project / Current Delivery / Attention Required / Team Capacity /
@@ -176,13 +177,18 @@ function AttentionCard({
     warning:  "text-amber-500 dark:text-amber-400",
   };
 
-  const className = `group h-full flex flex-col rounded-xl border p-4 shadow-sm shadow-slate-200/40 dark:shadow-black/20 transition-colors hover:border-brand-300 dark:hover:border-brand-700 ${toneStyles[tone]}`;
+  const className = `group h-full flex flex-col rounded-xl border p-4 shadow-sm shadow-slate-200/40 dark:shadow-black/20 ${toneStyles[tone]}${
+    disabled ? "" : ` ${KPI_INTERACTIVE_CLASS} hover:border-brand-300 dark:hover:border-brand-700`
+  }`;
 
   const content = (
     <>
       <div className="flex items-center justify-between mb-2">
         <span className={iconTone[tone]}>{icon}</span>
-        <svg className="w-3.5 h-3.5 text-slate-300 dark:text-zinc-700 group-hover:text-brand-400 transition-colors" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true">
+        <svg
+          className={`w-3.5 h-3.5 text-slate-300 dark:text-zinc-700 transition-colors ${disabled ? "" : "group-hover:text-brand-400"}`}
+          fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true"
+        >
           <path strokeLinecap="round" d="M9 18l6-6-6-6" />
         </svg>
       </div>
@@ -979,7 +985,7 @@ export function ProjectLeadDashboard() {
               <button
                 type="button"
                 onClick={handleCompletedTicketsClick}
-                className="w-full text-left p-0 cursor-pointer"
+                className={`w-full text-left p-0 rounded-md ${KPI_INTERACTIVE_CLASS}`}
               >
                 <HeroStat label="Completed Tickets" value={`${completedTickets} / ${totalTickets}`} />
               </button>
@@ -990,7 +996,7 @@ export function ProjectLeadDashboard() {
               <button
                 type="button"
                 onClick={handleRemainingHoursClick}
-                className="w-full text-left p-0 cursor-pointer"
+                className={`w-full text-left p-0 rounded-md ${KPI_INTERACTIVE_CLASS}`}
               >
                 <HeroStat label="Remaining Work (Open Tickets)" value={`${remainingHours}h`} />
               </button>
@@ -1001,7 +1007,7 @@ export function ProjectLeadDashboard() {
               <button
                 type="button"
                 onClick={handleBlockedTicketsClick}
-                className="w-full text-left p-0 cursor-pointer"
+                className={`w-full text-left p-0 rounded-md ${KPI_INTERACTIVE_CLASS}`}
               >
                 <HeroStat label="Blocked Tickets" value={blockedTickets} danger />
               </button>

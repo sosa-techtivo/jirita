@@ -36,6 +36,7 @@ import type { OrganizationActivityEvent, ProfileTimeEntryRecord, TicketStatusOpt
 import { loadMemberWeeklyCapacity } from "@/lib/projects";
 import { CapacityCell, formatHours, formatHoursMaybe } from "@/components/time-tracking-screen";
 import { PersonalTimesheetPanel } from "@/components/personal-timesheet-panel";
+import { KPI_INTERACTIVE_CLASS } from "@/components/reports-shared";
 import type { PersonalTimesheetEntry } from "@/components/personal-timesheet-panel";
 
 // My Work is the Member's own cross-project work queue — every KPI, ticket,
@@ -385,12 +386,13 @@ function KpiCard({
       onClick={onClick}
       className={[
         ...baseClassName,
+        KPI_INTERACTIVE_CLASS,
         accent
           ? "hover:border-brand-200 dark:hover:border-brand-800"
           : "hover:border-slate-300 dark:hover:border-zinc-600",
         active
           ? "ring-2 ring-brand-500/40 dark:ring-brand-500/30 !border-brand-300 dark:!border-brand-700"
-          : "hover:shadow-md",
+          : "",
       ].join(" ")}
     >
       {content}

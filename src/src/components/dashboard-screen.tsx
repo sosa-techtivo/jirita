@@ -28,6 +28,7 @@ import { loadOrganizationWorkloadMembers } from "@/lib/projects";
 import type { OrgWorkloadMember } from "@/lib/projects";
 import { utilizationOf } from "@/components/member-profile-modal";
 import { buildProjectHealthRows } from "@/components/reports-screen";
+import { KPI_INTERACTIVE_CLASS } from "@/components/reports-shared";
 import {
   Card,
   ActiveTicketRow,
@@ -267,7 +268,7 @@ function DashKpiCard({
     accent
       ? "border-brand-100 bg-brand-50/40 dark:border-zinc-700/70 dark:bg-zinc-900 dark:ring-1 dark:ring-inset dark:ring-violet-500/15"
       : "border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900",
-    href ? "cursor-pointer" : "",
+    href ? KPI_INTERACTIVE_CLASS : "",
   ].join(" ");
 
   const content = (

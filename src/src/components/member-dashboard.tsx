@@ -30,6 +30,7 @@ import {
   HERO_LABEL_CLASS,
   SkeletonBlock,
 } from "@/components/dashboard-shared";
+import { KPI_INTERACTIVE_CLASS } from "@/components/reports-shared";
 
 // A Member (Engineer / QA / Designer) may be staffed on several projects at
 // once, but they don't think in terms of projects — their context is their
@@ -825,7 +826,7 @@ export function MemberDashboard() {
             <button
               type="button"
               onClick={handleAssignedTicketsClick}
-              className="w-full text-left p-0 cursor-pointer"
+              className={`w-full text-left p-0 rounded-md ${KPI_INTERACTIVE_CLASS}`}
             >
               <HeroStat label="Assigned Tickets" value={activeWork.length} />
             </button>
@@ -838,7 +839,7 @@ export function MemberDashboard() {
             <button
               type="button"
               onClick={handleDueTodayClick}
-              className="w-full text-left p-0 cursor-pointer"
+              className={`w-full text-left p-0 rounded-md ${KPI_INTERACTIVE_CLASS}`}
             >
               {dueTodayCount === 1 ? (
                 <HeroStat label={dueTodayList[0].title} value={getTicketDisplayKey(dueTodayList[0])} danger />
