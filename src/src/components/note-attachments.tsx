@@ -9,6 +9,13 @@
 // Ticket Attachments, there's no historical-import "Data Only Backup"
 // concept for Notes, so there's no `isAvailable` field/branch here at all
 // — every note attachment is always a real, downloadable object.
+//
+// One exception to "near-duplicate, not shared": the zoom/pan/fit viewer
+// chrome inside NoteAttachmentPreviewModal's own "image" branch below comes
+// from components/image-viewer.tsx, the same module ticket-detail-screen.tsx's
+// AttachmentPreviewModal now uses — pure UI with no idea which feature it's
+// in, so sharing it doesn't reintroduce the cross-feature coupling the rest
+// of this file deliberately avoids.
 
 import { useEffect, useRef, useState, type DragEvent as ReactDragEvent } from "react";
 import { createPortal } from "react-dom";
@@ -18,6 +25,7 @@ import {
 } from "@/lib/notes";
 import type { ProjectNoteAttachment } from "@/lib/mock-notes";
 import { FIELD_LABEL } from "@/components/notes-shared";
+import { useImageViewer, ImageViewerToolbar, ImageViewerCanvas } from "@/components/image-viewer";
 
 export type NoteAttachmentItem = {
   id: string;
@@ -105,6 +113,7 @@ function NoteAttachmentPreviewModal({
 }) {
   const [url, setUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
+  const imageViewer = useImageViewer();
 
   useEffect(() => {
     let cancelled = false;
@@ -132,22 +141,39 @@ function NoteAttachmentPreviewModal({
         aria-modal="true"
         aria-labelledby="note-attachment-preview-title"
       >
-        <div className="flex items-center justify-between px-5 pt-5 pb-4 border-b border-slate-100 dark:border-zinc-800 flex-shrink-0">
-          <h2 id="note-attachment-preview-title" className="text-[15px] font-bold text-slate-900 dark:text-zinc-50 truncate pr-4">
-            {file.name}
-          </h2>
-          <button
-            onClick={onClose}
-            className="w-6 h-6 rounded-md flex items-center justify-center text-slate-400 dark:text-zinc-500 hover:text-slate-600 dark:hover:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors flex-shrink-0"
-            aria-label="Close"
-          >
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
-              <path strokeLinecap="round" d="M18 6L6 18M6 6l12 12" />
-            </svg>
-          </button>
+        <div className="flex-shrink-0">
+          <div className="flex items-center justify-between px-5 pt-5 pb-4 border-b border-slate-100 dark:border-zinc-800">
+            <h2 id="note-attachment-preview-title" className="text-[15px] font-bold text-slate-900 dark:text-zinc-50 truncate pr-4">
+              {file.name}
+            </h2>
+            <button
+              onClick={onClose}
+              className="w-6 h-6 rounded-md flex items-center justify-center text-slate-400 dark:text-zinc-500 hover:text-slate-600 dark:hover:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors flex-shrink-0"
+              aria-label="Close"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+                <path strokeLinecap="round" d="M18 6L6 18M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+          {kind === "image" && url && !failed && (
+            <div className="border-b border-slate-100 dark:border-zinc-800">
+              <ImageViewerToolbar
+                controller={imageViewer}
+                onOpenOriginal={() => window.open(url, "_blank", "noopener,noreferrer")}
+                onDownload={() => {
+                  downloadProjectNoteAttachment(file.storagePath, file.name).then((result) => {
+                    if (result.status === "error") {
+                      console.warn("[note-attachments] attachment download failed:", result.message);
+                    }
+                  });
+                }}
+              />
+            </div>
+          )}
         </div>
 
-        <div className="flex-1 min-h-0 overflow-auto bg-slate-50 dark:bg-zinc-950/40">
+        <div className={`flex-1 min-h-0 bg-slate-50 dark:bg-zinc-950/40 ${kind === "image" ? "overflow-hidden" : "overflow-auto"}`}>
           {!url && !failed && (
             <div className="flex items-center justify-center h-[70vh]">
               <svg className="w-5 h-5 animate-spin text-slate-300 dark:text-zinc-700" fill="none" viewBox="0 0 24 24">
@@ -164,9 +190,8 @@ function NoteAttachmentPreviewModal({
           )}
 
           {url && kind === "image" && (
-            <div className="flex items-center justify-center min-h-[70vh] p-4">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={url} alt={file.name} className="max-w-full h-auto" />
+            <div className="h-[70vh]">
+              <ImageViewerCanvas controller={imageViewer} src={url} alt={file.name} />
             </div>
           )}
 

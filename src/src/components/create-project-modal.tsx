@@ -147,7 +147,7 @@ export function CreateProjectModal({
             <div>
               <label className={FIELD_LABEL}>
                 Description
-                <span className="ml-2 font-normal normal-case tracking-normal text-slate-300 dark:text-zinc-700">optional</span>
+                <span className="ml-2 font-normal normal-case tracking-normal text-slate-400 dark:text-zinc-600">optional</span>
               </label>
               <textarea
                 value={description}

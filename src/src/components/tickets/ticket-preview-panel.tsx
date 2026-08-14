@@ -899,7 +899,7 @@ export function TicketPreviewPanel({
             <p className={`${FIELD_LABEL} mb-3`}>
               Comments
               {t.commentCount !== undefined && t.commentCount > 2 && (
-                <span className="ml-2 font-normal normal-case tracking-normal text-slate-300 dark:text-zinc-700">
+                <span className="ml-2 font-normal normal-case tracking-normal text-slate-400 dark:text-zinc-600">
                   · {t.commentCount} total
                 </span>
               )}

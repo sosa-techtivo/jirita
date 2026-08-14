@@ -88,6 +88,7 @@ import { FALLBACK_AVATAR } from "@/lib/current-user";
 import { formatHours } from "@/components/time-tracking-screen";
 import { MemberTrigger } from "@/components/member-profile";
 import { RichTextEditor, type MentionCandidate } from "@/components/rich-text/rich-text-editor";
+import { useImageViewer, ImageViewerToolbar, ImageViewerCanvas } from "@/components/image-viewer";
 import { RichTextViewer } from "@/components/rich-text/rich-text-viewer";
 import { sanitizeRichTextHtml, isRichTextEmpty } from "@/components/rich-text/rich-text-utils";
 import { Avatar } from "@/components/ui/avatar";
@@ -1066,7 +1067,7 @@ function RelatedTicketsSection({
         <div className="space-y-3">
           {grouped.map(({ kind, items }) => (
             <div key={kind}>
-              <p className="text-[9px] font-bold uppercase tracking-widest text-slate-300 dark:text-zinc-700 mb-1.5">
+              <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600 mb-1.5">
                 {RELATION_LABEL[kind]}
               </p>
               <div className="space-y-1.5">
@@ -1166,7 +1167,7 @@ function CollapsibleSection({
           >
             <span className={SECTION_LABEL}>{title}</span>
             {badge && (
-              <span className="text-[11px] font-normal normal-case tracking-normal text-slate-300 dark:text-zinc-700">
+              <span className="text-[11px] font-normal normal-case tracking-normal text-slate-400 dark:text-zinc-600">
                 {badge}
               </span>
             )}
@@ -1188,7 +1189,7 @@ function CollapsibleSection({
           <div className="flex-1 flex items-center gap-2 min-w-0 py-0.5">
             <span className={SECTION_LABEL}>{title}</span>
             {badge && (
-              <span className="text-[11px] font-normal normal-case tracking-normal text-slate-300 dark:text-zinc-700">
+              <span className="text-[11px] font-normal normal-case tracking-normal text-slate-400 dark:text-zinc-600">
                 {badge}
               </span>
             )}
@@ -2629,6 +2630,7 @@ function AttachmentPreviewModal({
 }) {
   const [url, setUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
+  const imageViewer = useImageViewer();
 
   useEffect(() => {
     let cancelled = false;
@@ -2656,22 +2658,39 @@ function AttachmentPreviewModal({
         aria-modal="true"
         aria-labelledby="attachment-preview-title"
       >
-        <div className="flex items-center justify-between px-5 pt-5 pb-4 border-b border-slate-100 dark:border-zinc-800 flex-shrink-0">
-          <h2 id="attachment-preview-title" className="text-[15px] font-bold text-slate-900 dark:text-zinc-50 truncate pr-4">
-            {file.name}
-          </h2>
-          <button
-            onClick={onClose}
-            className="w-6 h-6 rounded-md flex items-center justify-center text-slate-400 dark:text-zinc-500 hover:text-slate-600 dark:hover:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors flex-shrink-0"
-            aria-label="Close"
-          >
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
-              <path strokeLinecap="round" d="M18 6L6 18M6 6l12 12" />
-            </svg>
-          </button>
+        <div className="flex-shrink-0">
+          <div className="flex items-center justify-between px-5 pt-5 pb-4 border-b border-slate-100 dark:border-zinc-800">
+            <h2 id="attachment-preview-title" className="text-[15px] font-bold text-slate-900 dark:text-zinc-50 truncate pr-4">
+              {file.name}
+            </h2>
+            <button
+              onClick={onClose}
+              className="w-6 h-6 rounded-md flex items-center justify-center text-slate-400 dark:text-zinc-500 hover:text-slate-600 dark:hover:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors flex-shrink-0"
+              aria-label="Close"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+                <path strokeLinecap="round" d="M18 6L6 18M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+          {kind === "image" && url && !failed && (
+            <div className="border-b border-slate-100 dark:border-zinc-800">
+              <ImageViewerToolbar
+                controller={imageViewer}
+                onOpenOriginal={() => window.open(url, "_blank", "noopener,noreferrer")}
+                onDownload={() => {
+                  downloadTicketAttachment(file.storagePath, file.name).then((result) => {
+                    if (result.status === "error") {
+                      console.warn("[ticket-detail] attachment download failed:", result.message);
+                    }
+                  });
+                }}
+              />
+            </div>
+          )}
         </div>
 
-        <div className="flex-1 min-h-0 overflow-auto bg-slate-50 dark:bg-zinc-950/40">
+        <div className={`flex-1 min-h-0 bg-slate-50 dark:bg-zinc-950/40 ${kind === "image" ? "overflow-hidden" : "overflow-auto"}`}>
           {!url && !failed && (
             <div className="flex items-center justify-center h-[70vh]">
               <svg className="w-5 h-5 animate-spin text-slate-300 dark:text-zinc-700" fill="none" viewBox="0 0 24 24">
@@ -2688,9 +2707,8 @@ function AttachmentPreviewModal({
           )}
 
           {url && kind === "image" && (
-            <div className="flex items-center justify-center min-h-[70vh] p-4">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={url} alt={file.name} className="max-w-full h-auto" />
+            <div className="h-[70vh]">
+              <ImageViewerCanvas controller={imageViewer} src={url} alt={file.name} />
             </div>
           )}
 
@@ -3778,7 +3796,7 @@ function LogTimeModal({
           <div>
             <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600 mb-1.5">
               Comment{" "}
-              <span className="font-normal normal-case tracking-normal text-slate-300 dark:text-zinc-700">
+              <span className="font-normal normal-case tracking-normal text-slate-400 dark:text-zinc-600">
                 (optional)
               </span>
             </label>

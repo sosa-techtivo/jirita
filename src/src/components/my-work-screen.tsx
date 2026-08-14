@@ -985,7 +985,7 @@ export function MyWorkScreen() {
             <span className="text-[10px] font-semibold text-slate-400 dark:text-zinc-500 bg-slate-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded-full">
               {displayedTickets.length}
             </span>
-            <span className="hidden sm:block text-xs text-slate-300 dark:text-zinc-700">
+            <span className="hidden sm:block text-xs text-slate-400 dark:text-zinc-600">
               · {formatHours(totalHours)} estimated
             </span>
 
@@ -1150,7 +1150,7 @@ export function MyWorkScreen() {
                   if (entries.length === 0) return null;
                   return (
                     <div key={ag.id}>
-                      <p className="text-[10px] font-bold uppercase tracking-widest text-slate-300 dark:text-zinc-700 mb-2.5">
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600 mb-2.5">
                         {ag.label}
                       </p>
                       <ul className="space-y-3.5">

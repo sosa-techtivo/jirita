@@ -131,7 +131,7 @@ export function PersonalTimesheetPanel({
           <div className="px-5 pt-4 pb-6">
             <p className={`${FIELD_LABEL} mb-3`}>
               Logged Entries
-              <span className="ml-2 font-normal normal-case tracking-normal text-slate-300 dark:text-zinc-700">
+              <span className="ml-2 font-normal normal-case tracking-normal text-slate-400 dark:text-zinc-600">
                 · {formatHours(totalLogged)} total
               </span>
             </p>

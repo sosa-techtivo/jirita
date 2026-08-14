@@ -755,7 +755,7 @@ export function NewTicketModal({
             <div>
               <label className={FIELD_LABEL}>
                 Description
-                <span className="ml-2 font-normal normal-case tracking-normal text-slate-300 dark:text-zinc-700">
+                <span className="ml-2 font-normal normal-case tracking-normal text-slate-400 dark:text-zinc-600">
                   optional
                 </span>
               </label>
@@ -812,7 +812,7 @@ export function NewTicketModal({
               <div>
                 <label className={FIELD_LABEL}>
                   Due Date
-                  <span className="ml-2 font-normal normal-case tracking-normal text-slate-300 dark:text-zinc-700">
+                  <span className="ml-2 font-normal normal-case tracking-normal text-slate-400 dark:text-zinc-600">
                     optional
                   </span>
                 </label>
@@ -829,7 +829,7 @@ export function NewTicketModal({
             <div>
               <label className={FIELD_LABEL}>
                 Acceptance Criteria
-                <span className="ml-2 font-normal normal-case tracking-normal text-slate-300 dark:text-zinc-700">
+                <span className="ml-2 font-normal normal-case tracking-normal text-slate-400 dark:text-zinc-600">
                   optional
                 </span>
               </label>
@@ -848,7 +848,7 @@ export function NewTicketModal({
             <div>
               <label className={FIELD_LABEL}>
                 Attachments
-                <span className="ml-2 font-normal normal-case tracking-normal text-slate-300 dark:text-zinc-700">
+                <span className="ml-2 font-normal normal-case tracking-normal text-slate-400 dark:text-zinc-600">
                   optional
                 </span>
               </label>
