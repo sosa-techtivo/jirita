@@ -2810,7 +2810,19 @@ function CommentAttachmentsOverview({
 // TicketDetailScreen) can feed files into this exact section's own
 // startUpload — the same validations/upload/visualization "Upload Files"
 // already uses — instead of a second, parallel upload implementation.
-export type AttachmentsSectionHandle = { addFiles: (files: FileList | File[]) => void };
+export type AttachmentsSectionHandle = {
+  /** `onSettled` is optional and additive only — it fires once this exact
+   *  batch has fully settled (every file either uploaded or failed), on top
+   *  of (never instead of) the section's own onUploaded/onError props,
+   *  which keep firing exactly as before for every caller. Only the
+   *  page-level paste handler passes it today (to know precisely when its
+   *  own toast should flip from "uploading" to success/error); the file
+   *  input button and drag & drop omit it and are completely unaffected. */
+  addFiles: (
+    files: FileList | File[],
+    onSettled?: (results: { file: File; ok: boolean; filename?: string }[]) => void
+  ) => void;
+};
 
 const AttachmentsSection = forwardRef<
   AttachmentsSectionHandle,
@@ -2867,7 +2879,7 @@ const AttachmentsSection = forwardRef<
     return () => clearTimeout(timer);
   }, [uploading]);
 
-  const startUpload = (files: FileList | File[]) => {
+  const startUpload: AttachmentsSectionHandle["addFiles"] = (files, onSettled) => {
     if (isDevFallback) return; // no real ticket to upload against
     const fileArray = Array.from(files);
     const items: UploadingItem[] = fileArray.map((f) => ({
@@ -2878,6 +2890,11 @@ const AttachmentsSection = forwardRef<
       progress: 0,
     }));
     setUploading((prev) => [...prev, ...items]);
+
+    // Only tracked/reported when a caller actually passed onSettled (the
+    // page-level paste handler) — an ordinary array push+length check, never
+    // touching onUploaded/onError's own existing per-file firing above.
+    const settled: { file: File; ok: boolean; filename?: string }[] = [];
 
     items.forEach((item, i) => {
       const file = fileArray[i];
@@ -2890,6 +2907,8 @@ const AttachmentsSection = forwardRef<
           if (result.status === "error") {
             console.warn("[ticket-detail] attachment upload failed:", result.message);
             onError(result.message);
+            settled.push({ file, ok: false });
+            if (settled.length === items.length) onSettled?.(settled);
             return;
           }
           setAttachments((prev) => {
@@ -2897,6 +2916,8 @@ const AttachmentsSection = forwardRef<
             return [toAttachmentItem(result.attachment), ...prev];
           });
           onUploaded();
+          settled.push({ file, ok: true, filename: result.attachment.filename });
+          if (settled.length === items.length) onSettled?.(settled);
         }, 200);
       }).catch((err) => {
         // Without this, a rejected (not just {status:"error"}) upload would
@@ -2904,6 +2925,8 @@ const AttachmentsSection = forwardRef<
         setUploading((prev) => prev.filter((u) => u.id !== item.id));
         console.warn("[ticket-detail] attachment upload failed:", err);
         onError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
+        settled.push({ file, ok: false });
+        if (settled.length === items.length) onSettled?.(settled);
       });
     });
   };
@@ -3063,6 +3086,60 @@ const AttachmentsSection = forwardRef<
     </CollapsibleSection>
   );
 });
+
+// ── Paste-image feedback toast ──────────────────────────────────────────────
+// The page-level paste effect (TicketDetailScreen, below) is the only thing
+// that ever renders this — pasting an image while Attachments is scrolled
+// out of view otherwise gives no sign anything happened until the user
+// scrolls down to check. Same shell/position/timing convention as the
+// shared ErrorToast (ticket-ui.tsx); positioned a bit higher (bottom-20
+// instead of bottom-5) purely so it can never visually stack on top of that
+// other, independent toast if both happen to be showing at once. The
+// "uploading" state never auto-dismisses on its own — it always gets
+// explicitly replaced by "success" (or cleared in favor of the shared error
+// toast) once the real upload actually settles, never before.
+function PasteImageToast({
+  state,
+  onDismiss,
+}: {
+  state: { status: "uploading" } | { status: "success"; filename?: string };
+  onDismiss: () => void;
+}) {
+  useEffect(() => {
+    if (state.status !== "success") return;
+    const id = setTimeout(onDismiss, 5000);
+    return () => clearTimeout(id);
+  }, [state.status, onDismiss]);
+
+  return (
+    <div className="fixed bottom-20 right-5 z-[60] flex items-center gap-2 bg-slate-900 dark:bg-zinc-800 text-white text-[13px] font-medium px-4 py-2.5 rounded-lg shadow-lg shadow-black/20 max-w-sm">
+      {state.status === "uploading" ? (
+        <svg className="w-4 h-4 text-slate-300 flex-shrink-0 animate-spin" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+        </svg>
+      ) : (
+        <svg className="w-4 h-4 text-emerald-400 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24" aria-hidden="true">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M5 12l5 5L20 7" />
+        </svg>
+      )}
+      <span className="leading-snug">
+        {state.status === "uploading" ? (
+          "Uploading pasted image…"
+        ) : (
+          <>
+            Image attached
+            {state.filename && (
+              <span className="block text-[11px] font-normal text-slate-300 dark:text-zinc-400 mt-0.5 truncate">
+                {state.filename}
+              </span>
+            )}
+          </>
+        )}
+      </span>
+    </div>
+  );
+}
 
 // ── Development (real GitHub, read-only) ────────────────────────────────────
 // Real branches/commits/pull requests related to this ticket by its own
@@ -4469,6 +4546,19 @@ export function TicketDetailScreen({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const showError = (message: string) => setErrorMessage(message);
 
+  // Feedback for the one paste-to-attach case that has none today: pasting
+  // an image while Attachments is scrolled out of view leaves the user with
+  // no sign anything happened until they scroll down to check. Deliberately
+  // its own state (not reusing errorMessage) since this one needs an
+  // "uploading" state that then flips *in place* to success — see the
+  // page-level paste effect below, the only place this is ever set to
+  // "uploading". The file input button and drag & drop already have their
+  // own always-visible inline progress row in Attachments itself, so they
+  // never touch this.
+  const [pasteImageToast, setPasteImageToast] = useState<
+    { status: "uploading" } | { status: "success"; filename?: string } | null
+  >(null);
+
   // Extracted (not just inlined in the effect below) so the load-error state
   // can offer a real Retry, the same way tickets-screen.tsx's ticket *list*
   // already does — this was previously the one load path in the module with
@@ -4599,7 +4689,30 @@ export function TicketDetailScreen({
       } else if (focusedEditCommentRef.current) {
         focusedEditCommentRef.current.stage(files);
       } else {
-        attachmentsSectionRef.current?.addFiles(files);
+        // The only one of these three destinations that goes straight to a
+        // real ticket attachment (the other two stage into a comment, sent
+        // later on submit) — and the only one whose target section can be
+        // scrolled out of view, hence the toast. Only pasted images trigger
+        // it (per spec); the underlying upload itself is untouched either
+        // way — every pasted file, image or not, still goes through
+        // addFiles exactly as before.
+        const hasImage = files.some((f) => f.type.startsWith("image/"));
+        if (hasImage) {
+          setPasteImageToast({ status: "uploading" });
+          attachmentsSectionRef.current?.addFiles(files, (results) => {
+            const failed = results.some((r) => !r.ok);
+            if (failed) {
+              setPasteImageToast(null);
+              showError("Could not attach image");
+              return;
+            }
+            const imageResults = results.filter((r) => r.file.type.startsWith("image/"));
+            const filename = imageResults.length === 1 ? imageResults[0].filename : undefined;
+            setPasteImageToast({ status: "success", filename });
+          });
+        } else {
+          attachmentsSectionRef.current?.addFiles(files);
+        }
       }
     }
     document.addEventListener("paste", onPaste);
@@ -5570,6 +5683,7 @@ export function TicketDetailScreen({
       </div>
 
       {errorMessage && <ErrorToast message={errorMessage} onDismiss={() => setErrorMessage(null)} />}
+      {pasteImageToast && <PasteImageToast state={pasteImageToast} onDismiss={() => setPasteImageToast(null)} />}
     </div>
   );
 }
