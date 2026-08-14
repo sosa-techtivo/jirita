@@ -554,7 +554,8 @@ function EditableSidebarHours({
   if (isParent) {
     return (
       <SidebarField label="Estimated">
-        <span title="Derived from this ticket's child tickets">{value !== undefined ? `${value} h` : "—"}</span>
+        <span>{value !== undefined ? `${value} h` : "—"}</span>
+        <p className="mt-0.5 text-[11px] font-normal text-slate-400 dark:text-zinc-600">From children</p>
       </SidebarField>
     );
   }
