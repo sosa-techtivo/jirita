@@ -9,7 +9,6 @@ import {
   loadProjectTickets,
   loadOrganizationTickets,
   loadOrganizationLabels,
-  createOrganizationLabel,
   updateTicket,
   STATUS_FROM_DB,
   FALLBACK_TICKET_STATUSES,
@@ -35,7 +34,6 @@ import { ListView } from "@/components/tickets/list-view";
 import { CalendarView } from "@/components/tickets/calendar-view";
 import { TimelineView } from "@/components/tickets/timeline-view";
 import { InsightsView } from "@/components/tickets/insights-view";
-import { TicketPreviewPanel } from "@/components/tickets/ticket-preview-panel";
 import { useCurrentUser } from "@/components/current-user-provider";
 import { useOrganizationProjects } from "@/components/organization-projects-provider";
 import { getDefaultTicketView } from "@/lib/user-preferences";
@@ -46,7 +44,6 @@ import { useRefreshOnFocusAndVisibility } from "@/components/member-profile-moda
 
 interface SavedState {
   view: ViewMode;
-  previewTicketId: string | null;
   activeChips: string[];
   searchQuery: string;
   scrollTop: number;
@@ -75,13 +72,13 @@ function saveState(slug: string, state: SavedState) {
 
 // Lets another screen (e.g. the Admin Project Overview's blocked-tickets
 // banner) hand off to this screen already filtered, by writing into the same
-// saved-state slot this screen reads on mount — the same mechanism the
-// ticket preview panel already uses to restore view/scroll position.
+// saved-state slot this screen reads on mount — the same mechanism openTicket
+// below already uses to restore view/scroll position after visiting a
+// ticket's own Detail page.
 export function presetTicketsFilter(slug: string, chips: string[]) {
   if (typeof window === "undefined") return;
   saveState(slug, {
     view: "board",
-    previewTicketId: null,
     activeChips: chips,
     searchQuery: "",
     scrollTop: 0,
@@ -283,9 +280,9 @@ export function TicketsScreen({ slug, projectName }: { slug?: string; projectNam
   const [loadState, setLoadState] = useState<"loading" | "ready" | "error">(isDevFallback ? "ready" : "loading");
   const [loadErrorMessage, setLoadErrorMessage] = useState<string | null>(null);
   const [ticketList, setTicketList] = useState<Ticket[]>(initialDevTickets);
-  // Real, ordered per-project ticket_statuses (Fase 2) — Board columns, the
-  // Status filter, and the preview panel's status editor are all built from
-  // these instead of the old fixed 6-value enum. Single-project mode: this
+  // Real, ordered per-project ticket_statuses (Fase 2) — Board columns and
+  // the Status filter are both built from these instead of the old fixed
+  // 6-value enum. Single-project mode: this
   // project's own list. Org-wide "all projects" mode: keyed by slug, since a
   // drag-and-drop move must resolve its target status_id within that
   // ticket's own project, never a different project's row.
@@ -295,9 +292,9 @@ export function TicketsScreen({ slug, projectName }: { slug?: string; projectNam
   // filter itself stays unwired (see FilterBar), this just replaces the
   // mock names it used to show. Dev fallback shows none, never mock names.
   const [members, setMembers] = useState<OrgMember[]>([]);
-  // Real, project-scoped roster for the actual Assignee-picking UI (New
-  // Ticket, Quick Ticket Preview) — deliberately separate from `members`
-  // above: only an active member of *this* project can be assigned a
+  // Real, project-scoped roster for New Ticket's own Assignee-picking UI —
+  // deliberately separate from `members` above: only an active member of
+  // *this* project can be assigned a
   // ticket in it, but the Assigned filter is intentionally left showing
   // every org member, unchanged (out of scope for this restriction).
   const [assignableMembers, setAssignableMembers] = useState<OrgMember[]>([]);
@@ -305,14 +302,10 @@ export function TicketsScreen({ slug, projectName }: { slug?: string; projectNam
   // mode only (see the effect below); stays empty in single-project mode,
   // where the filter itself is never rendered at all.
   const [availableProjects, setAvailableProjects] = useState<{ slug: string; name: string }[]>([]);
-  // Real per-org label catalog, only needed for the preview panel's Labels
-  // editor (see editable prop below) — same catalog/merge Ticket Detail uses.
+  // Real per-org label catalog — feeds the Labels filter's own options
+  // (allLabelOptions below), same catalog/merge Ticket Detail uses.
   const [orgLabels, setOrgLabels] = useState<string[]>([]);
   const [view, setView] = useState<ViewMode>(saved?.view ?? getDefaultTicketView());
-  const [previewTicket, setPreviewTicket] = useState<Ticket | null>(() => {
-    if (!saved?.previewTicketId) return null;
-    return MOCK_TICKETS.find((t) => t.id === saved.previewTicketId) ?? null;
-  });
   const [activeChips, setActiveChips] = useState<Set<string>>(
     () => new Set(saved?.activeChips ?? [])
   );
@@ -416,10 +409,10 @@ export function TicketsScreen({ slug, projectName }: { slug?: string; projectNam
   }, [isDevFallback, organization]);
 
   useEffect(() => {
-    // No single project to staff an Assignee picker from in "all projects"
-    // mode — New Ticket is hidden there and the preview panel renders
-    // read-only (see `editable` below), so `assignableMembers` simply stays
-    // empty rather than loading a roster nothing will use.
+    // No single project to staff New Ticket's Assignee picker from in
+    // "all projects" mode — New Ticket is already hidden there, so
+    // `assignableMembers` simply stays empty rather than loading a roster
+    // nothing will use.
     if (isDevFallback || !organization || !slug) return;
     loadProjectTeam(organization.id, slug).then((result) => {
       if (result.status === "ready") setAssignableMembers(result.members);
@@ -770,52 +763,44 @@ export function TicketsScreen({ slug, projectName }: { slug?: string; projectNam
     selectedProjectSlug,
   ]);
 
-  function openPreview(ticket: Ticket) {
-    setPreviewTicket(ticket);
-  }
-
-  function closePreview() {
-    setPreviewTicket(null);
-  }
-
-  // Called synchronously when the user clicks "Expand" — saves full page state
-  // to sessionStorage so the tickets page can restore it on return.
-  function handleBeforeExpand() {
+  // A ticket click now navigates straight to its own Detail page — no more
+  // intermediate Preview step. Saves this screen's own view/filters/scroll
+  // to sessionStorage first (the same state Expand used to save right
+  // before navigating), so returning (Back / "Back to Tickets") restores
+  // exactly where the user left off, same as before.
+  function openTicket(ticket: Ticket) {
     const main = document.querySelector("main");
     saveState(scopeKey, {
       view,
-      previewTicketId: previewTicket?.id ?? null,
       activeChips: [...activeChips],
       searchQuery,
       scrollTop: main?.scrollTop ?? 0,
     });
+    router.push(`/projects/${ticket.projectSlug}/tickets/${getTicketDisplayKey(ticket)}`);
   }
 
   function handleTicketCreated(ticket: Ticket) {
     setTicketList((prev) => [ticket, ...prev]);
     setShowNewTicket(false);
-    setPreviewTicket(ticket);
+    openTicket(ticket);
   }
 
   function handlePreviewDuplicate(ticket: Ticket) {
     setShowNewTicket(false);
-    setPreviewTicket(ticket);
+    openTicket(ticket);
   }
 
-  // Passed to the preview panel's editable mode — after a successful inline
-  // edit there, keeps the board/list card and the preview's own selection in
-  // sync without a page reload (the panel already updates its own displayed
-  // copy internally; this only updates the list this screen renders from).
+  // Keeps this screen's own ticket list in sync after a real write made
+  // elsewhere (currently only Board drag-and-drop, below) without a full
+  // page reload.
   function handleTicketUpdated(updated: Ticket) {
     setTicketList((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
-    setPreviewTicket((prev) => (prev && prev.id === updated.id ? updated : prev));
   }
 
   // Board's drag-and-drop status change — the exact same updateTicket()
-  // action Ticket Detail's/the List view's own status editors already use
-  // (see ticket-preview-panel.tsx's persistPatch), so permissions/RLS and
-  // the Activity Log trigger it fires are identical, never a second path.
-  // Uses ticket.projectSlug rather than this screen's own `slug`, since
+  // action Ticket Detail's own status editor already uses, so permissions/
+  // RLS and the Activity Log trigger it fires are identical, never a second
+  // path. Uses ticket.projectSlug rather than this screen's own `slug`, since
   // this screen can also show every project's tickets at once (no `slug`
   // at all, e.g. a cross-project queue) — each ticket still knows its own.
   //
@@ -856,16 +841,6 @@ export function TicketsScreen({ slug, projectName }: { slug?: string; projectNam
     return { success: true };
   }
 
-  const createLabel = async (name: string): Promise<{ status: "success"; name: string } | { status: "error"; message: string }> => {
-    if (isDevFallback || !organization) {
-      return { status: "error", message: "Not available in this mode." };
-    }
-    const result = await createOrganizationLabel(organization.id, name);
-    if (result.status === "error") return result;
-    setOrgLabels((prev) => [...prev, result.label.name]);
-    return { status: "success", name: result.label.name };
-  };
-
   if (loadState === "loading") {
     return <TicketsScreenSkeleton showNewTicketButton={canCreateTicket} />;
   }
@@ -888,8 +863,7 @@ export function TicketsScreen({ slug, projectName }: { slug?: string; projectNam
     );
   }
 
-  // Computed once and reused by both the Labels filter (FilterBar) and the
-  // preview panel's Labels editor, instead of each building its own copy.
+  // Computed once for the Labels filter (FilterBar).
   const allLabelOptions = buildLabelCatalog(orgLabels);
 
   return (
@@ -994,48 +968,24 @@ export function TicketsScreen({ slug, projectName }: { slug?: string; projectNam
         <div className="mt-3 border-b border-slate-200 dark:border-zinc-800" />
       </div>
 
-      {/* Content area — every view reads the same filteredTickets, so Board/List/Calendar/Timeline/Insights always agree */}
+      {/* Content area — every view reads the same filteredTickets, so Board/List/Calendar/Timeline/Insights always agree.
+          A ticket click navigates straight to its own Detail page (openTicket, above) — no intermediate Preview step. */}
       {view === "board" ? (
         <BoardView
           tickets={filteredTickets}
-          onTicketClick={openPreview}
+          onTicketClick={openTicket}
           dragAndDrop={{ onMoveTicket: handleBoardMoveTicket }}
           statuses={boardColumnStatuses}
           hierarchy={{ childrenCountById, ticketCodeById }}
         />
       ) : view === "calendar" ? (
-        <CalendarView tickets={filteredTickets} onTicketClick={openPreview} />
+        <CalendarView tickets={filteredTickets} onTicketClick={openTicket} />
       ) : view === "timeline" ? (
-        <TimelineView tickets={filteredTickets} onTicketClick={openPreview} />
+        <TimelineView tickets={filteredTickets} onTicketClick={openTicket} />
       ) : view === "insights" ? (
-        <InsightsView tickets={filteredTickets} onTicketClick={openPreview} />
+        <InsightsView tickets={filteredTickets} onTicketClick={openTicket} />
       ) : (
-        <ListView tickets={filteredTickets} onTicketClick={openPreview} />
-      )}
-
-      {previewTicket !== null && (
-        <TicketPreviewPanel
-          ticket={previewTicket}
-          // Each ticket's own real projectSlug — always correct in
-          // single-project mode (identical to the page's own `slug`) and
-          // required in "all projects" mode, where tickets can belong to
-          // different projects.
-          slug={previewTicket.projectSlug}
-          onClose={closePreview}
-          onBeforeNavigate={handleBeforeExpand}
-          // Inline editing needs one definite project to scope the
-          // Assignee picker to (see assignableMembers above) — only
-          // available in single-project mode; "all projects" falls back to
-          // the same read-only panel every other non-Tickets-board caller
-          // already uses.
-          editable={Boolean(slug)}
-          isDevFallback={isDevFallback}
-          members={assignableMembers}
-          allLabels={allLabelOptions}
-          onCreateLabel={createLabel}
-          onTicketUpdated={handleTicketUpdated}
-          statuses={slug ? statuses : statusesBySlug[previewTicket.projectSlug]}
-        />
+        <ListView tickets={filteredTickets} onTicketClick={openTicket} />
       )}
 
       {/* No single project to create into in "all projects" mode — the

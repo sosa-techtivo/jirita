@@ -17,7 +17,6 @@ import type { DropdownGroup } from "@/components/tickets/filter-dropdown";
 import { FilterChip } from "@/components/tickets/filter-chip";
 import { getTicketDisplayKey } from "@/lib/mock-tickets";
 import type { Ticket, TicketStatus } from "@/lib/mock-tickets";
-import { TicketPreviewPanel } from "@/components/tickets/ticket-preview-panel";
 import {
   TicketTypeIcon,
   getTodayISO,
@@ -374,7 +373,12 @@ export function ProjectLeadReportsScreen() {
   const [assigneeFilter, setAssigneeFilter] = useState<string[]>([]);
   const [statusFilter, setStatusFilter] = useState<string[]>([]);
   const [priorityFilter, setPriorityFilter] = useState<string[]>([]);
-  const [preview, setPreview] = useState<Ticket | null>(null);
+  // A ticket click now navigates straight to its own Detail page — no more
+  // intermediate Preview step. Kept as `setPreview` (not renamed) so every
+  // existing call site below needs no change.
+  function setPreview(ticket: Ticket) {
+    router.push(`/projects/${ticket.projectSlug}/tickets/${getTicketDisplayKey(ticket)}`);
+  }
 
   // Delivery tab's own reporting period, for Tickets by Member (and any
   // other historical/logged-hours metric on that tab) — same real
@@ -636,8 +640,8 @@ export function ProjectLeadReportsScreen() {
   // real tickets already summed into this KPI's own displayed count above
   // — no second query, no duplicated status check. Same real 0/1/2+ rule
   // already established by the other navigable KPIs: zero stays
-  // non-interactive; exactly one opens it directly in the existing Ticket
-  // Preview panel (no new modal, no navigating to the list); more than one
+  // non-interactive; exactly one navigates straight to its own Ticket
+  // Detail (no new modal, no navigating to the list); more than one
   // hands off to the Tickets module's own org-wide view with the real
   // `?alerts=blocked` filter applied and visible (same query-state
   // convention Tickets' own filter bar already reads) — RLS already scopes
@@ -656,8 +660,8 @@ export function ProjectLeadReportsScreen() {
   // tickets/week-range already used for this KPI's own displayed count
   // above — no second query, no different "this week" definition. Same
   // real 0/1/2+ rule as the other navigable KPIs: zero stays
-  // non-interactive; exactly one opens it directly in the existing Ticket
-  // Preview panel; more than one hands off to the Tickets module's own
+  // non-interactive; exactly one navigates straight to its own Ticket
+  // Detail; more than one hands off to the Tickets module's own
   // org-wide view with the real `?alerts=due-this-week` filter applied and
   // visible (same query-state convention `?alerts=blocked`/`due-today`
   // already use) — RLS already scopes that destination to this same
@@ -1467,14 +1471,6 @@ export function ProjectLeadReportsScreen() {
         </div>
       )}
 
-      {/* ── Ticket preview panel ─────────────────────────────────────────── */}
-      {preview !== null && (
-        <TicketPreviewPanel
-          ticket={preview}
-          slug={preview.projectSlug}
-          onClose={() => setPreview(null)}
-        />
-      )}
     </div>
   );
 }

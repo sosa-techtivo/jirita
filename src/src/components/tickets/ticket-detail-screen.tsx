@@ -36,7 +36,6 @@ import {
   ErrorToast,
 } from "@/components/tickets/ticket-ui";
 import { BackToTicketsButton } from "@/components/tickets/back-to-tickets-button";
-import { TicketPreviewPanel } from "@/components/tickets/ticket-preview-panel";
 import { NewTicketModal } from "@/components/tickets/new-ticket-modal";
 import { CloseParentConfirmModal } from "@/components/tickets/close-parent-confirm-modal";
 import { AcceptanceCriteriaFields } from "@/components/tickets/acceptance-criteria-fields";
@@ -823,19 +822,19 @@ const RELATION_KIND_ORDER: TicketRelationKind[] = ["blocks", "blocked-by", "dupl
 
 function RelatedTicketCard({
   ticket,
-  onOpen,
+  slug,
   onRemove,
 }: {
   ticket: Ticket;
-  onOpen: () => void;
+  slug: string;
   onRemove: () => void;
 }) {
   return (
     <div className="group relative">
-      <button
-        onClick={onOpen}
+      <Link
+        href={`/projects/${slug}/tickets/${getTicketDisplayKey(ticket)}`}
         className={
-          "w-full text-left px-2.5 py-2 rounded-lg transition-colors " +
+          "block w-full text-left px-2.5 py-2 rounded-lg transition-colors " +
           "bg-slate-50 dark:bg-zinc-900/50 hover:bg-slate-100 dark:hover:bg-zinc-800/60 " +
           "border border-slate-100 dark:border-zinc-800"
         }
@@ -868,7 +867,7 @@ function RelatedTicketCard({
         <p className="text-[11px] text-slate-700 dark:text-zinc-300 leading-snug line-clamp-2 pr-2">
           {ticket.title}
         </p>
-      </button>
+      </Link>
       <button
         onClick={onRemove}
         className={
@@ -908,7 +907,6 @@ function RelatedTicketsSection({
   const { organization, isDevFallback } = useCurrentUser();
 
   const [relations, setRelations]     = useState<RelatedTicket[]>([]);
-  const [previewTicket, setPreviewTicket] = useState<Ticket | null>(null);
   const [linking, setLinking]         = useState(false);
   const [linkKind, setLinkKind]       = useState<TicketRelationKind>("related-to");
   const [searchQuery, setSearchQuery] = useState("");
@@ -1095,7 +1093,7 @@ function RelatedTicketsSection({
                   <RelatedTicketCard
                     key={linkId}
                     ticket={t}
-                    onOpen={() => setPreviewTicket(t)}
+                    slug={slug}
                     onRemove={() => removeLink(linkId)}
                   />
                 ))}
@@ -1105,15 +1103,6 @@ function RelatedTicketsSection({
         </div>
       )}
 
-      {/* Quick Ticket Preview */}
-      {previewTicket && (
-        <TicketPreviewPanel
-          ticket={previewTicket}
-          slug={slug}
-          onClose={() => setPreviewTicket(null)}
-          onBeforeNavigate={() => setPreviewTicket(null)}
-        />
-      )}
     </div>
   );
 }
@@ -2096,9 +2085,7 @@ function AttachmentRow({
 
   // Image attachments get an inline thumbnail (fit to width, aspect ratio
   // preserved via object-contain inside a capped-height box, so it can
-  // never overflow the section) instead of the plain ext-badge row below —
-  // same image-detection criterion (previewKind === "image") the ticket
-  // preview panel's own real-attachment rows already use.
+  // never overflow the section) instead of the plain ext-badge row below.
   if (isImage) {
     return (
       <>
@@ -5199,7 +5186,7 @@ export function TicketDetailScreen({
     return persist({ statusId: option.id });
   };
 
-  // Same open-children check Ticket Preview/Kanban drag-and-drop also run
+  // Same open-children check Kanban drag-and-drop also runs
   // (countOpenChildTickets, lib/tickets.ts) before letting a manual close
   // through — this is the "centralize the evaluation" requirement: one
   // shared query, each surface showing its own matching confirmation UI.

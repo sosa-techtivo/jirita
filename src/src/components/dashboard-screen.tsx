@@ -4,7 +4,6 @@ import { useState, useEffect, useMemo, Fragment } from "react";
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { TicketPreviewPanel } from "@/components/tickets/ticket-preview-panel";
 import { Avatar } from "@/components/ui/avatar";
 import type { Ticket, TicketStatus } from "@/lib/mock-tickets";
 import { getTicketDisplayKey } from "@/lib/mock-tickets";
@@ -422,9 +421,14 @@ function formatFullDate(todayISO: string): string {
 // as the Project Lead/Member dashboards.
 function AdminDashboard() {
   const { user, userId, organization, isDevFallback } = useCurrentUser();
-  const [preview, setPreview] = useState<Ticket | null>(null);
   const router = useRouter();
   const searchParams = useSearchParams();
+  // A ticket click now navigates straight to its own Detail page — no more
+  // intermediate Preview step. Kept as `setPreview` (not renamed) so every
+  // existing call site below needs no change.
+  function setPreview(ticket: Ticket) {
+    router.push(`/projects/${ticket.projectSlug}/tickets/${getTicketDisplayKey(ticket)}`);
+  }
 
   const [loadState, setLoadState] = useState<"loading" | "ready" | "error">(isDevFallback ? "ready" : "loading");
   const [loadErrorMessage, setLoadErrorMessage] = useState<string | null>(null);
@@ -1331,15 +1335,6 @@ function AdminDashboard() {
 
         </div>
       </div>
-
-      {/* ── Ticket preview panel ────────────────────────────────────────────── */}
-      {preview !== null && (
-        <TicketPreviewPanel
-          ticket={preview}
-          slug={preview.projectSlug}
-          onClose={() => setPreview(null)}
-        />
-      )}
 
       {/* ── Quick Actions: same modals Projects/Users open, just triggered
           directly from here instead of navigating first ──────────────── */}

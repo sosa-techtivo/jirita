@@ -28,8 +28,8 @@ export function RichTextViewer({
    *  usual visual style — for a read-only preview nested inside its own
    *  clickable row (e.g. the notification panel's comment excerpt), where
    *  a real, navigable link would fight that row's own click target.
-   *  Every existing caller (Description, Comments, Ticket Preview) keeps
-   *  real, clickable links by leaving this at its default. */
+   *  Every existing caller (Description, Comments) keeps real, clickable
+   *  links by leaving this at its default. */
   interactiveLinks?: boolean;
 }) {
   const [html, setHtml] = useState("");

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { NewTicketModal } from "@/components/tickets/new-ticket-modal";
 import { getTicketDisplayKey } from "@/lib/mock-tickets";
@@ -9,7 +10,6 @@ import { TicketTypeIcon, getTodayISO, parseDisplayDate } from "@/components/tick
 import { useCurrentUser } from "@/components/current-user-provider";
 import { canManage } from "@/lib/current-user";
 import { ProjectCategoryBadge, StatusBadge } from "@/components/status-badge";
-import { TicketPreviewPanel } from "@/components/tickets/ticket-preview-panel";
 import { Avatar } from "@/components/ui/avatar";
 import { MemberTrigger, useMemberProfile } from "@/components/member-profile";
 import { loadProjectDetail, loadProjectTeam } from "@/lib/projects";
@@ -106,7 +106,13 @@ export function ProjectLeadProjectOverview({ slug = "mobile-banking-app" }: { sl
   const [requestId, setRequestId] = useState(0);
 
   const [showNewTicket, setShowNewTicket] = useState(false);
-  const [preview, setPreview] = useState<Ticket | null>(null);
+  const router = useRouter();
+  // A ticket click now navigates straight to its own Detail page — no more
+  // intermediate Preview step. Kept as `setPreview` (not renamed) so every
+  // existing `onOpen={setPreview}` call site below needs no change.
+  function setPreview(ticket: Ticket) {
+    router.push(`/projects/${slug}/tickets/${getTicketDisplayKey(ticket)}`);
+  }
 
   const runFetch = useCallback(() => setRequestId((id) => id + 1), []);
 
@@ -578,14 +584,6 @@ export function ProjectLeadProjectOverview({ slug = "mobile-banking-app" }: { sl
         />
       )}
 
-      {/* ── Ticket preview panel ─────────────────────────────────────────────── */}
-      {preview !== null && (
-        <TicketPreviewPanel
-          ticket={preview}
-          slug={slug}
-          onClose={() => setPreview(null)}
-        />
-      )}
     </div>
   );
 }

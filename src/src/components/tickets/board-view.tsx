@@ -109,9 +109,8 @@ function columnForTicket(t: Ticket, columns: ColumnDefinition[]): ColumnDefiniti
 
 export interface BoardDragAndDropOptions {
   /** The real save — the exact same updateTicket() action Ticket
-   *  Detail's/the List view's own status editors already go through (see
-   *  ticket-preview-panel.tsx's persistPatch), so permissions/RLS and the
-   *  Activity Log trigger it fires are identical, never a second path.
+   *  Detail's own status editor already goes through, so permissions/RLS
+   *  and the Activity Log trigger it fires are identical, never a second path.
    *  `nextStatusName` is the dropped-on column's real ticket_statuses.name
    *  (Fase 2.5) — the caller resolves it back to a real status_id within
    *  the dragged ticket's OWN project, never assuming the same id/legacy

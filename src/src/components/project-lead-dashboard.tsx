@@ -6,7 +6,6 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCurrentUser } from "@/components/current-user-provider";
 import type { TeamMember } from "@/lib/mock-team";
-import { TicketPreviewPanel } from "@/components/tickets/ticket-preview-panel";
 import { Avatar } from "@/components/ui/avatar";
 import type { Ticket } from "@/lib/mock-tickets";
 import { getTicketDisplayKey } from "@/lib/mock-tickets";
@@ -201,10 +200,10 @@ function AttentionCard({
   // Same visual card in every case — same className/content throughout.
   // `disabled` renders a plain, non-interactive <div> (no navigation, no
   // click handler) for an empty state that must not be clickable. A plain
-  // `onClick` (used to open the Ticket Preview panel directly instead of
-  // navigating) renders a <button> instead of a <Link>. Every existing
-  // caller (no onClick, no disabled) keeps rendering the exact same <Link>
-  // as before.
+  // `onClick` (used to navigate straight to a single ticket's own Detail
+  // page instead of a list view) renders a <button> instead of a <Link>.
+  // Every existing caller (no onClick, no disabled) keeps rendering the
+  // exact same <Link> as before.
   if (disabled) {
     return <div className={className}>{content}</div>;
   }
@@ -262,9 +261,14 @@ function TeamCapacityRow({ member, onOpen }: { member: TeamMember; onOpen: (m: T
 export function ProjectLeadDashboard() {
   const { user, userId, organization, isDevFallback } = useCurrentUser();
   const { openMemberProfile } = useMemberProfile();
-  const [preview, setPreview] = useState<Ticket | null>(null);
   const router = useRouter();
   const searchParams = useSearchParams();
+  // A ticket click now navigates straight to its own Detail page — no more
+  // intermediate Preview step. Kept as `setPreview` (not renamed) so every
+  // existing call site below needs no change.
+  function setPreview(ticket: Ticket) {
+    router.push(`/projects/${ticket.projectSlug}/tickets/${getTicketDisplayKey(ticket)}`);
+  }
 
   // ── Current Project: real projects this profile leads (projects.owner_profile_id) ──
   const [projectsLoadState, setProjectsLoadState] = useState<"loading" | "ready" | "error">(
@@ -686,9 +690,8 @@ export function ProjectLeadDashboard() {
   // Completed Tickets KPI (Current Delivery): reuses `completedTicketsList`,
   // the exact same source of truth already driving the KPI's count above —
   // no second query, no duplicated status filter. Zero matches stays
-  // non-interactive; exactly one opens it directly in the existing Ticket
-  // Preview panel (`preview` state, same as every other single-ticket click
-  // on this dashboard); more than one hands off to the Tickets page scoped
+  // non-interactive; exactly one navigates straight to its own Ticket
+  // Detail; more than one hands off to the Tickets page scoped
   // to this project via the same `?alerts=` query-state convention used
   // elsewhere (e.g. Reports' own Completed card).
   function handleCompletedTicketsClick() {
@@ -706,9 +709,8 @@ export function ProjectLeadDashboard() {
   // (per-ticket remaining is floored at 0 *before* summing, the displayed
   // total only after), so which tickets actually "contribute" has to be
   // determined individually. Zero contributing tickets stays
-  // non-interactive; exactly one opens it directly in the existing Ticket
-  // Preview panel (`preview` state, same as every other single-ticket click
-  // on this dashboard); more than one hands off to the Tickets page scoped
+  // non-interactive; exactly one navigates straight to its own Ticket
+  // Detail; more than one hands off to the Tickets page scoped
   // to this project via the same `?alerts=` query-state convention Completed
   // Tickets above already uses — the union of the contributing tickets' own
   // statuses, never Time Tracking.
@@ -725,8 +727,8 @@ export function ProjectLeadDashboard() {
   // Blocked Tickets KPI (Current Delivery): reuses `blockedTicketsList`, the
   // exact same source of truth already driving the KPI's count above — no
   // second query, no duplicated status filter. Zero matches stays
-  // non-interactive; exactly one opens it directly in the existing Ticket
-  // Preview panel; more than one hands off to the Tickets page scoped to
+  // non-interactive; exactly one navigates straight to its own Ticket
+  // Detail; more than one hands off to the Tickets page scoped to
   // this project via the same `?alerts=` query-state convention Completed
   // Tickets/Remaining Work already use.
   function handleBlockedTicketsClick() {
@@ -1239,15 +1241,6 @@ export function ProjectLeadDashboard() {
         </Card>
 
       </div>
-
-      {/* ── Ticket preview panel ─────────────────────────────────────────────── */}
-      {preview !== null && (
-        <TicketPreviewPanel
-          ticket={preview}
-          slug={preview.projectSlug}
-          onClose={() => setPreview(null)}
-        />
-      )}
 
       {/* ── Quick Actions' modals — the exact same flows Team/Notes/Tickets use ── */}
       {showAddMember && (

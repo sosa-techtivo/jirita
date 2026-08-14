@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { getTicketDisplayKey } from "@/lib/mock-tickets";
 import type { Ticket, TicketStatus } from "@/lib/mock-tickets";
@@ -12,7 +13,6 @@ import { Avatar } from "@/components/ui/avatar";
 import { useCurrentUser } from "@/components/current-user-provider";
 import { useOrganizationProjects } from "@/components/organization-projects-provider";
 import { ProjectCategoryBadge, StatusBadge } from "@/components/status-badge";
-import { TicketPreviewPanel } from "@/components/tickets/ticket-preview-panel";
 import { presetTicketsFilter } from "@/components/tickets-screen";
 import { AdminProjectOverview } from "@/components/admin-project-overview";
 import { ProjectLeadProjectOverview } from "@/components/project-lead-project-overview";
@@ -345,9 +345,13 @@ function MemberProjectOverviewSkeleton() {
 
 export function ProjectOverview({ slug = "mobile-banking-app" }: { slug?: string }) {
   const { user, userId, organization, isDevFallback } = useCurrentUser();
-  // Declared before the role branches below so hook order stays identical
-  // across renders even if the role switches at runtime without unmounting.
-  const [preview, setPreview] = useState<Ticket | null>(null);
+  const router = useRouter();
+  // A ticket click now navigates straight to its own Detail page — no more
+  // intermediate Preview step. Kept as `setPreview` (not renamed) so every
+  // existing call site below needs no change.
+  function setPreview(ticket: Ticket) {
+    router.push(`/projects/${slug}/tickets/${getTicketDisplayKey(ticket)}`);
+  }
   const [workView, setWorkView] = useState<ProjectWorkView>(() => readStoredProjectWorkView(slug));
 
   const [loadState, setLoadState] = useState<"loading" | "ready" | "error">(isDevFallback ? "ready" : "loading");
@@ -785,14 +789,6 @@ export function ProjectOverview({ slug = "mobile-banking-app" }: { slug?: string
         </div>
       </div>
 
-      {/* ── Ticket preview panel ─────────────────────────────────────────────── */}
-      {preview !== null && (
-        <TicketPreviewPanel
-          ticket={preview}
-          slug={slug}
-          onClose={() => setPreview(null)}
-        />
-      )}
     </div>
   );
 }

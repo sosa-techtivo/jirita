@@ -5,7 +5,6 @@ import type { ReactNode } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCurrentUser } from "@/components/current-user-provider";
 import { TicketListRow } from "@/components/tickets/ticket-card";
-import { TicketPreviewPanel } from "@/components/tickets/ticket-preview-panel";
 import { StatusBadge, PriorityBadge, TicketTypeIcon, getTodayISO, parseDisplayDate } from "@/components/tickets/ticket-ui";
 import { formatHours, formatHoursMaybe } from "@/components/time-tracking-screen";
 import { statusMeta } from "@/components/status-badge";
@@ -380,9 +379,14 @@ function AttentionRow({
 
 export function MemberDashboard() {
   const { user, userId, organization, isDevFallback } = useCurrentUser();
-  const [preview, setPreview] = useState<Ticket | null>(null);
   const router = useRouter();
   const searchParams = useSearchParams();
+  // A ticket click now navigates straight to its own Detail page — no more
+  // intermediate Preview step. Kept as `setPreview` (not renamed) so every
+  // existing call site below needs no change.
+  function setPreview(ticket: Ticket) {
+    router.push(`/projects/${ticket.projectSlug}/tickets/${getTicketDisplayKey(ticket)}`);
+  }
 
   // Shared by both load effects below (project list + per-project delivery
   // data) so a single Retry click on either error state re-runs whichever
@@ -621,8 +625,8 @@ export function MemberDashboard() {
   // Assigned Tickets KPI: reuses `activeWork`, the exact same real,
   // per-member ticket list already driving this KPI's count above — no
   // second query, no duplicated assignee/status criteria. Zero stays
-  // non-interactive; exactly one opens it directly in the existing Ticket
-  // Preview panel; more than one hands off to this project's Tickets page
+  // non-interactive; exactly one navigates straight to its own Ticket
+  // Detail; more than one hands off to this project's Tickets page
   // with the real `?assignee=me` filter applied and visible (Tickets'
   // existing "Assigned" filter, now readable from the URL the same way
   // `?alerts=` already is).
@@ -638,7 +642,7 @@ export function MemberDashboard() {
   // Due Today KPI: reuses `dueTodayList`, the exact same real per-member
   // ticket list already driving this KPI's count above — no second query,
   // no duplicated due-date criteria. Zero stays non-interactive; exactly
-  // one opens it directly in the existing Ticket Preview panel; more than
+  // one navigates straight to its own Ticket Detail; more than
   // one hands off to this project's Tickets page with the same real
   // `?alerts=due-today` filter the Admin/Project Lead Dashboards already
   // use for "Due Today", combined with `?assignee=me` (this dashboard's own
@@ -1036,15 +1040,6 @@ export function MemberDashboard() {
 
         </div>
       </div>
-
-      {/* ── Ticket preview panel ────────────────────────────────────────────── */}
-      {preview !== null && (
-        <TicketPreviewPanel
-          ticket={preview}
-          slug={preview.projectSlug}
-          onClose={() => setPreview(null)}
-        />
-      )}
 
     </div>
   );

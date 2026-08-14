@@ -11,7 +11,6 @@ import { getTicketById, getTicketDisplayKey } from "@/lib/mock-tickets";
 import type { Ticket } from "@/lib/mock-tickets";
 import { StatusBadge as TicketStatusBadge, PriorityBadge, TicketTypeIcon, ActivityTimeline, ErrorToast } from "@/components/tickets/ticket-ui";
 import type { MockActivity } from "@/components/tickets/ticket-ui";
-import { TicketPreviewPanel } from "@/components/tickets/ticket-preview-panel";
 import type { User, UserStatus } from "@/lib/mock-users";
 import { fullName } from "@/lib/mock-users";
 import type { Role } from "@/lib/current-user";
@@ -216,9 +215,9 @@ export function MemberProfileModal({
 }) {
   const isUserMode = user !== undefined;
   const [visible, setVisible] = useState(false);
-  const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
   const [activeTab, setActiveTab] = useState<ProfileTab>(initialTab);
   const { organization, isDevFallback } = useCurrentUser();
+  const router = useRouter();
 
   // The single real-data fetch every "click a person" trigger app-wide now
   // funnels through — driven purely by (realProfileId, slug), never by
@@ -317,6 +316,14 @@ export function MemberProfileModal({
     setTimeout(onClose, 200);
   }
 
+  // A ticket click now navigates straight to its own Detail page — no more
+  // intermediate Preview step. Closes this modal first since it would
+  // otherwise sit stale underneath the new page.
+  function openTicket(ticket: Ticket) {
+    handleClose();
+    router.push(`/projects/${ticket.projectSlug}/tickets/${getTicketDisplayKey(ticket)}`);
+  }
+
   useEffect(() => {
     const id = requestAnimationFrame(() => requestAnimationFrame(() => setVisible(true)));
     return () => cancelAnimationFrame(id);
@@ -330,21 +337,18 @@ export function MemberProfileModal({
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
-      // While the ticket panel is open, let its own Escape handler close just
-      // that layer instead of closing both at once.
-      if (selectedTicket) return;
       handleClose();
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedTicket]);
+  }, []);
 
   return (
     <>
       <div
         aria-hidden
-        onClick={() => (selectedTicket ? setSelectedTicket(null) : handleClose())}
+        onClick={handleClose}
         className={
           "fixed inset-0 z-50 bg-black/30 dark:bg-black/50 transition-opacity duration-200 " +
           (visible ? "opacity-100" : "opacity-0")
@@ -462,7 +466,7 @@ export function MemberProfileModal({
                         <button
                           key={ticket.id}
                           type="button"
-                          onClick={() => setSelectedTicket(ticket)}
+                          onClick={() => openTicket(ticket)}
                           className="w-full flex items-center gap-3 py-2.5 px-2 -mx-2 rounded-lg text-left hover:bg-slate-50 dark:hover:bg-zinc-800/50 transition-colors"
                         >
                           <span className="flex items-center gap-1 text-xs font-mono text-slate-400 dark:text-zinc-500 flex-shrink-0 w-16">
@@ -485,28 +489,6 @@ export function MemberProfileModal({
         </div>
       </div>
 
-      {selectedTicket && (
-        <TicketPreviewPanel
-          ticket={selectedTicket}
-          // The ticket's own real project — always correct (identical to
-          // the outer `slug` in the existing single-project mode), and
-          // required when realActiveTickets spans more than one project
-          // (Team Workload), where there's no single outer `slug` at all.
-          slug={selectedTicket.projectSlug}
-          onClose={() => setSelectedTicket(null)}
-          // Expand navigates to the full Ticket Detail page underneath this
-          // modal — since MemberProfileProvider is mounted above the
-          // router's own children, this modal survives that navigation
-          // unless explicitly closed here too. Reuses both existing close
-          // mechanisms (this panel's own local `selectedTicket` clear, and
-          // this modal's own animated `handleClose`, which already calls
-          // the real `onClose` prop) rather than a new one.
-          onBeforeNavigate={() => {
-            setSelectedTicket(null);
-            handleClose();
-          }}
-        />
-      )}
     </>
   );
 }

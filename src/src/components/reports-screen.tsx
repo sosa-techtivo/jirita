@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo, useRef } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { FilterDropdown } from "@/components/tickets/filter-dropdown";
 import type { DropdownGroup } from "@/components/tickets/filter-dropdown";
 import { useCurrentUser } from "@/components/current-user-provider";
@@ -12,7 +13,6 @@ import { ProjectLeadReportsScreen } from "@/components/project-lead-reports-scre
 import { getTicketDisplayKey } from "@/lib/mock-tickets";
 import type { Ticket, TicketStatus, TicketPriority } from "@/lib/mock-tickets";
 import type { ProjectStatus, ProjectSummary } from "@/lib/mock-projects";
-import { TicketPreviewPanel } from "@/components/tickets/ticket-preview-panel";
 import { getTodayISO, parseDisplayDate, PriorityBadge, StatusBadge, PRIORITY_VALUES } from "@/components/tickets/ticket-ui";
 import { MemberTrigger } from "@/components/member-profile";
 import { Avatar } from "@/components/ui/avatar";
@@ -1971,7 +1971,13 @@ function AdminReportsScreen() {
   const [priorityFilter, setPriorityFilter] = useState<string[]>([]);
   const [labelFilter,    setLabelFilter]    = useState<string[]>([]);
   const [hoursFilter,    setHoursFilter]    = useState<string[]>([]);
-  const [preview,        setPreview]        = useState<Ticket | null>(null);
+  const router = useRouter();
+  // A ticket click now navigates straight to its own Detail page — no more
+  // intermediate Preview step. Kept as `setPreview` (not renamed) so every
+  // existing call site below needs no change.
+  function setPreview(ticket: Ticket) {
+    router.push(`/projects/${ticket.projectSlug}/tickets/${getTicketDisplayKey(ticket)}`);
+  }
 
   // Hours by Person — sort state
   const [personSort,    setPersonSort]    = useState<PersonSortKey>("estimatedHours");
@@ -3380,14 +3386,6 @@ function AdminReportsScreen() {
         </>
       )}
 
-      {/* ── Ticket preview panel ────────────────────────────────────────────── */}
-      {preview !== null && (
-        <TicketPreviewPanel
-          ticket={preview}
-          slug={preview.projectSlug}
-          onClose={() => setPreview(null)}
-        />
-      )}
     </div>
   );
 }

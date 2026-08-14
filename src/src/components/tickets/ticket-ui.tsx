@@ -110,10 +110,7 @@ export const PRIORITY_LABEL: Record<TicketPriority, string> = {
 export const PRIORITY_VALUES: TicketPriority[] = ["highest", "high", "medium", "low"];
 
 // ── Shared editing primitives ────────────────────────────────────────────────
-// Shared by ticket-detail-screen.tsx and ticket-preview-panel.tsx so neither
-// duplicates the other's inline-edit interaction/styling — lives here (not in
-// either of those two files) since ticket-detail-screen.tsx already imports
-// TicketPreviewPanel, and the reverse import would create a cycle.
+// Ticket Detail's own inline-edit interaction/styling primitives.
 
 export const EDIT_BTN =
   "opacity-0 group-hover:opacity-100 transition-opacity ml-1.5 p-0.5 rounded " +
@@ -161,14 +158,11 @@ export function CalendarIcon() {
 }
 
 // ── Editable: Description (Rich Text) ────────────────────────────────────────
-// Used by both Ticket Detail and the Quick Ticket Preview — same
-// click-to-edit / RichTextEditor / Save-Cancel interaction and the same
-// sanitizeRichTextHtml() call right before persistence in both places, so
-// there is exactly one implementation of "edit a ticket's description",
-// never two independently-behaving ones. viewerClassName/emptyClassName/
-// editorContentClassName let each caller keep its own existing text size
-// (Ticket Detail's 14px sidebar-less layout vs. the Preview panel's more
-// compact 13px) without forking the interaction logic itself.
+// Ticket Detail's own click-to-edit / RichTextEditor / Save-Cancel
+// interaction, with sanitizeRichTextHtml() called right before persistence.
+// viewerClassName/emptyClassName/editorContentClassName stay configurable
+// per caller rather than hardcoded, the same shape every other shared
+// editing primitive in this file already uses.
 export function EditableDescription({
   value,
   onSave,

@@ -7,7 +7,6 @@ import type { Ticket } from "@/lib/mock-tickets";
 import { getTicketDisplayKey } from "@/lib/mock-tickets";
 import { TicketListRow } from "@/components/tickets/ticket-card";
 import { BoardView, ticketColumnKey } from "@/components/tickets/board-view";
-import { TicketPreviewPanel } from "@/components/tickets/ticket-preview-panel";
 import { FilterDropdown } from "@/components/tickets/filter-dropdown";
 import type { DropdownGroup } from "@/components/tickets/filter-dropdown";
 import {
@@ -535,7 +534,6 @@ export function MyWorkScreen() {
   const [timesheetRecords, setTimesheetRecords] = useState<ProfileTimeEntryRecord[]>([]);
   const [requestId, setRequestId] = useState(0);
 
-  const [previewTicket, setPreviewTicket] = useState<Ticket | null>(null);
   const [view, setView]                   = useState<WorkView>("list");
   const [statusFilter, setStatusFilter]   = useState<string[]>([]);
   const [priorityFilter, setPriorityFilter] = useState<string[]>([]);
@@ -626,7 +624,11 @@ export function MyWorkScreen() {
     };
   }, [isDevFallback, organization, userId, requestId, user.weeklyCapacity]);
 
-  const openPreview = (ticket: Ticket) => setPreviewTicket(ticket);
+  // A ticket click now navigates straight to its own Detail page — no more
+  // intermediate Preview step. Kept as `openPreview` (not renamed) so every
+  // existing call site below needs no change.
+  const openPreview = (ticket: Ticket) =>
+    router.push(`/projects/${ticket.projectSlug}/tickets/${getTicketDisplayKey(ticket)}`);
   const show        = (section: string) => !focusMode || !FOCUS_MODE_HIDDEN.has(section);
 
   const todayISO     = getTodayISO();
@@ -735,17 +737,16 @@ export function MyWorkScreen() {
   // this KPI's own displayed count, regardless of status — no second
   // query, no duplicated assignee criteria. Same real 0/1/2+ rule already
   // established by the Admin/Member Dashboards' own navigable KPI cards:
-  // zero stays non-interactive; exactly one opens it directly in the
-  // existing Ticket Preview panel (no new modal); more than one hands off
-  // to the org-wide Tickets view with the real `?assignee=me` filter
-  // applied and visible (Tickets' existing "Assigned" filter, already
-  // readable from the URL the same way `?alerts=` is — same destination/
-  // param the Admin Dashboard's own "Assigned Tickets" KPI already uses for
-  // its own "All Projects" case).
+  // zero stays non-interactive; exactly one navigates straight to its own
+  // Ticket Detail; more than one hands off to the org-wide Tickets view
+  // with the real `?assignee=me` filter applied and visible (Tickets'
+  // existing "Assigned" filter, already readable from the URL the same way
+  // `?alerts=` is — same destination/param the Admin Dashboard's own
+  // "Assigned Tickets" KPI already uses for its own "All Projects" case).
   function handleAssignedTicketsClick() {
     if (myTickets.length === 0) return;
     if (myTickets.length === 1) {
-      setPreviewTicket(myTickets[0]);
+      openPreview(myTickets[0]);
       return;
     }
     router.push("/tickets?assignee=me");
@@ -1195,15 +1196,6 @@ export function MyWorkScreen() {
             )}
           </Section>
         </div>
-      )}
-
-      {/* ── Ticket preview panel ────────────────────────────────────────────── */}
-      {previewTicket !== null && (
-        <TicketPreviewPanel
-          ticket={previewTicket}
-          slug={previewTicket.projectSlug}
-          onClose={() => setPreviewTicket(null)}
-        />
       )}
 
       {/* ── My Timesheet panel ──────────────────────────────────────────────── */}
