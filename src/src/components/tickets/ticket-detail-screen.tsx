@@ -88,7 +88,7 @@ import { FALLBACK_AVATAR } from "@/lib/current-user";
 import { formatHours } from "@/components/time-tracking-screen";
 import { MemberTrigger } from "@/components/member-profile";
 import { RichTextEditor, type MentionCandidate } from "@/components/rich-text/rich-text-editor";
-import { useImageViewer, ImageViewerToolbar, ImageViewerCanvas } from "@/components/image-viewer";
+import { ImageViewerToolbar, ImageViewerCanvas } from "@/components/image-viewer";
 import { RichTextViewer } from "@/components/rich-text/rich-text-viewer";
 import { sanitizeRichTextHtml, isRichTextEmpty } from "@/components/rich-text/rich-text-utils";
 import { Avatar } from "@/components/ui/avatar";
@@ -2630,7 +2630,6 @@ function AttachmentPreviewModal({
 }) {
   const [url, setUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
-  const imageViewer = useImageViewer();
 
   useEffect(() => {
     let cancelled = false;
@@ -2676,7 +2675,6 @@ function AttachmentPreviewModal({
           {kind === "image" && url && !failed && (
             <div className="border-b border-slate-100 dark:border-zinc-800">
               <ImageViewerToolbar
-                controller={imageViewer}
                 onOpenOriginal={() => window.open(url, "_blank", "noopener,noreferrer")}
                 onDownload={() => {
                   downloadTicketAttachment(file.storagePath, file.name).then((result) => {
@@ -2708,7 +2706,7 @@ function AttachmentPreviewModal({
 
           {url && kind === "image" && (
             <div className="h-[70vh]">
-              <ImageViewerCanvas controller={imageViewer} src={url} alt={file.name} />
+              <ImageViewerCanvas src={url} alt={file.name} />
             </div>
           )}
 

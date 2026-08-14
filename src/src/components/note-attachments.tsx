@@ -10,9 +10,9 @@
 // concept for Notes, so there's no `isAvailable` field/branch here at all
 // — every note attachment is always a real, downloadable object.
 //
-// One exception to "near-duplicate, not shared": the zoom/pan/fit viewer
-// chrome inside NoteAttachmentPreviewModal's own "image" branch below comes
-// from components/image-viewer.tsx, the same module ticket-detail-screen.tsx's
+// One exception to "near-duplicate, not shared": the image preview chrome
+// inside NoteAttachmentPreviewModal's own "image" branch below comes from
+// components/image-viewer.tsx, the same module ticket-detail-screen.tsx's
 // AttachmentPreviewModal now uses — pure UI with no idea which feature it's
 // in, so sharing it doesn't reintroduce the cross-feature coupling the rest
 // of this file deliberately avoids.
@@ -25,7 +25,7 @@ import {
 } from "@/lib/notes";
 import type { ProjectNoteAttachment } from "@/lib/mock-notes";
 import { FIELD_LABEL } from "@/components/notes-shared";
-import { useImageViewer, ImageViewerToolbar, ImageViewerCanvas } from "@/components/image-viewer";
+import { ImageViewerToolbar, ImageViewerCanvas } from "@/components/image-viewer";
 
 export type NoteAttachmentItem = {
   id: string;
@@ -113,7 +113,6 @@ function NoteAttachmentPreviewModal({
 }) {
   const [url, setUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
-  const imageViewer = useImageViewer();
 
   useEffect(() => {
     let cancelled = false;
@@ -159,7 +158,6 @@ function NoteAttachmentPreviewModal({
           {kind === "image" && url && !failed && (
             <div className="border-b border-slate-100 dark:border-zinc-800">
               <ImageViewerToolbar
-                controller={imageViewer}
                 onOpenOriginal={() => window.open(url, "_blank", "noopener,noreferrer")}
                 onDownload={() => {
                   downloadProjectNoteAttachment(file.storagePath, file.name).then((result) => {
@@ -191,7 +189,7 @@ function NoteAttachmentPreviewModal({
 
           {url && kind === "image" && (
             <div className="h-[70vh]">
-              <ImageViewerCanvas controller={imageViewer} src={url} alt={file.name} />
+              <ImageViewerCanvas src={url} alt={file.name} />
             </div>
           )}
 
