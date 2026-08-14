@@ -2,6 +2,21 @@ import { useRef, useState } from "react";
 import type { Ticket } from "@/lib/mock-tickets";
 import { TicketBoardCard } from "@/components/tickets/ticket-card";
 
+// Parent/Child indicators on each card (ticket-card.tsx's TicketBoardCard) —
+// both maps are built once by the ultimate caller (tickets-screen.tsx) from
+// its own full, unfiltered ticket list, never from whichever (possibly
+// filtered) subset a column is currently rendering, so `↳ N` always
+// reflects a parent's real total child count regardless of active filters.
+// Declared here (not board-view.tsx, which imports this column component)
+// to avoid a circular import; board-view.tsx re-exports it.
+export interface BoardHierarchyInfo {
+  /** parent ticket id -> its direct child count. */
+  childrenCountById: Map<string, number>;
+  /** ticket id -> its own display key (e.g. "JIR-43") — used to resolve a
+   *  child's `parentTicketId` into the code shown/tooltipped on its card. */
+  ticketCodeById: Map<string, string>;
+}
+
 export interface ColumnDefinition {
   /** The status's real name (Fase 2.5) — also used as the React key and
    *  the drop zone's own data-column-id. Name, not a per-project
@@ -23,6 +38,10 @@ export interface ColumnDefinition {
   legacyValue: string | null;
   dotClass: string;
   countClass: string;
+  /** Real ticket_statuses.group_type — lets a drop onto this column check
+   *  whether it would close a parent ticket with open children still left
+   *  (see board-view.tsx's own handleDropOnColumn). */
+  groupType: "open" | "closed";
 }
 
 export type OnTicketClick = (ticket: Ticket) => void;
@@ -48,6 +67,7 @@ export function BoardColumn({
   onCardDragStart,
   onCardDragEnd,
   onDropTicket,
+  hierarchy,
 }: {
   column: ColumnDefinition;
   tickets: Ticket[];
@@ -62,6 +82,10 @@ export function BoardColumn({
   draggingTicketId?: string | null;
   onCardDragStart?: (ticket: Ticket) => void;
   onCardDragEnd?: () => void;
+  /** Parent/Child indicators — see BoardHierarchyInfo above. Undefined for
+   *  every caller that doesn't pass it (My Work, Project Overview), which
+   *  keep rendering cards with no indicator at all. */
+  hierarchy?: BoardHierarchyInfo;
   /** Fired on a real drop inside this column — board-view.tsx decides
    *  whether that's a genuine cross-column move (confirmation) or a
    *  same-column no-op. */
@@ -158,6 +182,8 @@ export function BoardColumn({
               isDragging={draggingTicketId === ticket.id}
               onDragStart={() => onCardDragStart?.(ticket)}
               onDragEnd={() => onCardDragEnd?.()}
+              childrenCount={hierarchy?.childrenCountById.get(ticket.id) ?? 0}
+              parentCode={ticket.parentTicketId ? hierarchy?.ticketCodeById.get(ticket.parentTicketId) : undefined}
             />
           ))
         )}

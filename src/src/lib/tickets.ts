@@ -50,6 +50,12 @@ export interface CreateTicketInput {
   labels?: string[];
   /** ISO date (yyyy-mm-dd). */
   dueDate?: string;
+  /** "Create a child" (Ticket Detail's Children section) reuses this exact
+   *  creation flow with this one extra field — the new tickets_guard_
+   *  parent_hierarchy trigger (20260927000000) is the real enforcement of
+   *  same-project/one-level-only, this is just where the value is threaded
+   *  through. */
+  parentTicketId?: string;
 }
 
 export type CreateTicketResult =
@@ -137,6 +143,7 @@ interface TicketRow {
   updated_at: string;
   created_by: string | null;
   created_at: string;
+  parent_ticket_id: string | null;
 }
 
 // ── Per-project configurable ticket statuses (Fase 2) ──────────────────────
@@ -419,7 +426,7 @@ interface AssigneeProfileRow {
 }
 
 const TICKET_COLUMNS =
-  "id, project_id, ticket_number, title, description, status, status_id, priority, type, assignee_profile_id, milestone, labels, acceptance_criteria, acceptance_criteria_done, story_points, hours, due_date, updated_at, created_by, created_at";
+  "id, project_id, ticket_number, title, description, status, status_id, priority, type, assignee_profile_id, milestone, labels, acceptance_criteria, acceptance_criteria_done, story_points, hours, due_date, updated_at, created_by, created_at, parent_ticket_id";
 
 // Absolute, year-inclusive date — every date-parsing helper across the
 // ticket views (Calendar/Timeline/Insights) parses this exact "MMM D, YYYY"
@@ -493,6 +500,7 @@ function rowToTicket(
     updatedAtISO: row.updated_at,
     createdByProfileId: row.created_by,
     createdAtISO: row.created_at,
+    parentTicketId: row.parent_ticket_id,
     creator: creatorRow
       ? {
           name: [creatorRow.first_name, creatorRow.last_name].filter(Boolean).join(" ") || "Unnamed",
@@ -775,6 +783,7 @@ export async function createTicket(
     hours: input.hours ?? null,
     due_date: input.dueDate ?? null,
     assignee_profile_id: input.assigneeProfileId ?? null,
+    parent_ticket_id: input.parentTicketId ?? null,
   };
 
   if (input.statusId) {
@@ -871,6 +880,11 @@ export interface UpdateTicketInput {
   acceptanceCriteria?: string[];
   /** Checked/unchecked state, aligned by index with the ticket's acceptanceCriteria. */
   acceptanceCriteriaDone?: boolean[];
+  /** Link (a real ticket id) / unlink (null) this ticket under a parent —
+   *  Ticket Detail's Children section, on the CHILD ticket's own row.
+   *  tickets_guard_parent_hierarchy (20260927000000) is the real same-
+   *  project/one-level-only enforcement. */
+  parentTicketId?: string | null;
 }
 
 export type UpdateTicketResult =
@@ -971,8 +985,17 @@ export async function updateTicket(
       return { status: "error", message: "Invalid status for this project." };
     }
     patch.status_id = input.statusId;
+    // Every real status change reaching this function is a human-initiated
+    // one — Ticket Detail's status selector, the Preview/Quick Edit panel,
+    // and Kanban drag-and-drop (including its own "Close anyway" override)
+    // all funnel through here. Only recompute_parent_ticket_status
+    // (20260927000000) ever sets this back to true, via a direct SQL
+    // UPDATE that never goes through this function — so a manual close can
+    // never be mistaken for the parent/children auto-close automation.
+    patch.auto_closed = false;
   } else if (input.status !== undefined) {
     patch.status = STATUS_TO_DB[input.status];
+    patch.auto_closed = false;
   }
   if (input.type !== undefined) patch.type = TYPE_TO_DB[input.type];
   if (input.priority !== undefined) patch.priority = input.priority;
@@ -980,6 +1003,7 @@ export async function updateTicket(
   if (input.hours !== undefined) patch.hours = input.hours;
   if (input.dueDate !== undefined) patch.due_date = input.dueDate;
   if (input.labels !== undefined) patch.labels = input.labels;
+  if (input.parentTicketId !== undefined) patch.parent_ticket_id = input.parentTicketId;
   // Same "empty list stored as null" convention createTicket already uses
   // for this column.
   if (input.acceptanceCriteria !== undefined) {
@@ -1039,6 +1063,231 @@ export async function updateTicket(
   }
 
   return { status: "success", ticket: rowToTicket(row, slug, assigneeRow, undefined, statusesById) };
+}
+
+// ── Parent / Children hierarchy (exactly one level) ─────────────────────────
+// "Is this ticket a parent" is never stored — it's purely whether any other
+// ticket's own parent_ticket_id points at it. Every read here is a flat,
+// separate query (never an embedded tickets.select("...,ticket_statuses(...)")),
+// same reasoning as loadProjectTicketStatusesData's own comment: parent_ticket_id
+// is a brand new FK, and PostgREST's relationship cache can lag behind a
+// hand-applied migration.
+
+export interface TicketParentSummary {
+  id: string;
+  ticketNumber: number;
+  title: string;
+  type: TicketType;
+  status: TicketStatus;
+  statusName?: string;
+  statusGroupType?: "open" | "closed";
+}
+
+export interface TicketChildSummary {
+  id: string;
+  ticketNumber: number;
+  title: string;
+  type: TicketType;
+  status: TicketStatus;
+  statusName?: string;
+  statusGroupType?: "open" | "closed";
+  hours?: number;
+  /** Real profiles.id — undefined/null when unassigned. Ticket Detail's
+   *  Children rows use this (plus assigneeName/assigneeAvatar below) to
+   *  show just the assignee's avatar, same MemberTrigger popover every
+   *  other assignee avatar in the app already opens. */
+  assigneeProfileId?: string | null;
+  assigneeName?: string;
+  assigneeAvatar?: string;
+}
+
+export type TicketHierarchyResult =
+  | {
+      status: "ready";
+      parent: TicketParentSummary | null;
+      children: TicketChildSummary[];
+      /** Sum of every child's own Estimated hours — undefined (never 0)
+       *  when there are no children at all, so callers can tell "not a
+       *  parent" apart from "a parent whose children have no estimate". */
+      estimatedHours: number | undefined;
+      loggedHours: number;
+    }
+  | { status: "error"; message: string };
+
+interface HierarchyTicketRow {
+  id: string;
+  ticket_number: number;
+  title: string;
+  type: string;
+  status: string;
+  status_id: string;
+  hours: string | null;
+  assignee_profile_id: string | null;
+}
+
+function rowToHierarchySummary(
+  row: HierarchyTicketRow,
+  statusesById: Map<string, TicketStatusOption>,
+  assigneesById?: Map<string, AssigneeProfileRow>
+): TicketChildSummary {
+  const statusOption = statusesById.get(row.status_id);
+  const assigneeRow = row.assignee_profile_id ? assigneesById?.get(row.assignee_profile_id) : undefined;
+  return {
+    id: row.id,
+    ticketNumber: row.ticket_number,
+    title: row.title,
+    type: TYPE_FROM_DB[row.type] ?? "TASK",
+    status: STATUS_FROM_DB[row.status] ?? "backlog",
+    statusName: statusOption?.name,
+    statusGroupType: statusOption?.groupType,
+    hours: row.hours !== null ? Number(row.hours) : undefined,
+    assigneeProfileId: row.assignee_profile_id,
+    assigneeName: assigneeRow
+      ? [assigneeRow.first_name, assigneeRow.last_name].filter(Boolean).join(" ") || "Unnamed"
+      : undefined,
+    assigneeAvatar: assigneeRow ? resolveAvatarUrl(assigneeRow.avatar_url, assigneeRow.updated_at) ?? FALLBACK_AVATAR : undefined,
+  };
+}
+
+const HIERARCHY_TICKET_COLUMNS = "id, ticket_number, title, type, status, status_id, hours, assignee_profile_id";
+
+// Ticket Detail's PARENT + CHILDREN sections, and the parent's own
+// aggregated Estimated/Logged hours (Estimated = sum of children's own
+// Estimated; Logged = sum of every logged time entry across all children —
+// never the parent's own, which is structurally impossible to have once it
+// has children, see tickets_block_hours_on_parent/
+// ticket_time_entries_block_on_parent, 20260927000000).
+export async function loadTicketHierarchy(ticket: Ticket): Promise<TicketHierarchyResult> {
+  const supabase = getSupabaseBrowserClient();
+
+  const [parentRes, childrenRes] = await Promise.all([
+    ticket.parentTicketId
+      ? supabase
+          .from("tickets")
+          .select(HIERARCHY_TICKET_COLUMNS)
+          .eq("id", ticket.parentTicketId)
+          .maybeSingle<HierarchyTicketRow>()
+      : Promise.resolve({ data: null, error: null }),
+    supabase
+      .from("tickets")
+      .select(HIERARCHY_TICKET_COLUMNS)
+      .eq("parent_ticket_id", ticket.id)
+      .order("ticket_number", { ascending: true })
+      .returns<HierarchyTicketRow[]>(),
+  ]);
+
+  if (parentRes.error) {
+    logDev("ticket parent lookup failed", parentRes.error);
+    return { status: "error", message: parentRes.error.message };
+  }
+  if (childrenRes.error) {
+    logDev("ticket children lookup failed", childrenRes.error);
+    return { status: "error", message: childrenRes.error.message };
+  }
+
+  const childRows = childrenRes.data ?? [];
+
+  const statusIds = Array.from(
+    new Set([parentRes.data?.status_id, ...childRows.map((r) => r.status_id)].filter((id): id is string => Boolean(id)))
+  );
+  const statusesById = new Map<string, TicketStatusOption>();
+  if (statusIds.length > 0) {
+    const { data: statusRows, error: statusError } = await supabase
+      .from("ticket_statuses")
+      .select("id, name, sort_order, group_type, is_default, legacy_enum_value")
+      .in("id", statusIds)
+      .returns<TicketStatusRow[]>();
+    if (statusError) {
+      logDev("ticket hierarchy statuses lookup failed", statusError);
+    } else {
+      for (const row of statusRows ?? []) statusesById.set(row.id, rowToTicketStatusOption(row));
+    }
+  }
+
+  // Flat, single query for every distinct child assignee — same "avoid
+  // N+1" reasoning as loadProjectTickets' own assignee lookup. Parent
+  // summaries never resolve an assignee (not needed anywhere yet), so
+  // this is scoped to children only.
+  const childAssigneeIds = Array.from(
+    new Set(childRows.map((r) => r.assignee_profile_id).filter((id): id is string => Boolean(id)))
+  );
+  const assigneesById = new Map<string, AssigneeProfileRow>();
+  if (childAssigneeIds.length > 0) {
+    const { data: assigneeRows, error: assigneeError } = await supabase
+      .from("profiles")
+      .select("id, first_name, last_name, avatar_url, updated_at")
+      .in("id", childAssigneeIds)
+      .returns<AssigneeProfileRow[]>();
+    if (assigneeError) {
+      logDev("ticket hierarchy assignees lookup failed", assigneeError);
+    } else {
+      for (const row of assigneeRows ?? []) assigneesById.set(row.id, row);
+    }
+  }
+
+  const parent: TicketParentSummary | null = parentRes.data
+    ? rowToHierarchySummary(parentRes.data, statusesById)
+    : null;
+  const children = childRows.map((row) => rowToHierarchySummary(row, statusesById, assigneesById));
+
+  let loggedHours = 0;
+  if (children.length > 0) {
+    const { data: entryRows, error: entriesError } = await supabase
+      .from("ticket_time_entries")
+      .select("minutes")
+      .in(
+        "ticket_id",
+        children.map((c) => c.id)
+      )
+      .returns<{ minutes: number }[]>();
+    if (entriesError) {
+      logDev("ticket hierarchy time entries lookup failed", entriesError);
+    } else {
+      loggedHours = (entryRows ?? []).reduce((sum, e) => sum + e.minutes, 0) / 60;
+    }
+  }
+
+  const estimatedHours =
+    children.length > 0 ? children.reduce((sum, c) => sum + (c.hours ?? 0), 0) : undefined;
+
+  return { status: "ready", parent, children, estimatedHours, loggedHours };
+}
+
+// Ticket Detail/Preview/Kanban's shared "would closing this ticket leave
+// open child tickets behind" check — the one place all three surfaces ask
+// this, so "Close anyway" behaves identically everywhere (see updateTicket's
+// own auto_closed handling above for the other half of that centralization).
+// Cheap and safe to call for any ticket, parent or not: a childless ticket
+// simply resolves to 0 with a single, empty-result query.
+export async function countOpenChildTickets(ticketId: string): Promise<number> {
+  const supabase = getSupabaseBrowserClient();
+
+  const { data: children, error } = await supabase
+    .from("tickets")
+    .select("status_id")
+    .eq("parent_ticket_id", ticketId)
+    .returns<{ status_id: string }[]>();
+
+  if (error) {
+    logDev("open child count lookup failed", error);
+    return 0;
+  }
+  if (!children || children.length === 0) return 0;
+
+  const statusIds = Array.from(new Set(children.map((c) => c.status_id)));
+  const { data: statusRows, error: statusError } = await supabase
+    .from("ticket_statuses")
+    .select("id, group_type")
+    .in("id", statusIds)
+    .returns<{ id: string; group_type: string }[]>();
+
+  if (statusError) {
+    logDev("open child count statuses lookup failed", statusError);
+    return 0;
+  }
+
+  const closedIds = new Set((statusRows ?? []).filter((s) => s.group_type === "closed").map((s) => s.id));
+  return children.filter((c) => !closedIds.has(c.status_id)).length;
 }
 
 // ── Ticket subscribers ───────────────────────────────────────────────────────

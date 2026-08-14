@@ -74,6 +74,14 @@ export interface Ticket {
    *  statuses, but group_type is the one field that always means the same
    *  thing. */
   statusGroupType?: "open" | "closed";
+  /** Real tickets.parent_ticket_id — the one-level Parent -> Children
+   *  hierarchy (Fase "Parent/Children"). null/undefined means this is a
+   *  normal ticket or a parent (parents can never have a parent of their
+   *  own — enforced in the database, never client-side). "Is this ticket a
+   *  parent" is never stored here or anywhere else — it's purely whether
+   *  any other ticket's own parentTicketId points at it, resolved on
+   *  demand by loadTicketHierarchy in lib/tickets.ts. */
+  parentTicketId?: string | null;
 }
 
 // Real (Supabase-backed) projects don't exist in mock-projects.ts, so

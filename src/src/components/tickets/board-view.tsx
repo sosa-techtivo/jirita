@@ -3,8 +3,10 @@
 import { useMemo, useState } from "react";
 import type { Ticket } from "@/lib/mock-tickets";
 import { STATUS_FROM_DB, FALLBACK_TICKET_STATUSES, type TicketStatusOption } from "@/lib/tickets";
-import { BoardColumn, type ColumnDefinition, type OnTicketClick } from "@/components/tickets/board-column";
+import { BoardColumn, type ColumnDefinition, type OnTicketClick, type BoardHierarchyInfo } from "@/components/tickets/board-column";
 import { TicketStatusChangeModal } from "@/components/tickets/ticket-status-change-modal";
+import { CloseParentConfirmModal } from "@/components/tickets/close-parent-confirm-modal";
+import { countOpenChildTickets } from "@/lib/tickets";
 
 // Color pair for each of the 6 legacy-linked statuses this phase seeds for
 // every project — keyed by legacy_enum_value (the one thing stable across
@@ -62,6 +64,7 @@ function buildColumns(statuses: TicketStatusOption[]): ColumnDefinition[] {
       legacyValue: option.legacyEnumValue,
       dotClass: colors.dotClass,
       countClass: colors.countClass,
+      groupType: option.groupType,
     });
   }
   return columns;
@@ -123,6 +126,7 @@ export function BoardView({
   onTicketClick,
   dragAndDrop,
   statuses,
+  hierarchy,
 }: {
   tickets: Ticket[];
   onTicketClick: OnTicketClick;
@@ -139,6 +143,10 @@ export function BoardView({
    *  status set at a time. Falls back to the fixed legacy 6-column layout
    *  while still loading, or for any caller that doesn't pass this yet. */
   statuses?: TicketStatusOption[];
+  /** Omitted entirely by every other caller (My Work, Project Overview),
+   *  which keep rendering cards with no Parent/Child indicator at all —
+   *  only the main Tickets screen's Board tab passes this. */
+  hierarchy?: BoardHierarchyInfo;
 }) {
   const columns = useMemo(
     () => buildColumns(statuses && statuses.length > 0 ? statuses : FALLBACK_TICKET_STATUSES),
@@ -159,6 +167,15 @@ export function BoardView({
     fromColumn: ColumnDefinition;
     toColumn: ColumnDefinition;
   } | null>(null);
+  // Same countOpenChildTickets() check Ticket Detail/Preview's own status
+  // selectors run before a manual close — set instead of pendingMove
+  // whenever dropping onto a closed-group column would leave open child
+  // tickets behind, so Kanban shows this exact same confirmation.
+  const [pendingCloseConfirm, setPendingCloseConfirm] = useState<{
+    ticket: Ticket;
+    toColumn: ColumnDefinition;
+    openCount: number;
+  } | null>(null);
 
   function handleCardDragStart(ticket: Ticket) {
     setDraggingTicket(ticket);
@@ -176,6 +193,16 @@ export function BoardView({
     // Dropped back on its own column (or a column that already covers this
     // ticket's current status) — a real no-op, never a confirmation.
     if (!fromColumn || fromColumn.id === toColumn.id) return;
+    if (toColumn.groupType === "closed") {
+      countOpenChildTickets(ticket.id).then((openCount) => {
+        if (openCount > 0) {
+          setPendingCloseConfirm({ ticket, toColumn, openCount });
+        } else {
+          setPendingMove({ ticket, fromColumn, toColumn });
+        }
+      });
+      return;
+    }
     setPendingMove({ ticket, fromColumn, toColumn });
   }
 
@@ -193,6 +220,7 @@ export function BoardView({
             onCardDragStart={handleCardDragStart}
             onCardDragEnd={handleCardDragEnd}
             onDropTicket={() => handleDropOnColumn(col)}
+            hierarchy={hierarchy}
           />
         ))}
       </div>
@@ -206,6 +234,19 @@ export function BoardView({
           onConfirm={async () => {
             const result = await dragAndDrop.onMoveTicket(pendingMove.ticket, pendingMove.toColumn.label);
             if (result.success) setPendingMove(null);
+            return result;
+          }}
+        />
+      )}
+
+      {pendingCloseConfirm && dragAndDrop && (
+        <CloseParentConfirmModal
+          ticket={pendingCloseConfirm.ticket}
+          openChildrenCount={pendingCloseConfirm.openCount}
+          onCancel={() => setPendingCloseConfirm(null)}
+          onConfirm={async () => {
+            const result = await dragAndDrop.onMoveTicket(pendingCloseConfirm.ticket, pendingCloseConfirm.toColumn.label);
+            if (result.success) setPendingCloseConfirm(null);
             return result;
           }}
         />

@@ -3289,6 +3289,96 @@ toggle icon — explicitly out of scope. `tsc --noEmit`, `eslint`, and
 `next build` all pass clean for every file this feature touched; not yet
 clicked through in a live browser.
 
+## Ticket Parent/Children (exactly one level)
+
+Simple hierarchy: a ticket can have N children or one parent, never both,
+never a third level. "Parent"/"child" are never stored roles — a ticket is
+a parent purely because some other ticket's own `parent_ticket_id` points
+at it, the same "derive, don't store" rule Siblings already followed.
+
+**Schema** — `20260927000000_ticket_parent_child_hierarchy.sql`:
+
+- `tickets.parent_ticket_id` (nullable self-FK, `on delete set null`),
+  `last_open_status_id` (nullable FK to `ticket_statuses`), `auto_closed`
+  (boolean, default false). No RLS changes — `tickets_select`/`_update`
+  already govern the whole row.
+- `tickets_guard_parent_hierarchy` (`before insert or update of
+  parent_ticket_id`): rejects self-parent, cross-project, and either
+  direction of a third level (the prospective parent is itself a child, or
+  this ticket already has children of its own).
+- `tickets_track_last_open_status` (`before insert or update`, every
+  ticket): remembers the most recent *open* status a ticket held, so an
+  auto-reopen (below) can restore the exact status it left, not just "some"
+  open one.
+- `recompute_parent_ticket_status(parent_id)` + `tickets_sync_parent_from_child`
+  (`after insert or update of status_id, parent_ticket_id`): whenever a
+  child's status changes or gets linked/unlinked, recomputes its parent —
+  auto-closes the parent once every child is closed, and auto-reopens it
+  (to `last_open_status_id`, or the project's default open status) if a
+  child reopens *and* the parent's own `auto_closed` flag is still true. A
+  parent with zero children is never evaluated (behaves like a normal
+  ticket) — this is what makes "is this a parent" stay purely derived.
+  Which closed status auto-close lands on is picked in
+  `20260928000000_parent_autoclose_prefer_normal_completion.sql` (see
+  below) — a later, narrow correction to this same function, not a change
+  to when/whether it fires.
+- `tickets_block_hours_on_parent` / `ticket_time_entries_block_on_parent`:
+  DB-level backstop (not just UI) — Estimated can't be edited and time
+  can't be logged directly on a ticket that already has children.
+
+**Centralizing "manual close vs. automation"** — `auto_closed` is the one
+flag that tells the two apart: `src/lib/tickets.ts`'s `updateTicket()` sets
+it to `false` on *every* manual status write it performs (including
+"Close anyway"); `recompute_parent_ticket_status` is the only place that
+ever sets it back to `true`, via a direct SQL `UPDATE` that never goes
+through `updateTicket()`. Since Ticket Detail's status selector, the
+Preview/Quick Edit panel, and Kanban drag-and-drop all already funnel
+every real status change through that one `updateTicket()` path, this one
+flag is enough to keep the automation correct no matter which surface
+fired the change — no separate evaluation logic duplicated per surface.
+
+**"Close anyway"** — all three surfaces (Ticket Detail, Preview/Quick Edit,
+Kanban) share one query, `countOpenChildTickets()` (`lib/tickets.ts`):
+before letting a manual close through, they check it and, if the ticket
+still has open children, show `CloseParentConfirmModal` ("This ticket
+still has X open child tickets.", Cancel / Close anyway) instead of saving
+immediately.
+
+**Which closed status auto-close picks** —
+`20260928000000_parent_autoclose_prefer_normal_completion.sql` redefines
+`recompute_parent_ticket_status` (`create or replace function`, same
+signature, everything else byte-for-byte unchanged) to fix a real
+correctness gap: the original version picked the closed status with the
+lowest `sort_order`, which is user-reorderable and has no semantic
+meaning, so a project with both "Done" and "Cancelled" could auto-close a
+parent into "Cancelled" purely because of column position. Now it prefers
+the closed status with `legacy_enum_value = 'done'` (the existing
+per-project "this is normal completion" marker every project is seeded
+with, reused rather than adding new schema); if that status was since
+deleted, it falls back to the *oldest* closed status by `created_at`
+(never editable by anyone) instead of `sort_order`, so a later-added
+exceptional status is never preferred just because of where it sits in
+the list. A child in an exceptional closed status (e.g. "Cancelled") still
+counts as CLOSED for deciding *whether* to auto-close the parent — only
+*which* status the parent lands on changed.
+
+**UI** (`ticket-detail-screen.tsx` only — Preview/Kanban only gained the
+confirmation above, not the sections themselves): a `PARENT` field (key +
+title, links to the parent's own detail page) when this ticket has one; a
+`CHILDREN` section (key + title + status per child, `+ Link` an existing
+same-project ticket, `+ Create` reusing `NewTicketModal` with
+`parentTicketId` set, and an unlink icon that clears the link without
+deleting the ticket) always shown, with an `X / Y closed` progress bar.
+`RELATED TICKETS` is a completely separate, untouched section. A parent's
+own Estimated/Logged/Remaining (header, mobile summary, sidebar, Time
+Tracking) are swapped for the sum of its children's Estimated and the sum
+of every logged time entry across them (`loadTicketHierarchy`,
+`lib/tickets.ts`) — the parent's own `hours` column and time entries are
+never read once it has children.
+
+`tsc --noEmit`, `eslint`, and `next build` all pass clean; not yet clicked
+through in a live browser.
+
 ## Metadata — Open Graph / Twitter previews (reset-password, accept-invite)
 
 Fixes a real, reported bug: sharing a `/reset-password` or `/accept-invite`

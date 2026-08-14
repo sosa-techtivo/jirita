@@ -27,12 +27,14 @@ import {
   downloadTicketAttachment,
   loadProfileSummary,
   updateTicket,
+  countOpenChildTickets,
   STATUS_FROM_DB,
   type TicketComment,
   type TicketAttachment,
   type UpdateTicketInput,
   type TicketStatusOption,
 } from "@/lib/tickets";
+import { CloseParentConfirmModal } from "@/components/tickets/close-parent-confirm-modal";
 import { MemberTrigger } from "@/components/member-profile";
 import { RichTextViewer } from "@/components/rich-text/rich-text-viewer";
 import { round1 } from "@/components/time-tracking-screen";
@@ -536,6 +538,11 @@ export function TicketPreviewPanel({
   // Surfaces a failed inline edit (see persistPatch below) — previously only
   // logged to the console, with no indication the change didn't save.
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  // "Close anyway" confirmation — set only when a manual close from this
+  // panel's own status selector would leave open child tickets behind. Same
+  // countOpenChildTickets() check Ticket Detail/Kanban drag-and-drop also
+  // run, so all three surfaces behave identically (lib/tickets.ts).
+  const [pendingCloseConfirm, setPendingCloseConfirm] = useState<{ option: TicketStatusOption; openCount: number } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -590,6 +597,19 @@ export function TicketPreviewPanel({
       setErrorMessage(err instanceof Error ? err.message : "Something went wrong. Please try again.");
       return false;
     });
+  }
+
+  // Shared by the status selector's own onChange and the CloseParentConfirmModal's
+  // "Close anyway" — the exact same write either way, just gated by a
+  // confirmation first when it would leave open child tickets behind.
+  function applyStatusOption(option: TicketStatusOption): Promise<boolean> {
+    return persistPatch({ statusId: option.id }, (prev) => ({
+      ...prev,
+      status: option.legacyEnumValue ? STATUS_FROM_DB[option.legacyEnumValue] ?? prev.status : prev.status,
+      statusId: option.id,
+      statusName: option.name,
+      statusGroupType: option.groupType,
+    }));
   }
 
   // Read-only here (this panel has no reply/edit/delete UI at all) — reuses
@@ -698,15 +718,16 @@ export function TicketPreviewPanel({
                 statusId={t.statusId}
                 label={t.statusName}
                 statuses={statuses}
-                onChange={(option) =>
-                  persistPatch({ statusId: option.id }, (prev) => ({
-                    ...prev,
-                    status: option.legacyEnumValue ? STATUS_FROM_DB[option.legacyEnumValue] ?? prev.status : prev.status,
-                    statusId: option.id,
-                    statusName: option.name,
-                    statusGroupType: option.groupType,
-                  }))
-                }
+                onChange={(option) => {
+                  if (isDevFallback || option.groupType !== "closed") {
+                    void applyStatusOption(option);
+                    return;
+                  }
+                  countOpenChildTickets(t.id).then((openCount) => {
+                    if (openCount > 0) setPendingCloseConfirm({ option, openCount });
+                    else void applyStatusOption(option);
+                  });
+                }}
               />
             ) : (
               <StatusBadge status={t.status} label={t.statusName} />
@@ -944,6 +965,19 @@ export function TicketPreviewPanel({
           </Link>
         </div>
       </aside>
+
+      {pendingCloseConfirm && (
+        <CloseParentConfirmModal
+          ticket={t}
+          openChildrenCount={pendingCloseConfirm.openCount}
+          onCancel={() => setPendingCloseConfirm(null)}
+          onConfirm={async () => {
+            const ok = await applyStatusOption(pendingCloseConfirm.option);
+            if (ok) setPendingCloseConfirm(null);
+            return { success: ok };
+          }}
+        />
+      )}
 
       {errorMessage && <ErrorToast message={errorMessage} onDismiss={() => setErrorMessage(null)} />}
     </>

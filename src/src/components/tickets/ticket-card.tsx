@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { CornerDownRight } from "lucide-react";
 import type { Ticket, TicketPriority } from "@/lib/mock-tickets";
 import { getTicketDisplayKey } from "@/lib/mock-tickets";
 import { TicketTypeIcon } from "@/components/tickets/ticket-ui";
@@ -50,6 +51,8 @@ export function TicketBoardCard({
   isDragging = false,
   onDragStart,
   onDragEnd,
+  childrenCount = 0,
+  parentCode,
 }: {
   ticket: Ticket;
   onTicketClick: (ticket: Ticket) => void;
@@ -63,6 +66,15 @@ export function TicketBoardCard({
   isDragging?: boolean;
   onDragStart?: () => void;
   onDragEnd?: () => void;
+  /** This ticket's own direct child count (Parent/Children hierarchy) —
+   *  0 (the default) renders no indicator at all, same as before this
+   *  feature. Resolved by board-column.tsx from the full, unfiltered
+   *  project ticket list, never re-queried per card. */
+  childrenCount?: number;
+  /** This ticket's own parent's display key (e.g. "JIR-43"), when it has
+   *  one — undefined renders no indicator. Same brand/icon language as
+   *  Ticket Detail's own Parent reference and Children rows. */
+  parentCode?: string;
 }) {
   const isBlocked = ticket.status === "blocked";
 
@@ -100,10 +112,47 @@ export function TicketBoardCard({
         </p>
       )}
 
-      {/* Ticket ID */}
+      {/* Ticket ID — Parent/Child hierarchy indicators reuse the exact same
+          icon (CornerDownRight) and brand color as Ticket Detail's own
+          Parent reference/Children rows, just without a title, per this
+          feature's own scope (a hover title is enough on a compact card). */}
       <p className="flex items-center gap-1 text-[11px] font-mono font-medium text-slate-400 dark:text-zinc-500 mb-1 leading-none">
-        <TicketTypeIcon type={ticket.type} />
-        {getTicketDisplayKey(ticket)}
+        {parentCode ? (
+          // Sky, not the brand lilac — distinguishes "this ticket IS a
+          // child" from "this ticket IS a parent" (brand) at a glance on
+          // the Board. Not orange/amber/red: those already carry Bug/
+          // Priority/warning meaning elsewhere on this exact card.
+          // TicketTypeIcon keeps its own explicit color (BUG's red, etc. —
+          // set on its own <svg>, never `currentColor`), so it doesn't pick
+          // up the wrapper's sky despite sitting inside it.
+          <span title={`Child of ${parentCode}`} className="inline-flex items-center gap-1 text-sky-600 dark:text-sky-400">
+            <CornerDownRight className="w-3 h-3 flex-shrink-0" aria-hidden="true" />
+            <TicketTypeIcon type={ticket.type} />
+            {getTicketDisplayKey(ticket)}
+          </span>
+        ) : childrenCount > 0 ? (
+          // Brand lilac — the key itself, not just the trailing `↳ N`
+          // badge below, so the whole hierarchy indicator (key included)
+          // reads as one lilac unit for a parent card.
+          <span className="inline-flex items-center gap-1 text-brand-600 dark:text-brand-400">
+            <TicketTypeIcon type={ticket.type} />
+            {getTicketDisplayKey(ticket)}
+          </span>
+        ) : (
+          <>
+            <TicketTypeIcon type={ticket.type} />
+            {getTicketDisplayKey(ticket)}
+          </>
+        )}
+        {childrenCount > 0 && (
+          <span
+            title={`${childrenCount} child ticket${childrenCount === 1 ? "" : "s"}`}
+            className="inline-flex items-center gap-0.5 text-brand-600 dark:text-brand-400"
+          >
+            <CornerDownRight className="w-3 h-3 flex-shrink-0" aria-hidden="true" />
+            {childrenCount}
+          </span>
+        )}
       </p>
 
       {/* Title */}

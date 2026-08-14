@@ -571,6 +571,27 @@ export function TicketsScreen({ slug, projectName }: { slug?: string; projectNam
     if (!value.from && !value.to) removeAddFilter("updated-date");
   }
 
+  // Board's own Parent/Child indicators (see ticket-card.tsx's
+  // TicketBoardCard) — built once from `ticketList`, the full unfiltered
+  // list this screen already loads, so a status/assignee/search filter
+  // hiding some of a parent's children never undercounts `↳ N`. Every
+  // Ticket already carries parentTicketId (lib/tickets.ts's TICKET_COLUMNS),
+  // so this is a single O(n) pass over already-loaded data — no extra
+  // query, no N+1 per card.
+  const childrenCountById = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const t of ticketList) {
+      if (t.parentTicketId) m.set(t.parentTicketId, (m.get(t.parentTicketId) ?? 0) + 1);
+    }
+    return m;
+  }, [ticketList]);
+
+  const ticketCodeById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const t of ticketList) m.set(t.id, getTicketDisplayKey(t));
+    return m;
+  }, [ticketList]);
+
   // The single place every filter (search, the 3 dropdowns, the 5 "Add
   // Filter" filters, and the 5 quick chips) is actually applied — every view
   // below (Board/List/Calendar/Timeline/Insights) and the header's Tickets/
@@ -980,6 +1001,7 @@ export function TicketsScreen({ slug, projectName }: { slug?: string; projectNam
           onTicketClick={openPreview}
           dragAndDrop={{ onMoveTicket: handleBoardMoveTicket }}
           statuses={boardColumnStatuses}
+          hierarchy={{ childrenCountById, ticketCodeById }}
         />
       ) : view === "calendar" ? (
         <CalendarView tickets={filteredTickets} onTicketClick={openPreview} />

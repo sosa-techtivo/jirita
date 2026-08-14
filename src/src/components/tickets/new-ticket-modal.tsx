@@ -337,6 +337,8 @@ export function NewTicketModal({
   onCreated,
   onPreviewDuplicate,
   statuses,
+  parentTicketId,
+  parentTicketLabel,
 }: {
   slug:               string;
   /** Current project's own tickets only — used for Possible Duplicates. */
@@ -351,6 +353,13 @@ export function NewTicketModal({
    *  own is_default open status) comes from, instead of a hardcoded
    *  "backlog". Undefined falls back to FALLBACK_TICKET_STATUSES. */
   statuses?: TicketStatusOption[];
+  /** Ticket Detail's Children section "+ Create" reuses this exact
+   *  creation flow with this one extra field — tickets_guard_parent_
+   *  hierarchy (20260927000000) is the real same-project/one-level-only
+   *  enforcement. Also swaps the header copy to make clear a child is
+   *  being created, not a standalone ticket. */
+  parentTicketId?: string;
+  parentTicketLabel?: string;
 }) {
   const { organization, isDevFallback } = useCurrentUser();
 
@@ -586,6 +595,7 @@ export function NewTicketModal({
         priority,
         labels: labels.length > 0 ? labels : undefined,
         dueDate: dueDate || undefined,
+        parentTicketId,
       });
       if (result.status === "error") {
         setError(result.message);
@@ -680,7 +690,14 @@ export function NewTicketModal({
 
           {/* ── Header ──────────────────────────────────────────────────────── */}
           <div className="flex items-center justify-between px-6 pt-5 pb-4 flex-shrink-0">
-            <h2 className="text-[15px] font-semibold text-slate-900 dark:text-zinc-50">New Ticket</h2>
+            <div>
+              <h2 className="text-[15px] font-semibold text-slate-900 dark:text-zinc-50">New Ticket</h2>
+              {parentTicketId && (
+                <p className="text-[11px] text-slate-400 dark:text-zinc-600 mt-0.5">
+                  Child of {parentTicketLabel ?? "this ticket"}
+                </p>
+              )}
+            </div>
             <button
               onClick={handleClose}
               aria-label="Close"

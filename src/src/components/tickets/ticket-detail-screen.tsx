@@ -13,7 +13,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
-import { ThumbsUp, ThumbsDown, Eye, EyeOff } from "lucide-react";
+import { ThumbsUp, ThumbsDown, Eye, EyeOff, CornerUpLeft, CornerDownRight } from "lucide-react";
 import type { Ticket, TicketStatus, TicketPriority, TicketType } from "@/lib/mock-tickets";
 import { tickets as ALL_TICKETS, getTicketDisplayKey } from "@/lib/mock-tickets";
 import {
@@ -37,6 +37,8 @@ import {
 } from "@/components/tickets/ticket-ui";
 import { BackToTicketsButton } from "@/components/tickets/back-to-tickets-button";
 import { TicketPreviewPanel } from "@/components/tickets/ticket-preview-panel";
+import { NewTicketModal } from "@/components/tickets/new-ticket-modal";
+import { CloseParentConfirmModal } from "@/components/tickets/close-parent-confirm-modal";
 import { AcceptanceCriteriaFields } from "@/components/tickets/acceptance-criteria-fields";
 import { getRegisteredTicketByCode } from "@/lib/pending-tickets";
 import {
@@ -71,6 +73,8 @@ import {
   formatRelativeTime,
   STATUS_FROM_DB,
   FALLBACK_TICKET_STATUSES,
+  loadTicketHierarchy,
+  countOpenChildTickets,
   type TicketComment,
   type CommentReactionType,
   type TicketActivityEvent,
@@ -81,6 +85,8 @@ import {
   type RelatedTicket,
   type TicketRelationKind,
   type TicketStatusOption,
+  type TicketParentSummary,
+  type TicketChildSummary,
 } from "@/lib/tickets";
 import { loadProjectTeam, loadProjectDetail, type OrgMember, type ProjectTeamMember } from "@/lib/projects";
 import { formatAbsoluteDate } from "@/lib/date-format";
@@ -520,9 +526,15 @@ function EditableSidebarStoryPoints({
 function EditableSidebarHours({
   value,
   onChange,
+  isParent = false,
 }: {
   value: number | undefined;
   onChange: (v: number | undefined) => void;
+  /** A parent's own Estimated is derived from its children (tickets_block_
+   *  hours_on_parent, 20260927000000 — even the DB itself rejects a direct
+   *  edit) — `value` is still the real aggregated number, just rendered
+   *  read-only instead of as an editable field. */
+  isParent?: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value?.toString() ?? "");
@@ -539,6 +551,14 @@ function EditableSidebarHours({
     if (e.key === "Enter") { e.preventDefault(); save(); }
     if (e.key === "Escape") cancel();
   };
+
+  if (isParent) {
+    return (
+      <SidebarField label="Estimated">
+        <span title="Derived from this ticket's child tickets">{value !== undefined ? `${value} h` : "—"}</span>
+      </SidebarField>
+    );
+  }
 
   return (
     <SidebarField label="Estimated">
@@ -1095,6 +1115,294 @@ function RelatedTicketsSection({
         />
       )}
     </div>
+  );
+}
+
+// ── Parent / Children (exactly one level) ───────────────────────────────────
+// "Is this ticket a parent" is never stored — see lib/tickets.ts's own
+// loadTicketHierarchy doc. Related Tickets (above) stays completely
+// untouched: this is a separate, dedicated section.
+
+function ChildTicketRow({
+  child,
+  slug,
+  onUnlink,
+}: {
+  child: TicketChildSummary;
+  slug: string;
+  onUnlink: () => void;
+}) {
+  const code = getTicketDisplayKey({ projectSlug: slug, ticketNumber: child.ticketNumber } as Ticket);
+  return (
+    <div className="group relative">
+      <Link
+        href={`/projects/${slug}/tickets/${code}`}
+        className="flex items-center gap-2.5 w-full text-left pl-3 pr-8 py-2.5 rounded-lg transition-colors bg-slate-50/70 dark:bg-zinc-900/40 hover:bg-slate-100 dark:hover:bg-zinc-800/60 border border-slate-100 dark:border-zinc-800"
+      >
+        <TicketTypeIcon type={child.type} className="w-3 h-3 flex-shrink-0" />
+        {/* Sky, not the brand lilac reserved for Parent — same Board
+            hierarchy grammar (Board's ticket-card.tsx), same exact
+            classes. */}
+        <CornerDownRight className="w-3 h-3 flex-shrink-0 text-sky-600 dark:text-sky-400" aria-hidden="true" />
+        <span className="font-mono text-[11px] font-semibold text-sky-600 dark:text-sky-400 flex-shrink-0">
+          {code}
+        </span>
+        <p className="flex-1 min-w-0 text-[13px] text-slate-700 dark:text-zinc-300 truncate">
+          {child.title}
+        </p>
+        <div className="flex-shrink-0 flex items-center gap-1.5">
+          <StatusBadge status={child.status} label={child.statusName} />
+          {/* Avatar only (no name) — same MemberTrigger popover every other
+              assignee avatar in the app opens; `nested` stops the click
+              from bubbling into the row's own Link navigation. Nothing
+              rendered at all when unassigned (no placeholder). */}
+          {child.assigneeProfileId && (
+            <MemberTrigger
+              name={child.assigneeName ?? ""}
+              avatar={child.assigneeAvatar ?? FALLBACK_AVATAR}
+              profileId={child.assigneeProfileId}
+              projectSlug={slug}
+              nested
+              className="flex-shrink-0 rounded-full"
+            >
+              <Avatar
+                src={child.assigneeAvatar ?? FALLBACK_AVATAR}
+                name={child.assigneeName ?? ""}
+                className="w-4 h-4 rounded-full flex-shrink-0 ring-1 ring-white dark:ring-zinc-900"
+              />
+            </MemberTrigger>
+          )}
+        </div>
+      </Link>
+      <button
+        onClick={onUnlink}
+        className="absolute top-1/2 -translate-y-1/2 right-2.5 opacity-0 group-hover:opacity-100 w-4 h-4 flex items-center justify-center rounded text-slate-400 dark:text-zinc-600 hover:text-slate-600 dark:hover:text-zinc-400 hover:bg-slate-200 dark:hover:bg-zinc-700 transition-all"
+        aria-label="Unlink child ticket"
+        title="Unlink (doesn't delete the ticket)"
+      >
+        <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" strokeWidth="3" viewBox="0 0 24 24">
+          <path d="M18 6L6 18M6 6l12 12" strokeLinecap="round" />
+        </svg>
+      </button>
+    </div>
+  );
+}
+
+function ChildrenSection({
+  ticket,
+  slug,
+  childTickets,
+  onChanged,
+  onCreateChild,
+  onError,
+}: {
+  ticket: Ticket;
+  slug: string;
+  /** Named childTickets, not `children` — this is a plain data prop, never
+   *  meant as this component's own JSX children. */
+  childTickets: TicketChildSummary[];
+  /** Called after a successful link/unlink — a database trigger may also
+   *  have just auto-closed/auto-reopened this ticket itself, so the caller
+   *  re-fetches both the hierarchy and the ticket's own row. */
+  onChanged: () => void;
+  onCreateChild: () => void;
+  onError: (message: string) => void;
+}) {
+  const { organization, isDevFallback } = useCurrentUser();
+
+  const [linking, setLinking]         = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  // Same lazy, once-per-open load RelatedTicketsSection's own picker uses.
+  const [projectTickets, setProjectTickets] = useState<Ticket[] | null>(null);
+  const [linkError, setLinkError]     = useState<string | null>(null);
+  const selectorRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!linking) return;
+    const handle = (e: MouseEvent) => {
+      if (selectorRef.current && !selectorRef.current.contains(e.target as Node)) {
+        setLinking(false);
+        setSearchQuery("");
+      }
+    };
+    document.addEventListener("mousedown", handle);
+    return () => document.removeEventListener("mousedown", handle);
+  }, [linking]);
+
+  useEffect(() => {
+    if (linking) searchRef.current?.focus();
+  }, [linking]);
+
+  useEffect(() => {
+    if (!linking || isDevFallback || !organization || projectTickets !== null) return;
+    loadProjectTickets(organization.id, slug).then((result) => {
+      if (result.status === "ready") setProjectTickets(result.tickets);
+    });
+  }, [linking, isDevFallback, organization, slug, projectTickets]);
+
+  // Excludes: this ticket itself; anything already a child of any ticket
+  // (including this one — already shown below, not offered again); and
+  // anything that already has children of its own — both of the latter two
+  // would create a third level, which tickets_guard_parent_hierarchy
+  // (20260927000000) rejects regardless, this just keeps invalid picks out
+  // of the list in the first place.
+  const usedAsParentIds = new Set(
+    (projectTickets ?? []).filter((t) => t.parentTicketId).map((t) => t.parentTicketId as string)
+  );
+  const query = searchQuery.trim().toLowerCase();
+  const searchResults = (projectTickets ?? []).filter((t) => {
+    if (t.id === ticket.id) return false;
+    if (t.parentTicketId) return false;
+    if (usedAsParentIds.has(t.id)) return false;
+    if (!query) return true;
+    return t.title.toLowerCase().includes(query) || getTicketDisplayKey(t).toLowerCase().includes(query);
+  });
+
+  const linkChild = (childTicketId: string) => {
+    if (isDevFallback) return;
+    setLinkError(null);
+    updateTicket(childTicketId, slug, { parentTicketId: ticket.id }).then((result) => {
+      if (result.status === "error") {
+        setLinkError(result.message);
+        return;
+      }
+      setLinking(false);
+      setSearchQuery("");
+      onChanged();
+    }).catch((err) => {
+      setLinkError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
+    });
+  };
+
+  const unlinkChild = (childTicketId: string) => {
+    if (isDevFallback) return;
+    updateTicket(childTicketId, slug, { parentTicketId: null }).then((result) => {
+      if (result.status === "error") {
+        onError(result.message);
+        return;
+      }
+      onChanged();
+    }).catch((err) => {
+      onError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
+    });
+  };
+
+  const closedCount = childTickets.filter((c) => c.statusGroupType === "closed").length;
+  const progressPct = childTickets.length > 0 ? Math.round((closedCount / childTickets.length) * 100) : 0;
+
+  const createLinkActions = (
+    <div className="flex items-center gap-3">
+      <button
+        onClick={onCreateChild}
+        className="text-[11px] font-semibold text-brand-600 dark:text-brand-500 hover:text-brand-700 dark:hover:text-brand-400 transition-colors leading-none"
+      >
+        + Create
+      </button>
+      <button
+        onClick={() => { setLinking((v) => !v); setLinkError(null); }}
+        className="text-[11px] font-semibold text-brand-600 dark:text-brand-500 hover:text-brand-700 dark:hover:text-brand-400 transition-colors leading-none"
+      >
+        + Link
+      </button>
+    </div>
+  );
+
+  const linkPicker = linking && (
+    <div
+      ref={selectorRef}
+      className="mb-3 rounded-lg border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 overflow-hidden shadow-sm"
+    >
+      <div className="flex items-stretch border-b border-slate-100 dark:border-zinc-800">
+        <input
+          ref={searchRef}
+          type="text"
+          placeholder="Search this project's tickets…"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          className="flex-1 min-w-0 text-[16px] sm:text-[13px] px-3 py-2 outline-none bg-transparent text-slate-700 dark:text-zinc-300 placeholder:text-slate-300 dark:placeholder:text-zinc-700"
+          onKeyDown={(e) => {
+            if (e.key === "Escape") { setLinking(false); setSearchQuery(""); }
+          }}
+        />
+      </div>
+      <div className="max-h-52 overflow-y-auto">
+        {searchResults.length === 0 ? (
+          <p className="px-3 py-2.5 text-[12px] text-slate-400 dark:text-zinc-600">
+            {projectTickets === null ? "Loading…" : searchQuery ? "No results" : "No more tickets to link"}
+          </p>
+        ) : (
+          searchResults.slice(0, 6).map((t) => (
+            <button
+              key={t.id}
+              onClick={() => linkChild(t.id)}
+              className="w-full flex items-center gap-2.5 text-left px-3 py-2 hover:bg-slate-50 dark:hover:bg-zinc-800/50 transition-colors border-b border-slate-50 dark:border-zinc-800/30 last:border-0"
+            >
+              <TicketTypeIcon type={t.type} className="w-3 h-3 flex-shrink-0" />
+              <span className="font-mono text-[11px] font-semibold text-slate-400 dark:text-zinc-600 flex-shrink-0">
+                {getTicketDisplayKey(t)}
+              </span>
+              <span className="flex-1 min-w-0 text-[13px] text-slate-700 dark:text-zinc-300 truncate">
+                {t.title}
+              </span>
+              <StatusBadge status={t.status} label={t.statusName} />
+            </button>
+          ))
+        )}
+      </div>
+      {linkError && (
+        <p className="px-3 py-1.5 text-[11px] text-red-600 dark:text-red-400 border-t border-slate-100 dark:border-zinc-800">
+          {linkError}
+        </p>
+      )}
+    </div>
+  );
+
+  // Nothing to show yet — a slim single line (label + the two actions),
+  // never the full structural section chrome, so a ticket that has never
+  // used hierarchy doesn't carry an empty "Children" block around. Becomes
+  // the real structural section below the moment a first child exists.
+  if (childTickets.length === 0) {
+    return (
+      <div>
+        <div className="flex items-center gap-3">
+          <span className={SECTION_LABEL}>Children</span>
+          {createLinkActions}
+        </div>
+        {linkPicker}
+      </div>
+    );
+  }
+
+  return (
+    <CollapsibleSection
+      title="Children"
+      badge={`· ${closedCount}/${childTickets.length} closed`}
+      headerAction={createLinkActions}
+    >
+      {linkPicker}
+
+      {/* Progress — a parent represents exclusively the aggregated work of
+          its children (product rule); this is purely a completion readout,
+          never itself editable. */}
+      <div className="mb-3">
+        <p className="text-[12px] font-medium text-slate-500 dark:text-zinc-400 mb-1.5">
+          {closedCount} / {childTickets.length} closed
+        </p>
+        <div className="h-1 rounded-full bg-slate-100 dark:bg-zinc-800 overflow-hidden">
+          <div
+            className="h-full bg-brand-500 rounded-full transition-all duration-300"
+            style={{ width: `${progressPct}%` }}
+          />
+        </div>
+      </div>
+
+      <div className="space-y-1.5">
+        {childTickets.map((child) => (
+          <ChildTicketRow key={child.id} child={child} slug={slug} onUnlink={() => unlinkChild(child.id)} />
+        ))}
+      </div>
+    </CollapsibleSection>
   );
 }
 
@@ -4081,6 +4389,8 @@ function TimeTrackingSection({
   onUpdateEntry,
   onDeleteEntry,
   onError,
+  isParent = false,
+  aggregatedLoggedHours,
 }: {
   ticketId:       string;
   /** This ticket's own real project — lets each entry's author "avatar"
@@ -4101,6 +4411,14 @@ function TimeTrackingSection({
   onDeleteEntry: (entryId: string) => void;
   /** Called with a message when a save fails — surfaced via the shared error toast. */
   onError:        (message: string) => void;
+  /** A parent ticket can never log time directly on itself (tickets_block_
+   *  hours_on_parent / ticket_time_entries_block_on_parent, 20260927000000)
+   *  — hides "Log Time" and the per-entry list, replacing them with a note
+   *  pointing at aggregatedLoggedHours instead. */
+  isParent?: boolean;
+  /** Sum of every child ticket's own logged time — only meaningful (and
+   *  only passed) when isParent. */
+  aggregatedLoggedHours?: number;
 }) {
   const [logModal,  setLogModal]  = useState(false);
   const [histModal, setHistModal] = useState(false);
@@ -4125,7 +4443,7 @@ function TimeTrackingSection({
     }
   }
 
-  const totalLogged = entries.reduce((s, e) => s + e.hours, 0);
+  const totalLogged = isParent ? (aggregatedLoggedHours ?? 0) : entries.reduce((s, e) => s + e.hours, 0);
   const pct         = estimatedHours ? Math.min(100, Math.round((totalLogged / estimatedHours) * 100)) : 0;
   const variance    = estimatedHours !== undefined ? totalLogged - estimatedHours : null;
   const isOver      = variance !== null && variance > 0;
@@ -4140,16 +4458,18 @@ function TimeTrackingSection({
         title="Time Tracking"
         defaultOpen={true}
         headerAction={
-          <button
-            type="button"
-            onClick={() => setLogModal(true)}
-            className="flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-md bg-brand-500 text-white hover:bg-brand-600 transition-colors shadow-sm shadow-brand-500/30"
-          >
-            <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24" aria-hidden="true">
-              <path strokeLinecap="round" d="M12 4v16m8-8H4" />
-            </svg>
-            Log Time
-          </button>
+          isParent ? undefined : (
+            <button
+              type="button"
+              onClick={() => setLogModal(true)}
+              className="flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-md bg-brand-500 text-white hover:bg-brand-600 transition-colors shadow-sm shadow-brand-500/30"
+            >
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24" aria-hidden="true">
+                <path strokeLinecap="round" d="M12 4v16m8-8H4" />
+              </svg>
+              Log Time
+            </button>
+          )
         }
       >
         {/* Single summary line: "11h logged / 8h estimated" */}
@@ -4193,8 +4513,12 @@ function TimeTrackingSection({
         )}
         {estimatedHours === undefined && <div className="mb-2" />}
 
-        {/* "View N entries →" link */}
-        {entries.length > 0 ? (
+        {/* "View N entries →" link — a parent has none of its own (see
+            isParent doc above); its total is a sum across child tickets,
+            each viewable from the Children section instead. */}
+        {isParent ? (
+          <p className="text-[12px] text-slate-400 dark:text-zinc-600">Aggregated from its child tickets.</p>
+        ) : entries.length > 0 ? (
           <button
             type="button"
             onClick={() => setHistModal(true)}
@@ -4538,6 +4862,29 @@ export function TicketDetailScreen({
   // paste event fires, never to trigger a re-render on its own.
   const focusedEditCommentRef = useRef<{ id: string; stage: (files: File[]) => void } | null>(null);
   const [loggedEntries, setLoggedEntries] = useState<TimeEntry[]>([]);
+  // Parent/Children hierarchy (exactly one level) — see lib/tickets.ts's
+  // own loadTicketHierarchy doc. hierarchyChildren.length > 0 is this
+  // component's one definition of "isParent" (never a stored flag).
+  const [hierarchyParent, setHierarchyParent] = useState<TicketParentSummary | null>(null);
+  const [hierarchyChildren, setHierarchyChildren] = useState<TicketChildSummary[]>([]);
+  const [hierarchyEstimated, setHierarchyEstimated] = useState<number | undefined>(undefined);
+  const [hierarchyLogged, setHierarchyLogged] = useState<number>(0);
+  // "Close anyway" confirmation (Ticket Detail's own status selector) —
+  // set only when a manual close would leave open child tickets behind.
+  const [pendingCloseConfirm, setPendingCloseConfirm] = useState<{ option: TicketStatusOption; openCount: number } | null>(null);
+  // Children section's "+ Create" — reuses NewTicketModal exactly as
+  // tickets-screen.tsx does, just pre-set to this ticket as parent.
+  const [creatingChild, setCreatingChild] = useState(false);
+  const applyHierarchy = (t: Ticket) => {
+    if (isDevFallback) return;
+    loadTicketHierarchy(t).then((r) => {
+      if (r.status !== "ready") return;
+      setHierarchyParent(r.parent);
+      setHierarchyChildren(r.children);
+      setHierarchyEstimated(r.estimatedHours);
+      setHierarchyLogged(r.loggedHours);
+    });
+  };
   // Typed ProjectTeamMember[] (not the narrower OrgMember[] other
   // consumers of this same roster declare) purely to keep `email` around —
   // needed for the @mention picker's real name/email search below; every
@@ -4602,6 +4949,7 @@ export function TicketDetailScreen({
         loadTicketSubscriptionState(result.ticket.id).then((r) => {
           if (detailRequestIdRef.current === requestId) setIsSubscribed(r.status === "ready" ? r.subscribed : false);
         });
+        applyHierarchy(result.ticket);
       } else if (result.status === "not-found") {
         setLoadState("not-found");
       } else {
@@ -4766,6 +5114,15 @@ export function TicketDetailScreen({
   };
 
   const ticketId = ticket.id;
+  // A ticket is a parent purely because at least one other ticket's own
+  // parentTicketId points at it — never a stored flag (see lib/tickets.ts's
+  // loadTicketHierarchy doc). Governs the Estimated/Log Time overrides
+  // below and the progress bar in the Children section.
+  const isParent = hierarchyChildren.length > 0;
+  const effectiveEstimatedHours = isParent ? hierarchyEstimated : ticket.hours;
+  const effectiveLoggedHours = isParent ? hierarchyLogged : loggedEntries.reduce((s, e) => s + e.hours, 0);
+  const effectiveRemainingHours =
+    effectiveEstimatedHours !== undefined ? Math.max(0, effectiveEstimatedHours - effectiveLoggedHours) : undefined;
 
   // Refetches real Activity from Supabase — every field edit, acceptance
   // criteria toggle, attachment upload, and time entry is now logged by a
@@ -4775,6 +5132,19 @@ export function TicketDetailScreen({
   const refreshActivity = () => {
     loadTicketActivity(ticketId).then((r) => {
       if (r.status === "ready") setActivityLog(r.events);
+    });
+  };
+
+  // Re-fetches PARENT/CHILDREN + their aggregated hours after a link/
+  // unlink/create — a database trigger may also have just auto-closed or
+  // auto-reopened this exact ticket (e.g. unlinking the last open child),
+  // so this always re-reads the ticket's own row too rather than assuming
+  // only the hierarchy itself changed.
+  const refreshHierarchy = () => {
+    if (!organization) return;
+    applyHierarchy(ticket);
+    loadTicketByCode(organization.id, slug, ticketCode).then((r) => {
+      if (r.status === "ready") setTicket(r.ticket);
     });
   };
 
@@ -4819,14 +5189,32 @@ export function TicketDetailScreen({
   // `statusGroupType` update (persist()'s success path never re-syncs
   // `ticket` from the server, see its own comment above, so this optimistic
   // update is what actually keeps state correct).
-  const updateStatus = (option: TicketStatusOption) => {
+  const applyStatusChange = (option: TicketStatusOption): Promise<boolean> => {
     const nextStatus = option.legacyEnumValue ? STATUS_FROM_DB[option.legacyEnumValue] ?? ticket.status : ticket.status;
     setTicket((prev) =>
       prev
         ? { ...prev, status: nextStatus, statusId: option.id, statusName: option.name, statusGroupType: option.groupType }
         : prev
     );
-    persist({ statusId: option.id });
+    return persist({ statusId: option.id });
+  };
+
+  // Same open-children check Ticket Preview/Kanban drag-and-drop also run
+  // (countOpenChildTickets, lib/tickets.ts) before letting a manual close
+  // through — this is the "centralize the evaluation" requirement: one
+  // shared query, each surface showing its own matching confirmation UI.
+  const updateStatus = (option: TicketStatusOption) => {
+    if (isDevFallback || option.groupType !== "closed") {
+      applyStatusChange(option);
+      return;
+    }
+    countOpenChildTickets(ticket.id).then((openCount) => {
+      if (openCount > 0) {
+        setPendingCloseConfirm({ option, openCount });
+      } else {
+        applyStatusChange(option);
+      }
+    });
   };
 
   // Acceptance Criteria checkbox — unlike persist() above, this updates
@@ -4872,8 +5260,13 @@ export function TicketDetailScreen({
     return { status: "success", name: result.label.name };
   };
 
-  const totalLogged = loggedEntries.reduce((s, e) => s + e.hours, 0);
-  const remaining   = (ticket.hours ?? 0) - totalLogged;
+  // A parent's own Estimated/Logged/Remaining are derived from its
+  // children (effectiveEstimatedHours/effectiveLoggedHours/
+  // effectiveRemainingHours, computed above) rather than this ticket's own
+  // (always-empty, for a parent — see tickets_block_hours_on_parent/
+  // ticket_time_entries_block_on_parent, 20260927000000) hours/entries.
+  const totalLogged = effectiveLoggedHours;
+  const remaining   = effectiveRemainingHours ?? 0;
 
   const addEntry = (entry: TimeEntry) => {
     setLoggedEntries((prev) => [entry, ...prev]);
@@ -5307,6 +5700,26 @@ export function TicketDetailScreen({
 
             {/* Title */}
             <header className="order-[10]">
+              {/* Parent reference — deliberately placed above the ticket's
+                  own key/status/title, not in the sidebar next to Related
+                  Tickets: a child ticket belonging to another ticket is
+                  structural context that should read before anything else
+                  on the page, not a same-weight relation among others. */}
+              {hierarchyParent && (() => {
+                const parentCode = getTicketDisplayKey({ projectSlug: slug, ticketNumber: hierarchyParent.ticketNumber } as Ticket);
+                return (
+                  <Link
+                    href={`/projects/${slug}/tickets/${parentCode}`}
+                    className="group inline-flex items-center gap-1 mb-2 text-[10px] font-bold uppercase tracking-widest text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300 transition-colors"
+                  >
+                    <CornerUpLeft className="w-3 h-3" aria-hidden="true" />
+                    Parent
+                    <span aria-hidden="true">·</span>
+                    <span className="font-mono">{parentCode}</span>
+                  </Link>
+                );
+              })()}
+
               <div className="flex items-center gap-2.5 mb-3">
                 <span className="relative inline-flex">
                   <button
@@ -5351,11 +5764,11 @@ export function TicketDetailScreen({
                   </>
                 )}
               </p>
-              {ticket.hours !== undefined && (
+              {effectiveEstimatedHours !== undefined && (
                 <div className="hidden sm:flex mt-2 items-center gap-3.5 flex-wrap">
                   <span className="text-[12px] text-slate-400 dark:text-zinc-600">
                     Estimated{" "}
-                    <span className="font-semibold text-slate-600 dark:text-zinc-300">{formatHours(ticket.hours)}</span>
+                    <span className="font-semibold text-slate-600 dark:text-zinc-300">{formatHours(effectiveEstimatedHours)}</span>
                   </span>
                   <span className="text-slate-200 dark:text-zinc-800 select-none" aria-hidden="true">·</span>
                   <span className="text-[12px] text-slate-400 dark:text-zinc-600">
@@ -5365,7 +5778,7 @@ export function TicketDetailScreen({
                   <span className="text-slate-200 dark:text-zinc-800 select-none" aria-hidden="true">·</span>
                   <span className="text-[12px] text-slate-400 dark:text-zinc-600">
                     Remaining{" "}
-                    <span className={`font-semibold ${remaining <= 0 && ticket.hours !== undefined ? "text-amber-600 dark:text-amber-400" : "text-slate-600 dark:text-zinc-300"}`}>
+                    <span className={`font-semibold ${remaining <= 0 && effectiveEstimatedHours !== undefined ? "text-amber-600 dark:text-amber-400" : "text-slate-600 dark:text-zinc-300"}`}>
                       {formatRemainingHours(remaining)}h
                     </span>
                   </span>
@@ -5376,7 +5789,7 @@ export function TicketDetailScreen({
             {/* Quick summary — Mobile only (Due date/Estimated/Logged/Remaining
                 as a compact 2-column grid); Desktop keeps showing these same
                 real values inline in the header line above, unchanged. */}
-            {ticket.hours !== undefined && (
+            {effectiveEstimatedHours !== undefined && (
               <div className="order-[20] sm:hidden mt-3 grid grid-cols-2 gap-x-4 gap-y-2.5 rounded-xl border border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900 shadow-sm shadow-slate-200/40 dark:shadow-black/20 px-3.5 py-3">
                 {ticket.dueDate && (
                   <div>
@@ -5386,7 +5799,7 @@ export function TicketDetailScreen({
                 )}
                 <div>
                   <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600 mb-0.5">Estimated</p>
-                  <p className="text-[13px] font-semibold text-slate-600 dark:text-zinc-300">{formatHours(ticket.hours ?? 0)}</p>
+                  <p className="text-[13px] font-semibold text-slate-600 dark:text-zinc-300">{formatHours(effectiveEstimatedHours ?? 0)}</p>
                 </div>
                 <div>
                   <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600 mb-0.5">Logged</p>
@@ -5430,6 +5843,25 @@ export function TicketDetailScreen({
               />
             </div>
 
+            {/* Children — a ticket that is itself a child can never have
+                children of its own (one level only), so this never renders
+                for one; its own Parent reference lives in the header
+                instead (above). Structural, main-column placement — same
+                weight as Description/Acceptance Criteria/Attachments, never
+                mixed with the sidebar's Related Tickets. */}
+            {!hierarchyParent && (
+              <div className="order-[47]">
+                <ChildrenSection
+                  ticket={ticket}
+                  slug={slug}
+                  childTickets={hierarchyChildren}
+                  onChanged={refreshHierarchy}
+                  onCreateChild={() => setCreatingChild(true)}
+                  onError={showError}
+                />
+              </div>
+            )}
+
             <div className="order-[50]">
               <AttachmentsSection ref={attachmentsSectionRef} ticketId={ticket.id} projectSlug={ticket.projectSlug} isDevFallback={isDevFallback} onUploaded={refreshActivity} onError={showError} />
             </div>
@@ -5447,13 +5879,15 @@ export function TicketDetailScreen({
                 ticketId={ticket.id}
                 projectSlug={ticket.projectSlug}
                 entries={loggedEntries}
-                estimatedHours={ticket.hours}
+                estimatedHours={effectiveEstimatedHours}
                 userId={userId}
                 isAdmin={isAdmin}
                 onAddEntry={addEntry}
                 onUpdateEntry={updateEntry}
                 onDeleteEntry={deleteEntry}
                 onError={showError}
+                isParent={isParent}
+                aggregatedLoggedHours={hierarchyLogged}
               />
             </div>
 
@@ -5608,16 +6042,21 @@ export function TicketDetailScreen({
           </article>
 
           {/* ── Metadata sidebar ─────────────────────────────────────────────── */}
-          {/* `contents` on Mobile flattens these 9 fields into direct children
-              of the row above. Each gets its `order-*` via an `nth-child`
-              arbitrary selector on `aside` itself (rather than a wrapper div
-              per field) specifically because SidebarField/RelatedTicketsSection
-              rely on `last:border-0` — a wrapper would make every field its
-              own single-child parent, breaking that divider. Fields 1–8
-              (Status…Labels) group right after the header/quick-summary;
-              field 9 (Related Tickets) is repositioned after Attachments.
-              Reverts to the exact original sticky column at `sm:`, where
-              `order` has no effect (these are no longer flex siblings). */}
+          {/* `contents` on Mobile flattens these 10 fields into direct
+              children of the row above. Each gets its `order-*` via an
+              `nth-child` arbitrary selector on `aside` itself (rather than a
+              wrapper div per field) specifically because SidebarField/
+              RelatedTicketsSection rely on `last:border-0` — a wrapper would
+              make every field its own single-child parent, breaking that
+              divider. Fields 1–8 (Status…Labels) group right after the
+              header/quick-summary; field 9 (Related Tickets) is
+              repositioned after Attachments. Reverts to the exact original
+              sticky column at `sm:`, where `order` has no effect (these are
+              no longer flex siblings). Parent/Children moved out of this
+              sidebar entirely — see the header breadcrumb and the main
+              column's own Children section below, so hierarchy reads as
+              structural, not as another sidebar relation alongside Related
+              Tickets. */}
           <aside
             className={
               "contents sm:block sm:w-56 sm:flex-shrink-0 sm:sticky sm:top-8 " +
@@ -5667,13 +6106,16 @@ export function TicketDetailScreen({
               onChange={(v) => { update("priority", v); persist({ priority: v }); }}
             />
 
-            {/* Estimated Hours — always visible (fixed product rule). */}
+            {/* Estimated Hours — always visible (fixed product rule); a
+                parent shows its aggregated value read-only instead of its
+                own (structurally impossible once it has children) hours. */}
             <EditableSidebarHours
-              value={ticket.hours}
+              value={effectiveEstimatedHours}
               onChange={(next) => {
                 update("hours", next);
                 persist({ hours: next ?? null });
               }}
+              isParent={isParent}
             />
 
             <EditableSidebarDueDate
@@ -5697,6 +6139,33 @@ export function TicketDetailScreen({
 
         </div>
       </div>
+
+      {pendingCloseConfirm && (
+        <CloseParentConfirmModal
+          ticket={ticket}
+          openChildrenCount={pendingCloseConfirm.openCount}
+          onCancel={() => setPendingCloseConfirm(null)}
+          onConfirm={async () => {
+            const ok = await applyStatusChange(pendingCloseConfirm.option);
+            if (ok) setPendingCloseConfirm(null);
+            return { success: ok };
+          }}
+        />
+      )}
+
+      {creatingChild && (
+        <NewTicketModal
+          slug={slug}
+          tickets={[]}
+          members={members}
+          onClose={() => setCreatingChild(false)}
+          onCreated={() => { setCreatingChild(false); refreshHierarchy(); }}
+          onPreviewDuplicate={() => {}}
+          statuses={statuses}
+          parentTicketId={ticket.id}
+          parentTicketLabel={getTicketDisplayKey(ticket)}
+        />
+      )}
 
       {errorMessage && <ErrorToast message={errorMessage} onDismiss={() => setErrorMessage(null)} />}
       {pasteImageToast && <PasteImageToast state={pasteImageToast} onDismiss={() => setPasteImageToast(null)} />}
