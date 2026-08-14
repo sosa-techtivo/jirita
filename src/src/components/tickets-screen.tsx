@@ -985,7 +985,7 @@ export function TicketsScreen({ slug, projectName }: { slug?: string; projectNam
       ) : view === "insights" ? (
         <InsightsView tickets={filteredTickets} onTicketClick={openTicket} />
       ) : (
-        <ListView tickets={filteredTickets} onTicketClick={openTicket} />
+        <ListView tickets={filteredTickets} onTicketClick={openTicket} hierarchy={{ childrenCountById, ticketCodeById }} />
       )}
 
       {/* No single project to create into in "all projects" mode — the

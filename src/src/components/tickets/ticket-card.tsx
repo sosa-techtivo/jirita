@@ -209,6 +209,8 @@ export function TicketListRow({
   ticket,
   onTicketClick,
   projectBadge,
+  childrenCount = 0,
+  parentCode,
 }: {
   ticket: Ticket;
   onTicketClick: (ticket: Ticket) => void;
@@ -216,6 +218,12 @@ export function TicketListRow({
    *  (e.g. a Member's cross-project work queue) show which project a
    *  ticket belongs to without competing with the title for attention. */
   projectBadge?: ReactNode;
+  /** Same Parent/Child indicators as TicketBoardCard (Board) — see its own
+   *  doc above. 0/undefined (the default) renders no indicator at all,
+   *  same as before this feature; only the main Tickets screen's List tab
+   *  passes real values today. */
+  childrenCount?: number;
+  parentCode?: string;
 }) {
   const isBlocked = ticket.status === "blocked";
 
@@ -227,14 +235,44 @@ export function TicketListRow({
       onClick={() => onTicketClick(ticket)}
       className="group w-full text-left flex items-center gap-4 px-4 py-3.5 hover:bg-slate-50 dark:hover:bg-zinc-800/50 transition-colors"
     >
-      {/* Project badge + ticket ID (+ title) */}
+      {/* Project badge + ticket ID (+ title) — Parent/Child indicators reuse
+          the exact same icon (CornerDownRight) and colors as Board's own
+          TicketBoardCard. */}
       <span className="flex-1 min-w-0 flex flex-col gap-0.5">
         {projectBadge}
         <span className="flex items-baseline gap-1.5 min-w-0">
-          <TicketTypeIcon type={ticket.type} />
-          <span className="text-[11px] font-mono font-medium text-slate-400 dark:text-zinc-500 flex-shrink-0">
-            {getTicketDisplayKey(ticket)}
-          </span>
+          {parentCode ? (
+            <span title={`Child of ${parentCode}`} className="flex items-baseline gap-1.5 text-sky-600 dark:text-sky-400">
+              <TicketTypeIcon type={ticket.type} />
+              <CornerDownRight className="w-3 h-3 flex-shrink-0 self-center" aria-hidden="true" />
+              <span className="text-[11px] font-mono font-medium flex-shrink-0">
+                {getTicketDisplayKey(ticket)}
+              </span>
+            </span>
+          ) : childrenCount > 0 ? (
+            <span className="flex items-baseline gap-1.5 text-brand-600 dark:text-brand-400">
+              <TicketTypeIcon type={ticket.type} />
+              <span className="text-[11px] font-mono font-medium flex-shrink-0">
+                {getTicketDisplayKey(ticket)}
+              </span>
+            </span>
+          ) : (
+            <>
+              <TicketTypeIcon type={ticket.type} />
+              <span className="text-[11px] font-mono font-medium text-slate-400 dark:text-zinc-500 flex-shrink-0">
+                {getTicketDisplayKey(ticket)}
+              </span>
+            </>
+          )}
+          {childrenCount > 0 && (
+            <span
+              title={`${childrenCount} child ticket${childrenCount === 1 ? "" : "s"}`}
+              className="flex items-center gap-0.5 text-brand-600 dark:text-brand-400 flex-shrink-0"
+            >
+              <CornerDownRight className="w-3 h-3 flex-shrink-0" aria-hidden="true" />
+              <span className="text-[11px] font-mono font-medium">{childrenCount}</span>
+            </span>
+          )}
           <span className="text-sm font-medium text-slate-800 dark:text-zinc-100 truncate">
             {ticket.title}
           </span>

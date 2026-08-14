@@ -1,6 +1,6 @@
 import type { Ticket } from "@/lib/mock-tickets";
 import { TicketListRow } from "@/components/tickets/ticket-card";
-import type { OnTicketClick } from "@/components/tickets/board-column";
+import type { OnTicketClick, BoardHierarchyInfo } from "@/components/tickets/board-column";
 
 const GROUPS: { id: string; label: string; statuses: Ticket["status"][] }[] = [
   { id: "backlog", label: "Backlog", statuses: ["backlog"] },
@@ -13,9 +13,14 @@ const GROUPS: { id: string; label: string; statuses: Ticket["status"][] }[] = [
 export function ListView({
   tickets,
   onTicketClick,
+  hierarchy,
 }: {
   tickets: Ticket[];
   onTicketClick: OnTicketClick;
+  /** Parent/Child indicators — see BoardHierarchyInfo (board-column.tsx).
+   *  Undefined for every caller that doesn't pass it, which keeps
+   *  rendering rows with no indicator at all, exactly as before. */
+  hierarchy?: BoardHierarchyInfo;
 }) {
   return (
     <div className="flex-1 overflow-y-auto">
@@ -40,7 +45,13 @@ export function ListView({
               {/* Ticket rows */}
               <div className="rounded-xl border border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900 overflow-hidden divide-y divide-slate-100 dark:divide-zinc-800">
                 {groupTickets.map((ticket) => (
-                  <TicketListRow key={ticket.id} ticket={ticket} onTicketClick={onTicketClick} />
+                  <TicketListRow
+                    key={ticket.id}
+                    ticket={ticket}
+                    onTicketClick={onTicketClick}
+                    childrenCount={hierarchy?.childrenCountById.get(ticket.id) ?? 0}
+                    parentCode={ticket.parentTicketId ? hierarchy?.ticketCodeById.get(ticket.parentTicketId) : undefined}
+                  />
                 ))}
               </div>
             </section>
