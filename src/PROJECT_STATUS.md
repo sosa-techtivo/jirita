@@ -3331,18 +3331,19 @@ flag that tells the two apart: `src/lib/tickets.ts`'s `updateTicket()` sets
 it to `false` on *every* manual status write it performs (including
 "Close anyway"); `recompute_parent_ticket_status` is the only place that
 ever sets it back to `true`, via a direct SQL `UPDATE` that never goes
-through `updateTicket()`. Since Ticket Detail's status selector, the
-Preview/Quick Edit panel, and Kanban drag-and-drop all already funnel
-every real status change through that one `updateTicket()` path, this one
-flag is enough to keep the automation correct no matter which surface
-fired the change — no separate evaluation logic duplicated per surface.
+through `updateTicket()`. Since Ticket Detail's status selector and Kanban
+drag-and-drop both already funnel every real status change through that
+one `updateTicket()` path, this one flag is enough to keep the automation
+correct no matter which surface fired the change — no separate evaluation
+logic duplicated per surface. (The Quick Edit/Preview panel this originally
+also covered no longer exists — see "Ticket Preview panel removed" below;
+Ticket Detail is now the only place a status change happens at all.)
 
-**"Close anyway"** — all three surfaces (Ticket Detail, Preview/Quick Edit,
-Kanban) share one query, `countOpenChildTickets()` (`lib/tickets.ts`):
-before letting a manual close through, they check it and, if the ticket
-still has open children, show `CloseParentConfirmModal` ("This ticket
-still has X open child tickets.", Cancel / Close anyway) instead of saving
-immediately.
+**"Close anyway"** — both surfaces (Ticket Detail, Kanban) share one query,
+`countOpenChildTickets()` (`lib/tickets.ts`): before letting a manual close
+through, they check it and, if the ticket still has open children, show
+`CloseParentConfirmModal` ("This ticket still has X open child tickets.",
+Cancel / Close anyway) instead of saving immediately.
 
 **Which closed status auto-close picks** —
 `20260928000000_parent_autoclose_prefer_normal_completion.sql` redefines
@@ -3362,22 +3363,92 @@ the list. A child in an exceptional closed status (e.g. "Cancelled") still
 counts as CLOSED for deciding *whether* to auto-close the parent — only
 *which* status the parent lands on changed.
 
-**UI** (`ticket-detail-screen.tsx` only — Preview/Kanban only gained the
-confirmation above, not the sections themselves): a `PARENT` field (key +
-title, links to the parent's own detail page) when this ticket has one; a
-`CHILDREN` section (key + title + status per child, `+ Link` an existing
-same-project ticket, `+ Create` reusing `NewTicketModal` with
-`parentTicketId` set, and an unlink icon that clears the link without
-deleting the ticket) always shown, with an `X / Y closed` progress bar.
-`RELATED TICKETS` is a completely separate, untouched section. A parent's
-own Estimated/Logged/Remaining (header, mobile summary, sidebar, Time
-Tracking) are swapped for the sum of its children's Estimated and the sum
-of every logged time entry across them (`loadTicketHierarchy`,
-`lib/tickets.ts`) — the parent's own `hours` column and time entries are
-never read once it has children.
+**UI (Ticket Detail)** — after a follow-up visual pass, Parent/Children no
+longer share the sidebar with Related Tickets (their first placement):
+- A **child's own Parent** is a single-line breadcrumb above the ticket's
+  own key/status/title in the header — `↩ Parent · JIR-43` (key only, no
+  title, no tooltip), clickable straight to the parent's Detail page.
+- A **parent's own Children** moved to the main column, between
+  Acceptance Criteria and Attachments — a real structural `CollapsibleSection`
+  (same chrome as Description/Attachments) once it has at least one child,
+  with `X / Y closed` + a progress bar, `+ Create` (reuses `NewTicketModal`
+  with `parentTicketId` set) and `+ Link` (search this project's other
+  tickets), each row unlink-able without deleting the ticket. A ticket with
+  no parent and no children yet shows only a slim one-line `Children ·
+  + Create · + Link` — never the full empty-state chrome — and a ticket
+  that already has a parent shows no Children section at all (structurally
+  can't have both). `RELATED TICKETS` stayed exactly where and what it was.
+- Estimated shows a small muted `From children` caption under the parent's
+  aggregated value (sidebar) — the only place this ambiguity actually
+  needed calling out; Logged/Remaining don't repeat it.
+
+**Visual hierarchy grammar (Board, List, Ticket Detail)** — brand lilac
+(`text-brand-600 dark:text-brand-400`) means "this ticket is a Parent";
+sky (`text-sky-600 dark:text-sky-400`) means "this ticket is a Child";
+plain tickets get no indicator at all. Same `CornerUpLeft`/`CornerDownRight`
+(lucide) icons everywhere. On Board cards and List rows a parent shows
+`JIR-43 ↳ 2` (key + count, tooltip `N child ticket(s)`) and a child shows
+`↳ JIR-54` (tooltip `Child of JIR-43`) right next to its own key — title,
+type icon, priority, hours, assignee, and status grouping are all
+untouched. Resolved with **zero extra queries**: `tickets-screen.tsx`
+already loads every project ticket with its own `parentTicketId`
+(`lib/tickets.ts`'s `TICKET_COLUMNS`), so two `Map`s
+(`childrenCountById`, `ticketCodeById`) are built once with `useMemo` over
+that same full, unfiltered list and passed down as one `hierarchy` prop
+(`BoardHierarchyInfo`, declared in `board-column.tsx`) through
+`BoardView`/`ListView` → `BoardColumn` → `TicketBoardCard`/`TicketListRow`.
+Counting from the *unfiltered* list (not whatever's currently visible)
+means an active Board/List filter can never undercount a parent's real
+child total.
+
+A parent's own Estimated/Logged/Remaining (header, mobile summary,
+sidebar, Time Tracking) are swapped for the sum of its children's
+Estimated and the sum of every logged time entry across them
+(`loadTicketHierarchy`, `lib/tickets.ts`) — the parent's own `hours`
+column and time entries are never read once it has children.
 
 `tsc --noEmit`, `eslint`, and `next build` all pass clean; not yet clicked
 through in a live browser.
+
+## Ticket Preview panel removed — Board/List navigate straight to Ticket Detail
+
+`ticket-preview-panel.tsx` (the slide-over "peek at a ticket without
+leaving the list" panel, with its own "Expand" button to the full page) is
+deleted outright. Every place that used to open it now navigates straight
+to the ticket's own canonical `/projects/{slug}/tickets/{key}` URL —
+Ticket Detail is the one real, interactive ticket surface app-wide now.
+
+**Entry points converted** (all now `router.push` to Ticket Detail, or a
+real `<Link>` where the row wasn't already a draggable/other-purpose
+element): the Tickets module's own Board/List/Calendar/Timeline/Insights
+tabs, all four Dashboards' navigable ticket rows and 0/1/2+ KPI cards,
+Project Overview (all three roles), Reports (Admin and Project Lead),
+My Work, Ticket Detail's own Related Tickets and Children sections
+(now plain `<Link>`s, same as Parent's own breadcrumb), and the Member
+Profile modal's "Active Tickets" list (which also closes the modal itself
+before navigating, replacing the old panel's `onBeforeNavigate` hook).
+`new-ticket-modal.tsx`'s "Possible Duplicates" click does the same.
+
+**Context preserved on Board/List "Back"** — reused, not rebuilt: the
+sessionStorage save/restore `tickets-screen.tsx` already had for the old
+"Expand" button (`view`, active filter chips, search query, scroll
+position) now fires from the same `openTicket()` every click goes through,
+so returning from Detail restores the exact same view/filters/scroll as
+before. Only `previewTicketId` was dropped from the saved shape (nothing
+left to restore).
+
+**Audited before deleting, nothing unique lost** — the panel was a strict
+functional subset of Ticket Detail (same inline-edit fields, same
+`updateTicket()` write path, read-only Comments/Attachments where Detail
+already has full CRUD/reply-threads/reactions). The only two things it did
+that weren't just "worse than Detail" were both preserved explicitly: the
+"Expand" link's own target URL (now the click target directly) and, in the
+Member Profile modal specifically, closing its host modal before
+navigating away.
+
+`tsc --noEmit`, `eslint`, and `next build` all pass clean across the ~15
+files this touched; `grep -r "TicketPreviewPanel\|previewTicket"` returns
+nothing anywhere in `src/`. Not yet clicked through in a live browser.
 
 ## Metadata — Open Graph / Twitter previews (reset-password, accept-invite)
 

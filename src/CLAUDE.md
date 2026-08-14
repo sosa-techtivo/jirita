@@ -332,7 +332,15 @@ per ticket interaction plus a manual subscribe/unsubscribe icon next to the
 Status field, fanning out through the existing notification system. Reports
 gained a dedicated Admin/Project-Lead-scoped Hours Report with real Excel/PDF
 export, gated by a new Admin-configurable per-Project-Lead financial-access
-permission that also governs Project Settings → Billing visibility.
+permission that also governs Project Settings → Billing visibility. Tickets
+also gained a real, exactly-one-level Parent → Children hierarchy (link/create/
+unlink children, auto-close/auto-reopen the parent, aggregated Estimated/
+Logged hours, a Parent/Child visual grammar — brand lilac vs. sky — shared
+by Ticket Detail, Board, and List). The old Ticket Preview slide-over panel
+was removed outright: every ticket click across the app (Board, List,
+Dashboards, Reports, Project Overview, My Work, Member Profile) now
+navigates straight to the ticket's own Ticket Detail page — no
+intermediate preview step anywhere.
 
 **For the authoritative, feature-by-feature breakdown — every Server
 Action, migration, and real bug fixed along the way, and the exact
