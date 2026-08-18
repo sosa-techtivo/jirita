@@ -39,6 +39,13 @@ import { useOrganizationProjects } from "@/components/organization-projects-prov
 import { getDefaultTicketView } from "@/lib/user-preferences";
 import { SkeletonBlock } from "@/components/dashboard-shared";
 import { useRefreshOnFocusAndVisibility } from "@/components/member-profile-modal";
+import { loadProjectSprints, type Sprint } from "@/lib/sprints";
+import {
+  SprintContextSelector,
+  SPRINT_CONTEXT_ALL,
+  SPRINT_CONTEXT_BACKLOG,
+} from "@/components/tickets/sprint-context-selector";
+import { ManageSprintModal } from "@/components/tickets/manage-sprint-modal";
 
 // ── Persisted state shape ─────────────────────────────────────────────────────
 
@@ -47,6 +54,10 @@ interface SavedState {
   activeChips: string[];
   searchQuery: string;
   scrollTop: number;
+  /** Sprint MVP — "all" | "backlog" | a real sprints.id. Undefined on state
+   *  saved before this feature existed; treated the same as unset (falls
+   *  back to the active-sprint-or-"all" default below). */
+  sprintContext?: string;
 }
 
 function sessionKey(slug: string) {
@@ -288,6 +299,14 @@ export function TicketsScreen({ slug, projectName }: { slug?: string; projectNam
   // ticket's own project, never a different project's row.
   const [statuses, setStatuses] = useState<TicketStatusOption[]>([]);
   const [statusesBySlug, setStatusesBySlug] = useState<Record<string, TicketStatusOption[]>>({});
+  // Sprint MVP — real projects.id (single-project mode only), resolved once
+  // by the same tickets fetch below (loadProjectTickets now also returns
+  // it), and this project's own sprints. Both stay null/empty in org-wide
+  // "all projects" mode, where the sprint selector/Manage Sprint action are
+  // never rendered at all (sprints are inherently project-scoped).
+  const [projectId, setProjectId] = useState<string | null>(null);
+  const [sprints, setSprints] = useState<Sprint[]>([]);
+  const [showManageSprint, setShowManageSprint] = useState(false);
   // Real org members for the Assigned filter's dropdown options only — the
   // filter itself stays unwired (see FilterBar), this just replaces the
   // mock names it used to show. Dev fallback shows none, never mock names.
@@ -309,6 +328,15 @@ export function TicketsScreen({ slug, projectName }: { slug?: string; projectNam
   const [activeChips, setActiveChips] = useState<Set<string>>(
     () => new Set(saved?.activeChips ?? [])
   );
+  // Sprint MVP — "all" | "backlog" | a real sprints.id, restricted to
+  // single-project mode (see filteredTickets below). Restored from the same
+  // per-project sessionStorage slot as view/activeChips/searchQuery when
+  // present; when there's no saved preference yet, an effect below defaults
+  // it to the project's active sprint once sprints finish loading (else
+  // stays "all" so a project that hasn't adopted sprints keeps showing
+  // everything — Board stays usable with no active sprint).
+  const [sprintContext, setSprintContext] = useState<string>(saved?.sprintContext ?? SPRINT_CONTEXT_ALL);
+  const hasAppliedDefaultSprintContextRef = useRef(Boolean(saved?.sprintContext));
   const [searchQuery, setSearchQuery] = useState(saved?.searchQuery ?? "");
   // Controlled here (not local to FilterBar) so they can be combined with
   // the quick-filter chips below in one shared filteredTickets — see
@@ -371,6 +399,7 @@ export function TicketsScreen({ slug, projectName }: { slug?: string; projectNam
         setTicketList(result.tickets);
         if ("statuses" in result) {
           setStatuses(result.statuses);
+          setProjectId(result.projectId);
         } else {
           setStatusesBySlug(result.statusesBySlug);
         }
@@ -425,6 +454,34 @@ export function TicketsScreen({ slug, projectName }: { slug?: string; projectNam
       if (result.status === "ready") setOrgLabels(result.labels.map((l) => l.name));
     });
   }, [isDevFallback, organization]);
+
+  // Sprint MVP — this project's own sprints (single-project mode only;
+  // `projectId` is never set in org-wide "all projects" mode, see runFetch
+  // above). Dev fallback has no real sprints table to query, so it just
+  // stays empty (same "no real data" convention every other real loader in
+  // this component follows in dev fallback).
+  useEffect(() => {
+    if (isDevFallback || !projectId) return;
+    loadProjectSprints(projectId).then((result) => {
+      if (result.status === "ready") setSprints(result.sprints);
+    });
+  }, [isDevFallback, projectId]);
+
+  // Default the sprint context to the project's active sprint the first
+  // time sprints load, but only when there's no saved preference already
+  // (hasAppliedDefaultSprintContextRef starts true whenever `saved` already
+  // carried one) — never overrides a user's own explicit choice, including
+  // one made moments ago via Manage Sprint (activating/closing a sprint
+  // reloads this same `sprints` list). No active sprint: stays "all", so a
+  // project that hasn't adopted sprints yet keeps showing everything.
+  useEffect(() => {
+    if (hasAppliedDefaultSprintContextRef.current) return;
+    if (sprints.length === 0) return;
+    hasAppliedDefaultSprintContextRef.current = true;
+    const active = sprints.find((s) => s.status === "active");
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: a one-time default sync from just-loaded sprint data, guarded by the ref above so it only ever runs once and never overrides a later user choice
+    if (active) setSprintContext(active.id);
+  }, [sprints]);
 
   // Project filter options — org-wide "all projects" mode only (the
   // per-project Tickets page never renders this filter, so there's nothing
@@ -698,6 +755,17 @@ export function TicketsScreen({ slug, projectName }: { slug?: string; projectNam
       // always null in single-project mode, so this is a no-op there.
       if (selectedProjectSlug && t.projectSlug !== selectedProjectSlug) return false;
 
+      // Sprint context — single-project mode only (org-wide "all projects"
+      // has no single sprint concept; the selector itself is never rendered
+      // there, so sprintContext always stays "all" in that mode anyway).
+      if (slug && sprintContext !== SPRINT_CONTEXT_ALL) {
+        if (sprintContext === SPRINT_CONTEXT_BACKLOG) {
+          if (t.sprintId) return false;
+        } else if (t.sprintId !== sprintContext) {
+          return false;
+        }
+      }
+
       if (assigned.length > 0) {
         const value = assigned[0];
         if (value === "me") {
@@ -760,7 +828,7 @@ export function TicketsScreen({ slug, projectName }: { slug?: string; projectNam
   }, [
     ticketList, searchQuery, assigned, priority, status, activeChips, isDevFallback, user.name, userId,
     labelsFilter, reporterFilter, dueDateFilter, createdDateFilter, updatedDateFilter, alertTypes,
-    selectedProjectSlug,
+    selectedProjectSlug, slug, sprintContext,
   ]);
 
   // A ticket click now navigates straight to its own Detail page — no more
@@ -775,6 +843,7 @@ export function TicketsScreen({ slug, projectName }: { slug?: string; projectNam
       activeChips: [...activeChips],
       searchQuery,
       scrollTop: main?.scrollTop ?? 0,
+      sprintContext,
     });
     router.push(`/projects/${ticket.projectSlug}/tickets/${getTicketDisplayKey(ticket)}`);
   }
@@ -886,6 +955,15 @@ export function TicketsScreen({ slug, projectName }: { slug?: string; projectNam
               gives the tabs their own horizontally-scrollable row instead. */}
           <div className="hidden sm:flex items-center gap-3 flex-shrink-0 mt-0.5">
             <ViewSwitcher view={view} onChange={setView} />
+            {slug && projectId && (
+              <SprintContextSelector
+                sprints={sprints}
+                value={sprintContext}
+                onChange={setSprintContext}
+                canManage={user.role !== "MEMBER"}
+                onManage={() => setShowManageSprint(true)}
+              />
+            )}
             {canCreateTicket && (
               <button
                 type="button"
@@ -910,8 +988,17 @@ export function TicketsScreen({ slug, projectName }: { slug?: string; projectNam
               </button>
             </div>
           )}
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto flex items-center gap-3">
             <ViewSwitcher view={view} onChange={setView} />
+            {slug && projectId && (
+              <SprintContextSelector
+                sprints={sprints}
+                value={sprintContext}
+                onChange={setSprintContext}
+                canManage={user.role !== "MEMBER"}
+                onManage={() => setShowManageSprint(true)}
+              />
+            )}
           </div>
         </div>
 
@@ -1000,6 +1087,20 @@ export function TicketsScreen({ slug, projectName }: { slug?: string; projectNam
           onCreated={handleTicketCreated}
           onPreviewDuplicate={handlePreviewDuplicate}
           statuses={statuses}
+        />
+      )}
+
+      {showManageSprint && slug && projectId && (
+        <ManageSprintModal
+          slug={slug}
+          projectId={projectId}
+          tickets={ticketList}
+          sprints={sprints}
+          statuses={statuses}
+          initialSprintId={sprintContext !== SPRINT_CONTEXT_ALL && sprintContext !== SPRINT_CONTEXT_BACKLOG ? sprintContext : null}
+          onClose={() => setShowManageSprint(false)}
+          onSprintsChange={setSprints}
+          onTicketChange={handleTicketUpdated}
         />
       )}
     </div>

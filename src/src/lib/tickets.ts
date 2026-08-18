@@ -20,6 +20,7 @@ import type { ProjectStatus } from "./mock-projects";
 import { formatAbsoluteDate, formatAbsoluteDateTime } from "./date-format";
 import { createNotification } from "./notifications";
 import { generateAttachmentThumbnail } from "./attachment-thumbnail";
+import { loadProjectSprints, type Sprint } from "./sprints";
 // Plain, browser-only DOMPurify — same package/reasoning as
 // components/rich-text/rich-text-utils.ts (never "isomorphic-dompurify").
 // This module already only ever runs client-side (every function here
@@ -28,7 +29,17 @@ import { generateAttachmentThumbnail } from "./attachment-thumbnail";
 import DOMPurify from "dompurify";
 
 export type TicketsResult =
-  | { status: "ready"; tickets: Ticket[]; statuses: TicketStatusOption[] }
+  | {
+      status: "ready";
+      tickets: Ticket[];
+      statuses: TicketStatusOption[];
+      /** Real projects.id (Sprint MVP) — the internal uuid loadProjectTickets
+       *  already resolves from `slug` for its own tickets/statuses queries
+       *  below, surfaced here so a caller can load this project's sprints
+       *  without a second slug->id lookup of its own. Single-project mode
+       *  only — never set by loadOrganizationTickets. */
+      projectId: string;
+    }
   | { status: "not-found" }
   | { status: "error"; message: string };
 
@@ -144,6 +155,7 @@ interface TicketRow {
   created_by: string | null;
   created_at: string;
   parent_ticket_id: string | null;
+  sprint_id: string | null;
 }
 
 // ── Per-project configurable ticket statuses (Fase 2) ──────────────────────
@@ -426,7 +438,7 @@ interface AssigneeProfileRow {
 }
 
 const TICKET_COLUMNS =
-  "id, project_id, ticket_number, title, description, status, status_id, priority, type, assignee_profile_id, milestone, labels, acceptance_criteria, acceptance_criteria_done, story_points, hours, due_date, updated_at, created_by, created_at, parent_ticket_id";
+  "id, project_id, ticket_number, title, description, status, status_id, priority, type, assignee_profile_id, milestone, labels, acceptance_criteria, acceptance_criteria_done, story_points, hours, due_date, updated_at, created_by, created_at, parent_ticket_id, sprint_id";
 
 // Absolute, year-inclusive date — every date-parsing helper across the
 // ticket views (Calendar/Timeline/Insights) parses this exact "MMM D, YYYY"
@@ -501,6 +513,7 @@ function rowToTicket(
     createdByProfileId: row.created_by,
     createdAtISO: row.created_at,
     parentTicketId: row.parent_ticket_id,
+    sprintId: row.sprint_id,
     creator: creatorRow
       ? {
           name: [creatorRow.first_name, creatorRow.last_name].filter(Boolean).join(" ") || "Unnamed",
@@ -570,7 +583,7 @@ export async function loadProjectTickets(organizationId: string, slug: string): 
     rowToTicket(row, slug, row.assignee_profile_id ? assigneesById.get(row.assignee_profile_id) : undefined, undefined, statusesById)
   );
 
-  return { status: "ready", tickets, statuses };
+  return { status: "ready", tickets, statuses, projectId: project.id };
 }
 
 // Shared by loadProjectTickets/loadTicketByCode — same flat-query,
@@ -596,7 +609,17 @@ async function loadProjectTicketStatusesData(
 }
 
 export type TicketByCodeResult =
-  | { status: "ready"; ticket: Ticket; statuses: TicketStatusOption[] }
+  | {
+      status: "ready";
+      ticket: Ticket;
+      statuses: TicketStatusOption[];
+      /** This project's real sprints (every status — Ticket Detail's own
+       *  Sprint field needs the closed ones too, to display/lock a ticket
+       *  already stuck in one, e.g. Sprint 0). Loaded in the same call as
+       *  the ticket itself, same "bundled, not a separate race-prone fetch"
+       *  convention `statuses` above already established. */
+      sprints: Sprint[];
+    }
   | { status: "not-found" }
   | { status: "error"; message: string };
 
@@ -685,7 +708,10 @@ export async function loadTicketByCode(
 
   const { list: statuses, byId: statusesById } = await loadProjectTicketStatusesData(supabase, project.id);
 
-  return { status: "ready", ticket: rowToTicket(row, slug, assigneeRow, creatorRow, statusesById), statuses };
+  const sprintsResult = await loadProjectSprints(project.id);
+  const sprints = sprintsResult.status === "ready" ? sprintsResult.sprints : [];
+
+  return { status: "ready", ticket: rowToTicket(row, slug, assigneeRow, creatorRow, statusesById), statuses, sprints };
 }
 
 // Creates a ticket for the currently-open project only. Ticket Number is
@@ -885,6 +911,11 @@ export interface UpdateTicketInput {
    *  tickets_guard_parent_hierarchy (20260927000000) is the real same-
    *  project/one-level-only enforcement. */
   parentTicketId?: string | null;
+  /** Real tickets.sprint_id (Sprint MVP) — set to a real sprints.id to add
+   *  this ticket to that sprint, or null to return it to the general
+   *  backlog. The only write path Manage Sprint's ticket checklist uses;
+   *  covered by the existing tickets_update RLS policy, no new one needed. */
+  sprintId?: string | null;
 }
 
 export type UpdateTicketResult =
@@ -1004,6 +1035,7 @@ export async function updateTicket(
   if (input.dueDate !== undefined) patch.due_date = input.dueDate;
   if (input.labels !== undefined) patch.labels = input.labels;
   if (input.parentTicketId !== undefined) patch.parent_ticket_id = input.parentTicketId;
+  if (input.sprintId !== undefined) patch.sprint_id = input.sprintId;
   // Same "empty list stored as null" convention createTicket already uses
   // for this column.
   if (input.acceptanceCriteria !== undefined) {

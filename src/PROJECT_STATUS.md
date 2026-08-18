@@ -144,6 +144,38 @@ Most recently, JIRITA gained **persistent ticket subscribers** — a durable "ha
 
 A follow-up pass then added the missing **manual** half: a small outline eye icon next to the ticket's Status field (Ticket Detail's right-column sidebar, immediately right of the status badge — an earlier placement in the top `Ticket ID | Status` header row was moved here one iteration later, presentation-only) lets any user who can already view a ticket subscribe or unsubscribe from it with one click, regardless of whether they've ever interacted with it — `Eye` (filled/active) = subscribed, `EyeOff` (muted) = not, with the same `title`/`aria-label` tooltip convention (`"Subscribe to this ticket"`/`"Unsubscribe from this ticket"`) the rest of this app already uses (there is no dedicated Tooltip component anywhere in JIRITA). Because `ticket_subscribers` had already shipped to the live Supabase project select/insert-only, unsubscribing needed a second, separate migration rather than an edit to the applied one — `20260926000000_ticket_subscribers_self_delete.sql` adds a `ticket_subscribers_delete` RLS policy and grant restricted to `profile_id = auth.uid()`, so a user can only ever remove their own subscription, never anyone else's, and removing one never touches ticket/project access. `setTicketSubscription`/`loadTicketSubscriptionState` (`lib/tickets.ts`) are the only two new functions — the toggle is optimistic (flips immediately, rolls back on a failed write) and deliberately silent: subscribing/unsubscribing never itself sends a notification, and every automatic subscribe rule above is completely unchanged, so a manual unsubscribe stays respected until the user re-subscribes (viewing/refreshing a ticket has never triggered a subscription).
 
+Most recently, JIRITA gained a **Sprint MVP**: a new per-project `sprints`
+entity (`20260929000000_add_sprints.sql`) so Admin/Project Lead can
+organize tickets into a single active sprint instead of one flat backlog,
+shaped after the existing `ticket_statuses` feature (plain RLS-gated
+insert/update for name/dates, two `SECURITY DEFINER` RPCs —
+`activate_sprint`/`close_sprint` — for the operations that carry a real
+cross-row invariant, and a partial unique index enforcing "at most one
+active sprint per project" at the database level). A new nullable
+`tickets.sprint_id` is independent of workflow `status` — `null` means the
+general backlog. Closing a sprint keeps its already-closed tickets
+attached and returns any still-open ones to the backlog; a historical
+backfill gives every project with pre-existing closed tickets a closed
+"Sprint 0" so nothing disappears. The Tickets/Board header gained a sprint
+context selector (reusing the existing `FilterDropdown` component — All
+tickets / Backlog / the active sprint / each closed sprint), defaulting to
+the active sprint the first time one exists, and a "Manage sprint" action
+(Admin/Project Lead only) to create/rename/reschedule a sprint, add/remove
+tickets, activate, and close (with a preview of how many tickets stay vs.
+return to the backlog). Member keeps full read access, no write. Explicitly
+out of scope for this MVP: burndown, velocity, sprint goals, capacity
+planning, new story points, auto start/close by date, sprint-specific
+reports, multiple active sprints, and drag-and-drop between sprints.
+`tsc`/`eslint`/`next build` all pass clean, and the migration has been
+pushed to and confirmed live against the real Supabase project (including
+the Sprint 0 backfill actually running) — only the UI itself hasn't been
+clicked through in a live browser yet. Pushing it also surfaced and fixed
+unrelated pre-existing drift: six earlier migrations
+(`20260922000000`–`20260927000000`) were already live in the real schema
+but still showed as pending in the CLI's own remote tracking table,
+reconciled via a verified-safe `supabase migration repair`. See
+Architecture Status → "Sprints (MVP)" for the full detail.
+
 ---
 
 # Repository Structure
@@ -3761,6 +3793,170 @@ generic gray silhouette.
   a photo exists, so any call site that assumed it was always an inline
   element and wrapped it in a `<p>` produced invalid HTML for a user with
   no photo.
+
+## Sprints (MVP) — schema live and confirmed, UI not yet clicked through
+
+A minimal per-project `sprints` entity so Admin/Project Lead can organize
+tickets into a single active sprint instead of one flat backlog, per an
+explicitly scope-controlled MVP prompt: no burndown/velocity/goals/
+capacity/story points/auto start-close/sprint reports/multiple active
+sprints/drag-and-drop between sprints, and no changes to Calendar/Timeline/
+Insights. Shaped after the existing per-project `ticket_statuses` feature
+(20260830000000 → 20260921000000): plain RLS-gated insert/update for
+simple fields, SECURITY DEFINER RPCs for the two operations with a real
+cross-row invariant.
+
+**Data model** (`supabase/migrations/20260929000000_add_sprints.sql`)
+
+- New `sprints` table: `id, project_id, name, status ('planned'|'active'|
+  'closed', default 'planned'), start_date, end_date, created_by,
+  created_at, updated_at`. `start_date`/`end_date` are purely informational
+  — nothing reads them to drive status automatically.
+- A partial unique index (`sprints_one_active_per_project`, `where status =
+  'active'`) is the real "at most one active sprint per project" guarantee
+  — the same defense-in-depth shape as
+  `ticket_statuses_one_default_per_project`, not just an RPC-level check.
+- New nullable `tickets.sprint_id` (FK to `sprints`, `on delete set null`).
+  `sprint_id = null` is the general backlog; a ticket's `sprint_id` is
+  completely independent of its workflow `status` (a ticket can be
+  Backlog-status and still belong to a sprint, or any other status and
+  belong to none).
+- Historical backfill, same migration, idempotent (guarded by a
+  not-exists-by-name check, safe to re-run): every project with at least
+  one closed ticket (`ticket_statuses.group_type = 'closed'`, this app's
+  own established open/closed source — see `isTicketClosed()` in
+  `lib/tickets.ts` — never the raw `status = 'done'` literal) and no
+  `sprint_id` yet gets one closed `Sprint 0`, claiming exactly those
+  tickets. Open historical tickets are left alone (`sprint_id` stays
+  null).
+
+**Authorization**
+
+- `sprints_select`: any project viewer (`can_view_project`), same as
+  `tickets_select` — Member included, read-only.
+- `sprints_insert`/`sprints_update`: org-wide Admin or Project Lead only
+  (`is_org_admin_or_lead`), same trust level `ticket_statuses_insert`/
+  `_update` already grant. Only `name`/`start_date`/`end_date` are ever
+  plain-UPDATE-able (`revoke update … grant update (name, start_date,
+  end_date)`, same column-restricted-grant convention
+  `ticket_statuses_management`, 20260920000000, established) — `status`
+  only ever changes through the two RPCs below. No delete policy (sprint
+  deletion/cancellation is out of this MVP's scope).
+- Adding/removing a ticket from a sprint is just writing `tickets.
+  sprint_id` — already covered by the existing `tickets_update` policy
+  (assignee, any real project member, or org admin/lead), no new RLS
+  needed. Member's "view only" restriction on sprints is therefore
+  UI-level: Manage Sprint (the only place `sprint_id` is edited from) is
+  hidden entirely for Member.
+
+**`activate_sprint(p_sprint_id)`** — no-op if already active; raises if the
+sprint is closed; raises if a *different* sprint in the same project is
+already active ("Close it before activating a new one" — a deliberate hard
+error, not a silent auto-close of the other one, which would silently
+return its own open tickets to the backlog as a side effect).
+
+**`close_sprint(p_sprint_id)`** — raises if already closed; allowed from
+either `planned` or `active` (closing a never-activated sprint costs
+nothing extra, and there's no separate cancel/delete action in this MVP).
+Sets `status = 'closed'`, then moves every ticket in that sprint whose
+current status is `open` back to the backlog (`sprint_id = null`); closed
+tickets keep their `sprint_id`, preserving history. Never touches
+`parent_ticket_id`.
+
+**Backend** (`src/lib/sprints.ts`, new file) — mirrors the `TicketStatusOption`
+section of `lib/tickets.ts`: `loadProjectSprints`, `createSprint`,
+`updateSprint`, `activateSprint`/`closeSprint` (thin RPC wrappers). `Ticket`
+(`mock-tickets.ts`) gained `sprintId`; `lib/tickets.ts`'s `TICKET_COLUMNS`/
+`rowToTicket`/`UpdateTicketInput`/`updateTicket` all thread it through —
+adding/removing a ticket from a sprint is just another `updateTicket({
+sprintId })` call, no new write path. `loadProjectTickets`'s ready result
+also now returns the resolved `projectId` (previously internal-only),
+since `tickets-screen.tsx` needs it to load this project's sprints without
+a second slug→id lookup.
+
+**UI** (`src/components/tickets/sprint-context-selector.tsx`,
+`manage-sprint-modal.tsx`, both new; `tickets-screen.tsx` modified) —
+single-project Tickets/Board only (`slug` present; sprints don't apply to
+the org-wide "all projects" `/tickets` route). A `FilterDropdown` (the same
+component `filter-bar.tsx` already uses for Assigned/Priority/Status, not
+a bespoke dropdown) next to the view tabs offers All tickets / Backlog /
+the active sprint / each closed sprint; selecting one filters every view
+(Board/List/Calendar/Timeline/Insights all read the same `filteredTickets`,
+so they always agree). Defaults to the project's active sprint the first
+time sprints load, but only when there's no saved preference yet
+(persisted in the same per-project `sessionStorage` slot as
+view/filters) — no active sprint means it stays "All tickets," so a
+project that hasn't adopted sprints yet keeps the Board fully usable. A
+"Manage sprint" button next to the selector (Admin/Project Lead only)
+opens `ManageSprintModal`: create; rename/reschedule; Activate; Close
+Sprint (shows a "N closed tickets stay, M open tickets return to backlog"
+preview, computed client-side from already-loaded tickets, before
+confirming). New Ticket creation deliberately has no sprint picker of its
+own — a ticket only ever joins a sprint via this modal's own selector.
+
+**UX refinement**: the ticket selector was rebuilt from a flat searchable
+checkbox list into a two-column dual-list (candidates left, sprint tickets
+right — the same pattern already used in a sibling Techtivo product,
+PadelClub), a pure UI change with no new migration/RLS and no change to
+how a ticket joins/leaves a sprint (still the same `updateTicket({
+sprintId })` call). Left column groups unassigned tickets (`sprint_id`
+null) into **Suggested** (open, non-Backlog status — with an "Add all
+suggested" action that adds exactly what's currently visible, respecting
+an active search) and **Backlog** (Backlog status specifically, matched by
+the real `ticket_statuses.legacy_enum_value = 'backlog'`, never the
+display name, so a renamed Backlog status keeps classifying correctly).
+Tickets belonging to a *different* sprint (including closed ones, Sprint 0
+included) are never shown in that default grouping — they surface only as
+an explicit, informational search result, tagged with which sprint/status
+they're in, and are read-only/disabled (no reassign action) when that
+other sprint is closed, so a closed sprint's history can never be
+disturbed from here. Right column always shows the sprint's current
+tickets in full (`Sprint tickets · N`, independent of the search box),
+each with a one-click remove. The modal widens to `max-w-3xl` only for
+this detail view (List/Create stay at the original width); each column
+scrolls independently and is capped so the modal itself never grows
+unbounded. `tsc`/`eslint`/`next build` all pass clean.
+
+**Ticket Detail gained its own editable Sprint field**, in the sidebar
+right after Labels and before Related Tickets (`EditableSidebarSprint`,
+`ticket-detail-screen.tsx`) — same `SidebarField`/click-to-edit `<select>`
+pattern Status/Type/Priority already use, no new UI primitive. Shows the
+current sprint's name, or "Backlog" for `sprint_id = null`; a ticket
+already sitting in a closed sprint (Sprint 0 included) shows a small
+"Closed" badge and is locked read-only for every role, Admin/Project Lead
+included — closed-sprint history can never be disturbed from here, same
+rule the dual-list selector's own "In other sprints" results already
+enforce. Editable only for Admin/Project Lead (`user.role !== "MEMBER"`,
+mirroring Manage Sprint's own UI gate); Member sees it read-only. The
+dropdown only ever offers Backlog plus the project's non-closed sprints
+(active + planned) — never a closed one as a new destination. Persists
+through the exact same `updateTicket({ sprintId })` write Manage Sprint's
+own selector already uses (no second assignment path), which only ever
+touches the `sprint_id` column — changing Sprint can never change Status.
+`loadTicketByCode` (`lib/tickets.ts`) now also returns this project's real
+sprints, loaded in the same call as the ticket itself (same "bundled, not
+a second race-prone fetch" convention `statuses` already used there) — no
+new migration, no new RLS, no new Sprint-assignment logic. `tsc`/`eslint`/
+`next build` all pass clean.
+
+**Passes `tsc --noEmit`, `next build`, and lint** (no new errors/warnings).
+`20260929000000_add_sprints.sql` has been pushed to the live Supabase
+project (`npm run db:push`) and confirmed via a live, read-only probe: the
+`sprints` table and `tickets.sprint_id` both resolve, and the Sprint 0
+historical backfill actually ran, correctly creating one closed `Sprint 0`
+per project with pre-existing closed tickets. Along the way, this push
+surfaced and repaired unrelated pre-existing drift: migrations
+`20260922000000`–`20260927000000` (attachment thumbnails, financial
+access, ticket subscribers, ticket parent/child hierarchy) turned out to
+already be live in the actual schema but were still marked pending in the
+CLI's own remote tracking table — evidently applied directly at some
+earlier point rather than through `db push`. Verified read-only (each
+migration's real column/table probed directly) before reconciling via
+`supabase migration repair --status applied` (metadata-only, no SQL
+re-run); `20260928000000` was left for `db push` itself to apply for real
+(a `create or replace function`, safe to (re)run either way) rather than
+assumed. The Sprint MVP's own UI (selector, Manage Sprint modal) has not
+yet been clicked through in a live browser.
 
 ## Still mock
 

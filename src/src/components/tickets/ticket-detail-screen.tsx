@@ -88,6 +88,7 @@ import {
   type TicketChildSummary,
 } from "@/lib/tickets";
 import { loadProjectTeam, loadProjectDetail, type OrgMember, type ProjectTeamMember } from "@/lib/projects";
+import type { Sprint } from "@/lib/sprints";
 import { formatAbsoluteDate } from "@/lib/date-format";
 import { FALLBACK_AVATAR } from "@/lib/current-user";
 import { formatHours } from "@/components/time-tracking-screen";
@@ -805,6 +806,98 @@ function EditableSidebarLabels({
           </div>
         )}
       </div>
+    </SidebarField>
+  );
+}
+
+// ── Editable: Sidebar Sprint ─────────────────────────────────────────────────
+// Sprint MVP — tickets.sprint_id, read/write reuses the exact same
+// updateTicket({ sprintId }) path Manage Sprint's own dual-list selector
+// already uses (tickets-screen.tsx / manage-sprint-modal.tsx); no second
+// assignment implementation. `sprintId = null` is "Backlog" — this never
+// touches `status`, which stays whatever it already was (a ticket's
+// workflow status and its sprint are two completely independent facts).
+
+const SPRINT_BACKLOG_VALUE = "__backlog__";
+
+function EditableSidebarSprint({
+  sprintId,
+  sprints,
+  canEdit,
+  onChange,
+}: {
+  /** tickets.sprint_id — null/undefined means the general backlog. */
+  sprintId?: string | null;
+  /** This project's real sprints, every status included (not just open
+   *  ones) — the closed ones are never offered as a new destination below,
+   *  but are still needed to resolve/display a ticket already locked into
+   *  one, e.g. Sprint 0. */
+  sprints: Sprint[];
+  /** Admin/Project Lead only (mirrors Manage Sprint's own UI gate,
+   *  sprint-context-selector.tsx) — Member sees this field read-only.
+   *  tickets.sprint_id itself is still governed by the same tickets_update
+   *  RLS policy as every other field here regardless of this prop; this is
+   *  purely the UI-level mirror of that same product decision, not a
+   *  second authorization mechanism. */
+  canEdit: boolean;
+  onChange: (sprintId: string | null) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const ref = useRef<HTMLSelectElement>(null);
+  useEffect(() => { if (editing) ref.current?.focus(); }, [editing]);
+
+  const currentSprint = sprintId ? sprints.find((s) => s.id === sprintId) : undefined;
+  // A ticket already sitting in a closed sprint (Sprint 0 included) is
+  // always locked, regardless of role — closed-sprint history can never be
+  // disturbed from here, the same rule Manage Sprint's own dual-list
+  // enforces for its "In other sprints" search results.
+  const isLockedToClosedSprint = currentSprint?.status === "closed";
+  const canActuallyEdit = canEdit && !isLockedToClosedSprint;
+
+  // Valid new destinations: Backlog, plus every non-closed sprint (the
+  // active one and any planned ones) — never a closed sprint, Sprint 0
+  // included, as a target to move *into*.
+  const eligibleSprints = sprints
+    .filter((s) => s.status !== "closed")
+    .sort((a, b) => (a.status === "active" ? -1 : b.status === "active" ? 1 : b.createdAt.localeCompare(a.createdAt)));
+
+  return (
+    <SidebarField label="Sprint">
+      {editing ? (
+        <select
+          ref={ref}
+          className={INPUT_BASE + " py-0.5 text-[16px] sm:text-[12px]"}
+          value={sprintId ?? SPRINT_BACKLOG_VALUE}
+          onChange={(e) => {
+            onChange(e.target.value === SPRINT_BACKLOG_VALUE ? null : e.target.value);
+            setEditing(false);
+          }}
+          onBlur={() => setEditing(false)}
+          onKeyDown={(e) => { if (e.key === "Escape") setEditing(false); }}
+        >
+          <option value={SPRINT_BACKLOG_VALUE}>Backlog</option>
+          {eligibleSprints.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.name}{s.status === "active" ? " (Active)" : ""}
+            </option>
+          ))}
+        </select>
+      ) : (
+        <div
+          className={`group flex items-center gap-1.5 ${canActuallyEdit ? "cursor-pointer" : ""}`}
+          onClick={canActuallyEdit ? () => setEditing(true) : undefined}
+        >
+          <span className="text-slate-700 dark:text-zinc-300">{currentSprint ? currentSprint.name : "Backlog"}</span>
+          {isLockedToClosedSprint && (
+            <span className="inline-flex items-center px-1.5 py-0.5 rounded-md text-[10px] font-semibold bg-slate-100 text-slate-500 dark:bg-zinc-800 dark:text-zinc-400">
+              Closed
+            </span>
+          )}
+          {canActuallyEdit && (
+            <button className={EDIT_BTN} aria-label="Edit sprint"><PencilIcon /></button>
+          )}
+        </div>
+      )}
     </SidebarField>
   );
 }
@@ -4671,7 +4764,7 @@ function TicketDetailSkeletonSection({ titleWidth, children }: { titleWidth: str
   );
 }
 
-const SIDEBAR_SKELETON_FIELDS = ["Status", "Assignee", "Type", "Priority", "Estimated", "Due Date", "Labels", "Related Tickets"];
+const SIDEBAR_SKELETON_FIELDS = ["Status", "Assignee", "Type", "Priority", "Estimated", "Due Date", "Labels", "Sprint", "Related Tickets"];
 
 function TicketDetailSkeleton() {
   return (
@@ -4805,6 +4898,13 @@ export function TicketDetailScreen({
   // the old fixed 6-value enum. Dev fallback keeps EditableStatusBadge's
   // own FALLBACK_TICKET_STATUSES default.
   const [statuses, setStatuses] = useState<TicketStatusOption[]>([]);
+  // Sprint MVP — this project's real sprints (every status), bundled into
+  // the same loadTicketByCode result as `ticket`/`statuses` above rather
+  // than a separate fetch, so the Sprint field's own currentSprint lookup
+  // can never briefly resolve wrong while sprints are still loading. Dev
+  // fallback stays empty (no real sprints table to query) — same "Backlog"
+  // display as a real ticket genuinely outside any sprint.
+  const [sprints, setSprints] = useState<Sprint[]>([]);
   // Real Comments/Activity — start empty and stay empty unless real rows
   // exist, in every mode (including dev fallback — no mock people, ever).
   const [comments, setComments] = useState<TicketComment[]>([]);
@@ -4924,6 +5024,7 @@ export function TicketDetailScreen({
       if (result.status === "ready") {
         setTicket(result.ticket);
         setStatuses(result.statuses);
+        setSprints(result.sprints);
         setLoadState("ready");
         loadTicketComments(result.ticket.id).then((r) => {
           if (detailRequestIdRef.current === requestId) setComments(r.status === "ready" ? r.comments : []);
@@ -6036,8 +6137,8 @@ export function TicketDetailScreen({
               wrapper div per field) specifically because SidebarField/
               RelatedTicketsSection rely on `last:border-0` — a wrapper would
               make every field its own single-child parent, breaking that
-              divider. Fields 1–8 (Status…Labels) group right after the
-              header/quick-summary; field 9 (Related Tickets) is
+              divider. Fields 1–9 (Status…Sprint) group right after the
+              header/quick-summary; field 10 (Related Tickets) is
               repositioned after Attachments. Reverts to the exact original
               sticky column at `sm:`, where `order` has no effect (these are
               no longer flex siblings). Parent/Children moved out of this
@@ -6052,7 +6153,7 @@ export function TicketDetailScreen({
               "[&>*:nth-child(3)]:order-[30] [&>*:nth-child(4)]:order-[30] " +
               "[&>*:nth-child(5)]:order-[30] [&>*:nth-child(6)]:order-[30] " +
               "[&>*:nth-child(7)]:order-[30] [&>*:nth-child(8)]:order-[30] " +
-              "[&>*:nth-child(9)]:order-[60]"
+              "[&>*:nth-child(9)]:order-[30] [&>*:nth-child(10)]:order-[60]"
             }
           >
 
@@ -6119,6 +6220,13 @@ export function TicketDetailScreen({
               onChange={(v) => { update("labels", v); persist({ labels: v }); }}
               allLabels={allLabelOptions}
               onCreateLabel={createLabel}
+            />
+
+            <EditableSidebarSprint
+              sprintId={ticket.sprintId}
+              sprints={sprints}
+              canEdit={user.role !== "MEMBER"}
+              onChange={(v) => { update("sprintId", v); persist({ sprintId: v }); }}
             />
 
             <RelatedTicketsSection ticketId={ticket.id} slug={slug} onChanged={refreshActivity} onError={showError} />

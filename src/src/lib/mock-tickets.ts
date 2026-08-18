@@ -82,6 +82,11 @@ export interface Ticket {
    *  any other ticket's own parentTicketId points at it, resolved on
    *  demand by loadTicketHierarchy in lib/tickets.ts. */
   parentTicketId?: string | null;
+  /** Real tickets.sprint_id (Sprint MVP) — the sprint this ticket currently
+   *  belongs to, or null/undefined for the general backlog. Never mixed up
+   *  with `status`: a ticket can be Backlog-status and still belong to a
+   *  sprint, or any other status and belong to no sprint at all. */
+  sprintId?: string | null;
 }
 
 // Real (Supabase-backed) projects don't exist in mock-projects.ts, so
