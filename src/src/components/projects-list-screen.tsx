@@ -705,7 +705,7 @@ function ManagedProjectsScreen() {
     <div className="max-w-4xl mx-auto px-4 sm:px-8 py-10">
       <div className="flex items-center justify-between gap-4">
         <h1 className="text-xl font-bold text-slate-900 tracking-tight dark:text-zinc-50">Projects</h1>
-        {canCreateProject && !isProjectLead && (
+        {canCreateProject && (
           <button
             type="button"
             onClick={() => setShowCreateModal(true)}
@@ -1212,13 +1212,6 @@ function ProjectMenu({
 
 function EmptyState({ hasAnyProjects, onCreate }: { hasAnyProjects: boolean; onCreate: () => void }) {
   const { user } = useCurrentUser();
-  // Mirrors the header button's role gate exactly (isProjectLead ? "+ New
-  // Ticket" (no-op) : "+ Create Project") — previously this button always
-  // opened the create modal regardless of role, so a Project Lead landing
-  // on an empty filtered view could create a project from here even though
-  // the header's equivalent action for their role is a ticket, not a
-  // project.
-  const isProjectLead = user.role === "PROJECT_LEAD";
   return (
     <div className="flex flex-col items-center justify-center text-center py-20 px-4">
       <div className="w-10 h-10 rounded-lg border border-slate-200 flex items-center justify-center text-slate-400 mb-4 dark:border-zinc-700 dark:text-zinc-500">
@@ -1233,7 +1226,7 @@ function EmptyState({ hasAnyProjects, onCreate }: { hasAnyProjects: boolean; onC
       <p className="text-sm text-slate-400 mt-1 max-w-xs dark:text-zinc-500">
         {hasAnyProjects ? "Try adjusting your search or filters." : "Get started by creating your first project."}
       </p>
-      {canManage(user.role) && !isProjectLead && (
+      {canManage(user.role) && (
         <button
           type="button"
           onClick={onCreate}

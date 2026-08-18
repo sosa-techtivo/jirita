@@ -403,6 +403,24 @@ export async function loadOrganizationProjects(
 // product requirement), slug/project_code auto-derived from the name since
 // the create form doesn't collect them. Leaves owner_profile_id/category/
 // health at their column defaults — not part of this flow.
+//
+// Deliberately two separate requests, not a single chained
+// `.insert(...).select().single()` (which compiles to one INSERT ...
+// RETURNING): a project's SELECT visibility for a non-admin creator
+// (Project Lead) depends on projects_add_creator_membership
+// (20260803000000, an AFTER INSERT trigger) having already inserted their
+// own project_memberships row — Postgres applies the table's SELECT
+// policy to a RETURNING clause the same as it would a plain SELECT, and
+// this is the very first real path where that visibility depends on a
+// side effect of the same statement rather than the row's own columns
+// (every other RETURNING call site in this codebase is Admin-only or
+// keys off a column the inserting user already owns). Splitting into an
+// insert, then a separate follow-up read, removes any dependency on
+// exactly when a same-statement AFTER trigger's effects become visible to
+// that statement's own RETURNING output — the second request is a
+// genuinely new statement, issued only once the first has already
+// completed, so the trigger's row is unambiguously committed and visible
+// by the time it runs.
 export async function createProject(params: {
   organizationId: string;
   name: string;
@@ -410,28 +428,37 @@ export async function createProject(params: {
 }): Promise<CreateProjectResult> {
   const supabase = getSupabaseBrowserClient();
   const name = params.name.trim();
+  const slug = slugify(name);
+
+  const { error: insertError } = await supabase.from("projects").insert({
+    organization_id: params.organizationId,
+    slug,
+    name,
+    project_code: generateProjectCode(name),
+    description: params.description.trim() || null,
+    status: "active",
+  });
+
+  if (insertError) {
+    logDev("projects insert failed", insertError);
+    // 23505 = unique_violation — collides with (organization_id, slug) or
+    // (organization_id, project_code), both derived from the same name.
+    if (insertError.code === "23505") {
+      return { status: "error", message: "A project with this name already exists in your organization." };
+    }
+    return { status: "error", message: insertError.message };
+  }
 
   const { data, error } = await supabase
     .from("projects")
-    .insert({
-      organization_id: params.organizationId,
-      slug: slugify(name),
-      name,
-      project_code: generateProjectCode(name),
-      description: params.description.trim() || null,
-      status: "active",
-    })
     .select(PROJECT_COLUMNS)
+    .eq("organization_id", params.organizationId)
+    .eq("slug", slug)
     .single<ProjectRow>();
 
-  if (error) {
-    logDev("projects insert failed", error);
-    // 23505 = unique_violation — collides with (organization_id, slug) or
-    // (organization_id, project_code), both derived from the same name.
-    if (error.code === "23505") {
-      return { status: "error", message: "A project with this name already exists in your organization." };
-    }
-    return { status: "error", message: error.message };
+  if (error || !data) {
+    logDev("project read-back after creation failed", error);
+    return { status: "error", message: error?.message ?? "Project was created but could not be loaded." };
   }
 
   return { status: "success", project: rowToProjectSummary(data, undefined) };

@@ -176,6 +176,84 @@ but still showed as pending in the CLI's own remote tracking table,
 reconciled via a verified-safe `supabase migration repair`. See
 Architecture Status → "Sprints (MVP)" for the full detail.
 
+Most recently, a real, reported bug was fixed: a **Project Lead could not
+create a project** — every attempt failed with "new row violates row-level
+security policy for table projects," even though the Sidebar's and
+Dashboard's own "+ New Project" quick actions already showed the option to
+that role (`canManage(user.role)`, which already includes `PROJECT_LEAD`).
+Root cause: the live `projects_insert` RLS policy did not match this
+repo's own migration history (`20260708000000_mvp_schema.sql` already
+declares `with check (is_org_admin_or_lead(organization_id))`, which
+already covers Project Lead) — the same class of live-vs-repo drift
+already found and repaired for six unrelated migrations while pushing the
+Sprint MVP migration, immediately above. A new migration,
+`20260930000000_fix_projects_insert_rls_project_lead.sql`, re-asserts that
+exact policy (drop-then-recreate, reusing `is_org_admin_or_lead` verbatim
+— no new helper, no duplicated role logic); `projects_select`/`_update`/
+`_delete` were left completely untouched. Separately, `createProject`
+(`lib/projects.ts`) was hardened: it previously chained
+`.insert(...).select().single()` (one `INSERT ... RETURNING`), whose
+RETURNING output Postgres filters through the table's own SELECT policy —
+for a Project Lead (unlike Admin, whose visibility never depends on
+`project_memberships`), that visibility hinges on
+`projects_add_creator_membership` (`20260803000000`, an `AFTER INSERT`
+trigger) having already inserted their own membership row within that same
+statement. Now split into two separate requests — a plain insert, then an
+independent follow-up `select` by `(organization_id, slug)` — removing any
+dependency on that same-statement trigger/RETURNING timing entirely. Also
+fixed: `projects-list-screen.tsx`'s own "+ Create Project" button (header)
+and its empty-state equivalent both carried an extra `&& !isProjectLead`
+on top of `canManage(user.role)` — a deliberate-at-the-time product
+decision from an earlier, unrelated pass that this task's own requirements
+explicitly supersede; removed from both, so all three real entry points
+(Sidebar, Dashboard, `/projects`) now gate identically on `canManage`
+alone. Verified live end-to-end, not just by code review: a throwaway
+test auth user was created with a real `organization_memberships` row
+(`role = 'project_lead'`), signed in for a real session, and used to
+reproduce `createProject`'s exact two-step flow directly against the live
+Supabase project — insert succeeded, the read-back returned the row
+immediately, `project_memberships` held the creator's own row, and a
+second pass with that same user flipped to `role = 'member'` was correctly
+rejected with the identical RLS error the original bug report described.
+The test's auth user/profile/organization_membership were deleted
+immediately after; the test **project** itself silently failed to delete
+in that same cleanup pass (its own delete call's error was never checked)
+— see the very next entry below, which both explains why and cleans it up
+for real. `tsc`/`eslint`/`next build` all pass clean.
+
+Immediately after, that same leftover test project turned out to be
+**un-deletable through the app itself** ("Delete Project" failed with
+"Cannot delete the only closed status in this project"), exposing a
+second real, pre-existing bug: deleting a project has likely never
+actually succeeded for any project with real `ticket_statuses`/
+`project_memberships` rows — i.e. every real project. Root cause: `ON
+DELETE CASCADE` from `projects` runs real DELETEs on every dependent
+table, which fire that table's own `BEFORE DELETE` triggers exactly as if
+a user had deleted that one row standalone (the `projects` row is already
+gone from its table by the time those triggers run — see
+`20260903000000`'s own trace of this general behavior, which already
+fixed the identical class of bug for `project_notes`/`ticket_relations`).
+Two guards never anticipated running as part of a larger project teardown:
+`ticket_statuses_block_unsafe_delete` (`20260920000000` — "every project
+needs at least one open and one closed status," a real invariant for a
+project that keeps existing, but blocking once every status is being
+removed together because the project itself is being deleted) and
+`project_memberships_block_unsafe_delete` (`20260910000000` — refuses to
+remove the project's only active Project Lead or a member with open
+tickets, same problem). Fixed with the identical existence-guard pattern
+`20260903000000` already established: `create or replace function` on
+both, adding `if not exists (select 1 from public.projects where id =
+old.project_id) then return old; end if;` at the top of each — skips the
+safety check only when this row's own project no longer exists (which
+only happens as a cascade side effect of deleting that project, never
+from a standalone status/membership delete) — no RLS change, no other
+behavior change. New migration:
+`20260930010000_fix_project_delete_cascade_guard_conflicts.sql`, pushed
+to and confirmed live: the leftover orphaned test project (which the
+service-role `deleteProjectAction` — the same code path — had also
+silently failed to remove) was deleted for real immediately after, and
+verified gone.
+
 ---
 
 # Repository Structure
