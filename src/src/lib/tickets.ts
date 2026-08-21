@@ -67,6 +67,12 @@ export interface CreateTicketInput {
    *  same-project/one-level-only, this is just where the value is threaded
    *  through. */
   parentTicketId?: string;
+  /** Real tickets.sprint_id (Sprint MVP) — set to a real sprints.id to
+   *  create the ticket directly into that sprint, or omit/null to leave it
+   *  in the general backlog (the column's own default). Lets a Sprint-
+   *  filtered Board/List context preselect its sprint on the New Ticket
+   *  form without changing the default for any other entry point. */
+  sprintId?: string | null;
 }
 
 export type CreateTicketResult =
@@ -810,6 +816,7 @@ export async function createTicket(
     due_date: input.dueDate ?? null,
     assignee_profile_id: input.assigneeProfileId ?? null,
     parent_ticket_id: input.parentTicketId ?? null,
+    sprint_id: input.sprintId ?? null,
   };
 
   if (input.statusId) {

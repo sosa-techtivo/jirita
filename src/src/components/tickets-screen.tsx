@@ -1087,6 +1087,8 @@ export function TicketsScreen({ slug, projectName }: { slug?: string; projectNam
           onCreated={handleTicketCreated}
           onPreviewDuplicate={handlePreviewDuplicate}
           statuses={statuses}
+          sprints={sprints}
+          initialSprintId={sprintContext !== SPRINT_CONTEXT_ALL && sprintContext !== SPRINT_CONTEXT_BACKLOG ? sprintContext : null}
         />
       )}
 

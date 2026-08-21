@@ -19,10 +19,16 @@ import { useCurrentUser } from "@/components/current-user-provider";
 import { FALLBACK_AVATAR } from "@/lib/current-user";
 import type { OrgMember } from "@/lib/projects";
 import { formatAbsoluteDate } from "@/lib/date-format";
+import type { Sprint } from "@/lib/sprints";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const MILESTONES = ["App Store Submission", "Beta Release", "Security Audit"];
+
+// Mirrors ticket-detail-screen.tsx's EditableSidebarSprint — a plain
+// sentinel string for the "Backlog" <option>, since <select> values can't
+// be null.
+const SPRINT_BACKLOG_VALUE = "__backlog__";
 
 const ALL_LABELS = [
   "Accessibility", "API", "Bug", "Compliance", "Dark Mode",
@@ -339,6 +345,8 @@ export function NewTicketModal({
   statuses,
   parentTicketId,
   parentTicketLabel,
+  sprints,
+  initialSprintId,
 }: {
   slug:               string;
   /** Current project's own tickets only — used for Possible Duplicates. */
@@ -360,6 +368,18 @@ export function NewTicketModal({
    *  being created, not a standalone ticket. */
   parentTicketId?: string;
   parentTicketLabel?: string;
+  /** This project's real sprints (Sprint MVP), every status included —
+   *  same list Manage Sprint/Ticket Detail already use. Undefined/empty
+   *  just means the Sprint field only ever offers Backlog (org-wide mode,
+   *  or a project that hasn't adopted sprints yet). */
+  sprints?: Sprint[];
+  /** Sprint field's initial value — the sprint the New Ticket form was
+   *  opened from (e.g. Board/List filtered to a specific sprint), or
+   *  null/undefined for Backlog. Purely a default: the user can still
+   *  change it to any other eligible sprint or Backlog before creating.
+   *  Never changes the default for entry points that aren't Sprint-
+   *  filtered — see tickets-screen.tsx's call site. */
+  initialSprintId?: string | null;
 }) {
   const { organization, isDevFallback } = useCurrentUser();
 
@@ -384,6 +404,10 @@ export function NewTicketModal({
   const [priority, setPriority]         = useState<TicketPriority>("medium");
   const [ticketType, setTicketType]     = useState<TicketType>("TASK");
   const [assigneeId, setAssigneeId]     = useState("");
+  // Sprint MVP — preselected from the Board/List context this modal was
+  // opened from (initialSprintId), still freely changeable here to any
+  // other eligible sprint or back to Backlog. null = Backlog.
+  const [sprintId, setSprintId]         = useState<string | null>(initialSprintId ?? null);
   const [labels, setLabels]             = useState<string[]>([]);
   const [dueDate, setDueDate]           = useState("");
   const [attachments, setAttachments]   = useState<PendingAttachment[]>([]);
@@ -523,6 +547,13 @@ export function NewTicketModal({
   // Derived
   const duplicates = getDuplicates(title, tickets);
   const canSubmit  = title.trim().length > 0 && !submitting;
+  // Valid Sprint destinations: Backlog, plus every non-closed sprint (the
+  // active one first) — mirrors ticket-detail-screen.tsx's
+  // EditableSidebarSprint eligibleSprints exactly, since a brand-new
+  // ticket should never be offered a closed sprint either.
+  const eligibleSprints = (sprints ?? [])
+    .filter((s) => s.status !== "closed")
+    .sort((a, b) => (a.status === "active" ? -1 : b.status === "active" ? 1 : b.createdAt.localeCompare(a.createdAt)));
 
   const toggleLabel = (label: string) =>
     setLabels((prev) =>
@@ -561,6 +592,7 @@ export function NewTicketModal({
       type:        ticketType,
       assignee,
       milestone:   MILESTONES[0],
+      sprintId,
       labels,
       acceptanceCriteria: filledCriteria.length > 0 ? filledCriteria : undefined,
       dueDate:     dueDate ? formatDueDate(dueDate) : undefined,
@@ -596,6 +628,7 @@ export function NewTicketModal({
         labels: labels.length > 0 ? labels : undefined,
         dueDate: dueDate || undefined,
         parentTicketId,
+        sprintId,
       });
       if (result.status === "error") {
         setError(result.message);
@@ -820,11 +853,28 @@ export function NewTicketModal({
               </div>
             )}
 
-            {/* Labels + Due Date */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {/* Labels + Sprint + Due Date */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
                 <label className={FIELD_LABEL}>Labels</label>
                 <LabelPicker selected={labels} onToggle={toggleLabel} />
+              </div>
+              <div>
+                <label className={FIELD_LABEL}>Sprint</label>
+                <select
+                  value={sprintId ?? SPRINT_BACKLOG_VALUE}
+                  onChange={(e) =>
+                    setSprintId(e.target.value === SPRINT_BACKLOG_VALUE ? null : e.target.value)
+                  }
+                  className={INPUT}
+                >
+                  <option value={SPRINT_BACKLOG_VALUE}>Backlog</option>
+                  {eligibleSprints.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}{s.status === "active" ? " (Active)" : ""}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div>
                 <label className={FIELD_LABEL}>
