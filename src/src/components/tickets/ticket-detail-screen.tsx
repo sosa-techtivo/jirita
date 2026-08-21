@@ -1464,7 +1464,7 @@ function ChildrenSection({
   // the real structural section below the moment a first child exists.
   if (childTickets.length === 0) {
     return (
-      <div>
+      <div className="mt-10">
         <div className="flex items-center gap-3">
           <span className={SECTION_LABEL}>Children</span>
           {createLinkActions}
