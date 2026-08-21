@@ -77,6 +77,12 @@ export function TicketBoardCard({
   parentCode?: string;
 }) {
   const isBlocked = ticket.status === "blocked";
+  // Same precedence the ID/icon indicator below already uses (child wins
+  // over parent when — in principle — both were somehow true): a ticket
+  // "IS a child" whenever it resolved a parentCode, "IS a parent" only
+  // otherwise, when it has children of its own.
+  const isChild = Boolean(parentCode);
+  const isParent = !isChild && childrenCount > 0;
 
   return (
     <button
@@ -97,7 +103,20 @@ export function TicketBoardCard({
       className={[
         "group w-full text-left rounded-lg border bg-white px-3.5 py-2.5",
         "shadow-sm hover:shadow-md hover:-translate-y-px transition-all duration-150",
-        isBlocked
+        // Parent/Child hierarchy border takes priority over Blocked's own
+        // red border — Blocked still shows via its text label below
+        // either way, it just never overrides this card's border color.
+        // brand-500/brand-700 (not brand-200/brand-300/brand-900 —
+        // globals.css's @theme only defines 50/100/500/600/700; the other
+        // shades don't exist and silently fall back to currentColor, i.e.
+        // a dark border). brand-500/40 (up from /25) and sky-300 (up from
+        // sky-200) so both read clearly at a glance, comparable intensity
+        // to each other, still well short of Blocked's own red.
+        isChild
+          ? "border-sky-300 dark:border-sky-900/60"
+          : isParent
+          ? "border-brand-500/40 dark:border-brand-700/40"
+          : isBlocked
           ? "border-red-200 dark:border-red-900/60"
           : "border-slate-200 dark:border-zinc-700/70",
         "dark:bg-zinc-900 dark:shadow-black/30",
