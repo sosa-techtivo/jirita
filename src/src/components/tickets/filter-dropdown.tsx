@@ -18,6 +18,12 @@ export interface DropdownOption {
   label: string;
   displayLabel?: string; // short form used in the button label (e.g. "Sarah" for "Sarah Chen")
   avatar?: string;
+  /** Optional badge/pill classes (StatusBadge's own bg/text convention,
+   *  ticket-ui.tsx) wrapping just this option's value in the trigger
+   *  button when it's the current selection — e.g. Sprint context's
+   *  Backlog/active/closed pills. undefined (every other FilterDropdown
+   *  caller) keeps the plain-text trigger label exactly as before. */
+  badgeClassName?: string;
 }
 
 export interface DropdownGroup {
@@ -36,6 +42,13 @@ interface FilterDropdownProps {
   searchable?: boolean;
   align?: "left" | "right";
   variant?: "default" | "add";
+  /** Overrides the trigger button's own "has a selection" container
+   *  classes (brand/purple by default) — e.g. Sprint context's neutral
+   *  gray container, so its colored value pill (badgeClassName above)
+   *  isn't sitting inside a second, competing color. undefined (every
+   *  other FilterDropdown caller) keeps the existing brand/purple
+   *  container exactly as before. */
+  triggerActiveClassName?: string;
 }
 
 // ── Icons ─────────────────────────────────────────────────────────────────────
@@ -113,6 +126,7 @@ export function FilterDropdown({
   searchable = false,
   align = "left",
   variant = "default",
+  triggerActiveClassName,
 }: FilterDropdownProps) {
   const [isOpen, setIsOpen] = useState(false);
   // Whether the panel <div> exists in the DOM at all right now. Stays true
@@ -221,11 +235,20 @@ export function FilterDropdown({
   const hasSelection = mode !== "menu" && selected.length > 0;
 
   let buttonLabel = label;
+  // Set only for a single-value selection whose option carries a
+  // badgeClassName (Sprint context today) — renders as `label:` plain text
+  // followed by just the value in a pill, instead of buttonLabel's single
+  // plain-text string. Multi-select's own "+N" suffix has no single value
+  // to wrap a pill around, so it always keeps the plain-text label.
+  let selectedBadge: { display: string; className: string } | undefined;
   if (hasSelection) {
     const first = allOptions.find((o) => o.value === selected[0]);
     const firstDisplay = first?.displayLabel ?? first?.label ?? selected[0];
     buttonLabel = `${label}: ${firstDisplay}`;
     if (selected.length > 1) buttonLabel += ` +${selected.length - 1}`;
+    else if (first?.badgeClassName) {
+      selectedBadge = { display: firstDisplay, className: first.badgeClassName };
+    }
   }
 
   // ── Handlers ────────────────────────────────────────────────────────────────
@@ -281,7 +304,7 @@ export function FilterDropdown({
     "inline-flex items-center gap-0.5 text-sm px-2 py-1.5 rounded-md transition-colors";
 
   const triggerActive = hasSelection
-    ? "text-brand-700 dark:text-brand-400 bg-brand-50 dark:bg-brand-500/10 font-medium"
+    ? (triggerActiveClassName ?? "text-brand-700 dark:text-brand-400 bg-brand-50 dark:bg-brand-500/10 font-medium")
     : "";
 
   const triggerDefault =
@@ -304,7 +327,21 @@ export function FilterDropdown({
         ].join(" ")}
       >
         {variant === "add" && <PlusIcon />}
-        <span className="max-w-[150px] truncate">{buttonLabel}</span>
+        {selectedBadge ? (
+          // Same StatusBadge pill convention (ticket-ui.tsx) as everywhere
+          // else in this app a colored status pill appears — wraps just
+          // the value, not the "Label:" prefix before it.
+          <span className="max-w-[150px] flex items-center gap-1 min-w-0">
+            <span className="flex-shrink-0">{label}:</span>
+            <span
+              className={`inline-flex items-center px-1.5 py-0.5 rounded-md text-[11px] font-semibold truncate min-w-0 ${selectedBadge.className}`}
+            >
+              {selectedBadge.display}
+            </span>
+          </span>
+        ) : (
+          <span className="max-w-[150px] truncate">{buttonLabel}</span>
+        )}
         {hasSelection ? (
           <span
             role="button"

@@ -89,6 +89,11 @@ import {
 } from "@/lib/tickets";
 import { loadProjectTeam, loadProjectDetail, type OrgMember, type ProjectTeamMember } from "@/lib/projects";
 import type { Sprint } from "@/lib/sprints";
+import {
+  SPRINT_BACKLOG_BADGE_CLASS,
+  SPRINT_ACTIVE_BADGE_CLASS,
+  SPRINT_CLOSED_BADGE_CLASS,
+} from "@/components/tickets/sprint-context-selector";
 import { formatAbsoluteDate } from "@/lib/date-format";
 import { FALLBACK_AVATAR } from "@/lib/current-user";
 import { formatHours } from "@/components/time-tracking-screen";
@@ -853,6 +858,16 @@ function EditableSidebarSprint({
   // enforces for its "In other sprints" search results.
   const isLockedToClosedSprint = currentSprint?.status === "closed";
   const canActuallyEdit = canEdit && !isLockedToClosedSprint;
+  // Same three pill classes the Tickets/Board Sprint context selector
+  // already uses (sprint-context-selector.tsx) — active/closed read the
+  // ticket's real sprint.status, never inferred by name; Backlog (no
+  // sprint) and any other real status (e.g. planned) stay neutral.
+  const sprintBadgeClass =
+    currentSprint?.status === "active"
+      ? SPRINT_ACTIVE_BADGE_CLASS
+      : currentSprint?.status === "closed"
+      ? SPRINT_CLOSED_BADGE_CLASS
+      : SPRINT_BACKLOG_BADGE_CLASS;
 
   // Valid new destinations: Backlog, plus every non-closed sprint (the
   // active one and any planned ones) — never a closed sprint, Sprint 0
@@ -887,7 +902,9 @@ function EditableSidebarSprint({
           className={`group flex items-center gap-1.5 ${canActuallyEdit ? "cursor-pointer" : ""}`}
           onClick={canActuallyEdit ? () => setEditing(true) : undefined}
         >
-          <span className="text-slate-700 dark:text-zinc-300">{currentSprint ? currentSprint.name : "Backlog"}</span>
+          <span className={`inline-flex items-center px-1.5 py-0.5 rounded-md text-[11px] font-semibold ${sprintBadgeClass}`}>
+            {currentSprint ? currentSprint.name : "Backlog"}
+          </span>
           {isLockedToClosedSprint && (
             <span className="inline-flex items-center px-1.5 py-0.5 rounded-md text-[10px] font-semibold bg-slate-100 text-slate-500 dark:bg-zinc-800 dark:text-zinc-400">
               Closed
