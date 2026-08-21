@@ -390,6 +390,12 @@ export async function inviteUserAction(params: {
   const redirectTo = `${params.redirectOrigin}/accept-invite`;
   let invitedUserId: string;
 
+  // No `from`/sender parameter exists on this call — the GoTrue Admin API
+  // has none. Every Supabase Auth email (this one included) always goes out
+  // as whatever Sender Email/Sender Name is configured under Project
+  // Settings -> Authentication -> SMTP Settings in the Supabase Dashboard;
+  // see lib/email-sender.ts for the one canonical sender identity that
+  // Dashboard setting is meant to match.
   const { data: inviteData, error: inviteError } = await admin.auth.admin.inviteUserByEmail(email, {
     redirectTo,
     data: { first_name: firstName, last_name: lastName },

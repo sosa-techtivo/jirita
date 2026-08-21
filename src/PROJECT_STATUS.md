@@ -254,6 +254,43 @@ service-role `deleteProjectAction` — the same code path — had also
 silently failed to remove) was deleted for real immediately after, and
 verified gone.
 
+Most recently, a thorough audit was run on how JIRITA sends (or could
+send) email, ahead of configuring an official sender — no new
+notification/email *events* were added, by explicit scope. Findings: no
+email-provider SDK is installed anywhere (no Resend/SendGrid/Nodemailer/
+Postmark/Mailgun), no `supabase/config.toml` or Supabase Edge Functions
+exist in this repo, and no API route sends mail. The only real
+email-sending capability anywhere in the codebase is Supabase Auth's own
+hosted email, reached two ways: `resetPasswordForEmail`
+(`lib/auth.ts`, live — used by Forgot Password today) and
+`inviteUserByEmail` (`lib/server/invite-user-action.ts`, code-complete but
+unreachable from the UI since "Send by email" was removed from Invite
+User — see `generateInviteLinkAction`, the actual active invite path,
+which mints a link and never sends mail). Critically, **neither call
+accepts a `from`/sender parameter** — every Supabase Auth email always
+uses whatever Sender Email/Sender Name is configured under Project
+Settings → Authentication → SMTP Settings (Custom SMTP) in the Supabase
+Dashboard, which is entirely external to this repo (no env var, no
+migration, no Management API token available here can set it). A new
+file, `lib/email-sender.ts`, is the one canonical, documented sender
+identity (`JIRITA <alejo+no-reply@techtivo.com>`) for whoever configures
+that Dashboard setting to match, and for any future non-Auth email code to
+import instead of hardcoding the address — referenced, not imported, from
+both real Auth-email call sites (a plain code comment, since neither
+actually consumes it) and from `.env.example`. A read-only DNS check
+(`dig`) found `techtivo.com`'s mail already runs on Google Workspace (real
+MX records) but has **no SPF record and no DMARC record** — sending as
+`@techtivo.com` from any relay (Google Workspace SMTP itself, or a
+third-party ESP) without first adding an SPF entry authorizing that relay
+risks poor deliverability/spam-folder placement. No DNS was modified (out
+of scope, explicitly). See Architecture Status → "Email sender
+configuration audit" for the full external-configuration checklist this
+surfaced — Custom SMTP setup in the Supabase Dashboard, and the SPF/DKIM
+DNS records for `techtivo.com`, both remain to be done manually before any
+JIRITA email can actually go out as `alejo+no-reply@techtivo.com`; no
+end-to-end test was possible or attempted for that reason. `tsc`/`eslint`/
+`next build` all pass clean.
+
 ---
 
 # Repository Structure
@@ -4035,6 +4072,104 @@ re-run); `20260928000000` was left for `db push` itself to apply for real
 (a `create or replace function`, safe to (re)run either way) rather than
 assumed. The Sprint MVP's own UI (selector, Manage Sprint modal) has not
 yet been clicked through in a live browser.
+
+## Email sender configuration audit (no new email events — infra only)
+
+An explicitly scoped audit: configure/prepare JIRITA's official email
+sender (`alejo+no-reply@techtivo.com`) without adding any new
+notification/email *trigger* — that's a deliberately separate, later
+task.
+
+**What actually sends email today** (full audit, not guessed):
+
+- No email-provider SDK exists anywhere in this repo — no Resend,
+  SendGrid, Nodemailer, Postmark, or Mailgun in `package.json` or any
+  import. No `supabase/config.toml`, no `supabase/functions/` (Edge
+  Functions), no `src/app/api/` route sends mail.
+- The **only** real email-sending capability anywhere is Supabase Auth's
+  own hosted email, via two calls, neither of which accepts a `from`
+  parameter — GoTrue has none:
+  - `resetPasswordForEmail` (`lib/auth.ts`'s `requestPasswordReset`) —
+    live, used by Forgot Password today.
+  - `inviteUserByEmail` (`lib/server/invite-user-action.ts`'s
+    `inviteUserAction`) — code-complete, fully wired, but unreachable
+    from any UI: Invite User's "Send by email" method was removed
+    outright in an earlier pass (see "Users → Delete User" / Invite User
+    entries above), leaving `generateInviteLinkAction` (mints a link,
+    never sends mail) as the only invite path the UI actually offers.
+- Every Supabase Auth email — both of the above — always goes out as
+  whatever **Sender Email/Sender Name is configured under Project
+  Settings → Authentication → SMTP Settings (Custom SMTP) in the Supabase
+  Dashboard**. That setting is entirely external to this repo: no env var
+  reads it, no migration sets it, and this environment holds no Supabase
+  **Management API** token (only the project-scoped anon/service-role
+  keys) that could set it programmatically even if that were desired.
+
+**What changed in code** (deliberately minimal — there is no live "from"
+call site to wire up):
+
+- New `lib/email-sender.ts` — the one canonical, documented sender
+  identity: `JIRITA_EMAIL_SENDER_ADDRESS` (`alejo+no-reply@techtivo.com`),
+  `JIRITA_EMAIL_SENDER_NAME` (`JIRITA`), and the combined
+  `JIRITA_EMAIL_SENDER` (`JIRITA <alejo+no-reply@techtivo.com>`). A plain
+  exported constant, not an env var — this value is fixed branding, not a
+  secret or a value that varies per deployment. Nothing imports it at
+  runtime yet (there's nothing for it to configure); it exists so (1)
+  whoever configures the Dashboard's Custom SMTP has one unambiguous
+  value to copy, and (2) any future non-Auth transactional email code
+  imports it instead of a second hardcoded string.
+- A short doc comment added at both real Auth-email call sites
+  (`lib/auth.ts`, `lib/server/invite-user-action.ts`) pointing at
+  `lib/email-sender.ts` and stating plainly that neither call has a
+  `from` parameter to set.
+- `.env.example` — a comment (no new variable) next to
+  `SUPABASE_SERVICE_ROLE_KEY` explaining the same thing, so a future
+  reader looking for "where's the email config" finds the real answer
+  instead of assuming a missing env var.
+
+**External configuration required (manual — not something this repo or
+session can do)**:
+
+1. **Supabase Dashboard → Project Settings → Authentication → SMTP
+   Settings**: enable Custom SMTP, set Sender Email =
+   `alejo+no-reply@techtivo.com`, Sender Name = `JIRITA`, and fill in
+   Host/Port/Username/Password for a **real SMTP relay** — this repo
+   cannot invent those credentials. Two realistic options, presented
+   without choosing one:
+   - **Reuse existing infrastructure** (`techtivo.com`'s mail already
+     runs on Google Workspace, confirmed via its real MX records —
+     `aspmx.l.google.com` et al.): Google Workspace's own SMTP relay
+     (`smtp-relay.gmail.com`) or Gmail SMTP (`smtp.gmail.com`) with an
+     App Password for the `alejo@techtivo.com` account — no new
+     third-party signup, matching this task's own "don't add a new
+     platform if the existing one can do it" instruction.
+   - **A dedicated transactional ESP** (Resend/SendGrid/Postmark/SES) —
+     more deliverability tooling (webhooks, analytics), but requires a
+     new account and its own domain verification.
+2. **DNS for `techtivo.com`** (checked read-only via `dig`, not
+   modified): **no SPF record and no DMARC record exist today** — only
+   Google's own MX records. Whichever relay is chosen in step 1 needs an
+   SPF `TXT` record on `techtivo.com` authorizing it (e.g. `v=spf1
+   include:_spf.google.com ... ~all` if using Google Workspace relay, or
+   the ESP's own documented `include:`), plus that provider's DKIM
+   `CNAME`/`TXT` records, or mail sent as `@techtivo.com` risks landing in
+   spam/being rejected outright. This must be added by whoever
+   administers `techtivo.com`'s DNS zone — explicitly not done here.
+3. **The `+` in `alejo+no-reply@techtivo.com`**: syntactically valid as a
+   From address and unrestricted by Supabase's own Dashboard field or by
+   Google Workspace SMTP (which natively supports plus-addressing for its
+   own accounts). Not verified against a specific third-party ESP, since
+   none is configured yet — some providers using *single-sender*
+   verification (rather than domain-level) require verifying the *exact*
+   address including the `+`; confirm this once a specific provider is
+   chosen, per this task's own instruction to stop and report rather than
+   substitute a different address.
+
+**No end-to-end send was attempted** — correctly, per this task's own
+instructions: there is no correct configuration yet for a test to
+validate (Supabase's *default*, non-Custom-SMTP sender is Supabase's own
+shared address, not this one), and sending a real email through the wrong
+sender would prove nothing.
 
 ## Still mock
 
