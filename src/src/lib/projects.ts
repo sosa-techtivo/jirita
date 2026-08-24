@@ -1742,3 +1742,91 @@ export async function loadOrganizationMemberWeeklyCapacities(
 
   return { status: "ready", capacities };
 }
+
+// ── Project Favorites (Sidebar) ─────────────────────────────────────────────
+// Per-user, per-organization quick-access list — see
+// 20260930020000_add_project_favorites.sql for the table/RLS. Keyed by
+// `slug` (this app's stable, immutable-after-creation project identifier),
+// never by another user's data — RLS already enforces `profile_id =
+// auth.uid()` on every operation, these functions just pass the caller's
+// own real profile id through.
+
+export type FavoriteProjectSlugsResult =
+  | { status: "ready"; slugs: string[] }
+  | { status: "error"; message: string };
+
+export async function loadFavoriteProjectSlugs(
+  organizationId: string,
+  profileId: string
+): Promise<FavoriteProjectSlugsResult> {
+  const supabase = getSupabaseBrowserClient();
+
+  const { data: rows, error } = await supabase
+    .from("project_favorites")
+    .select("project_slug")
+    .eq("organization_id", organizationId)
+    .eq("profile_id", profileId)
+    .returns<{ project_slug: string }[]>();
+
+  if (error) {
+    logDev("project favorites query failed", error);
+    return { status: "error", message: error.message };
+  }
+
+  return { status: "ready", slugs: (rows ?? []).map((row) => row.project_slug) };
+}
+
+export type ProjectFavoriteWriteResult = { status: "success" } | { status: "error"; message: string };
+
+// Plain insert, not .upsert() — PostgREST compiles .upsert() into
+// `INSERT ... ON CONFLICT DO UPDATE`, which Postgres requires real UPDATE
+// privilege for (checked at statement-analysis time, regardless of whether
+// a conflict actually occurs) even though this table deliberately never
+// grants UPDATE (project_favorites is add/remove-only, see the migration's
+// own comment) — that mismatch was the real cause of every "Couldn't add
+// favorite" (42501 permission denied for table project_favorites, hint:
+// GRANT UPDATE...). Idempotency instead comes from treating the PK's own
+// unique_violation (23505) — "this exact favorite already exists" — as a
+// silent success below, never a second/duplicate row and never a UI error
+// just because a fast double-click (or Favorites and Projects both firing
+// the same toggle) raced to insert it twice.
+const POSTGRES_UNIQUE_VIOLATION = "23505";
+
+export async function addProjectFavorite(
+  organizationId: string,
+  profileId: string,
+  slug: string
+): Promise<ProjectFavoriteWriteResult> {
+  const supabase = getSupabaseBrowserClient();
+
+  const { error } = await supabase
+    .from("project_favorites")
+    .insert({ organization_id: organizationId, profile_id: profileId, project_slug: slug });
+
+  if (error && error.code !== POSTGRES_UNIQUE_VIOLATION) {
+    logDev("add project favorite failed", error);
+    return { status: "error", message: error.message };
+  }
+  return { status: "success" };
+}
+
+export async function removeProjectFavorite(
+  organizationId: string,
+  profileId: string,
+  slug: string
+): Promise<ProjectFavoriteWriteResult> {
+  const supabase = getSupabaseBrowserClient();
+
+  const { error } = await supabase
+    .from("project_favorites")
+    .delete()
+    .eq("organization_id", organizationId)
+    .eq("profile_id", profileId)
+    .eq("project_slug", slug);
+
+  if (error) {
+    logDev("remove project favorite failed", error);
+    return { status: "error", message: error.message };
+  }
+  return { status: "success" };
+}

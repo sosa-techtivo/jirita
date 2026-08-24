@@ -3,6 +3,7 @@ import { Inter } from "next/font/google";
 import { ThemeProvider } from "@/components/theme-provider";
 import { CurrentUserProvider } from "@/components/current-user-provider";
 import { OrganizationProjectsProvider } from "@/components/organization-projects-provider";
+import { ProjectFavoritesProvider } from "@/components/project-favorites-provider";
 import { MemberProfileProvider } from "@/components/member-profile";
 import "./globals.css";
 
@@ -36,7 +37,9 @@ export default function RootLayout({
         <ThemeProvider attribute="class" defaultTheme="light" forcedTheme="light" disableTransitionOnChange>
           <CurrentUserProvider>
             <OrganizationProjectsProvider>
-              <MemberProfileProvider>{children}</MemberProfileProvider>
+              <ProjectFavoritesProvider>
+                <MemberProfileProvider>{children}</MemberProfileProvider>
+              </ProjectFavoritesProvider>
             </OrganizationProjectsProvider>
           </CurrentUserProvider>
         </ThemeProvider>
