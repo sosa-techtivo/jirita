@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { CLIENT_NAMES } from "@/lib/mock-projects";
@@ -11,6 +11,7 @@ import { useCurrentUser } from "@/components/current-user-provider";
 import { hasFinancialAccess } from "@/lib/current-user";
 import { useOrganizationProjects } from "@/components/organization-projects-provider";
 import { useRefreshOnFocusAndVisibility } from "@/components/member-profile-modal";
+import { useUnsavedChangesWarning } from "@/lib/unsaved-changes";
 import { loadProjectDetail, loadOrganizationClients, createOrganizationClient, validateRepositoryUrl } from "@/lib/projects";
 import type { ProjectDetail, EditableProjectStatus, Client, RepositoryProvider } from "@/lib/projects";
 import { getSupabaseBrowserClient } from "@/lib/supabase-client";
@@ -269,6 +270,69 @@ export function ProjectSettingsScreen({ slug }: { slug: string }) {
   );
   const [repositoryUrl, setRepositoryUrl] = useState(initialDevProject?.repositoryUrl ?? "");
 
+  // The last server-confirmed values every editable field above was set
+  // from — null until the first real load resolves. Compared against the
+  // live field values below (isDirty) so a background refetch can never
+  // silently overwrite an edit the user hasn't saved yet. See applyProject.
+  type ProjectFormSnapshot = {
+    name: string;
+    description: string;
+    projectCode: string;
+    status: ProjectStatus;
+    category: ProjectCategory;
+    client: string;
+    billingRate: number;
+    targetDate: string;
+    repositoryProvider: RepositoryProvider | null;
+    repositoryUrl: string;
+  };
+  // State, not a ref — isDirty below needs to read it during render, and
+  // reading a ref's `.current` during render is unsafe (React may re-render
+  // without re-running effects, e.g. a Suspense replay).
+  const [baseline, setBaseline] = useState<ProjectFormSnapshot | null>(
+    initialDevProject
+      ? {
+          name: initialDevProject.name,
+          description: initialDevProject.description,
+          projectCode: initialDevProject.projectCode,
+          status: initialDevProject.status,
+          category: initialDevProject.category,
+          client: initialDevProject.client ?? "",
+          billingRate: initialDevProject.defaultHourlyRate ?? 0,
+          targetDate: initialDevProject.targetDateISO ?? "",
+          repositoryProvider: initialDevProject.repositoryProvider,
+          repositoryUrl: initialDevProject.repositoryUrl ?? "",
+        }
+      : null
+  );
+
+  // True once any field has been edited away from the last server-confirmed
+  // snapshot — the one signal every reinitialization path below (background
+  // refetch, focus regain) must check before overwriting local state.
+  const isDirty =
+    baseline !== null &&
+    (name !== baseline.name ||
+      description !== baseline.description ||
+      projectCode !== baseline.projectCode ||
+      status !== baseline.status ||
+      category !== baseline.category ||
+      client !== baseline.client ||
+      billingRate !== baseline.billingRate ||
+      targetDate !== baseline.targetDate ||
+      repositoryProvider !== baseline.repositoryProvider ||
+      repositoryUrl !== baseline.repositoryUrl);
+
+  // Mirrors isDirty into a ref, kept current every render (useLayoutEffect,
+  // no deps — same convention new-ticket-modal.tsx's own attachmentsRef
+  // uses) so the async .then() callback inside runFetch below can read the
+  // latest value without needing isDirty in its own dependency array.
+  const isDirtyRef = useRef(isDirty);
+  useLayoutEffect(() => {
+    isDirtyRef.current = isDirty;
+  });
+
+  useUnsavedChangesWarning(isDirty);
+
   // Real GitHub OAuth connection status — "loading" only while the very
   // first check for this project is in flight; never shown as "connected"
   // from stale local data (see refreshGithubStatus below, which always
@@ -352,6 +416,18 @@ export function ProjectSettingsScreen({ slug }: { slug: string }) {
     setTargetDate(project.targetDateISO ?? "");
     setRepositoryProvider(project.repositoryProvider);
     setRepositoryUrl(project.repositoryUrl ?? "");
+    setBaseline({
+      name: project.name,
+      description: project.description,
+      projectCode: project.projectCode,
+      status: project.status,
+      category: project.category,
+      client: project.client ?? "",
+      billingRate: project.defaultHourlyRate ?? 0,
+      targetDate: project.targetDateISO ?? "",
+      repositoryProvider: project.repositoryProvider,
+      repositoryUrl: project.repositoryUrl ?? "",
+    });
   }, []);
 
   // Refetches just this project — every setState lives inside its .then()
@@ -360,21 +436,40 @@ export function ProjectSettingsScreen({ slug }: { slug: string }) {
   // refreshAfterSave below: a settings save never changes the org's member
   // or client roster, so re-fetching those on every Save/Archive/Restore
   // would just be unnecessary traffic.
-  const runFetch = useCallback(() => {
+  //
+  // `detail` (read-only display data — Archived badge, GitHub section
+  // gating, etc.) always reflects the latest fetch. The editable fields
+  // only get overwritten (applyProject) when `force` is passed (an
+  // explicit post-Save/Archive/Restore resync via refreshAfterSave, where
+  // resyncing is exactly the point) or when the form isn't currently dirty
+  // — a background refetch must never clobber an edit the user hasn't
+  // saved yet.
+  const runFetch = useCallback((opts?: { force?: boolean }) => {
     if (!organization) return;
     const requestId = ++requestIdRef.current;
     loadProjectDetail(organization.id, slug).then((result) => {
       if (requestIdRef.current !== requestId) return;
       if (result.status === "ready") {
         setDetail({ status: "ready", project: result.project });
-        applyProject(result.project);
+        if (opts?.force || !isDirtyRef.current) {
+          applyProject(result.project);
+        }
       } else if (result.status === "not-found") {
         setDetail({ status: "not-found" });
       } else {
         setDetail({ status: "error", message: result.message });
       }
     });
-  }, [organization, slug, applyProject]);
+    // organization?.id (not the object) — the object gets a new reference
+    // on every window-focus regain (current-user-provider.tsx's own session
+    // revalidation). Project Settings must not refetch — and, via the
+    // isDirtyRef guard above, must never resync its editable fields — just
+    // from switching tabs and back; only a real navigation (slug change) or
+    // an actual org switch (id change) should trigger either. Same
+    // reasoning ticket-detail-screen.tsx's own main load effect already
+    // documents.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [organization?.id, slug, applyProject]);
 
   useEffect(() => {
     if (isDevFallback || !organization) return; // dev fallback handled synchronously above — no fetch needed
@@ -384,7 +479,9 @@ export function ProjectSettingsScreen({ slug }: { slug: string }) {
     loadOrganizationClients(organization.id).then((result) => {
       if (result.status === "ready") setClients(result.clients);
     });
-  }, [isDevFallback, organization, runFetch]);
+    // organization?.id, not the object — see runFetch's own comment above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDevFallback, organization?.id, runFetch]);
 
   // Called after Save/Archive/Restore (always from an event handler, never
   // from an effect) so the on-screen data — and, via the shared
@@ -409,7 +506,11 @@ export function ProjectSettingsScreen({ slug }: { slug: string }) {
       }
       return;
     }
-    runFetch();
+    // force: true — this call only ever follows an explicit Save/Archive/
+    // Restore the user just triggered, so resyncing every field (even if
+    // something else was typed into a different field in the meantime) is
+    // exactly what should happen here, unlike a background refetch.
+    runFetch({ force: true });
   }, [isDevFallback, sharedProjects, slug, runFetch, applyProject, targetDate, repositoryProvider, repositoryUrl]);
 
   // Plain const, not a hook — safe to read before the early-return checks

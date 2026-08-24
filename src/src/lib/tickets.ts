@@ -4494,6 +4494,27 @@ export type OrganizationLoggedHoursResult =
   | { status: "ready"; totalMinutes: number }
   | { status: "error"; message: string };
 
+// Both org-wide dashboard queries below (`loadOrganizationLoggedMinutes`,
+// `loadOrganizationActivity`) filter `.in("ticket_id", ticketIds)` against
+// every ticket in the organization — with an org's ticket count now
+// regularly in the hundreds (e.g. a single historical import can add 100+
+// at once), a single unchunked `.in()` serializes the whole id list into
+// one GET query string and can exceed the gateway/proxy's max URL length,
+// which Supabase/PostgREST then reports back as a bare, bodyless "Bad
+// Request" — not a validation error. Splitting into fixed-size batches and
+// querying each in parallel keeps every individual request's URL small
+// regardless of how large the organization gets. Same local-helper
+// convention already used the same way in unfuddle-import/execute-project-
+// restore-phase3.ts/export-project.ts — not extracted to a shared util
+// since this is the only other place it's needed.
+function chunkArray<T>(items: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}
+
+const ORG_TICKET_ID_BATCH_SIZE = 100;
+
 // Real logged hours (Time Entries) for the Hours Burn KPI — every other
 // dashboard KPI is derived client-side from loadOrganizationTickets' own
 // result, but estimated hours live on tickets while logged hours live in
@@ -4502,19 +4523,36 @@ export async function loadOrganizationLoggedMinutes(ticketIds: string[]): Promis
   if (ticketIds.length === 0) return { status: "ready", totalMinutes: 0 };
 
   const supabase = getSupabaseBrowserClient();
+  const batches = chunkArray(ticketIds, ORG_TICKET_ID_BATCH_SIZE);
 
-  const { data: rows, error } = await supabase
-    .from("ticket_time_entries")
-    .select("minutes")
-    .in("ticket_id", ticketIds)
-    .returns<{ minutes: number }[]>();
+  const results = await Promise.all(
+    batches.map((batch) =>
+      supabase
+        .from("ticket_time_entries")
+        .select("minutes")
+        .in("ticket_id", batch)
+        .returns<{ minutes: number }[]>()
+    )
+  );
 
-  if (error) {
-    logDev("organization time entries query failed", error);
-    return { status: "error", message: error.message };
+  // Any batch failing fails the whole call, same as the single-query
+  // version did — never a silently-partial total.
+  for (let i = 0; i < results.length; i++) {
+    const { error } = results[i];
+    if (error) {
+      logDev("organization time entries query failed", {
+        batch: i,
+        batchSize: batches[i].length,
+        message: error.message,
+      });
+      return { status: "error", message: error.message };
+    }
   }
 
-  const totalMinutes = (rows ?? []).reduce((sum, row) => sum + row.minutes, 0);
+  const totalMinutes = results.reduce(
+    (sum, { data }) => sum + (data ?? []).reduce((batchSum, row) => batchSum + row.minutes, 0),
+    0
+  );
   return { status: "ready", totalMinutes };
 }
 
@@ -4602,24 +4640,51 @@ export async function loadOrganizationActivity(
   if (ticketIds.length === 0) return { status: "ready", events: [] };
 
   const supabase = getSupabaseBrowserClient();
+  const batches = chunkArray(ticketIds, ORG_TICKET_ID_BATCH_SIZE);
 
-  let query = supabase
-    .from("ticket_activity")
-    .select("id, ticket_id, actor_profile_id, event_type, old_value, new_value, created_at")
-    .in("ticket_id", ticketIds);
-  if (actorProfileId) query = query.eq("actor_profile_id", actorProfileId);
+  const batchResults = await Promise.all(
+    batches.map((batch) => {
+      let query = supabase
+        .from("ticket_activity")
+        .select("id, ticket_id, actor_profile_id, event_type, old_value, new_value, created_at")
+        .in("ticket_id", batch);
+      if (actorProfileId) query = query.eq("actor_profile_id", actorProfileId);
 
-  const { data: rows, error } = await query
-    .order("created_at", { ascending: false })
-    .limit(ORG_ACTIVITY_RAW_FETCH_LIMIT)
-    .returns<OrgActivityRawRow[]>();
+      return query
+        .order("created_at", { ascending: false })
+        .limit(ORG_ACTIVITY_RAW_FETCH_LIMIT)
+        .returns<OrgActivityRawRow[]>();
+    })
+  );
 
-  if (error) {
-    logDev("organization activity query failed", error);
-    return { status: "error", message: error.message };
+  // Any batch failing fails the whole call, same as the single-query
+  // version did — never a silently-partial activity feed.
+  for (let i = 0; i < batchResults.length; i++) {
+    const { error } = batchResults[i];
+    if (error) {
+      logDev("organization activity query failed", {
+        batch: i,
+        batchSize: batches[i].length,
+        message: error.message,
+      });
+      return { status: "error", message: error.message };
+    }
   }
 
-  const relevant = (rows ?? []).filter(isRelevantOrgActivityRow).slice(0, limit);
+  // Each batch already comes back as its own top ORG_ACTIVITY_RAW_FETCH_LIMIT
+  // most recent raw rows (within that batch's tickets only). Any row that
+  // belongs in the true organization-wide top ORG_ACTIVITY_RAW_FETCH_LIMIT
+  // must also rank within its own batch's top ORG_ACTIVITY_RAW_FETCH_LIMIT —
+  // so merging every batch's rows, re-sorting by recency, and re-capping at
+  // the same limit reproduces exactly what one unchunked query would have
+  // returned. Only after that does the existing relevant-event filter and
+  // final `limit` apply, same as before chunking.
+  const rows = batchResults
+    .flatMap((result) => result.data ?? [])
+    .sort((a, b) => (a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : 0))
+    .slice(0, ORG_ACTIVITY_RAW_FETCH_LIMIT);
+
+  const relevant = rows.filter(isRelevantOrgActivityRow).slice(0, limit);
 
   const profileIds = new Set<string>();
   for (const row of relevant) {

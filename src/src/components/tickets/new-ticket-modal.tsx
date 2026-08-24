@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Ticket, TicketPriority, TicketType } from "@/lib/mock-tickets";
 import { getTicketDisplayKey } from "@/lib/mock-tickets";
 import { StatusBadge, TicketTypeIcon, TicketTypeSelect, PRIORITY_LABEL } from "@/components/tickets/ticket-ui";
@@ -20,6 +20,8 @@ import { FALLBACK_AVATAR } from "@/lib/current-user";
 import type { OrgMember } from "@/lib/projects";
 import { formatAbsoluteDate } from "@/lib/date-format";
 import type { Sprint } from "@/lib/sprints";
+import { loadDraft, useDraftAutosave, useUnsavedChangesWarning } from "@/lib/unsaved-changes";
+import { UnsavedChangesDialog } from "@/components/unsaved-changes-dialog";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -333,6 +335,30 @@ function LabelPicker({
   );
 }
 
+// ── Draft recovery (Paso 5) ─────────────────────────────────────────────────
+// Serializable subset of the form, autosaved to sessionStorage while it has
+// real content and restored if this component ever mounts fresh with a
+// leftover draft still in that session — a second, independent layer of
+// protection behind "this component simply never resets its own local
+// state" (every field below is a plain useState initializer, never an
+// effect that re-syncs from props). Deliberately excludes `attachments`:
+// File objects can't survive JSON.stringify, and staged files are already
+// safe for as long as the component stays mounted (see PendingAttachment's
+// own doc) — sessionStorage recovery only ever needs to cover the
+// serializable fields.
+type TicketDraft = {
+  title: string;
+  description: string;
+  criteria: string[];
+  statusId: string;
+  priority: TicketPriority;
+  ticketType: TicketType;
+  assigneeId: string;
+  sprintId: string | null;
+  labels: string[];
+  dueDate: string;
+};
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function NewTicketModal({
@@ -383,6 +409,14 @@ export function NewTicketModal({
 }) {
   const { organization, isDevFallback } = useCurrentUser();
 
+  // Specific enough that a Create Ticket draft for this project (or, for a
+  // child ticket, this exact parent) never collides with any other form's
+  // own draft. Read once, at mount, via the lazy useState initializer below
+  // — never re-read later, so a leftover draft can only ever apply to a
+  // genuinely fresh mount of this modal, never overwrite mid-session edits.
+  const draftKey = `jirita:draft:ticket:create:${slug}${parentTicketId ? `:child:${parentTicketId}` : ""}`;
+  const [initialDraft] = useState<TicketDraft | null>(() => loadDraft<TicketDraft>(draftKey));
+
   // Entrance animation
   const [visible, setVisible] = useState(false);
   useEffect(() => {
@@ -391,29 +425,55 @@ export function NewTicketModal({
   }, []);
 
   // Form state
-  const [title, setTitle]               = useState("");
-  const [description, setDescription]   = useState("");
-  const [criteria, setCriteria]         = useState<string[]>([]);
+  const [title, setTitle]               = useState(initialDraft?.title ?? "");
+  const [description, setDescription]   = useState(initialDraft?.description ?? "");
+  const [criteria, setCriteria]         = useState<string[]>(initialDraft?.criteria ?? []);
   const statusOptions = statuses && statuses.length > 0 ? statuses : FALLBACK_TICKET_STATUSES;
   // The project's own is_default open status (Fase 2) — never a hardcoded
   // "backlog". Falls back to the first option if, somehow, no status is
   // marked default (shouldn't happen — enforced by a DB constraint).
   const [statusId, setStatusId] = useState(
-    () => statusOptions.find((option) => option.isDefault)?.id ?? statusOptions[0]?.id ?? ""
+    () => initialDraft?.statusId ?? statusOptions.find((option) => option.isDefault)?.id ?? statusOptions[0]?.id ?? ""
   );
-  const [priority, setPriority]         = useState<TicketPriority>("medium");
-  const [ticketType, setTicketType]     = useState<TicketType>("TASK");
-  const [assigneeId, setAssigneeId]     = useState("");
+  const [priority, setPriority]         = useState<TicketPriority>(initialDraft?.priority ?? "medium");
+  const [ticketType, setTicketType]     = useState<TicketType>(initialDraft?.ticketType ?? "TASK");
+  const [assigneeId, setAssigneeId]     = useState(initialDraft?.assigneeId ?? "");
   // Sprint MVP — preselected from the Board/List context this modal was
   // opened from (initialSprintId), still freely changeable here to any
   // other eligible sprint or back to Backlog. null = Backlog.
-  const [sprintId, setSprintId]         = useState<string | null>(initialSprintId ?? null);
-  const [labels, setLabels]             = useState<string[]>([]);
-  const [dueDate, setDueDate]           = useState("");
+  const [sprintId, setSprintId]         = useState<string | null>(initialDraft?.sprintId ?? initialSprintId ?? null);
+  const [labels, setLabels]             = useState<string[]>(initialDraft?.labels ?? []);
+  const [dueDate, setDueDate]           = useState(initialDraft?.dueDate ?? "");
   const [attachments, setAttachments]   = useState<PendingAttachment[]>([]);
   const [dragActive, setDragActive]     = useState(false);
   const [submitting, setSubmitting]     = useState(false);
   const [error, setError]               = useState<string | null>(null);
+  const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
+
+  // True once the form actually holds content worth protecting — gates
+  // both draft autosave (Paso 5: "guardarse solamente cuando haya
+  // cambios") and the unsaved-changes confirmation on an explicit close or
+  // browser-tab close below (Paso 6). Also true right after a draft is
+  // restored, before any further edit this session — that restored content
+  // is real and just as worth protecting as anything freshly typed.
+  const hasContent =
+    title.trim().length > 0 ||
+    !isRichTextEmpty(description) ||
+    criteria.some((c) => c.trim().length > 0) ||
+    labels.length > 0 ||
+    dueDate !== "" ||
+    assigneeId !== "" ||
+    attachments.length > 0 ||
+    priority !== "medium" ||
+    ticketType !== "TASK" ||
+    sprintId !== (initialSprintId ?? null);
+
+  const currentDraft: TicketDraft = useMemo(
+    () => ({ title, description, criteria, statusId, priority, ticketType, assigneeId, sprintId, labels, dueDate }),
+    [title, description, criteria, statusId, priority, ticketType, assigneeId, sprintId, labels, dueDate]
+  );
+  const { clear: clearDraft } = useDraftAutosave(draftKey, currentDraft, hasContent);
+  useUnsavedChangesWarning(hasContent);
 
   const titleRef        = useRef<HTMLInputElement>(null);
   const criteriaRefs    = useRef<(HTMLInputElement | null)[]>([]);
@@ -609,6 +669,7 @@ export function NewTicketModal({
     if (isDevFallback || !organization) {
       const ticket = buildTicket();
       registerTicket(ticket);
+      clearDraft();
       onCreated(ticket);
       return;
     }
@@ -647,6 +708,7 @@ export function NewTicketModal({
           )
         );
       }
+      clearDraft();
       onCreated(result.ticket);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
@@ -663,19 +725,79 @@ export function NewTicketModal({
     submitRef.current = handleSubmit;
   });
 
-  const handleClose = () => {
-    if (submitting) return;
+  // The actual close, once nothing needs confirming (or the user just
+  // confirmed Discard) — never called directly from a UI event handler
+  // itself, see requestClose below.
+  const performClose = () => {
     setVisible(false);
     setTimeout(onClose, 200);
   };
 
-  // Esc to close modal (document-level)
+  // Every explicit abandon action (X button, Cancel, Esc, backdrop click)
+  // routes through here instead of straight to performClose — Paso 6: a
+  // dirty form gets a "Keep editing / Discard changes" confirmation first,
+  // never a silent close. Tab switching/losing window focus never calls
+  // this at all, so it can never trigger the confirmation either.
+  const requestClose = () => {
+    if (submitting) return;
+    if (hasContent) {
+      setShowDiscardConfirm(true);
+      return;
+    }
+    performClose();
+  };
+
+  // Set only while the discard confirmation is showing because the user
+  // clicked a Possible Duplicate (not a plain close) — selecting another
+  // ticket destroys this form exactly like closing it does, so it gets the
+  // same confirmation (Paso 6) rather than silently discarding. Only ever
+  // written/read from event handlers below, never during render.
+  const pendingDuplicateRef = useRef<Ticket | null>(null);
+
+  const requestPreviewDuplicate = (t: Ticket) => {
+    if (hasContent) {
+      pendingDuplicateRef.current = t;
+      setShowDiscardConfirm(true);
+      return;
+    }
+    onPreviewDuplicate(t);
+    onClose();
+  };
+
+  const cancelDiscardConfirm = () => {
+    pendingDuplicateRef.current = null;
+    setShowDiscardConfirm(false);
+  };
+
+  const confirmDiscard = () => {
+    clearDraft();
+    setShowDiscardConfirm(false);
+    const pendingDuplicate = pendingDuplicateRef.current;
+    pendingDuplicateRef.current = null;
+    if (pendingDuplicate) {
+      onPreviewDuplicate(pendingDuplicate);
+      onClose();
+    } else {
+      performClose();
+    }
+  };
+
+  const requestCloseRef = useRef(requestClose);
+  useLayoutEffect(() => {
+    requestCloseRef.current = requestClose;
+  });
+
+  // Esc to close modal (document-level) — Escape while the discard-confirm
+  // dialog itself is open just dismisses that dialog (browser default
+  // focus/Escape handling on its own buttons already covers that), not a
+  // second nested close, so this is suppressed while it's showing.
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") handleClose(); };
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !showDiscardConfirm) requestCloseRef.current();
+    };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [submitting]);
+  }, [showDiscardConfirm]);
 
   // ── Render ──────────────────────────────────────────────────────────────────
 
@@ -684,7 +806,7 @@ export function NewTicketModal({
       {/* Backdrop */}
       <div
         aria-hidden
-        onClick={handleClose}
+        onClick={requestClose}
         className={
           "fixed inset-0 z-50 bg-black/30 dark:bg-black/50 " +
           "transition-opacity duration-200 " +
@@ -732,7 +854,7 @@ export function NewTicketModal({
               )}
             </div>
             <button
-              onClick={handleClose}
+              onClick={requestClose}
               aria-label="Close"
               className="p-1.5 rounded-lg text-slate-400 dark:text-zinc-500 hover:text-slate-700 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors"
             >
@@ -833,7 +955,7 @@ export function NewTicketModal({
                     <button
                       key={t.id}
                       type="button"
-                      onClick={() => { onPreviewDuplicate(t); onClose(); }}
+                      onClick={() => requestPreviewDuplicate(t)}
                       className="w-full flex items-center gap-2.5 px-3.5 py-2.5 hover:bg-amber-100/60 dark:hover:bg-amber-950/30 transition-colors text-left"
                     >
                       <TicketTypeIcon type={t.type} />
@@ -978,7 +1100,7 @@ export function NewTicketModal({
           {/* ── Footer ──────────────────────────────────────────────────────── */}
           <div className="flex items-center justify-between gap-3 px-6 py-4 mt-1 border-t border-slate-100 dark:border-zinc-800 flex-shrink-0 rounded-b-2xl bg-slate-50/40 dark:bg-zinc-900/20">
             <button
-              onClick={handleClose}
+              onClick={requestClose}
               className="px-4 py-2 text-[13px] font-medium text-slate-500 dark:text-zinc-500 hover:text-slate-800 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800 rounded-lg transition-colors"
             >
               Cancel
@@ -1004,6 +1126,12 @@ export function NewTicketModal({
           </div>
         </div>
       </div>
+
+      <UnsavedChangesDialog
+        open={showDiscardConfirm}
+        onKeepEditing={cancelDiscardConfirm}
+        onDiscard={confirmDiscard}
+      />
     </>
   );
 }
