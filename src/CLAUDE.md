@@ -342,6 +342,22 @@ Dashboards, Reports, Project Overview, My Work, Member Profile) now
 navigates straight to the ticket's own Ticket Detail page — no
 intermediate preview step anywhere.
 
+Most recently: a reusable **unsaved-changes protection** pattern
+(`src/lib/unsaved-changes.ts`, a shared discard-confirmation dialog) was
+added after a real bug was found and fixed — Project Settings was
+silently discarding unsaved edits on an ordinary browser-tab switch
+(traced to an effect keyed on the whole `organization` object instead of
+its `id`); Create Ticket also gained sessionStorage draft recovery as a
+second layer. A real Admin Dashboard "Bad Request" bug (an org-wide
+ticket-id query exceeding the gateway's max URL length once the org's
+ticket count grew) was fixed by batching. The Sidebar's Projects list was
+rebuilt into collapsible **Favorites**/**Projects** accordions with a
+mini search and real per-user favorites (new `project_favorites` table +
+RLS reusing the existing project-visibility gate), replacing the old
+3-project cap for Project Lead/Member — a favorite now renders in exactly
+one place, and each accordion's open/closed state is remembered for the
+session without ever being forced open by an active project.
+
 **For the authoritative, feature-by-feature breakdown — every Server
 Action, migration, and real bug fixed along the way, and the exact
 boundary of what's confirmed live vs. not-yet-verified vs. still mock —

@@ -1,4 +1,4 @@
-> Last Updated: August 12, 2026
+> Last Updated: August 24, 2026
 
 ---
 
@@ -290,6 +290,12 @@ DNS records for `techtivo.com`, both remain to be done manually before any
 JIRITA email can actually go out as `alejo+no-reply@techtivo.com`; no
 end-to-end test was possible or attempted for that reason. `tsc`/`eslint`/
 `next build` all pass clean.
+
+Most recently, JIRITA gained a reusable **unsaved-changes protection** mechanism after a real, reproducible bug was diagnosed from a Project Lead report: Project Settings was silently discarding unsaved edits (Target Date, Billing Rate, Repository fields, etc.) on an ordinary browser-tab switch, with no visible reload — traced to its own project-load effect depending on the whole `organization` object rather than `organization?.id`, and `current-user-provider.tsx` handing back a *new* `organization` reference on every window-focus regain (its own pre-existing session-revalidation effect) was enough on its own to silently re-run the load and reset the form. Fixed with a dirty-state guard (a `baseline` snapshot compared field-by-field, background refetches only apply when not dirty, an explicit post-Save/Archive/Restore resync always does) plus a new reusable set — `useUnsavedChangesWarning`/`useDraftAutosave`/`loadDraft` (`src/lib/unsaved-changes.ts`) and a shared `UnsavedChangesDialog` — also applied to Create Ticket as a second protection layer (a sessionStorage draft, restored on mount and cleared on Create/Discard; closing with real content now asks to confirm). Create Ticket, Edit Ticket's inline editors, and Comments were all audited first and confirmed already immune by design (`useState(initialValue)` read once, never resynced by an effect) — only Project Settings actually had the bug, so only it needed the dirty-guard fix.
+
+Separately, a real "Couldn't load dashboard / Bad Request" production bug was diagnosed and fixed: the Admin Dashboard's org-wide `loadOrganizationLoggedMinutes`/`loadOrganizationActivity` (`lib/tickets.ts`) each filtered `.in("ticket_id", ticketIds)` against *every* ticket in the organization in one request — once the org's real ticket count grew large enough (the KTVibe historical import alone added 170 tickets on top of every other project's own), the serialized id list exceeded the gateway's max URL length and Supabase returned a bare 400, surfaced generically as `"Bad Request"`. Both queries now batch `ticketIds` into fixed groups of 100 and query in parallel, with Activity's exact original recency ordering/limit semantics preserved across the merge (each batch keeps its own top-200 most-recent rows, all batches are merged/re-sorted/re-capped at 200, then the existing relevant-event filter and final `limit` apply — never `limit × batchCount`). `dashboard-screen.tsx` itself needed no change.
+
+Most recently, the Sidebar's Projects list — previously every project for Admin but a hard 3-item "pinned" cap for Project Lead/Member with no way to reach any other project from the Sidebar at all — was rebuilt into two independent, collapsible **Favorites** and **Projects** accordions with a mini client-side search, so it scales to an organization with dozens of projects without overflowing the viewport. Favorites is a new, per-user, per-organization `project_favorites` table (`20260930020000_add_project_favorites.sql`, applied to the live project), keyed by `(profile_id, organization_id, project_slug)` — confirmed via code search that `projects.slug` is genuinely immutable after creation, so no `project_id` FK was needed — with RLS reusing the existing `public.can_view_project()` visibility gate for `SELECT`/`INSERT` (never a new permission model) and an identity-only `DELETE` (so losing access to a project never permanently strands a stale favorite). A real bug was found and fixed along the way: the first favorite-toggle implementation used `.upsert()`, which PostgREST compiles to `INSERT ... ON CONFLICT DO UPDATE` — requiring `UPDATE` privilege the table deliberately never grants — so every "add favorite" failed with `42501 permission denied`; fixed by switching to a plain `.insert()` treating the primary key's own `23505 unique_violation` as a silent success. A favorited project now renders in exactly one place (Favorites — filtered out of the Projects list, even though it's still conceptually part of it), and each accordion's open/closed state is remembered for the browser session (`sessionStorage`) without ever being silently reopened by an active or favorited project — an earlier iteration did exactly that (`|| Boolean(activeSlug)`), and it was removed after real testing showed a user could no longer manually close a section. All of the above is implemented and type/build-clean (`tsc`/`eslint`/`next build` all pass); the unsaved-changes protection and the Sidebar rework have not yet been clicked through in a live browser (no test credentials available in this session), and the Dashboard fix's own live confirmation is still pending the user's own reload. See Architecture Status → "Unsaved Changes Protection (forms)" / "Dashboard — org-wide query batching" / "Sidebar — Favorites + scalable Projects list" for the full detail.
 
 ---
 
@@ -4170,6 +4176,236 @@ instructions: there is no correct configuration yet for a test to
 validate (Supabase's *default*, non-Custom-SMTP sender is Supabase's own
 shared address, not this one), and sending a real email through the wrong
 sender would prove nothing.
+
+## Unsaved Changes Protection (forms) — real bug found and fixed
+
+A Project Lead-reported bug ("form data disappears switching tabs while
+editing") was diagnosed and traced to one concrete, reproducible root
+cause — not a browser reload, a silent re-render.
+
+- **Root cause**: `project-settings-screen.tsx`'s project-load `useEffect`
+  depended on the whole `organization` object (not `organization?.id`).
+  `current-user-provider.tsx`'s own pre-existing session-revalidation
+  effect hands back a *new* `organization` object reference on every
+  window-focus regain (switching browser tabs/apps), even when nothing
+  about the org actually changed. That reference change alone re-ran
+  `runFetch()` → `applyProject()`, which unconditionally called
+  `setName`/`setDescription`/`setTargetDate`/etc. from the last-saved
+  server row — silently overwriting Name, Description, Status, Category,
+  Client, Billing Rate, Target Date, and Repository Provider/URL if the
+  user had unsaved edits in any of them.
+- **Audit first**: Create Ticket (`new-ticket-modal.tsx`), Edit Ticket's
+  inline editors (`EditableTitle`/`EditableDescription`/etc.,
+  `ticket-detail-screen.tsx`/`ticket-ui.tsx`), and the Comment
+  composer/edit sessions were all checked for the same pattern and found
+  already immune by design — every one seeds its local state via a plain
+  `useState(initialValue)` read once at mount/edit-start, never an effect
+  that resyncs from props/a fresh fetch. Only Project Settings had the
+  bug, so only it needed the structural fix.
+- **Fix**: the load effect now depends on `organization?.id` (matching
+  `ticket-detail-screen.tsx`'s own pre-existing, explicitly-documented
+  precedent for the same reason), plus a second, independent layer: a
+  `baseline` snapshot (React **state**, not a ref — this repo's
+  `react-hooks/refs` lint rule flags reading `.current` during render) is
+  compared field-by-field into a derived `isDirty`. A background refetch
+  only ever overwrites form fields when `!isDirty`; an explicit
+  post-Save/Archive/Restore resync (`refreshAfterSave`) always applies
+  (`force: true`), since re-syncing after your own save is exactly the
+  point.
+- **Reusable primitives** (new files):
+  - `src/lib/unsaved-changes.ts` — `useUnsavedChangesWarning(isDirty)`
+    (native browser `beforeunload` prompt; fires only on a real
+    close/reload attempt, never on tab switch/window blur/visibilitychange,
+    since `beforeunload` simply doesn't fire for those) and
+    `useDraftAutosave`/`loadDraft` (sessionStorage draft persistence — auto
+    -clears itself the instant content goes back to blank, so a stale
+    draft from before an edit can never resurface without the user having
+    confirmed a real Discard).
+  - `src/components/unsaved-changes-dialog.tsx` — shared "Unsaved
+    changes — You have unsaved changes. Discard them?" (Keep editing /
+    Discard changes) confirmation, reused rather than a second
+    implementation.
+- **Applied to Create Ticket** as a second, defense-in-depth layer (it was
+  never actually vulnerable to the reference-identity bug, but is the
+  highest-value form to protect against an unexpected remount within the
+  same session): a sessionStorage draft keyed
+  `jirita:draft:ticket:create:<slug>[:child:<parentTicketId>]`, covering
+  every serializable field (never staged `File` attachments — those can't
+  survive `JSON.stringify` and are already safe for as long as the modal
+  stays mounted); restored once via a lazy `useState` initializer on
+  mount, cleared on a successful Create and on an explicit Discard.
+  Closing with real content — the X button, Cancel, Esc, backdrop click,
+  or clicking a Possible Duplicate — now shows the confirm dialog instead
+  of silently discarding; switching tabs/losing focus never does.
+- Edit Ticket's inline editors and the Comment composer were deliberately
+  left unchanged — no sessionStorage draft machinery was added there,
+  since they were already immune and adding it would have been
+  unjustified extra surface area for a bug that doesn't exist there.
+
+`tsc`/`eslint`/`next build` all pass. Not yet clicked through in a live
+browser (no test credentials available in this session) — same "should
+work, not yet verified" status as most of this list.
+
+---
+
+## Dashboard — org-wide query batching (real "Bad Request" bug fixed)
+
+A real, reproducible production bug, not a code-review hypothetical:
+opening `/dashboard` (Admin) showed "Couldn't load dashboard / Bad
+Request" instead of the real dashboard.
+
+- **Root cause, confirmed via dev-server logs** (not guessed): the Admin
+  Dashboard's `loadOrganizationLoggedMinutes`/`loadOrganizationActivity`
+  (`lib/tickets.ts`) each filtered `.in("ticket_id", ticketIds)` against
+  **every** ticket in the organization in a single GET request. Once the
+  org's real ticket count grew large enough — the KTVibe historical
+  import alone added 170 tickets in one shot, on top of every other
+  project's own — the serialized id list exceeded the gateway/proxy's max
+  URL length, and Supabase returned a bare, bodyless 400 that
+  supabase-js surfaced as a generic `{"message":"Bad Request"}`. This was
+  explicitly verified to have zero code-path coupling with the same
+  session's unsaved-forms work (`current-user-provider.tsx` was never
+  touched) — a pure data-volume issue, unrelated to any frontend change.
+- **Fix**: both functions now split `ticketIds` into fixed 100-id batches
+  (a local `chunkArray` helper — the same small pattern already
+  independently duplicated in `unfuddle-import/*`/`export-project.ts`/
+  `execute-project-restore-phase3.ts`, not extracted to a shared util
+  since nowhere else needs it) and query every batch in parallel via
+  `Promise.all`.
+  - **Logged Minutes**: sums `minutes` across every batch's rows — same
+    total a single unchunked query would have produced.
+  - **Activity**: preserves its exact original semantics, not just a
+    naive concatenation. Each batch keeps its own top-
+    `ORG_ACTIVITY_RAW_FETCH_LIMIT` (200) most-recent raw rows (any row
+    that belongs in the true organization-wide top 200 must also rank in
+    its own batch's top 200); all batches' rows are merged, re-sorted by
+    `created_at` descending, and re-capped at that same 200 — reproducing
+    exactly what one unchunked query's raw fetch would have returned.
+    *Only after that* does the pre-existing relevant-event filter and the
+    caller's own `limit` (e.g. 11 from the Dashboard) apply, same order of
+    operations as before chunking — never `limit × batchCount`.
+  - Any single batch failing fails the whole call, same as the original
+    single-query version (never a silently-partial total/feed), logged via
+    the existing `logDev` with `{batch, batchSize, message}` — no raw
+    UUIDs ever logged.
+  - `dashboard-screen.tsx` itself needed no change — it still builds and
+    sends the full `ticketIds` array; making the query safe is fully
+    encapsulated in `lib/tickets.ts`.
+
+`tsc`/`eslint`/`next build` all pass. Confirmed via server-side logs that
+the old `42501`/`Bad Request` failures stopped appearing after the fix
+landed; a fresh live `/dashboard` reload to confirm the KPIs/Recent
+Activity render correctly is the user's own next step.
+
+---
+
+## Sidebar — Favorites + scalable Projects list
+
+The Sidebar's Projects block — previously every project for Admin, but a
+hard 3-item "pinned" cap for Project Lead/Member with **no way to reach
+any other project from the Sidebar at all** — was rebuilt into two
+independent, collapsible accordions, **Favorites** and **Projects**, with
+a mini client-side search, so it scales to an organization with dozens of
+projects without overflowing the viewport. Scope was deliberately
+contained to `src/components/sidebar.tsx` plus the new favorites
+data layer — ticket logic, permissions, the Dashboard, and the unsaved-
+forms work above were untouched.
+
+- **Persistence — new `project_favorites` table**
+  (`supabase/migrations/20260930020000_add_project_favorites.sql`,
+  applied to the live project via `supabase db push`). Per-user,
+  per-organization, keyed `(profile_id, organization_id, project_slug)` —
+  `slug`, not a raw `project_id`, after confirming by code search (not
+  assumption) that `projects.slug` is genuinely immutable after creation:
+  no update path, RPC, form, or migration anywhere ever writes it once a
+  project exists, and `projects` already carries a real
+  `unique (organization_id, slug)` constraint to build a composite FK
+  against (`on delete cascade`, so a real permanent Delete Project cleans
+  up its own favorites automatically).
+- **RLS** (reviewed and tightened once, after an initial pass): `SELECT`
+  and `INSERT` require `profile_id = auth.uid()` **and** a real
+  `exists (... public.can_view_project(p.id))` check against `projects` —
+  the exact same Admin-sees-everything / Project-Lead-and-Member-only-
+  staffed-projects gate `projects_select` already enforces, reused rather
+  than inventing a second permission model (same reuse pattern
+  `ticket_subscribers`' own RLS already established). Without that
+  check, `profile_id = auth.uid()` alone would have let an authenticated
+  user favorite any `(organization_id, slug)` pair they could merely
+  guess, even one they have no real access to. `DELETE` is deliberately
+  **identity-only** (no access check): removing your own favorite can
+  never leak or grant anything, and a user who's since lost access to a
+  project must still be able to clear their own now-stale favorite —
+  gating `DELETE` the same way as `SELECT`/`INSERT` would instead strand
+  that row forever.
+- **Real bug found and fixed**: the first `addProjectFavorite`
+  implementation used `.upsert(...)`, which PostgREST compiles to
+  `INSERT ... ON CONFLICT DO UPDATE` — Postgres requires real `UPDATE`
+  privilege for that (checked at statement-analysis time regardless of
+  whether a conflict actually occurs), and the table deliberately never
+  grants `UPDATE` (favorites are add/remove-only, per its own migration
+  comment). Every "add favorite" failed with `42501 permission denied for
+  table project_favorites`, confirmed via the exact captured Supabase
+  error (`code`/`message`/`hint`) in dev-server logs. Fixed — without
+  adding the `UPDATE` grant/policy the design deliberately avoids — by
+  switching to a plain `.insert()` and treating the primary key's own
+  `23505 unique_violation` as a silent success, never a UI error.
+- **Star toggle**: outline/filled, hover/focus-revealed unless already
+  favorited (never fills the list with stars), `aria-label`/`title`
+  "Add to favorites"/"Remove from favorites". Optimistic —
+  `ProjectFavoritesProvider` (new, mounted at the root `layout.tsx` next
+  to `OrganizationProjectsProvider`, for the identical reason that
+  provider exists: Sidebar is rendered per-page from `app-shell.tsx`, not
+  a shared layout, so it fully remounts on every navigation, and fetching
+  favorites at the root avoids refetching — and briefly flashing an empty
+  "No favorites yet" — on every single page change) flips the local `Set`
+  immediately and fires the real write in the background, reverting with
+  the shared `ErrorToast` (`tickets/ticket-ui.tsx`) on a real failure.
+- **Deduplication**: a favorited project renders in exactly one place —
+  Favorites only. It's filtered out of the Projects list
+  (`nonFavoriteProjects = visibleProjects.filter(p => !favoriteSlugs.has(p.slug))`)
+  even though it's still conceptually part of the general list
+  (Favorites ⊂ Projects, per the original spec) — showing it twice read
+  as pure noise/wasted vertical space once this was actually in front of
+  real users. The Projects accordion's own mini search (`Search
+  projects...`, filters `name`/`projectCode`, case-insensitive, no
+  per-keystroke request — everything's already loaded client-side) only
+  ever searches that same already-deduped non-favorite list, so a
+  favorited project can't show up twice in a search result either.
+- **Accordion open/closed state**: session-only
+  (`sessionStorage["jirita:sidebar:sections"]`), read once via a lazy
+  `useState` initializer and persisted on every toggle. Defaults to both
+  open only when nothing is stored yet (`readSidebarSections() ?? {...}`
+  — nullish coalescing, never `||`, so a stored `false` is never coerced
+  back to `true`). Once the user has toggled either accordion, that exact
+  stored state renders as-is — **no** "force open because there's an
+  active/favorited project" override. An earlier iteration had exactly
+  that (`sidebarSections.projectsOpen || Boolean(activeSlug)`), which
+  silently reopened a section the instant there was an active project —
+  real testing surfaced that the user could never actually close a
+  section while browsing a project, so the override was removed outright.
+  A collapsed section can legitimately hide the active project now; its
+  own route/highlight/submenu (`ProjectNavItem`, shared verbatim between
+  Favorites and Projects — never a second implementation) are completely
+  unaffected by either accordion's open state.
+- Every role now sees the Sidebar's full project list (previously
+  Project Lead/Member were capped at 3 "pinned" projects) — the
+  accordion + scroll + search is exactly what makes lifting that cap
+  safe. Admin's own org-wide visibility rule, and each role's project
+  sub-nav gating (`projectNavForRole` — Member never sees Team/Reports/
+  Settings), are both unchanged.
+- **Layout**: the scrollable Favorites+Projects region uses
+  `flex-1 min-h-0 overflow-y-auto` between the fixed top nav and the
+  fixed bottom profile footer — no viewport-height hacks. Confirmed
+  build-clean and consistent with the existing `hidden md:flex` desktop-
+  only gate; mobile (`mobile-tab-bar.tsx`) was not touched at all.
+
+`tsc`/`eslint`/`next build` all pass. Not yet clicked through in a live
+browser (no test credentials available in this session) — the exact
+manual test matrix (favorite/unfavorite, search, both-open/one-open/both-
+closed accordion combinations, per-role visibility) is written up and
+ready for the user's own pass.
+
+---
 
 ## Still mock
 
