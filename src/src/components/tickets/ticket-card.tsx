@@ -101,7 +101,7 @@ export function TicketBoardCard({
       data-ticket-status={ticket.status}
       onClick={() => onTicketClick(ticket)}
       className={[
-        "group w-full text-left rounded-lg border bg-white px-3.5 py-2.5",
+        "group w-full text-left rounded-lg border px-3.5 py-2.5",
         "shadow-sm hover:shadow-md hover:-translate-y-px transition-all duration-150",
         // Parent/Child hierarchy border takes priority over Blocked's own
         // red border — Blocked still shows via its text label below
@@ -119,7 +119,24 @@ export function TicketBoardCard({
           : isBlocked
           ? "border-red-200 dark:border-red-900/60"
           : "border-slate-200 dark:border-zinc-700/70",
-        "dark:bg-zinc-900 dark:shadow-black/30",
+        // Parent/Child hierarchy background — reuses the exact same
+        // isChild/isParent booleans as the border above (never a second
+        // way to detect hierarchy). One step lighter than sky-50/brand-50
+        // (each ~35% blended toward white, arbitrary values rather than a
+        // named shade since Tailwind's palettes don't go lighter than -50)
+        // — the plain -50 shades read as a touch too saturated/prominent
+        // once seen next to real card content (title/priority/due date),
+        // this is a tint, not a block of color, while still clearly
+        // perceptible next to a plain white card — still well short of
+        // Blocked's own red — a Blocked parent/child keeps this same
+        // background, its red border and "Blocked" label already carry
+        // that meaning without needing the background too.
+        isChild
+          ? "bg-[#F5FBFF] dark:bg-sky-950/40"
+          : isParent
+          ? "bg-[#F6F5FF] dark:bg-brand-500/10"
+          : "bg-white dark:bg-zinc-900",
+        "dark:shadow-black/30",
         draggable ? "cursor-grab active:cursor-grabbing" : "",
         isDragging ? "opacity-40" : "",
       ].join(" ")}

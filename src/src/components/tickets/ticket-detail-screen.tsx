@@ -325,18 +325,11 @@ function EditableSidebarType({ value, onChange }: { value: TicketType; onChange:
 
 function EditableSidebarAssignee({
   value,
-  assigneeProfileId,
   onChange,
-  projectSlug,
   members,
 }: {
   value: { name: string; avatar: string };
-  /** Real profiles.id backing `value`, when known — passed straight through
-   *  to the read-only MemberTrigger below so it opens the real profile
-   *  instead of falling back to a name-based guess. */
-  assigneeProfileId?: string | null;
   onChange: (v: { name: string; avatar: string }) => void;
-  projectSlug?: string;
   /** Real organization members only — no mock names. */
   members: OrgMember[];
 }) {
@@ -371,26 +364,35 @@ function EditableSidebarAssignee({
           ))}
         </select>
       ) : (
-        <div className="group flex items-center gap-1.5">
-          <MemberTrigger
-            name={value.name}
-            avatar={value.avatar}
-            profileId={assigneeProfileId ?? undefined}
-            projectSlug={projectSlug}
-            className="flex items-center gap-1.5 min-w-0"
-          >
-            <Avatar src={value.avatar} name={value.name} className="w-5 h-5 rounded-full flex-shrink-0" />
-            <span className="truncate">{value.name}</span>
-          </MemberTrigger>
-          <button
-            type="button"
-            className={EDIT_BTN}
-            aria-label="Edit assignee"
-            onClick={() => setEditing(true)}
+        // Whole-row trigger (not just the pencil icon) — a plain <button>
+        // rather than MemberTrigger + a separate small edit button: a real
+        // <button> is what already gives every other same-row trigger in
+        // this file (MemberTrigger's own non-nested render, the old pencil
+        // button) native keyboard focus/Enter/Space for free, no manual
+        // key handler needed. This does mean clicking the name/avatar here
+        // now opens the assignee selector instead of this person's profile
+        // (MemberTrigger, shared app-wide, was intentionally left
+        // untouched) — the same profile is still reachable from every
+        // other place this person appears (Comments, Team, Reports, ...).
+        <button
+          type="button"
+          onClick={() => setEditing(true)}
+          aria-label="Edit assignee"
+          className={
+            "group w-full flex items-center gap-1.5 -mx-1 px-1 py-0.5 rounded-md text-left " +
+            "cursor-pointer transition-colors hover:bg-slate-50 dark:hover:bg-zinc-800/60 " +
+            "focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40"
+          }
+        >
+          <Avatar src={value.avatar} name={value.name} className="w-5 h-5 rounded-full flex-shrink-0" />
+          <span className="truncate">{value.name}</span>
+          <span
+            aria-hidden="true"
+            className={EDIT_BTN + " group-hover:opacity-100 group-focus-visible:opacity-100"}
           >
             <PencilIcon />
-          </button>
-        </div>
+          </span>
+        </button>
       )}
     </SidebarField>
   );
@@ -6186,13 +6188,11 @@ export function TicketDetailScreen({
 
             <EditableSidebarAssignee
               value={ticket.assignee}
-              assigneeProfileId={ticket.assigneeProfileId}
               onChange={(v) => {
                 update("assignee", v);
                 const member = members.find((m) => m.name === v.name);
                 persist({ assigneeProfileId: member ? member.id : null });
               }}
-              projectSlug={ticket.projectSlug}
               members={members}
             />
 
