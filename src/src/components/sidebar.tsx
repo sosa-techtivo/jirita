@@ -400,13 +400,18 @@ export function Sidebar({
   // Searches only the section it's actually inside — the already-deduped
   // non-favorite list — so a favorited project can never show up twice in
   // a single search result either.
-  const searchedProjects = projectSearchQuery
-    ? nonFavoriteProjects.filter(
-        (project) =>
-          project.name.toLowerCase().includes(projectSearchQuery) ||
-          project.projectCode.toLowerCase().includes(projectSearchQuery)
-      )
-    : nonFavoriteProjects;
+  const searchedProjects = (
+    projectSearchQuery
+      ? nonFavoriteProjects.filter(
+          (project) =>
+            project.name.toLowerCase().includes(projectSearchQuery) ||
+            project.projectCode.toLowerCase().includes(projectSearchQuery)
+        )
+      : nonFavoriteProjects
+  )
+    // Alphabetical A→Z by visible name, case-insensitive — Projects list only.
+    .slice()
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
 
   // Session-only accordion state (see readSidebarSections' own doc) — read
   // once per mount, persisted right back on every toggle, and rendered
