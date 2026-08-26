@@ -25,6 +25,7 @@ import { FALLBACK_AVATAR } from "./current-user";
 import { createNotification } from "./notifications";
 import { formatAbsoluteDate } from "./date-format";
 import { deleteProjectAction, type DeleteProjectResult } from "./server/delete-project-action";
+import { notifyProjectAccessRequestAction } from "./server/notify-project-access-request-action";
 import type { ClientName, ProjectCategory, ProjectHealth, ProjectStatus, ProjectSummary } from "./mock-projects";
 
 export type ProjectsResult =
@@ -1364,7 +1365,14 @@ async function hydrateAccessRequests(
       requesterName: profile ? [profile.first_name, profile.last_name].filter(Boolean).join(" ") || "Unnamed" : "Unknown",
       requesterAvatar: (profile ? resolveAvatarUrl(profile.avatar_url, profile.updated_at) : null) ?? FALLBACK_AVATAR,
       status: row.status,
-      requestedAt: formatAbsoluteDate(row.created_at),
+      // created_at is a real timestamptz ("2026-08-26T20:34:19.66...+00:00"),
+      // not the date-only "YYYY-MM-DD" formatAbsoluteDate expects — passing
+      // it through unsliced produced "Invalid Date" (it appends its own
+      // "T00:00:00" to whatever string it's given). Slicing to just the
+      // date portion keeps this display date-only, matching requestedAt's
+      // documented "Aug 3, 2026" shape, without changing formatAbsoluteDate
+      // itself or any of its other (genuinely date-only) callers.
+      requestedAt: formatAbsoluteDate(row.created_at.slice(0, 10)),
     };
   });
 }
@@ -1440,43 +1448,30 @@ export async function requestProjectAccess(
 
   // Notify every real Lead of this project (there's normally exactly one —
   // the partial unique index on project_role = 'lead' — but this holds
-  // even if that's ever momentarily untrue). Fire-and-forget: never
-  // delays or can fail the already-successful request above.
+  // even if that's ever momentarily untrue). Done via a Server Action
+  // (notifyProjectAccessRequestAction) rather than a direct client query
+  // for the Leads, because project_memberships_select RLS (can_view_project)
+  // hides this project's memberships from the requester — they're, by
+  // definition, not yet a member of it. A direct client-side query here
+  // silently returned zero rows under RLS (no error), which was a real
+  // production bug: the request itself was created, but its Lead was never
+  // notified in-app or by email. Fire-and-forget: never delays or can fail
+  // the already-successful request above.
   void (async () => {
-    const { data: leadRows } = await supabase
-      .from("project_memberships")
-      .select("profile_id")
-      .eq("project_id", projectId)
-      .eq("project_role", "lead")
-      .returns<{ profile_id: string }[]>();
-
     const {
-      data: { user: authUser },
-    } = await supabase.auth.getUser();
-    const actorProfileId = authUser?.id ?? null;
-
-    let requesterName = "Someone";
-    if (actorProfileId) {
-      const { data: requesterRow } = await supabase
-        .from("profiles")
-        .select("first_name, last_name")
-        .eq("id", actorProfileId)
-        .maybeSingle<{ first_name: string | null; last_name: string | null }>();
-      requesterName = requesterRow
-        ? [requesterRow.first_name, requesterRow.last_name].filter(Boolean).join(" ") || "Unnamed"
-        : "Someone";
+      data: { session },
+    } = await supabase.auth.getSession();
+    if (!session) {
+      logDev("project access request notification skipped: no session");
+      return;
     }
-
-    for (const lead of leadRows ?? []) {
-      await createNotification({
-        organizationId,
-        recipientProfileId: lead.profile_id,
-        actorProfileId,
-        type: "project_access_requested",
-        title: `${requesterName} requested to join ${projectName}`,
-        projectId,
-      });
-    }
+    const result = await notifyProjectAccessRequestAction({
+      accessToken: session.access_token,
+      organizationId,
+      projectId,
+      projectName,
+    });
+    if (result.status === "error") logDev("project access request notification failed", result.message);
   })().catch((err) => {
     logDev("project access request notification failed", err);
   });
