@@ -30,6 +30,20 @@ function getSendGridClient(): typeof sgMail {
   if (initialized) return sgMail;
 
   const apiKey = process.env.SENDGRID_API_KEY;
+
+  // TEMPORARY diagnostic — presence/absence only, never values. Added to
+  // determine whether Vercel Production's runtime actually has these env
+  // vars set, after "[notification-email] send-failed Missing
+  // SENDGRID_API_KEY..." kept appearing in production despite the
+  // Environment Variables being configured in the Vercel dashboard and a
+  // redeploy having been done. Remove once diagnosed.
+  console.info("[email-env-debug]", {
+    SENDGRID_API_KEY: Boolean(process.env.SENDGRID_API_KEY),
+    JIRITA_EMAIL_FROM_ADDRESS: Boolean(process.env.JIRITA_EMAIL_FROM_ADDRESS),
+    JIRITA_EMAIL_FROM_NAME: Boolean(process.env.JIRITA_EMAIL_FROM_NAME),
+    VERCEL_ENV: process.env.VERCEL_ENV ?? null,
+  });
+
   if (!apiKey) {
     throw new Error("Missing SENDGRID_API_KEY. Set it in .env.local (see .env.example).");
   }
