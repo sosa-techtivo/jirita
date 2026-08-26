@@ -1,0 +1,12 @@
+-- Immediate-email idempotency marker for notifications. Set once, only
+-- after SendGrid has actually accepted an immediate-email notification's
+-- send (see src/lib/server/notification-email.ts) — never for digest
+-- (no digested_at column here; that's a future phase). Historical rows
+-- stay null forever and never retroactively trigger an email, since
+-- nothing in this phase queries/backfills existing rows.
+--
+-- No index: this phase only ever reads/writes emailed_at for the one row
+-- just inserted in the same request (by primary key), never scans for
+-- "all unemailed" — a bulk query pattern like that belongs to a future
+-- digest phase, which can add whatever index it actually needs then.
+alter table public.notifications add column emailed_at timestamptz;

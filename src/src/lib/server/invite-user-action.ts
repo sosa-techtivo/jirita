@@ -39,6 +39,7 @@
 import { createClient } from "@supabase/supabase-js";
 import type { SupabaseClient, User as SupabaseAuthUser } from "@supabase/supabase-js";
 import type { Role } from "@/lib/current-user";
+import { requireAppBaseUrl } from "./app-base-url";
 
 export type InviteUserResult = { status: "success" } | { status: "error"; message: string };
 export type GenerateInviteLinkResult =
@@ -94,17 +95,6 @@ function requireSupabaseUrl(): string {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   if (!url) throw new Error("Missing NEXT_PUBLIC_SUPABASE_URL.");
   return url;
-}
-
-// Public app URL used to build the "Generate invite link" link — deliberately
-// never Supabase's own domain (see GenerateLinkProperties.action_link, which
-// points at the Supabase project itself and is never used for the copyable
-// link below). Only read by generateInviteLinkAction; inviteUserAction's
-// email redirect keeps using the caller's own origin exactly as before.
-function requireAppUrl(): string {
-  const url = process.env.NEXT_PUBLIC_APP_URL;
-  if (!url) throw new Error("Missing NEXT_PUBLIC_APP_URL.");
-  return url.replace(/\/+$/, "");
 }
 
 // Authenticated-as-the-caller client — identification + authorization only,
@@ -393,9 +383,9 @@ export async function inviteUserAction(params: {
   // No `from`/sender parameter exists on this call — the GoTrue Admin API
   // has none. Every Supabase Auth email (this one included) always goes out
   // as whatever Sender Email/Sender Name is configured under Project
-  // Settings -> Authentication -> SMTP Settings in the Supabase Dashboard;
-  // see lib/email-sender.ts for the one canonical sender identity that
-  // Dashboard setting is meant to match.
+  // Settings -> Authentication -> SMTP Settings in the Supabase Dashboard.
+  // Unrelated to the SendGrid sender in lib/email-sender.ts, which this
+  // path does not use.
   const { data: inviteData, error: inviteError } = await admin.auth.admin.inviteUserByEmail(email, {
     redirectTo,
     data: { first_name: firstName, last_name: lastName },
@@ -479,7 +469,7 @@ export async function generateInviteLinkAction(params: {
 
   let appUrl: string;
   try {
-    appUrl = requireAppUrl();
+    appUrl = requireAppBaseUrl();
   } catch (err) {
     logServerError("app-url-missing", err);
     return { status: "error", message: "Server configuration error." };
@@ -658,7 +648,7 @@ export async function generatePasswordResetLinkAction(params: {
 
   let appUrl: string;
   try {
-    appUrl = requireAppUrl();
+    appUrl = requireAppBaseUrl();
   } catch (err) {
     logServerError("app-url-missing", err);
     return { status: "error", message: "Server configuration error." };
@@ -688,7 +678,7 @@ export async function generatePasswordResetLinkAction(params: {
 
 // "Copy Invitation Link" (Users → row menu, Invited users only) — mints a
 // fresh single-use link for a profile that was *already* invited, the same
-// generateLink + requireAppUrl() + token_hash mechanics as
+// generateLink + requireAppBaseUrl() + token_hash mechanics as
 // generateInviteLinkAction above. Deliberately doesn't go through
 // prepareInvite: that function's job is rejecting a *new* invite that would
 // collide with an existing membership, which is exactly the case here (the
@@ -776,7 +766,7 @@ export async function regenerateInviteLinkAction(params: {
 
   let appUrl: string;
   try {
-    appUrl = requireAppUrl();
+    appUrl = requireAppBaseUrl();
   } catch (err) {
     logServerError("app-url-missing", err);
     return { status: "error", message: "Server configuration error." };

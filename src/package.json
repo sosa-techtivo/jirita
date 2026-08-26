@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "test": "vitest run",
     "db:push": "npx supabase db push",
     "import:dry-run": "tsx src/lib/unfuddle-import/runner/dry-run.ts",
     "import:phase2": "tsx src/lib/unfuddle-import/runner/phase2-run.ts",
@@ -23,6 +24,7 @@
     "backfill:thumbnails:apply": "tsx src/lib/attachment-thumbnail-backfill/runner/backfill-run.ts --apply"
   },
   "dependencies": {
+    "@sendgrid/mail": "^8.1.6",
     "@supabase/supabase-js": "^2.110.1",
     "@tiptap/core": "^3.29.2",
     "@tiptap/extension-color": "^3.29.2",
@@ -57,6 +59,7 @@
     "sharp": "^0.34.5",
     "tailwindcss": "^4",
     "tsx": "^4.23.1",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.11"
   }
 }

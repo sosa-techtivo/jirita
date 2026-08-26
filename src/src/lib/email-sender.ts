@@ -1,26 +1,98 @@
-// The one canonical "From" identity for every email JIRITA's own system
-// ever sends — a single source of truth so no call site (present or
-// future) hardcodes this string itself.
+// Server-only transactional email sender, backed by the SendGrid Web API
+// (never SMTP). Never import this from a "use client" file — the guard
+// below throws immediately if this module ever ends up evaluated in a
+// browser bundle, as a defense-in-depth backstop (this project adds no new
+// dependencies beyond @sendgrid/mail, so there's no `server-only` package
+// to enforce this at build time). Same pattern as
+// src/lib/server/github-token-crypto.ts.
 //
-// IMPORTANT — this constant does not, by itself, change what sender any
-// email actually goes out as. The only real email-sending capability in
-// this codebase today is Supabase Auth's own hosted email (used by
-// resetPasswordForEmail in lib/auth.ts, and by inviteUserByEmail in
-// lib/server/invite-user-action.ts — currently unreachable from the UI,
-// see that file's own header comment). Supabase Auth has no per-call
-// "from" parameter: every hosted Auth email uses whatever Sender
-// Email/Sender Name is configured under Project Settings -> Authentication
-// -> SMTP Settings (Custom SMTP) in the Supabase Dashboard — that setting
-// cannot be changed from this repo, via a migration, or via an environment
-// variable read by this app's own server. Until Custom SMTP is configured
-// there with a real, domain-verified SMTP relay, Supabase Auth emails
-// (Forgot Password today; Invite-by-email if ever re-enabled) continue
-// going out from Supabase's own default shared sender, not this address.
-//
-// A plain exported constant, not an environment variable, since this
-// value doesn't vary per deployment/environment and isn't a secret — it's
-// fixed branding, same category as e.g. hours-report-branding.ts's own
-// logo constant.
-export const JIRITA_EMAIL_SENDER_ADDRESS = "alejo+no-reply@techtivo.com";
-export const JIRITA_EMAIL_SENDER_NAME = "JIRITA";
-export const JIRITA_EMAIL_SENDER = `${JIRITA_EMAIL_SENDER_NAME} <${JIRITA_EMAIL_SENDER_ADDRESS}>`;
+// This module is infrastructure only — nothing in the app calls
+// sendTransactionalEmail yet. Notifications, ticket assignments, mentions,
+// replies, project access, and digest emails are deliberately not wired to
+// it. Supabase Auth's own hosted email (Forgot Password today) is a
+// separate delivery path entirely, controlled by Project Settings ->
+// Authentication -> SMTP Settings in the Supabase Dashboard — unaffected
+// by this file.
+
+import sgMail from "@sendgrid/mail";
+
+if (typeof window !== "undefined") {
+  throw new Error("email-sender.ts must never be imported by client-side code.");
+}
+
+let initialized = false;
+
+// Fixed branding fallback only — never a secret, never an address. See
+// JIRITA_EMAIL_FROM_NAME below for the one field allowed to default.
+const DEFAULT_FROM_NAME = "JIRITA";
+
+function getSendGridClient(): typeof sgMail {
+  if (initialized) return sgMail;
+
+  const apiKey = process.env.SENDGRID_API_KEY;
+  if (!apiKey) {
+    throw new Error("Missing SENDGRID_API_KEY. Set it in .env.local (see .env.example).");
+  }
+
+  sgMail.setApiKey(apiKey);
+  initialized = true;
+  return sgMail;
+}
+
+function getFromAddress(): { email: string; name: string } {
+  const email = process.env.JIRITA_EMAIL_FROM_ADDRESS;
+  if (!email) {
+    throw new Error("Missing JIRITA_EMAIL_FROM_ADDRESS. Set it in .env.local (see .env.example).");
+  }
+
+  const name = process.env.JIRITA_EMAIL_FROM_NAME || DEFAULT_FROM_NAME;
+
+  return { email, name };
+}
+
+export interface SendTransactionalEmailInput {
+  /** One or more recipient addresses. */
+  to: string | string[];
+  subject: string;
+  text: string;
+  html: string;
+}
+
+export interface SendTransactionalEmailResult {
+  /** HTTP status code returned by the SendGrid Web API. */
+  statusCode: number;
+  /** The `x-message-id` response header, when SendGrid provides one. */
+  messageId: string | null;
+}
+
+// The sender is always the configured JIRITA identity — callers cannot
+// override it. Errors from the SendGrid API propagate to the caller after
+// being re-wrapped with a message that never includes the API key.
+export async function sendTransactionalEmail(
+  input: SendTransactionalEmailInput
+): Promise<SendTransactionalEmailResult> {
+  const client = getSendGridClient();
+  const from = getFromAddress();
+
+  try {
+    const [response] = await client.send({
+      to: input.to,
+      from,
+      subject: input.subject,
+      text: input.text,
+      html: input.html,
+    });
+
+    return {
+      statusCode: response.statusCode,
+      messageId: response.headers["x-message-id"] ?? null,
+    };
+  } catch (error) {
+    // SendGrid errors can carry response bodies with request details;
+    // never let a raw error object (or its body) surface API-key material
+    // — there is none in these errors, but we still log/rethrow only a
+    // plain message.
+    const message = error instanceof Error ? error.message : "Unknown SendGrid error.";
+    throw new Error(`Failed to send transactional email via SendGrid: ${message}`);
+  }
+}

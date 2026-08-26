@@ -58,7 +58,8 @@ export function onAuthStateChange(callback: (user: AuthUser | null) => void): ()
 // has an account (Supabase's resetPasswordForEmail behaves the same way).
 // Same as every other Supabase Auth email: no `from` parameter exists here
 // either — the sender is whatever's configured in the Supabase Dashboard's
-// Auth SMTP Settings, never this call site. See lib/email-sender.ts.
+// Auth SMTP Settings, never this call site. Unrelated to the SendGrid
+// sender in lib/email-sender.ts, which this path does not use.
 export async function requestPasswordReset(email: string): Promise<void> {
   await getSupabaseBrowserClient().auth.resetPasswordForEmail(email.trim(), {
     redirectTo: `${window.location.origin}/reset-password`,

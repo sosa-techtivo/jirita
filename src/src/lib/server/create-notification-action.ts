@@ -20,6 +20,7 @@
 
 import { createClient } from "@supabase/supabase-js";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { isImmediateEmailNotificationType, sendImmediateNotificationEmail } from "./notification-email";
 
 const NOTIFICATION_TYPES = [
   "ticket_assigned",
@@ -176,32 +177,40 @@ export async function createNotificationAction(
     return { status: "error", message: "Recipient is not part of this organization." };
   }
 
-  // A referenced project must really belong to this organization.
+  // A referenced project must really belong to this organization. Selects
+  // a couple of extra display columns beyond the `id` this check strictly
+  // needs, purely so an immediate-email type (below) never has to re-query
+  // for the same row a second time.
+  type ProjectContext = { id: string; name: string; slug: string; projectCode: string };
+  let projectContext: ProjectContext | null = null;
   if (params.projectId) {
     const { data: projectRow, error: projectError } = await admin
       .from("projects")
-      .select("id")
+      .select("id, name, slug, project_code")
       .eq("id", params.projectId)
       .eq("organization_id", params.organizationId)
-      .maybeSingle<{ id: string }>();
+      .maybeSingle<{ id: string; name: string; slug: string; project_code: string }>();
     if (projectError) {
       logServerError("project-lookup-failed", projectError);
       return { status: "error", message: "Could not verify the referenced project." };
     }
     if (!projectRow) return { status: "error", message: "Referenced project not found in this organization." };
+    projectContext = { id: projectRow.id, name: projectRow.name, slug: projectRow.slug, projectCode: projectRow.project_code };
   }
 
   // A referenced ticket must belong to the referenced project (or, if no
   // project was given, to some project of this same organization) — a flat
   // follow-up query rather than an embedded select, same convention
   // lib/tickets.ts already uses to avoid depending on PostgREST's FK
-  // relationship cache.
+  // relationship cache. Same extra-columns-for-email reasoning as above.
+  type TicketContext = { id: string; ticketNumber: number; title: string };
+  let ticketContext: TicketContext | null = null;
   if (params.ticketId) {
     const { data: ticketRow, error: ticketError } = await admin
       .from("tickets")
-      .select("id, project_id")
+      .select("id, project_id, ticket_number, title")
       .eq("id", params.ticketId)
-      .maybeSingle<{ id: string; project_id: string }>();
+      .maybeSingle<{ id: string; project_id: string; ticket_number: number; title: string }>();
     if (ticketError) {
       logServerError("ticket-lookup-failed", ticketError);
       return { status: "error", message: "Could not verify the referenced ticket." };
@@ -216,10 +225,10 @@ export async function createNotificationAction(
     } else {
       const { data: ticketProjectRow, error: ticketProjectError } = await admin
         .from("projects")
-        .select("id")
+        .select("id, name, slug, project_code")
         .eq("id", ticketRow.project_id)
         .eq("organization_id", params.organizationId)
-        .maybeSingle<{ id: string }>();
+        .maybeSingle<{ id: string; name: string; slug: string; project_code: string }>();
       if (ticketProjectError) {
         logServerError("ticket-project-lookup-failed", ticketProjectError);
         return { status: "error", message: "Could not verify the referenced ticket's project." };
@@ -227,23 +236,54 @@ export async function createNotificationAction(
       if (!ticketProjectRow) {
         return { status: "error", message: "Referenced ticket's project is not in this organization." };
       }
+      projectContext = {
+        id: ticketProjectRow.id,
+        name: ticketProjectRow.name,
+        slug: ticketProjectRow.slug,
+        projectCode: ticketProjectRow.project_code,
+      };
     }
+
+    ticketContext = { id: ticketRow.id, ticketNumber: ticketRow.ticket_number, title: ticketRow.title };
   }
 
-  const { error: insertError } = await admin.from("notifications").insert({
-    organization_id: params.organizationId,
-    recipient_profile_id: params.recipientProfileId,
-    actor_profile_id: params.actorProfileId,
-    type: params.type,
-    title: params.title.trim(),
-    message: params.message,
-    project_id: params.projectId,
-    ticket_id: params.ticketId,
-  });
+  const { data: insertedRow, error: insertError } = await admin
+    .from("notifications")
+    .insert({
+      organization_id: params.organizationId,
+      recipient_profile_id: params.recipientProfileId,
+      actor_profile_id: params.actorProfileId,
+      type: params.type,
+      title: params.title.trim(),
+      message: params.message,
+      project_id: params.projectId,
+      ticket_id: params.ticketId,
+    })
+    .select("id")
+    .single<{ id: string }>();
 
-  if (insertError) {
+  if (insertError || !insertedRow) {
     logServerError("notification-insert-failed", insertError);
-    return { status: "error", message: insertError.message };
+    return { status: "error", message: insertError?.message ?? "Failed to create notification." };
+  }
+
+  // In-app notification is the source of truth and already committed above
+  // — email is a secondary, best-effort delivery layer projected from it.
+  // sendImmediateNotificationEmail never throws, so a SendGrid problem here
+  // can never turn this already-successful action into an error response.
+  if (isImmediateEmailNotificationType(params.type)) {
+    await sendImmediateNotificationEmail({
+      admin,
+      notificationId: insertedRow.id,
+      recipientProfileId: params.recipientProfileId,
+      actorProfileId: params.actorProfileId,
+      type: params.type,
+      message: params.message,
+      project: projectContext ? { name: projectContext.name, slug: projectContext.slug } : null,
+      ticket: ticketContext
+        ? { code: `${projectContext?.projectCode ?? "TKT"}-${ticketContext.ticketNumber}`, title: ticketContext.title }
+        : null,
+    });
   }
 
   return { status: "success" };
