@@ -5061,6 +5061,16 @@ export type OrganizationLoggedTimeResult =
 // need to know not just how many minutes were logged, but by whom and on
 // which ticket, not just a single aggregate like loadOrganizationLoggedMinutes
 // above). Grouping by person/ticket is left to the caller.
+//
+// Chunked via the same chunkArray/ORG_TICKET_ID_BATCH_SIZE convention as
+// loadOrganizationLoggedMinutes/loadOrganizationActivity above — a Project
+// Lead scoped to a large migrated project (e.g. an Unfuddle import) can
+// easily push ticketIds past 1,000+, which serialized into one unchunked
+// `.in()` blows the gateway's max URL length and comes back as a bare,
+// bodyless "Bad Request" (reproduced directly against the ticket_time_entries
+// REST endpoint: a 1,391-id single query 400s, a 100-id batch is a clean
+// 200). This is the same failure mode that function's own comment already
+// documents, just reached here via a different caller.
 export async function loadOrganizationLoggedTimeForRange(
   ticketIds: string[],
   startDate: string,
@@ -5069,29 +5079,45 @@ export async function loadOrganizationLoggedTimeForRange(
   if (ticketIds.length === 0) return { status: "ready", entries: [] };
 
   const supabase = getSupabaseBrowserClient();
+  const batches = chunkArray(ticketIds, ORG_TICKET_ID_BATCH_SIZE);
 
-  const { data: rows, error } = await supabase
-    .from("ticket_time_entries")
-    .select("ticket_id, logged_by, minutes, work_date, comment")
-    .in("ticket_id", ticketIds)
-    .gte("work_date", startDate)
-    .lte("work_date", endDate)
-    .returns<{ ticket_id: string; logged_by: string | null; minutes: number; work_date: string; comment: string | null }[]>();
+  const results = await Promise.all(
+    batches.map((batch) =>
+      supabase
+        .from("ticket_time_entries")
+        .select("ticket_id, logged_by, minutes, work_date, comment")
+        .in("ticket_id", batch)
+        .gte("work_date", startDate)
+        .lte("work_date", endDate)
+        .returns<{ ticket_id: string; logged_by: string | null; minutes: number; work_date: string; comment: string | null }[]>()
+    )
+  );
 
-  if (error) {
-    logDev("organization logged time range query failed", error);
-    return { status: "error", message: error.message };
+  // Any batch failing fails the whole call, same as the single-query
+  // version did — never a silently-partial result.
+  for (let i = 0; i < results.length; i++) {
+    const { error } = results[i];
+    if (error) {
+      logDev("organization logged time range query failed", {
+        batch: i,
+        batchSize: batches[i].length,
+        message: error.message,
+      });
+      return { status: "error", message: error.message };
+    }
   }
 
   return {
     status: "ready",
-    entries: (rows ?? []).map((row) => ({
-      ticketId: row.ticket_id,
-      loggedBy: row.logged_by,
-      minutes: row.minutes,
-      workDate: row.work_date,
-      comment: row.comment,
-    })),
+    entries: results.flatMap(({ data }) =>
+      (data ?? []).map((row) => ({
+        ticketId: row.ticket_id,
+        loggedBy: row.logged_by,
+        minutes: row.minutes,
+        workDate: row.work_date,
+        comment: row.comment,
+      }))
+    ),
   };
 }
 
