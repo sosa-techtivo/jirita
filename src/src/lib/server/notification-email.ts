@@ -23,6 +23,7 @@ import { sendTransactionalEmail } from "../email-sender";
 import type { NotificationType } from "./create-notification-action";
 import { getAppBaseUrl } from "./app-base-url";
 import { getEmailPreferencesForRecipient } from "./email-preferences";
+import { escapeHtml, wrapEmailHtml, ctaHtml } from "./email-template";
 
 if (typeof window !== "undefined") {
   throw new Error("notification-email.ts must never be imported by client-side code.");
@@ -49,14 +50,6 @@ export function isImmediateEmailNotificationType(type: NotificationType): boolea
 function logEmailWarning(operation: string, detail?: unknown): void {
   const message = detail instanceof Error ? detail.message : detail;
   console.warn(`[notification-email] ${operation}`, message ?? "");
-}
-
-function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
 }
 
 export interface NotificationEmailProject {
@@ -89,51 +82,6 @@ interface EmailContent {
   html: string;
 }
 
-// Fixed absolute URL, not built from NEXT_PUBLIC_APP_URL (which is
-// currently "http://localhost:3000" in this environment — not publicly
-// reachable, so an email client could never load it). jirita.techtivo.com
-// is the same domain already authenticated for SendGrid sending (SPF/DKIM/
-// DMARC, see Fase 1), so it's a real, stable, publicly-resolvable host for
-// this static asset regardless of where the app itself is deployed.
-const LOGO_URL = "https://jirita.techtivo.com/img/jirita-logo.png";
-
-// ~110px wide, height held to the source PNG's own aspect ratio
-// (217x47 -> 24px) so it never stretches; explicit width/height attributes
-// (not just CSS) are what keeps email clients — Outlook in particular —
-// from reserving the wrong box before the image loads.
-const LOGO_HEADER_HTML = `<img src="${LOGO_URL}" width="110" height="24" alt="JIRITA" style="display:block;width:110px;height:24px;border:0;outline:none;text-decoration:none;">`;
-
-function wrapHtml(bodyHtml: string): string {
-  return `<!doctype html>
-<html>
-  <body style="margin:0;padding:24px;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;color:#0f172a;">
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
-      <tr>
-        <td align="center">
-          <table role="presentation" width="100%" style="max-width:480px;" cellpadding="0" cellspacing="0">
-            <tr>
-              <td style="padding-bottom:20px;">
-                ${LOGO_HEADER_HTML}
-              </td>
-            </tr>
-            <tr>
-              <td style="background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;padding:24px;">
-                ${bodyHtml}
-              </td>
-            </tr>
-          </table>
-        </td>
-      </tr>
-    </table>
-  </body>
-</html>`;
-}
-
-function ctaHtml(href: string | null, label: string): string {
-  if (!href) return "";
-  return `<p style="margin:20px 0 0;"><a href="${href}" style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;padding:10px 18px;border-radius:8px;font-size:14px;font-weight:600;">${escapeHtml(label)}</a></p>`;
-}
-
 function buildEmailContent(input: {
   type: NotificationType;
   actorName: string;
@@ -162,7 +110,7 @@ function buildEmailContent(input: {
         `Project: ${project.name}`,
         ...(ticketUrl ? ["", `View ticket: ${ticketUrl}`] : []),
       ].join("\n");
-      const html = wrapHtml(
+      const html = wrapEmailHtml(
         `<p style="margin:0 0 12px;font-size:15px;">${escapeHtml(actorName)} assigned you a ticket.</p>` +
           `<p style="margin:0 0 12px;font-size:15px;font-weight:600;">${escapeHtml(ticket.code)}: ${escapeHtml(ticket.title)}</p>` +
           `<p style="margin:0;font-size:14px;color:#475569;">Project: ${escapeHtml(project.name)}</p>` +
@@ -182,7 +130,7 @@ function buildEmailContent(input: {
         `"${safeExcerpt}"`,
         ...(ticketUrl ? ["", `View ticket: ${ticketUrl}`] : []),
       ].join("\n");
-      const html = wrapHtml(
+      const html = wrapEmailHtml(
         `<p style="margin:0 0 12px;font-size:15px;">${escapeHtml(actorName)} mentioned you in a comment on:</p>` +
           `<p style="margin:0 0 12px;font-size:15px;font-weight:600;">${escapeHtml(ticket.code)}: ${escapeHtml(ticket.title)}</p>` +
           `<p style="margin:0;font-size:14px;color:#475569;font-style:italic;">"${escapeHtml(safeExcerpt)}"</p>` +
@@ -202,7 +150,7 @@ function buildEmailContent(input: {
         `"${safeExcerpt}"`,
         ...(ticketUrl ? ["", `View reply: ${ticketUrl}`] : []),
       ].join("\n");
-      const html = wrapHtml(
+      const html = wrapEmailHtml(
         `<p style="margin:0 0 12px;font-size:15px;">${escapeHtml(actorName)} replied to your comment on:</p>` +
           `<p style="margin:0 0 12px;font-size:15px;font-weight:600;">${escapeHtml(ticket.code)}: ${escapeHtml(ticket.title)}</p>` +
           `<p style="margin:0;font-size:14px;color:#475569;font-style:italic;">"${escapeHtml(safeExcerpt)}"</p>` +
@@ -219,7 +167,7 @@ function buildEmailContent(input: {
         project.name,
         ...(projectsUrl ? ["", `Review request: ${projectsUrl}`] : []),
       ].join("\n");
-      const html = wrapHtml(
+      const html = wrapEmailHtml(
         `<p style="margin:0 0 12px;font-size:15px;">${escapeHtml(actorName)} requested access to:</p>` +
           `<p style="margin:0;font-size:15px;font-weight:600;">${escapeHtml(project.name)}</p>` +
           ctaHtml(projectsUrl, "Review request")

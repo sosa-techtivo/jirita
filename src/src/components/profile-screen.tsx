@@ -4,8 +4,14 @@ import { useEffect, useRef, useState, type ChangeEvent, type DragEvent, type For
 import Link from "next/link";
 import { ROLE_LABELS, type CurrentUser } from "@/lib/current-user";
 import { useCurrentUser } from "@/components/current-user-provider";
-import { SettingRow, SettingGroup } from "@/components/settings-ui";
+import { SettingRow, SettingGroup, SelectField } from "@/components/settings-ui";
 import { getDefaultTicketView, setDefaultTicketView, type DefaultTicketView } from "@/lib/user-preferences";
+import {
+  loadOwnEmailPreferences,
+  updateOwnEmailPreferences,
+  type OwnEmailPreferences,
+  type EmailDigestFrequency,
+} from "@/lib/email-preferences";
 import { ALLOWED_AVATAR_TYPES, validateAvatarFile } from "@/lib/avatar-upload";
 import { Avatar } from "@/components/ui/avatar";
 
@@ -72,6 +78,37 @@ function TicketViewToggle({ value, onChange }: { value: DefaultTicketView; onCha
     </div>
   );
 }
+
+// Same boolean on/off switch as invite-user-modal.tsx's "Financial access"
+// row — reused inline here rather than extracted, since this is the only
+// other place in the app that needs one so far.
+function Switch({ checked, onChange, label }: { checked: boolean; onChange: (next: boolean) => void; label: string }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      onClick={() => onChange(!checked)}
+      className={`relative inline-flex h-5 w-9 flex-shrink-0 items-center rounded-full transition-colors ${
+        checked ? "bg-brand-600 dark:bg-brand-500" : "bg-slate-200 dark:bg-zinc-700"
+      }`}
+    >
+      <span
+        className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+          checked ? "translate-x-4" : "translate-x-0.5"
+        }`}
+      />
+    </button>
+  );
+}
+
+const DIGEST_FREQUENCY_OPTIONS: { value: EmailDigestFrequency; label: string }[] = [
+  { value: "1h", label: "Every hour" },
+  { value: "4h", label: "Every 4 hours" },
+  { value: "8h", label: "Every 8 hours" },
+  { value: "daily", label: "Daily" },
+];
 
 // Wraps the existing avatar <img> (unchanged size/shape/position) with
 // click-to-upload and drag & drop. Resting appearance is pixel-identical to
@@ -193,15 +230,32 @@ export function ProfileScreen() {
 }
 
 function ProfileForm({ user }: { user: CurrentUser }) {
-  const { updateProfile } = useCurrentUser();
+  const { updateProfile, userId } = useCurrentUser();
 
   const [firstName, setFirstName] = useState(user.firstName);
   const [lastName, setLastName] = useState(user.lastName);
   const [weeklyCapacity, setWeeklyCapacity] = useState(String(user.weeklyCapacity));
   const [defaultView, setDefaultViewState] = useState<DefaultTicketView>(() => getDefaultTicketView());
+  const [emailPrefs, setEmailPrefs] = useState<OwnEmailPreferences | null>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Backend-backed (organization_memberships), unlike defaultView above —
+  // loaded once per mount rather than read synchronously, so it starts
+  // null and the "Email notifications" group below shows a brief loading
+  // row until this resolves.
+  useEffect(() => {
+    if (!userId) return;
+    let cancelled = false;
+    loadOwnEmailPreferences(userId).then((result) => {
+      if (cancelled) return;
+      if (result.status === "ready") setEmailPrefs(result.preferences);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
 
   async function handleSave(e: FormEvent) {
     e.preventDefault();
@@ -216,12 +270,20 @@ function ProfileForm({ user }: { user: CurrentUser }) {
     });
     setDefaultTicketView(defaultView);
 
+    // Only attempted once the initial load above has actually resolved —
+    // if it hasn't (e.g. the request is still in flight), there is nothing
+    // loaded to save yet, and this must never overwrite real saved
+    // preferences with a still-null draft.
+    const emailPrefsResult = emailPrefs ? await updateOwnEmailPreferences(emailPrefs) : null;
+
     setSaving(false);
-    if (result.success) {
+    if (result.success && (!emailPrefsResult || emailPrefsResult.status === "success")) {
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
-    } else {
+    } else if (!result.success) {
       setError(result.message ?? "Something went wrong. Please try again.");
+    } else if (emailPrefsResult && emailPrefsResult.status === "error") {
+      setError(emailPrefsResult.message ?? "Could not save email preferences. Please try again.");
     }
   }
 
@@ -307,6 +369,47 @@ function ProfileForm({ user }: { user: CurrentUser }) {
           <SettingRow label="Default Ticket View" hint="Used when you open a project's Tickets tab">
             <TicketViewToggle value={defaultView} onChange={setDefaultViewState} />
           </SettingRow>
+        </SettingGroup>
+
+        <SettingGroup title="Email notifications">
+          {emailPrefs ? (
+            <>
+              <SettingRow
+                label="Send important notifications immediately"
+                hint="Assignments, mentions, replies, and project access requests."
+              >
+                <Switch
+                  checked={emailPrefs.immediateEnabled}
+                  onChange={(next) => setEmailPrefs({ ...emailPrefs, immediateEnabled: next })}
+                  label="Send important notifications immediately"
+                />
+              </SettingRow>
+              <SettingRow
+                label="Send me a summary of notifications I haven't seen"
+                hint="Includes unread activity since your last summary."
+              >
+                <Switch
+                  checked={emailPrefs.digestEnabled}
+                  onChange={(next) => setEmailPrefs({ ...emailPrefs, digestEnabled: next })}
+                  label="Send me a summary of notifications I haven't seen"
+                />
+              </SettingRow>
+              <SettingRow label="Summary frequency">
+                <SelectField
+                  value={emailPrefs.digestFrequency}
+                  disabled={!emailPrefs.digestEnabled}
+                  options={DIGEST_FREQUENCY_OPTIONS}
+                  onChange={(value) =>
+                    setEmailPrefs({ ...emailPrefs, digestFrequency: value as EmailDigestFrequency })
+                  }
+                />
+              </SettingRow>
+            </>
+          ) : (
+            <SettingRow label="Loading…">
+              <span />
+            </SettingRow>
+          )}
         </SettingGroup>
 
         <SettingGroup title="Account">
