@@ -57,9 +57,13 @@ export function onAuthStateChange(callback: (user: AuthUser | null) => void): ()
 // Always resolves — mirrors a real backend never revealing whether an email
 // has an account (Supabase's resetPasswordForEmail behaves the same way).
 // Same as every other Supabase Auth email: no `from` parameter exists here
-// either — the sender is whatever's configured in the Supabase Dashboard's
-// Auth SMTP Settings, never this call site. Unrelated to the SendGrid
-// sender in lib/email-sender.ts, which this path does not use.
+// either — the sender/branding is whatever's configured in the Supabase
+// Dashboard's Auth SMTP Settings + Email Templates, never this call site.
+// That Dashboard config should route through the same SendGrid
+// account/sender as lib/email-sender.ts (never a second provider) and use
+// JIRITA/Techtivo branding instead of Supabase's default template — see
+// docs/SUPABASE_AUTH_EMAIL_SETUP.md for the exact settings. This function's
+// own tokens/redirect behavior are unaffected either way.
 export async function requestPasswordReset(email: string): Promise<void> {
   await getSupabaseBrowserClient().auth.resetPasswordForEmail(email.trim(), {
     redirectTo: `${window.location.origin}/reset-password`,

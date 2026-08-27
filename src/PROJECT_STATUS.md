@@ -4500,6 +4500,44 @@ Supabase project.
 
 ---
 
+## Supabase Auth Email — Forgot Password sender/branding (pending manual Dashboard step)
+
+A request to stop Forgot Password emails going out under Supabase's
+default sender/branding was investigated. Confirmed by code inspection:
+`resetPasswordForEmail()` (`src/lib/auth.ts`) takes no `from` parameter —
+the sender/branding for every Supabase Auth email (Forgot Password today)
+is entirely governed by Project Settings → Authentication → SMTP Settings
++ Email Templates in the Supabase Dashboard, with **no code
+representation anywhere in this repo** (no `supabase/config.toml`, no env
+var, no migration) and no Supabase Management API access available to
+this session to change it programmatically.
+
+Rather than introducing a second email provider or duplicate
+configuration, the fix reuses the exact SendGrid account/sender already
+authenticated and in use for JIRITA's own notification email
+(`src/lib/email-sender.ts` — `JIRITA <no-reply@jirita.techtivo.com>`,
+`jirita.techtivo.com` already SPF/DKIM/DMARC-authenticated, see "Email
+Notifications" above). `docs/SUPABASE_AUTH_EMAIL_SETUP.md` documents the
+exact Dashboard steps: enable Custom SMTP with SendGrid's SMTP relay
+(`smtp.sendgrid.net:587`, username `apikey`, password = the same
+`SENDGRID_API_KEY`, sender = the same `JIRITA_EMAIL_FROM_ADDRESS`/
+`JIRITA_EMAIL_FROM_NAME`), and replace the Reset Password template's
+Subject/Message body with JIRITA-branded copy that reuses the same
+logo/card/button chrome as `src/lib/server/email-template.ts` (keeping
+Supabase's own `{{ .ConfirmationURL }}` token, since removing it would
+break the reset link). `.env.example` and `src/lib/auth.ts`'s own comment
+now point at that doc instead of describing the Dashboard setting as
+unrelated/default.
+
+**This is a manual, external step — same category as the `CRON_SECRET`
+Supabase Vault step above — and remains to be applied by hand in the
+Dashboard.** No code, migration, RLS policy, or env var was added; the
+existing `resetPasswordForEmail`/`/forgot-password`/`/reset-password`
+flow and tokens are completely unchanged. `tsc`/`eslint` pass clean on
+the (comment-only) touched files.
+
+---
+
 ## Still mock
 
 - **Resolved, differently than planned**: the workspace-wide Settings screen

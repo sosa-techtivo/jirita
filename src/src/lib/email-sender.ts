@@ -6,13 +6,15 @@
 // to enforce this at build time). Same pattern as
 // src/lib/server/github-token-crypto.ts.
 //
-// This module is infrastructure only — nothing in the app calls
-// sendTransactionalEmail yet. Notifications, ticket assignments, mentions,
-// replies, project access, and digest emails are deliberately not wired to
-// it. Supabase Auth's own hosted email (Forgot Password today) is a
-// separate delivery path entirely, controlled by Project Settings ->
-// Authentication -> SMTP Settings in the Supabase Dashboard — unaffected
-// by this file.
+// Supabase Auth's own hosted email (Forgot Password today) is a separate
+// delivery path entirely, controlled by Project Settings -> Authentication
+// -> SMTP Settings in the Supabase Dashboard — this file's exported
+// sendTransactionalEmail is never called for it. That Dashboard SMTP
+// setting should still point at this same sender identity/SendGrid account
+// (JIRITA_EMAIL_FROM_ADDRESS/JIRITA_EMAIL_FROM_NAME below), never a second
+// provider — see docs/SUPABASE_AUTH_EMAIL_SETUP.md for the exact
+// Dashboard steps (Custom SMTP + the JIRITA-branded Reset Password
+// template).
 
 import sgMail from "@sendgrid/mail";
 
