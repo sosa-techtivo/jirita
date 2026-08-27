@@ -377,6 +377,16 @@ function AttentionRow({
 
 // ── Main component ────────────────────────────────────────────────────────────
 
+// Sentinel `?project=` value for the "All projects" scope — same
+// `?project=<slug>`-as-source-of-truth persistence mechanism as any real
+// project selection (see resolvedProjectSlug/handleScopeChange below), just
+// a reserved value instead of a real slug. A real project slug always wins
+// over this sentinel if one ever collided (see resolvedProjectSlug below),
+// so this is safe even in the vanishingly unlikely case a project is
+// genuinely slugged "__all__". Also the default scope (see
+// resolvedProjectSlug) whenever nothing valid is persisted yet.
+const ALL_PROJECTS_VALUE = "__all__";
+
 export function MemberDashboard() {
   const { user, userId, organization, isDevFallback } = useCurrentUser();
   const router = useRouter();
@@ -400,8 +410,9 @@ export function MemberDashboard() {
   // Admin and Project Lead Dashboards' own scope selectors — 0 memberships
   // resolves to no project (every section below just falls back to its
   // existing empty state), exactly 1 auto-scopes with no selector shown,
-  // 2+ reads the URL (falling back to the first membership when the URL
-  // names a project this member can no longer see). ──
+  // 2+ reads the URL and defaults to "All projects" (never the first
+  // membership) whenever nothing valid is persisted — no `?project=` yet,
+  // or the URL names a project this member can no longer see. ──
   const [projectsLoadState, setProjectsLoadState] = useState<"loading" | "ready" | "error">(
     isDevFallback ? "ready" : "loading"
   );
@@ -429,21 +440,49 @@ export function MemberDashboard() {
   }, [isDevFallback, organization, userId, requestId]);
 
   const requestedProjectSlug = searchParams.get("project");
+  // null means either "All projects selected" or "no projects at all" —
+  // isAllProjectsMode below (not this alone) is what distinguishes them.
+  //
+  // A real project slug always takes precedence over the "All projects"
+  // sentinel (so a project that happened to be slugged exactly "__all__"
+  // would still resolve to itself, never be shadowed) — the `.some(...)`
+  // check below is what guarantees that, by matching real slugs first.
+  //
+  // Default is "All projects", never the first individual project: with
+  // 2+ team projects, a null/absent `?project=` (first-ever Dashboard
+  // visit — nothing persisted yet) and a stale/inaccessible `?project=`
+  // (a project since archived or removed) both fall through to the same
+  // "All projects" default below, same as the explicit `?project=__all__`
+  // sentinel. Only a `?project=<real slug>` that still names one of this
+  // member's own current projects resolves to that single project — i.e.
+  // the only way to land on one specific project is to have explicitly
+  // selected it (persisted via handleScopeChange below), never as a
+  // default.
   const resolvedProjectSlug = useMemo(() => {
     if (memberProjects.length === 0) return null;
     if (memberProjects.length === 1) return memberProjects[0].slug;
     if (requestedProjectSlug && memberProjects.some((p) => p.slug === requestedProjectSlug)) return requestedProjectSlug;
-    return memberProjects[0].slug;
+    return null;
   }, [memberProjects, requestedProjectSlug]);
+  // Only meaningful with 2+ team projects — same gate the selector itself
+  // uses below, so "All projects" can never be reached with 0 or 1 (where
+  // there's nothing to aggregate and the selector isn't even shown). Covers
+  // both the explicit `?project=__all__` selection and the default
+  // (unset/stale `?project=`) case above — both resolve resolvedProjectSlug
+  // to null the same way, and both should aggregate.
+  const isAllProjectsMode = memberProjects.length > 1 && resolvedProjectSlug === null;
 
   // Keeps the URL honest with the resolved selection above — clears
   // `?project=` once it's down to a single (or zero) team project, and
   // corrects a stale/inaccessible slug back to the real fallback — via
-  // `router.replace` (a correction, not a user-driven navigation).
+  // `router.replace` (a correction, not a user-driven navigation). A valid
+  // "All projects" selection (`?project=__all__` while staffed on 2+
+  // projects) is left alone here, same as any other valid real slug.
   useEffect(() => {
     if (projectsLoadState !== "ready" || !requestedProjectSlug) return;
     const isValidMultiProjectSelection =
-      memberProjects.length > 1 && memberProjects.some((p) => p.slug === requestedProjectSlug);
+      memberProjects.length > 1 &&
+      (memberProjects.some((p) => p.slug === requestedProjectSlug) || requestedProjectSlug === ALL_PROJECTS_VALUE);
     if (isValidMultiProjectSelection) return;
 
     const params = new URLSearchParams(searchParams.toString());
@@ -471,17 +510,110 @@ export function MemberDashboard() {
   const todayISO = getTodayISO();
 
   useEffect(() => {
-    if (isDevFallback || !organization || !userId || !resolvedProjectSlug) return;
+    if (isDevFallback || !organization || !userId) return;
+    // Nothing to load either way: not aggregating, and no single project
+    // resolved either (memberProjects is empty) — same existing empty-state
+    // fallback as before this change, just now also guarded against firing
+    // for a real, valid "All projects" selection.
+    if (!isAllProjectsMode && !resolvedProjectSlug) return;
     let cancelled = false;
     // Back to "loading" on every project switch too, not just the first
     // mount — reuses the existing full-screen skeleton state below (gated
     // on `loadState`) so the previous project's tickets/hours/activity are
     // never left on screen while the new project's real data is still in
-    // flight.
+    // flight. Also fires on a scope switch into/out of "All projects".
     // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: same "clear before the async fetch below resolves" pattern used elsewhere in this app (e.g. member-profile-modal.tsx)
     setLoadState("loading");
 
     (async () => {
+      if (isAllProjectsMode) {
+        // ── All projects: aggregate tickets/time/attention across every
+        // project this member can access. `memberProjects` is the exact
+        // same RLS-scoped list (loadMemberProjects) backing the selector
+        // itself — never a broader org-wide project query — so this can
+        // never surface a project the member isn't actually staffed on.
+        // Same Promise.all-over-loadProjectTickets shape lib/tickets.ts's
+        // own loadOrganizationTickets already uses for its org-wide
+        // equivalent, reused here rather than reimplemented — just scoped
+        // to memberProjects (typically a handful) instead of every org
+        // project, and run once per scope change, not per ticket/row. ──
+        const perProjectResults = await Promise.all(
+          memberProjects.map((p) => loadProjectTickets(organization.id, p.slug))
+        );
+        if (cancelled) return;
+
+        const allTickets: Ticket[] = [];
+        for (const result of perProjectResults) {
+          if (result.status === "error") {
+            setLoadState("error");
+            setLoadErrorMessage(result.message);
+            return;
+          }
+          if (result.status === "ready") allTickets.push(...result.tickets);
+        }
+
+        const allActiveTicketIds = allTickets
+          .filter((t) => t.assigneeProfileId === userId && !isTicketClosed(t))
+          .map((t) => t.id);
+        const allTicketIds = allTickets.map((t) => t.id);
+
+        const { start: weekStart, end: weekEnd } = getWeekRangeISO(getTodayISO());
+        const [timeResult, attentionResult, weekEntriesResult] = await Promise.all([
+          loadProfileLoggedTimeForDate(userId, getTodayISO()),
+          loadMemberAttentionEvents(allActiveTicketIds, userId),
+          loadOrganizationLoggedTimeForRange(allTicketIds, weekStart, weekEnd),
+        ]);
+        if (cancelled) return;
+
+        if (timeResult.status === "error") {
+          setLoadState("error");
+          setLoadErrorMessage(timeResult.message);
+          return;
+        }
+        if (attentionResult.status === "error") {
+          setLoadState("error");
+          setLoadErrorMessage(attentionResult.message);
+          return;
+        }
+        if (weekEntriesResult.status === "error") {
+          setLoadState("error");
+          setLoadErrorMessage(weekEntriesResult.message);
+          return;
+        }
+
+        // Same profile-wide-then-narrowed pattern as the single-project
+        // branch below, just narrowed to the union of every accessible
+        // project's ticket ids instead of one project's — keeps "Logged
+        // Today"'s total and its per-project breakdown consistent (an
+        // entry on a ticket outside this set, e.g. a since-archived
+        // project, is excluded from both, never just one).
+        const allTicketIdSet = new Set(allTicketIds);
+        const scopedTodayEntries = timeResult.entries.filter((e) => allTicketIdSet.has(e.ticketId));
+        const myWeekMinutes = weekEntriesResult.entries
+          .filter((e) => e.loggedBy === userId)
+          .reduce((sum, e) => sum + e.minutes, 0);
+
+        setTickets(allTickets);
+        setProjects(memberProjects.map((p) => ({ slug: p.slug, name: p.name, status: "active" })));
+        setTodayEntries(scopedTodayEntries);
+        setAttentionEvents(attentionResult.events);
+        // Weekly Capacity is user-level, never per-project
+        // (organization_memberships.weekly_capacity — the same single
+        // source of truth loadProjectTeam's own weeklyCapacity field
+        // already resolves to per member, see its comment in
+        // lib/projects.ts) — reused directly from the signed-in profile
+        // instead of a per-project team lookup, which would be both
+        // redundant (identical value on every project) and ambiguous about
+        // which project's roster to even ask under this scope. Never
+        // summed or multiplied across the aggregated projects.
+        setWeeklyCapacity(user.weeklyCapacity);
+        setWeekLoggedMinutes(myWeekMinutes);
+        setLoadState("ready");
+        return;
+      }
+
+      if (!resolvedProjectSlug) return;
+
       const ticketsResult = await loadProjectTickets(organization.id, resolvedProjectSlug);
       if (cancelled) return;
       if (ticketsResult.status === "error") {
@@ -562,7 +694,7 @@ export function MemberDashboard() {
     return () => {
       cancelled = true;
     };
-  }, [isDevFallback, organization, userId, resolvedProjectSlug, memberProjects, requestId, user.weeklyCapacity]);
+  }, [isDevFallback, organization, userId, resolvedProjectSlug, isAllProjectsMode, memberProjects, requestId, user.weeklyCapacity]);
 
   const ticketsById = useMemo(() => new Map(tickets.map((t) => [t.id, t])), [tickets]);
   const projectsBySlug = useMemo(() => new Map(projects.map((p) => [p.slug, p])), [projects]);
@@ -626,34 +758,47 @@ export function MemberDashboard() {
   // per-member ticket list already driving this KPI's count above — no
   // second query, no duplicated assignee/status criteria. Zero stays
   // non-interactive; exactly one navigates straight to its own Ticket
-  // Detail; more than one hands off to this project's Tickets page
-  // with the real `?assignee=me` filter applied and visible (Tickets'
-  // existing "Assigned" filter, now readable from the URL the same way
-  // `?alerts=` already is).
+  // Detail; more than one hands off to a Tickets page with the real
+  // `?assignee=me` filter applied and visible (Tickets' existing
+  // "Assigned" filter, now readable from the URL the same way `?alerts=`
+  // already is) — the project-scoped Tickets page under a single project,
+  // or the same org-wide `/tickets?assignee=me` destination My Work's own
+  // "Assigned Tickets" KPI already uses under "All projects" (never a
+  // second/parallel cross-project tickets view).
   function handleAssignedTicketsClick() {
-    if (activeWork.length === 0 || !resolvedProjectSlug) return;
+    if (activeWork.length === 0) return;
     if (activeWork.length === 1) {
       setPreview(activeWork[0]);
       return;
     }
+    if (isAllProjectsMode) {
+      router.push("/tickets?assignee=me");
+      return;
+    }
+    if (!resolvedProjectSlug) return;
     router.push(`/projects/${resolvedProjectSlug}/tickets?assignee=me`);
   }
 
   // Due Today KPI: reuses `dueTodayList`, the exact same real per-member
   // ticket list already driving this KPI's count above — no second query,
   // no duplicated due-date criteria. Zero stays non-interactive; exactly
-  // one navigates straight to its own Ticket Detail; more than
-  // one hands off to this project's Tickets page with the same real
-  // `?alerts=due-today` filter the Admin/Project Lead Dashboards already
-  // use for "Due Today", combined with `?assignee=me` (this dashboard's own
-  // KPI is personal, unlike Admin's) so the destination shows only the
-  // current user's own tickets due today.
+  // one navigates straight to its own Ticket Detail; more than one hands
+  // off to the same real `?alerts=due-today` filter the Admin/Project Lead
+  // Dashboards already use for "Due Today", combined with `?assignee=me`
+  // (this dashboard's own KPI is personal, unlike Admin's) — project-scoped
+  // under a single project, or the org-wide `/tickets` under "All
+  // projects", same destination choice as handleAssignedTicketsClick above.
   function handleDueTodayClick() {
-    if (dueTodayList.length === 0 || !resolvedProjectSlug) return;
+    if (dueTodayList.length === 0) return;
     if (dueTodayList.length === 1) {
       setPreview(dueTodayList[0]);
       return;
     }
+    if (isAllProjectsMode) {
+      router.push("/tickets?assignee=me&alerts=due-today");
+      return;
+    }
+    if (!resolvedProjectSlug) return;
     router.push(`/projects/${resolvedProjectSlug}/tickets?assignee=me&alerts=due-today`);
   }
 
@@ -805,15 +950,21 @@ export function MemberDashboard() {
 
           {/* Project scope selector — same component/placement pattern as
               the Admin and Project Lead Dashboards' own selectors, shown
-              only when staffed on more than one active project. */}
+              only when staffed on more than one active project. "All
+              projects" is always the first option, aggregating every
+              section below across every project this member can access
+              (memberProjects) — Weekly Capacity is the one exception,
+              intentionally never aggregated (it's user-level, see
+              weeklyCapacity below). */}
           {memberProjects.length > 1 && (
             <div className="relative inline-flex items-center flex-shrink-0">
               <select
-                value={resolvedProjectSlug ?? ""}
+                value={resolvedProjectSlug ?? ALL_PROJECTS_VALUE}
                 onChange={(event) => handleScopeChange(event.target.value)}
                 aria-label="Current project"
                 className="appearance-none text-[16px] sm:text-[13px] font-medium pl-3 pr-7 py-1.5 rounded-lg border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-slate-700 dark:text-zinc-300 hover:bg-slate-50 dark:hover:bg-zinc-800 transition-colors cursor-pointer outline-none focus:ring-2 focus:ring-brand-500/30"
               >
+                <option value={ALL_PROJECTS_VALUE}>All projects</option>
                 {memberProjects.map((p) => (
                   <option key={p.slug} value={p.slug}>{p.name}</option>
                 ))}
