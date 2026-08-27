@@ -3241,6 +3241,16 @@ export async function loadTeamMemberWorkHistoryProjectOptions(
   return { status: "ready", projectSlugs: Array.from(new Set(withRealHistory.map((row) => row.projectSlug))) };
 }
 
+// Chunked via chunkArray/ORG_TICKET_ID_BATCH_SIZE — `ticketIds` here is a
+// Project Lead's whole led-project participation universe for one team
+// member (computeTeamWorkHistoryRows below), which for an active member on
+// a large migrated project can realistically exceed 1,000 (1,035 confirmed
+// in production for one real member of María José's led projects; 725 for
+// her own participation as a member). Reproduced directly against
+// production at that scale as a 400. Unlike the paginated/`.order()+.limit()`
+// functions elsewhere in this file, this query has no cap of its own — the
+// caller aggregates every matching row — so batches are simply concatenated,
+// no re-sort/re-slice needed to reproduce the unchunked result.
 async function fetchScopedTimeEntryRows(
   supabase: ReturnType<typeof getSupabaseBrowserClient>,
   ticketIds: string[],
@@ -3248,18 +3258,33 @@ async function fetchScopedTimeEntryRows(
   period?: { from: string; to: string }
 ): Promise<{ status: "ready"; rows: { ticket_id: string; minutes: number; created_at: string }[] } | { status: "error"; message: string }> {
   if (ticketIds.length === 0) return { status: "ready", rows: [] };
-  let query = supabase
-    .from("ticket_time_entries")
-    .select("ticket_id, minutes, created_at")
-    .in("ticket_id", ticketIds)
-    .eq("logged_by", profileId);
-  if (period) query = query.gte("work_date", period.from).lte("work_date", period.to);
-  const { data, error } = await query.returns<{ ticket_id: string; minutes: number; created_at: string }[]>();
-  if (error) {
-    logDev("team work history scoped time entries query failed", error);
-    return { status: "error", message: error.message };
+  const batches = chunkArray(ticketIds, ORG_TICKET_ID_BATCH_SIZE);
+
+  const results = await Promise.all(
+    batches.map((batch) => {
+      let query = supabase
+        .from("ticket_time_entries")
+        .select("ticket_id, minutes, created_at")
+        .in("ticket_id", batch)
+        .eq("logged_by", profileId);
+      if (period) query = query.gte("work_date", period.from).lte("work_date", period.to);
+      return query.returns<{ ticket_id: string; minutes: number; created_at: string }[]>();
+    })
+  );
+
+  for (let i = 0; i < results.length; i++) {
+    const { error } = results[i];
+    if (error) {
+      logDev("team work history scoped time entries query failed", {
+        batch: i,
+        batchSize: batches[i].length,
+        message: error.message,
+      });
+      return { status: "error", message: error.message };
+    }
   }
-  return { status: "ready", rows: data ?? [] };
+
+  return { status: "ready", rows: results.flatMap((r) => r.data ?? []) };
 }
 
 async function fetchScopedActivityRows(
@@ -3270,24 +3295,39 @@ async function fetchScopedActivityRows(
   eventTypes?: string[]
 ): Promise<{ status: "ready"; rows: { ticket_id: string; created_at: string }[] } | { status: "error"; message: string }> {
   if (ticketIds.length === 0) return { status: "ready", rows: [] };
-  let query = supabase
-    .from("ticket_activity")
-    .select("ticket_id, created_at")
-    .in("ticket_id", ticketIds)
-    .eq("actor_profile_id", profileId);
-  if (eventTypes) query = query.in("event_type", eventTypes);
-  if (period) {
-    const start = new Date(`${period.from}T00:00:00`);
-    const endExclusive = new Date(`${period.to}T00:00:00`);
-    endExclusive.setDate(endExclusive.getDate() + 1);
-    query = query.gte("created_at", start.toISOString()).lt("created_at", endExclusive.toISOString());
+  const batches = chunkArray(ticketIds, ORG_TICKET_ID_BATCH_SIZE);
+
+  const results = await Promise.all(
+    batches.map((batch) => {
+      let query = supabase
+        .from("ticket_activity")
+        .select("ticket_id, created_at")
+        .in("ticket_id", batch)
+        .eq("actor_profile_id", profileId);
+      if (eventTypes) query = query.in("event_type", eventTypes);
+      if (period) {
+        const start = new Date(`${period.from}T00:00:00`);
+        const endExclusive = new Date(`${period.to}T00:00:00`);
+        endExclusive.setDate(endExclusive.getDate() + 1);
+        query = query.gte("created_at", start.toISOString()).lt("created_at", endExclusive.toISOString());
+      }
+      return query.returns<{ ticket_id: string; created_at: string }[]>();
+    })
+  );
+
+  for (let i = 0; i < results.length; i++) {
+    const { error } = results[i];
+    if (error) {
+      logDev("team work history scoped activity query failed", {
+        batch: i,
+        batchSize: batches[i].length,
+        message: error.message,
+      });
+      return { status: "error", message: error.message };
+    }
   }
-  const { data, error } = await query.returns<{ ticket_id: string; created_at: string }[]>();
-  if (error) {
-    logDev("team work history scoped activity query failed", error);
-    return { status: "error", message: error.message };
-  }
-  return { status: "ready", rows: data ?? [] };
+
+  return { status: "ready", rows: results.flatMap((r) => r.data ?? []) };
 }
 
 // Applies every real Work History filter (Project/Search/Period/Status/
@@ -4191,6 +4231,18 @@ export type ProfileTimeEntriesResult =
 // just filtered by logged_by + a ticket_id set instead of a single ticket.
 // Backs My Work's own Personal Timesheet panel, the one place in the app
 // that needs "all of one person's own logged entries across many tickets."
+//
+// Chunked via chunkArray/ORG_TICKET_ID_BATCH_SIZE — a profile assigned
+// across many projects (e.g. a Project Lead who's also staffed as an
+// individual contributor — 725 assigned tickets in production as of this
+// fix) pushes ticketIds well past the single-GET-URL safe size; reproduced
+// directly against production (725 ids, ~27KB URL) as a 400. Same "fetch
+// each batch's own top-`limit` rows, merge, re-sort, re-slice to `limit`"
+// shape as loadOrganizationActivity above — any row belonging in the true
+// top-`limit` across the full ticketIds set necessarily ranks within its
+// own batch's top-`limit` too (removing other batches' rows can only help
+// a row's rank), so this reproduces exactly what one unchunked query would
+// have returned.
 export async function loadProfileTimeEntries(
   profileId: string,
   ticketIds: string[],
@@ -4199,20 +4251,37 @@ export async function loadProfileTimeEntries(
   if (ticketIds.length === 0) return { status: "ready", entries: [] };
 
   const supabase = getSupabaseBrowserClient();
+  const batches = chunkArray(ticketIds, ORG_TICKET_ID_BATCH_SIZE);
 
-  const { data: rows, error } = await supabase
-    .from("ticket_time_entries")
-    .select("id, minutes, comment, work_date, logged_by, created_at, ticket_id")
-    .eq("logged_by", profileId)
-    .in("ticket_id", ticketIds)
-    .order("created_at", { ascending: false })
-    .limit(limit)
-    .returns<(TimeEntryRow & { ticket_id: string })[]>();
+  const batchResults = await Promise.all(
+    batches.map((batch) =>
+      supabase
+        .from("ticket_time_entries")
+        .select("id, minutes, comment, work_date, logged_by, created_at, ticket_id")
+        .eq("logged_by", profileId)
+        .in("ticket_id", batch)
+        .order("created_at", { ascending: false })
+        .limit(limit)
+        .returns<(TimeEntryRow & { ticket_id: string })[]>()
+    )
+  );
 
-  if (error) {
-    logDev("profile time entries query failed", error);
-    return { status: "error", message: error.message };
+  for (let i = 0; i < batchResults.length; i++) {
+    const { error } = batchResults[i];
+    if (error) {
+      logDev("profile time entries query failed", {
+        batch: i,
+        batchSize: batches[i].length,
+        message: error.message,
+      });
+      return { status: "error", message: error.message };
+    }
   }
+
+  const rows = batchResults
+    .flatMap((result) => result.data ?? [])
+    .sort((a, b) => (a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : 0))
+    .slice(0, limit);
 
   // logged_by is always this same profile (filtered above), so the logger's
   // own profile row only needs to be resolved once, not per-row.
@@ -4225,7 +4294,7 @@ export async function loadProfileTimeEntries(
     logDev("profile lookup for time entries failed", profileError);
   }
 
-  const entries: ProfileTimeEntryRecord[] = (rows ?? []).map((row) => ({
+  const entries: ProfileTimeEntryRecord[] = rows.map((row) => ({
     ...rowToTimeEntryRecord(row, profileRow ?? undefined),
     ticketId: row.ticket_id,
   }));
@@ -4873,68 +4942,105 @@ export type OrganizationActivityPageResult =
   | { status: "ready"; entries: OrganizationActivityEntry[]; totalCount: number }
   | { status: "error"; message: string };
 
-interface OrganizationActivityRawRow extends ActivityRow {
-  ticket_id: string;
+// `id`/`ticket_id`/etc. are nullable here because the RPC (see
+// 20260930080000_fix_organization_activity_page_count.sql) LEFT JOINs the
+// paginated page onto a single always-present total_count row — an
+// out-of-range page (or a genuinely empty organization) comes back as
+// exactly one row with every activity column null, carrying only the real
+// total_count, rather than zero rows with total_count unrecoverable. A
+// null `id` marks that "count-only" row.
+interface OrganizationActivityPageRpcRow {
+  id: string | null;
+  ticket_id: string | null;
+  actor_profile_id: string | null;
+  event_type: string | null;
+  field_name: string | null;
+  old_value: string | null;
+  new_value: string | null;
+  created_at: string | null;
+  total_count: number;
 }
 
+// The non-null shape a row actually has once it's passed the `id !== null`
+// filter below — same fields ActivityRow (buildActivityLabel's own param
+// type) plus ticket_id expects, just narrowed down from the nullable RPC
+// row type rather than redeclared from scratch.
+type OrganizationActivityPageRow = { [K in keyof OrganizationActivityPageRpcRow]: NonNullable<OrganizationActivityPageRpcRow[K]> };
+
+// Server-side pagination via the organization_activity_page RPC
+// (20260930070000_add_organization_activity_page_rpc.sql,
+// 20260930080000_fix_organization_activity_page_count.sql) — the relational
+// filter (ticket_activity -> tickets -> projects -> organization_id), the
+// created_at desc/id asc order, LIMIT/OFFSET, and exact total count all run
+// inside one Postgres query now, instead of building a client-side
+// `.in("ticket_id", ...)` from every ticket in the organization (1,492 in
+// production as of this fix — a ~55KB GET URL that 400s at the gateway
+// before it ever reaches PostgREST). The RPC is SECURITY INVOKER — it runs
+// as the calling user, so it's bound by exactly the same
+// ticket_activity_select/tickets_select/projects_select RLS this function
+// relied on before; see the migration's own comment for why that's
+// sufficient (no separate authorization logic to keep in sync).
 export async function loadOrganizationActivityPage(
   organizationId: string,
   page: number,
   pageSize: number
 ): Promise<OrganizationActivityPageResult> {
   const supabase = getSupabaseBrowserClient();
+  const offset = (page - 1) * pageSize;
 
-  const { data: projectRows, error: projectsError } = await supabase
-    .from("projects")
-    .select("id, slug, name, project_code")
-    .eq("organization_id", organizationId)
-    .returns<{ id: string; slug: string; name: string; project_code: string }[]>();
+  const { data, error } = await supabase.rpc("organization_activity_page", {
+    target_organization_id: organizationId,
+    page_size: pageSize,
+    page_offset: offset,
+  });
 
-  if (projectsError) {
-    logDev("organization activity projects lookup failed", projectsError);
-    return { status: "error", message: projectsError.message };
+  if (error) {
+    logDev("organization activity page rpc failed", error);
+    return { status: "error", message: error.message };
   }
-  if (!projectRows || projectRows.length === 0) return { status: "ready", entries: [], totalCount: 0 };
+  const rpcRows = (data ?? []) as OrganizationActivityPageRpcRow[];
+  // The RPC always returns exactly one row even with zero matching
+  // activity (a count-only row with a null id) — real total count is
+  // still readable from it, so this is never conflated with an actual
+  // error/short-circuit path the way an empty array would be.
+  const totalCount = rpcRows[0]?.total_count ?? 0;
+  const rows = rpcRows.filter((row): row is OrganizationActivityPageRow => row.id !== null);
+  if (rows.length === 0) return { status: "ready", entries: [], totalCount };
 
-  const projectIds = projectRows.map((p) => p.id);
-  const projectById = new Map(projectRows.map((p) => [p.id, p]));
-
+  // Hydrate only the tickets/projects referenced by this one page's rows —
+  // never the whole organization's, now that the RPC above already did the
+  // large-scope filtering/ordering/pagination inside Postgres.
+  const ticketIds = Array.from(new Set(rows.map((row) => row.ticket_id)));
   const { data: ticketRows, error: ticketsError } = await supabase
     .from("tickets")
     .select("id, ticket_number, title, project_id")
-    .in("project_id", projectIds)
+    .in("id", ticketIds)
     .returns<{ id: string; ticket_number: number; title: string; project_id: string }[]>();
 
   if (ticketsError) {
-    logDev("organization activity tickets lookup failed", ticketsError);
+    logDev("organization activity page tickets lookup failed", ticketsError);
     return { status: "error", message: ticketsError.message };
   }
-  const ticketIds = (ticketRows ?? []).map((t) => t.id);
-  if (ticketIds.length === 0) return { status: "ready", entries: [], totalCount: 0 };
-
   const ticketById = new Map((ticketRows ?? []).map((t) => [t.id, t]));
 
-  const offset = (page - 1) * pageSize;
-  const { data: rows, error, count } = await supabase
-    .from("ticket_activity")
-    .select("id, ticket_id, actor_profile_id, event_type, field_name, old_value, new_value, created_at", {
-      count: "exact",
-    })
-    .in("ticket_id", ticketIds)
-    .order("created_at", { ascending: false })
-    // Same tie-break as loadProjectActivityPage — keeps LIMIT/OFFSET
-    // pagination stable when several rows share the same created_at.
-    .order("id", { ascending: true })
-    .range(offset, offset + pageSize - 1)
-    .returns<OrganizationActivityRawRow[]>();
+  const projectIds = Array.from(new Set((ticketRows ?? []).map((t) => t.project_id)));
+  const projectById = new Map<string, { id: string; slug: string; name: string; project_code: string }>();
+  if (projectIds.length > 0) {
+    const { data: projectRows, error: projectsError } = await supabase
+      .from("projects")
+      .select("id, slug, name, project_code")
+      .in("id", projectIds)
+      .returns<{ id: string; slug: string; name: string; project_code: string }[]>();
 
-  if (error) {
-    logDev("organization activity page query failed", error);
-    return { status: "error", message: error.message };
+    if (projectsError) {
+      logDev("organization activity page projects lookup failed", projectsError);
+      return { status: "error", message: projectsError.message };
+    }
+    for (const row of projectRows ?? []) projectById.set(row.id, row);
   }
 
   const profileIds = new Set<string>();
-  for (const row of rows ?? []) {
+  for (const row of rows) {
     if (row.actor_profile_id) profileIds.add(row.actor_profile_id);
     if (row.event_type === "assignee_changed") {
       if (row.old_value) profileIds.add(row.old_value);
@@ -4944,7 +5050,7 @@ export async function loadOrganizationActivityPage(
   const profilesById = await loadProfilesByIds(supabase, Array.from(profileIds));
   const resolveName = (id: string | null) => (id ? resolveProfileName(profilesById.get(id)) : null);
 
-  const entries: OrganizationActivityEntry[] = (rows ?? []).map((row) => {
+  const entries: OrganizationActivityEntry[] = rows.map((row) => {
     const ticket = ticketById.get(row.ticket_id);
     const project = ticket ? projectById.get(ticket.project_id) : undefined;
     return {
@@ -4958,7 +5064,7 @@ export async function loadOrganizationActivityPage(
     };
   });
 
-  return { status: "ready", entries, totalCount: count ?? 0 };
+  return { status: "ready", entries, totalCount };
 }
 
 // ── Member Dashboard reads ──────────────────────────────────────────────────
@@ -5219,6 +5325,13 @@ export type HoursOrAssigneeActivityResult =
 // capped for the Recent Activity widget's small display limit), this
 // returns every matching row in the range uncapped, since a weekly sum
 // can't silently drop events past a display limit.
+//
+// Chunked via chunkArray/ORG_TICKET_ID_BATCH_SIZE — same reasoning as
+// loadOrganizationLoggedTimeForRange above. Admin Reports calls this with
+// every org ticket id at once (1,488 in production as of this fix), which
+// unbatched serializes into a ~55KB GET query string and 400s at the
+// gateway before it ever reaches PostgREST; reproduced directly against
+// this org's full ticket set.
 export async function loadHoursAndAssigneeActivityForRange(
   ticketIds: string[],
   startISO: string,
@@ -5227,29 +5340,43 @@ export async function loadHoursAndAssigneeActivityForRange(
   if (ticketIds.length === 0) return { status: "ready", events: [] };
 
   const supabase = getSupabaseBrowserClient();
+  const batches = chunkArray(ticketIds, ORG_TICKET_ID_BATCH_SIZE);
 
-  const { data: rows, error } = await supabase
-    .from("ticket_activity")
-    .select("ticket_id, event_type, old_value, new_value")
-    .in("ticket_id", ticketIds)
-    .in("event_type", ["hours_changed", "assignee_changed"])
-    .gte("created_at", startISO)
-    .lt("created_at", endExclusiveISO)
-    .returns<{ ticket_id: string; event_type: string; old_value: string | null; new_value: string | null }[]>();
+  const results = await Promise.all(
+    batches.map((batch) =>
+      supabase
+        .from("ticket_activity")
+        .select("ticket_id, event_type, old_value, new_value")
+        .in("ticket_id", batch)
+        .in("event_type", ["hours_changed", "assignee_changed"])
+        .gte("created_at", startISO)
+        .lt("created_at", endExclusiveISO)
+        .returns<{ ticket_id: string; event_type: string; old_value: string | null; new_value: string | null }[]>()
+    )
+  );
 
-  if (error) {
-    logDev("hours/assignee activity range query failed", error);
-    return { status: "error", message: error.message };
+  for (let i = 0; i < results.length; i++) {
+    const { error } = results[i];
+    if (error) {
+      logDev("hours/assignee activity range query failed", {
+        batch: i,
+        batchSize: batches[i].length,
+        message: error.message,
+      });
+      return { status: "error", message: error.message };
+    }
   }
 
   return {
     status: "ready",
-    events: (rows ?? []).map((row) => ({
-      ticketId: row.ticket_id,
-      eventType: row.event_type as "hours_changed" | "assignee_changed",
-      oldValue: row.old_value,
-      newValue: row.new_value,
-    })),
+    events: results.flatMap(({ data }) =>
+      (data ?? []).map((row) => ({
+        ticketId: row.ticket_id,
+        eventType: row.event_type as "hours_changed" | "assignee_changed",
+        oldValue: row.old_value,
+        newValue: row.new_value,
+      }))
+    ),
   };
 }
 
@@ -5263,6 +5390,11 @@ export type TicketsCompletedInRangeResult =
 // be touched by any later field edit long after the ticket was actually
 // completed. Same uncapped/date-ranged shape as
 // loadHoursAndAssigneeActivityForRange above, just for a different event.
+//
+// Chunked via chunkArray/ORG_TICKET_ID_BATCH_SIZE — same reasoning as
+// loadHoursAndAssigneeActivityForRange above; Admin Reports' Delivery tab
+// calls this with every org ticket id at once (1,488 in production),
+// which unbatched hits the same gateway URL-length 400.
 export async function loadTicketsCompletedInRange(
   ticketIds: string[],
   startISO: string,
@@ -5271,26 +5403,42 @@ export async function loadTicketsCompletedInRange(
   if (ticketIds.length === 0) return { status: "ready", ticketIds: [] };
 
   const supabase = getSupabaseBrowserClient();
+  const batches = chunkArray(ticketIds, ORG_TICKET_ID_BATCH_SIZE);
 
-  const { data: rows, error } = await supabase
-    .from("ticket_activity")
-    .select("ticket_id")
-    .in("ticket_id", ticketIds)
-    .eq("event_type", "status_changed")
-    .eq("new_value", "done")
-    .gte("created_at", startISO)
-    .lt("created_at", endExclusiveISO)
-    .returns<{ ticket_id: string }[]>();
+  const results = await Promise.all(
+    batches.map((batch) =>
+      supabase
+        .from("ticket_activity")
+        .select("ticket_id")
+        .in("ticket_id", batch)
+        .eq("event_type", "status_changed")
+        .eq("new_value", "done")
+        .gte("created_at", startISO)
+        .lt("created_at", endExclusiveISO)
+        .returns<{ ticket_id: string }[]>()
+    )
+  );
 
-  if (error) {
-    logDev("tickets completed in range query failed", error);
-    return { status: "error", message: error.message };
+  for (let i = 0; i < results.length; i++) {
+    const { error } = results[i];
+    if (error) {
+      logDev("tickets completed in range query failed", {
+        batch: i,
+        batchSize: batches[i].length,
+        message: error.message,
+      });
+      return { status: "error", message: error.message };
+    }
   }
 
   // De-duplicated — a ticket could in theory be marked Done more than once
   // in the same period (moved off Done and back), but it should still only
-  // count once.
-  return { status: "ready", ticketIds: Array.from(new Set((rows ?? []).map((r) => r.ticket_id))) };
+  // count once. Batches partition ticketIds disjointly, so this dedupe is
+  // just as correct merged across batches as it was on one query's rows.
+  return {
+    status: "ready",
+    ticketIds: Array.from(new Set(results.flatMap(({ data }) => (data ?? []).map((r) => r.ticket_id)))),
+  };
 }
 
 export interface DeliveryActivityEvent {
