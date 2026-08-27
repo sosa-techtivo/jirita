@@ -4302,6 +4302,91 @@ export async function loadProfileTimeEntries(
   return { status: "ready", entries };
 }
 
+export type ProfileTimeEntriesForRangeResult =
+  | { status: "ready"; entries: ProfileTimeEntryRecord[] }
+  | { status: "error"; message: string };
+
+// JIR-77 — My Work's own "Hours" tab: every one of this profile's own
+// logged time entries whose work_date falls within
+// [startDateISO, endDateISO] (inclusive), across a given ticket_id scope.
+// Same row shape/rowToTimeEntryRecord mapping and the same
+// chunkArray/ORG_TICKET_ID_BATCH_SIZE batching as loadProfileTimeEntries
+// just above — reused, not reimplemented; the only real differences are a
+// work_date range filter in place of a row-count `limit` (a person's own
+// entries within an explicit date window are already inherently bounded,
+// so no cap is applied here), and sorting by work_date — the date the
+// work was actually performed — rather than created_at (when the row was
+// written), since "newest first" here means the most recent workday.
+//
+// `logged_by = profileId` is the only real access boundary this needs:
+// every ticketId a caller passes must already be one this same profile can
+// see (the same RLS-scoped ticket list every other My Work section reads
+// from — see loadOrganizationTickets), so this can never surface another
+// user's hours or a ticket from an inaccessible project.
+export async function loadProfileTimeEntriesForRange(
+  profileId: string,
+  ticketIds: string[],
+  startDateISO: string,
+  endDateISO: string
+): Promise<ProfileTimeEntriesForRangeResult> {
+  if (ticketIds.length === 0) return { status: "ready", entries: [] };
+
+  const supabase = getSupabaseBrowserClient();
+  const batches = chunkArray(ticketIds, ORG_TICKET_ID_BATCH_SIZE);
+
+  const batchResults = await Promise.all(
+    batches.map((batch) =>
+      supabase
+        .from("ticket_time_entries")
+        .select("id, minutes, comment, work_date, logged_by, created_at, ticket_id")
+        .eq("logged_by", profileId)
+        .in("ticket_id", batch)
+        .gte("work_date", startDateISO)
+        .lte("work_date", endDateISO)
+        .order("work_date", { ascending: false })
+        .order("created_at", { ascending: false })
+        .returns<(TimeEntryRow & { ticket_id: string })[]>()
+    )
+  );
+
+  for (let i = 0; i < batchResults.length; i++) {
+    const { error } = batchResults[i];
+    if (error) {
+      logDev("profile time entries range query failed", {
+        batch: i,
+        batchSize: batches[i].length,
+        message: error.message,
+      });
+      return { status: "error", message: error.message };
+    }
+  }
+
+  const rows = batchResults
+    .flatMap((result) => result.data ?? [])
+    .sort((a, b) => {
+      if (a.work_date !== b.work_date) return a.work_date < b.work_date ? 1 : -1;
+      return a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : 0;
+    });
+
+  // logged_by is always this same profile (filtered above), so the logger's
+  // own profile row only needs to be resolved once, not per-row.
+  const { data: profileRow, error: profileError } = await supabase
+    .from("profiles")
+    .select("id, first_name, last_name, avatar_url, updated_at")
+    .eq("id", profileId)
+    .maybeSingle<AssigneeProfileRow>();
+  if (profileError) {
+    logDev("profile lookup for time entries range failed", profileError);
+  }
+
+  const entries: ProfileTimeEntryRecord[] = rows.map((row) => ({
+    ...rowToTimeEntryRecord(row, profileRow ?? undefined),
+    ticketId: row.ticket_id,
+  }));
+
+  return { status: "ready", entries };
+}
+
 export interface LogTimeInput {
   /** Must be > 0 — normalized from the modal's separate hours/minutes fields. */
   minutes: number;
