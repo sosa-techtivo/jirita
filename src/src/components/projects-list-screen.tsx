@@ -391,19 +391,9 @@ function ManagedProjectsScreen() {
   // "Over Capacity" KPI above and reused for every row (never resolved by
   // name/avatar, never `mock-team.ts`, never a second per-row fetch).
   const [teamStatsBySlug, setTeamStatsBySlug] = useState<Map<string, RowTeamStats>>(new Map());
-  // Real refresh-on-tab-regain — same mechanism the Admin/Project Lead/Member
-  // Dashboards already rely on (see dashboard-screen.tsx's own comment on its
-  // main effect): current-user-provider.tsx's window "focus" listener
-  // revalidates the session on every window-focus-regain (i.e. switching
-  // back to this browser tab) and hands back a new `organization` object
-  // reference each time, even when nothing changed. This effect already
-  // depends on `organization`, so it re-runs on that same signal — no
-  // second/duplicate focus or visibilitychange listener added here, and
-  // nothing runs while the tab stays hidden (the dashboards' own mechanism
-  // is itself a one-shot, event-driven check, never a timer/poll). Resetting
-  // `metricsStatus` to "loading" synchronously on every re-run (not just the
-  // first) is the same "show the skeleton again" pattern dashboard-screen.tsx's
-  // own main effect already uses.
+  // Resetting `metricsStatus` to "loading" synchronously on every re-run
+  // (not just the first) is the same "show the skeleton again" pattern
+  // dashboard-screen.tsx's own main effect already uses.
   const [metricsStatus, setMetricsStatus] = useState<"loading" | "ready">("loading");
   useEffect(() => {
     if (isDevFallback || !organization) return;
@@ -503,7 +493,15 @@ function ManagedProjectsScreen() {
     return () => {
       cancelled = true;
     };
-  }, [isDevFallback, organization, isProjectLead]);
+    // organization?.id (not the whole `organization` object) — depending on
+    // the object re-triggers this effect (and its "loading" skeleton flash)
+    // on every window-focus regain, since current-user-provider.tsx hands
+    // back a new `organization` reference on its own session revalidation
+    // even when the org itself hasn't changed. Keying off the real identity
+    // means this only re-runs on a genuine org change, isProjectLead
+    // changing, or the initial mount — no background auto-refresh.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDevFallback, organization?.id, isProjectLead]);
 
   // Pending Project Access Requests (Project Lead only) — Members asking to
   // join a project this user leads. project_access_requests_select RLS

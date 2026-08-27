@@ -2040,7 +2040,7 @@ function AdminReportsScreen() {
   useEffect(() => {
     if (!organization) return;
     let cancelled = false;
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: both tabs' own widgets must show their own skeleton again the instant this effect re-runs — on mount, on a Billing Period change, on Delivery's 7 filters (client-side, don't re-trigger this) staying put, and on tab-regain (organization gets a new reference from current-user-provider.tsx's existing focus listener, the same real refresh-on-focus mechanism the Dashboards/Projects/My Work already rely on) — same "reset before the async fetch resolves" pattern used elsewhere in this app.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: both tabs' own widgets must show their own skeleton again the instant this effect re-runs — on mount, on a Billing Period change, and on Delivery's 7 filters (client-side, don't re-trigger this) staying put — same "reset before the async fetch resolves" pattern used elsewhere in this app.
     setDeliveryLoadState("loading");
     setFinanceLoadState("loading");
 
@@ -2132,7 +2132,16 @@ function AdminReportsScreen() {
     return () => {
       cancelled = true;
     };
-  }, [organization, period, customRange, deliveryPeriod, deliveryCustomRange, deliveryRequestId]);
+    // organization?.id (not the whole `organization` object) — depending on
+    // the object re-triggers this effect (both tabs' full skeleton) on
+    // every window-focus regain, since current-user-provider.tsx hands back
+    // a new `organization` reference on its own session revalidation even
+    // when the org itself hasn't changed. Keying off the real identity
+    // means this only re-runs on a genuine org change, a Period/Billing
+    // Period change, the initial mount, or an explicit user-triggered
+    // setDeliveryRequestId bump (Retry) — no background auto-refresh.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [organization?.id, period, customRange, deliveryPeriod, deliveryCustomRange, deliveryRequestId]);
 
   // ── Filter option lists — real values only, drawn from the unfiltered
   //    raw org data above (never a static catalog), and restricted to

@@ -414,7 +414,7 @@ export function ProjectLeadReportsScreen() {
   useEffect(() => {
     if (!organization) return;
     let cancelled = false;
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: clears the previous scope's data the instant this effect re-runs (on mount, on a Period change, and on tab-regain), before the async fetch below resolves, same pattern used elsewhere in this app.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: clears the previous scope's data the instant this effect re-runs (on mount, on a Period change), before the async fetch below resolves, same pattern used elsewhere in this app.
     setLoadState("loading");
 
     (async () => {
@@ -454,7 +454,16 @@ export function ProjectLeadReportsScreen() {
     return () => {
       cancelled = true;
     };
-  }, [organization, myProjects, requestId, period, customRange]);
+    // organization?.id (not the whole `organization` object) — depending on
+    // the object re-triggers this effect on every window-focus regain,
+    // since current-user-provider.tsx hands back a new `organization`
+    // reference on its own session revalidation even when the org itself
+    // hasn't changed. Keying off the real identity means this only re-runs
+    // on a genuine org change, myProjects/Period changing, the initial
+    // mount, or an explicit user-triggered runFetch() (Retry) — no
+    // background auto-refresh.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [organization?.id, myProjects, requestId, period, customRange]);
 
   const todayISO = getTodayISO();
 

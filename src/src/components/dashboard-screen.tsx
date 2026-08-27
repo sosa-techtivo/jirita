@@ -521,13 +521,6 @@ function AdminDashboard() {
   useEffect(() => {
     if (isDevFallback || !organization) return;
     let cancelled = false;
-    // Back to "loading" on every re-run too, not just the first mount —
-    // same real-data-refresh pattern Member's and Project Lead's own main
-    // effects already use (e.g. project-lead-dashboard.tsx), so this effect
-    // re-running (organization gets a new reference on every
-    // window-focus-regain revalidation in current-user-provider.tsx) shows
-    // the existing skeleton again instead of silently swapping data in the
-    // background with no visible refresh.
     // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: same "clear before the async fetch below resolves" pattern used elsewhere in this app (e.g. member-profile-modal.tsx)
     setLoadState("loading");
 
@@ -580,7 +573,16 @@ function AdminDashboard() {
     return () => {
       cancelled = true;
     };
-  }, [isDevFallback, organization, requestId]);
+    // organization?.id (not the whole `organization` object) — depending on
+    // the object re-triggers this effect (and its full-page loading flash)
+    // on every window-focus regain, since current-user-provider.tsx hands
+    // back a new `organization` reference on its own session revalidation
+    // even when the org itself hasn't changed. Keying off the real identity
+    // means this only re-runs on a genuine org change, the initial mount,
+    // or an explicit user-triggered runFetch() (Retry) — no background
+    // auto-refresh.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDevFallback, organization?.id, requestId]);
 
   const todayISO = getTodayISO();
 

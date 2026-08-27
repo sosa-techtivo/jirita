@@ -452,7 +452,16 @@ export function ProjectLeadTimeTrackingScreen() {
     return () => {
       cancelled = true;
     };
-  }, [isDevFallback, organization, userId, loadRequestId]);
+    // organization?.id (not the whole `organization` object) — depending on
+    // the object re-triggers this effect (and its full-page loading flash)
+    // on every window-focus regain, since current-user-provider.tsx hands
+    // back a new `organization` reference on its own session revalidation
+    // even when the org itself hasn't changed. Keying off the real identity
+    // means this only re-runs on a genuine org change, the initial mount,
+    // or an explicit user-triggered loadRequestId bump (Retry) — no
+    // background auto-refresh.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDevFallback, organization?.id, userId, loadRequestId]);
 
   // Custom Range has no fixed window, so it's fetched on its own — only once
   // the core load above is ready, and only while Custom Range is selected.
@@ -471,7 +480,10 @@ export function ProjectLeadTimeTrackingScreen() {
     return () => {
       cancelled = true;
     };
-  }, [isDevFallback, organization, period, customRange, loadState, rawTickets]);
+    // organization?.id, not the object — see the main effect's own comment
+    // above for why.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDevFallback, organization?.id, period, customRange, loadState, rawTickets]);
 
   const visibleMembers = useMemo(() => {
     if (memberFilter.length === 0) return rawTeam;

@@ -437,7 +437,15 @@ export function MemberDashboard() {
     return () => {
       cancelled = true;
     };
-  }, [isDevFallback, organization, userId, requestId]);
+    // organization?.id (not the whole `organization` object) — depending on
+    // the object re-triggers this effect on every window-focus regain,
+    // since current-user-provider.tsx hands back a new `organization`
+    // reference on its own session revalidation even when the org itself
+    // hasn't changed. Keying off the real identity means this only re-runs
+    // on a genuine org change, the initial mount, or an explicit
+    // user-triggered runFetch() (Retry) — no background auto-refresh.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDevFallback, organization?.id, userId, requestId]);
 
   const requestedProjectSlug = searchParams.get("project");
   // null means either "All projects selected" or "no projects at all" —
@@ -694,7 +702,10 @@ export function MemberDashboard() {
     return () => {
       cancelled = true;
     };
-  }, [isDevFallback, organization, userId, resolvedProjectSlug, isAllProjectsMode, memberProjects, requestId, user.weeklyCapacity]);
+    // organization?.id, not the object — see the project-list effect's own
+    // comment above for why.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDevFallback, organization?.id, userId, resolvedProjectSlug, isAllProjectsMode, memberProjects, requestId, user.weeklyCapacity]);
 
   const ticketsById = useMemo(() => new Map(tickets.map((t) => [t.id, t])), [tickets]);
   const projectsBySlug = useMemo(() => new Map(projects.map((p) => [p.slug, p])), [projects]);

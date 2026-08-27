@@ -503,7 +503,7 @@ export function TimeTrackingScreen() {
     // this org-wide Admin/Member data for them.
     if (!organization || isProjectLead) return;
     let cancelled = false;
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: every data-dependent block below must show its own skeleton again the instant this effect re-runs — on mount and on tab-regain (organization gets a new reference from current-user-provider.tsx's existing focus listener, the same real refresh-on-focus mechanism the Dashboards/Projects/My Work/Reports already rely on) — same "reset before the async fetch resolves" pattern used elsewhere in this app.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: every data-dependent block below must show its own skeleton again the instant this effect re-runs on mount — same "reset before the async fetch resolves" pattern used elsewhere in this app.
     setLoadState("loading");
 
     (async () => {
@@ -551,7 +551,16 @@ export function TimeTrackingScreen() {
     })();
 
     return () => { cancelled = true; };
-  }, [organization, isProjectLead, loadRequestId]);
+    // organization?.id (not the whole `organization` object) — depending on
+    // the object re-triggers this effect (and its full-page loading flash)
+    // on every window-focus regain, since current-user-provider.tsx hands
+    // back a new `organization` reference on its own session revalidation
+    // even when the org itself hasn't changed. Keying off the real identity
+    // means this only re-runs on a genuine org change, the initial mount,
+    // or an explicit user-triggered loadRequestId bump (Retry) — no
+    // background auto-refresh.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [organization?.id, isProjectLead, loadRequestId]);
 
   // Custom Range has no fixed window, so it's fetched on its own — only
   // once the core load above is ready, and only while Custom Range is
@@ -577,7 +586,10 @@ export function TimeTrackingScreen() {
     })();
 
     return () => { cancelled = true; };
-  }, [organization, isProjectLead, period, customRange, loadState, rawTickets]);
+    // organization?.id, not the object — see the main effect's own comment
+    // above for why.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [organization?.id, isProjectLead, period, customRange, loadState, rawTickets]);
 
   // ── Real member roster — active org members only, same "active" scope
   //    Hours Missing/Timesheets are meant to cover. ──────────────────────

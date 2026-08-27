@@ -372,6 +372,35 @@ RLS gap; a wrong date formatter producing "Invalid Date") were found and
 fixed along the way. This also introduced the project's first test suite
 (Vitest).
 
+Most recently: Project Overview (Admin/Project Lead) gained a dedicated
+"New" section (JIR-82) above Active Work — tickets still in a project's
+real default status, matched by `is_default`, never by display text —
+closing a gap where a freshly created ticket had nowhere to appear. Two
+real follow-up bugs were found and fixed on the same feature: New
+Ticket's Sprint selector, opened from Project Overview, only ever offered
+Backlog (neither Overview loaded real sprints the way Tickets already
+did); and a just-created ticket's own row now stays highlighted in New
+for the rest of that page session (no timer — an earlier 8-second version
+was replaced after feedback it was too short).
+
+Most recently also: the Member Dashboard's project selector gained an
+"All projects" option (aggregating every KPI/list across accessible
+projects, Weekly Capacity never summed) and is now the real default; My
+Work gained a parallel "My Hours" tab (JIR-77) — a member's own logged
+time across every accessible project, filterable by date range, with a
+real total.
+
+Most recently also: a real bug (not a timer — an effect-dependency issue)
+was found and fixed across Dashboard, Reports, Time Tracking, Projects,
+and My Work: several data-loading effects depended on the whole
+`organization` object instead of its `id`, so `current-user-provider.tsx`'s
+existing window-focus session revalidation silently re-triggered a full
+reload on every tab switch. Fixed the same way as the earlier Project
+Settings unsaved-changes bug. Separately, every Supabase-Auth email flow
+in JIRITA was audited (only Forgot Password is live/reachable today); its
+sender/branding fix is a Supabase Dashboard-only change, documented in
+`docs/SUPABASE_AUTH_EMAIL_SETUP.md`, still pending manual application.
+
 **For the authoritative, feature-by-feature breakdown — every Server
 Action, migration, and real bug fixed along the way, and the exact
 boundary of what's confirmed live vs. not-yet-verified vs. still mock —

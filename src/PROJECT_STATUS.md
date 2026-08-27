@@ -297,6 +297,16 @@ Separately, a real "Couldn't load dashboard / Bad Request" production bug was di
 
 Most recently, the Sidebar's Projects list — previously every project for Admin but a hard 3-item "pinned" cap for Project Lead/Member with no way to reach any other project from the Sidebar at all — was rebuilt into two independent, collapsible **Favorites** and **Projects** accordions with a mini client-side search, so it scales to an organization with dozens of projects without overflowing the viewport. Favorites is a new, per-user, per-organization `project_favorites` table (`20260930020000_add_project_favorites.sql`, applied to the live project), keyed by `(profile_id, organization_id, project_slug)` — confirmed via code search that `projects.slug` is genuinely immutable after creation, so no `project_id` FK was needed — with RLS reusing the existing `public.can_view_project()` visibility gate for `SELECT`/`INSERT` (never a new permission model) and an identity-only `DELETE` (so losing access to a project never permanently strands a stale favorite). A real bug was found and fixed along the way: the first favorite-toggle implementation used `.upsert()`, which PostgREST compiles to `INSERT ... ON CONFLICT DO UPDATE` — requiring `UPDATE` privilege the table deliberately never grants — so every "add favorite" failed with `42501 permission denied`; fixed by switching to a plain `.insert()` treating the primary key's own `23505 unique_violation` as a silent success. A favorited project now renders in exactly one place (Favorites — filtered out of the Projects list, even though it's still conceptually part of it), and each accordion's open/closed state is remembered for the browser session (`sessionStorage`) without ever being silently reopened by an active or favorited project — an earlier iteration did exactly that (`|| Boolean(activeSlug)`), and it was removed after real testing showed a user could no longer manually close a section. All of the above is implemented and type/build-clean (`tsc`/`eslint`/`next build` all pass); the unsaved-changes protection and the Sidebar rework have not yet been clicked through in a live browser (no test credentials available in this session), and the Dashboard fix's own live confirmation is still pending the user's own reload. See Architecture Status → "Unsaved Changes Protection (forms)" / "Dashboard — org-wide query batching" / "Sidebar — Favorites + scalable Projects list" for the full detail.
 
+Most recently, Project Overview (Admin and Project Lead) gained a dedicated **"New"** section (JIR-82), rendered immediately above the existing Active Work section, holding every ticket still sitting in a project's own real default/base status (`ticket_statuses.is_default`, matched by the real `status_id`, never by a fragile display-text guess) — closing a real UX gap where a ticket a user had just created from "+ New Ticket" had nowhere to appear in the Overview at all. It reuses the exact same RLS-scoped `tickets`/`statuses` data the rest of the Overview already loads (no second/broader query), caps its own preview the same "N shown, real View all link" way the rest of the page already does, and shows nothing at all (Active Work simply moves back to its normal top position) when a project has zero such tickets. Two real follow-up bugs were found and fixed on the same feature: the New Ticket modal opened from Project Overview had its own Sprint selector silently offering only "Backlog," since neither Overview component loaded a project's real sprints the way `tickets-screen.tsx` already did (fixed by reusing `loadProjectSprints` there too); and, per a UX follow-up request, the ticket a "+ New Ticket" flow just created now stays visibly highlighted (a subtle lilac row background + a "Just created" pill) in the New section for the rest of that page session — tracked entirely client-side by the ticket's own real id (never guessed from title/position), replacing an earlier 8-second-timeout version after feedback that the window was too short. See Architecture Status → "Project Overview → New section (JIR-82) + Sprint selector fix + Just Created highlight" for the full detail.
+
+Also most recently, the Member Dashboard's project scope selector gained an **"All projects"** option, aggregating Assigned Tickets/Due Today/Logged Today/Recommended Next/My Active Work/Needs Your Attention/Time Today/Upcoming Work across every project the signed-in member can access (reusing the same RLS-scoped `loadMemberProjects` list the selector itself already used, fanned out with one `loadProjectTickets` call per project — never a broader org-wide query) — Weekly Capacity is the one deliberate exception, read from the profile's own real value and never summed across projects. "All projects" is now the actual default whenever nothing has been explicitly persisted yet (a stale/inaccessible `?project=` also now falls back to it, never to "the first project" as before). My Work gained a parallel new **"My Hours"** tab (JIR-77) — a member's own logged time entries across every accessible project, filtered by an explicit From/To date range (defaulting to the current month), showing Date/Project/Ticket/Description/Hours per row (Ticket links straight to its own detail page) and a real accumulated total for the selected range, backed by a new `loadProfileTimeEntriesForRange` query scoped by `logged_by = profileId` plus the same already-permission-scoped ticket-id list every other My Work section reads from. My Work's own tab affordance was then made more discoverable per a follow-up request: renamed to "My Hours," visually separated from the List/Board segment with a small divider, and given a permanent subtle lilac background while inactive.
+
+Also most recently, a real bug — not a timer, an effect-dependency issue — was found and fixed across the Dashboard, Reports, Time Tracking, Projects, and My Work screens: several of their main data-loading effects depended on the whole `organization` object (from `useCurrentUser()`) rather than its `id`. `current-user-provider.tsx`'s own pre-existing window-focus session-revalidation effect hands back a *new* `organization` object reference every time the browser tab regains focus, even when the organization itself hasn't changed — so every one of these effects silently re-ran on every tab switch, flashing the loading skeleton and refetching everything with no user action involved (in several files this was previously misdescribed in comments as a deliberate "refresh-on-focus" feature). Fixed the same way the earlier Project Settings unsaved-changes bug fix addressed this exact class of issue: depending on `organization?.id` instead, across `dashboard-screen.tsx`, `project-lead-dashboard.tsx`, `member-dashboard.tsx`, `reports-screen.tsx`, `project-lead-reports-screen.tsx`, `time-tracking-screen.tsx`, `project-lead-time-tracking-screen.tsx`, `projects-list-screen.tsx`, and `member-projects-screen.tsx` (My Work's own two effects, `my-work-screen.tsx`, had already been fixed in the same pass that added "My Hours"). Every effect's initial-load/genuine-org-change/explicit-Retry behavior is unchanged — only the spurious tab-focus refetch was removed. `current-user-provider.tsx` itself was intentionally left untouched (shared, global infrastructure, not scoped to any one screen); `organization-projects-provider.tsx` (the shared `/projects`-and-Sidebar project-list context) has the same underlying issue but was left out of scope for the same reason.
+
+Separately, a read-only audit was run of every Supabase-Auth-triggered email flow in JIRITA (signup/confirmation, invites, password recovery, magic link/OTP, email changes, reauthentication): only Forgot Password (live, reachable) and the email-invite `inviteUserByEmail` path (code-complete but unreachable from the current UI) actually send Supabase-hosted email; every link-minting flow (Generate Invite Link, Reset Password link, Re-generate Invitation Link) uses `generateLink`, which never sends mail at all. Forgot Password's own sender/branding was then addressed: since it's governed entirely by Supabase Dashboard settings with zero code representation in this repo, the fix is `docs/SUPABASE_AUTH_EMAIL_SETUP.md` — exact Custom SMTP settings (reusing the same SendGrid account/sender already live for JIRITA's own notification email, never a second provider) and a JIRITA-branded Reset Password template — still pending manual application in the Dashboard by whoever has access.
+
+All of the above is implemented and type/build-clean (`tsc`/`eslint`/`next build`/`vitest` all pass); none of it has been clicked through in a live browser (no test credentials available in any of these sessions) — same "should work, not yet verified" status as most of the rest of this document.
+
 ---
 
 # Repository Structure
@@ -4535,6 +4545,273 @@ Dashboard.** No code, migration, RLS policy, or env var was added; the
 existing `resetPasswordForEmail`/`/forgot-password`/`/reset-password`
 flow and tokens are completely unchanged. `tsc`/`eslint` pass clean on
 the (comment-only) touched files.
+
+Separately, a full read-only audit was run of every Auth flow in JIRITA
+capable of triggering a Supabase-hosted email (signup/confirmation,
+invites, password recovery, magic link/OTP, email change,
+reauthentication) — no changes were made, this was investigation only.
+Findings: **Forgot Password** (`resetPasswordForEmail`, live, reachable
+from `/forgot-password`, including its own "Resend email" button) is the
+only Supabase-Auth email flow currently reachable from the UI — see
+above. **Email-invite** (`admin.auth.admin.inviteUserByEmail`, wrapped by
+`inviteUserAction`/`inviteOrganizationUser`) is code-complete but
+confirmed unreachable from the UI today (`invite-user-modal.tsx`'s own
+header comment documents that "Send by email" was deliberately removed;
+`inviteOrganizationUser` has zero real call sites, only comment
+mentions) — flagged as a latent risk with the same no-`from`-param,
+Supabase-branded-by-default problem as Forgot Password, not currently
+covered by the fix above. Three flows mint a real Supabase Auth
+token/link but **never send any email at all** — `generateLink`
+(`type: "invite"`/`"recovery"`/`"magiclink"`) has no send side effect,
+only `hashed_token` minting — covering Generate Invite Link, Reset
+Password (Users row menu / Member Profile Modal), and Re-generate
+Invitation Link; all three build their own `NEXT_PUBLIC_APP_URL`-based
+link, never Supabase's own `action_link`. Several Supabase Auth email
+types have **no code path in JIRITA at all**: `signUp` (no self-serve
+signup screen — every account is Admin-API-created), `signInWithOtp`
+(magic-link *sign-in*, as opposed to the `magiclink` token type used
+internally above), and any email-change confirmation (Profile shows
+email as read-only; no code anywhere writes `auth.users.email`).
+`changePassword` deliberately reauthenticates via `signInWithPassword`
+rather than Supabase's own `auth.reauthenticate()`, specifically to avoid
+that API's own OTP-email side effect.
+
+---
+
+## Project Overview → New section (JIR-82) + Sprint selector fix + Just Created highlight
+
+**JIR-82.** Root cause of the original gap: a ticket created via "+ New
+Ticket" without an explicit status choice lands in the project's real
+default/base status (`ticket_statuses.is_default`, resolved server-side
+in `createTicket`, `lib/tickets.ts`) — but `admin-project-overview.tsx`'s
+and `project-lead-project-overview.tsx`'s own "Active Work" section only
+ever grouped tickets with `status === "blocked"/"in-progress"/"review"`,
+so a freshly created ticket had no group to land in and simply
+disappeared from the Overview, even though it was still correctly
+counted in the "Open Tickets" KPI.
+
+Fix: a new `selectNewStatusTickets(tickets, statuses)` helper
+(`admin-project-overview.tsx`, exported and reused by
+`project-lead-project-overview.tsx`) matches a ticket into "New" by
+comparing its real `statusId` against whichever status row has
+`isDefault: true` — never by display text, since a project can rename
+its default status away from the seeded "To Do" (Fase 2.5 custom
+statuses). A new `NewWorkSection` component renders immediately above
+Active Work, capped at 5 (`NEW_WORK_PREVIEW_LIMIT`) with a "View all N
+tickets →" link to the plain (unfiltered) Tickets page — the same
+fallback target Active Work's own "View all" link already uses, since no
+existing URL-filter mechanism represents "status = the default status."
+Renders nothing (not an empty card) when a project has zero New tickets.
+Reuses the existing `TicketRow` component from Active Work's own
+`TicketGroup` — no second row component. No query/RLS/migration change:
+both `tickets` and `statuses` were already loaded by the existing
+Overview effect: the filtering is pure client-side.
+
+**Sprint selector fix.** A separate, real bug was found while validating
+JIR-82: opening "+ New Ticket" from either Project Overview only ever
+showed "Backlog" in the Sprint selector, even when the project had an
+active sprint. Root cause: `NewTicketModal`'s `eligibleSprints` is built
+from an optional `sprints` prop (`(sprints ?? []).filter(s => s.status
+!== "closed")`) — `tickets-screen.tsx` already loads real sprints via
+`loadProjectSprints` and passes them through, but neither
+`admin-project-overview.tsx` nor `project-lead-project-overview.tsx` ever
+did. Fixed by adding the identical `loadProjectSprints` effect (same
+"fire once `project.id` is known, silently no-op on error" shape
+`tickets-screen.tsx` already uses) to both files and passing
+`sprints={sprints}` through — no new query function, no new eligibility
+rule; sprint eligibility (Backlog + every non-closed sprint, active
+first) is now identical everywhere the modal is opened from.
+
+**"Just created" highlight.** Follow-up UX request: after creating a
+ticket, its own row in the New section should be identifiable. Since
+`NewTicketModal`'s `onCreated(ticket)` already hands back the real
+created `Ticket` (its real `id`, never guessed from title/timestamp/
+array position), `handleTicketCreated` in both Overview files now also
+calls `setRecentlyCreatedTicketId(ticket.id)` — a new, purely
+client-side, ephemeral `useState`, never persisted anywhere. `TicketRow`
+gained an optional `highlighted` prop (default `false`, so every other
+caller — Active Work's own `TicketGroup` — is visually unaffected) that
+adds a subtle `bg-brand-50 dark:bg-brand-500/10` row background plus a
+small "Just created" pill; `NewWorkSection` gained a matching
+`recentlyCreatedTicketId` prop, passing `highlighted={ticket.id ===
+recentlyCreatedTicketId}` per row. Original version used an 8-second
+`setTimeout` to clear the highlight; after feedback that this was too
+short, the timer was removed outright — the highlight now simply stays
+set for the rest of that page session, moves to a newer ticket's id if
+one is created before the previous highlight would have expired, and is
+cleared naturally by navigating away or reloading (fresh `useState(null)`
+on mount), never by a background timer.
+
+All of the above is implemented and type/build-clean (`tsc`/`eslint`/
+`next build`/`vitest` all pass), not yet clicked through in a live
+browser (no test credentials available in any of these sessions).
+
+---
+
+## Member Dashboard → "All projects" scope + real default
+
+The Member Dashboard's existing `?project=<slug>`-driven project scope
+selector (shown only when staffed on 2+ active projects) gained a new
+`ALL_PROJECTS_VALUE = "__all__"` sentinel option, listed first, that
+aggregates every section — Assigned Tickets, Due Today, Logged Today,
+Recommended Next, My Active Work, Needs Your Attention, Time Today,
+Upcoming Work — across every project `loadMemberProjects` (the exact
+same RLS-scoped list already backing the selector's real per-project
+options) resolves for the signed-in member, never a broader/org-wide
+query. Aggregation is a `Promise.all` fan-out of the existing
+`loadProjectTickets` call, one per accessible project (mirroring the
+same Promise.all-over-`loadProjectTickets` shape `lib/tickets.ts`'s own
+`loadOrganizationTickets` already uses for its org-wide equivalent, just
+scoped to the member's own — typically small — project list) —
+`loadMemberAttentionEvents`/`loadOrganizationLoggedTimeForRange` are each
+still called exactly once, over the union of ticket ids, never once per
+project. **Weekly Capacity is the one deliberate exception**: read
+directly from the signed-in profile's own `user.weeklyCapacity`
+(`organization_memberships.weekly_capacity`, confirmed the same
+single source of truth `loadProjectTeam`'s own `weeklyCapacity` field
+already resolves to per member) rather than any per-project team lookup,
+and never summed/multiplied across the aggregated projects. Ticket rows
+already showed a per-row project badge before this change (unconditional
+in Recommended Next/My Active Work/Time Today/Upcoming Work), so no new
+UI was needed to distinguish a ticket's origin project once "All
+projects" is selected. "Assigned Tickets"/"Due Today" KPI clicks (when 2+
+matches) now route to the existing org-wide `/tickets?assignee=me`
+destination under "All projects" — the same target My Work's own
+"Assigned Tickets" KPI already uses for its own cross-project case — or
+to the project-scoped Tickets page as before under a single project.
+
+**Default changed** in a follow-up request: "All projects" is now the
+real default whenever nothing valid is persisted yet — both a genuinely
+unset `?project=` (first-ever visit) and a stale/inaccessible
+`?project=<slug>` (a project since archived or access removed) now fall
+back to "All projects," never to "the first project" as the selector did
+before. Persistence itself is unchanged — same `?project=` URL-as-
+source-of-truth mechanism, explicit selections (including "All
+projects") still round-trip through `handleScopeChange` exactly as
+before.
+
+Implemented and type/build-clean (`tsc`/`eslint`/`next build` all pass),
+not yet clicked through in a live browser (no test credentials available
+in this session).
+
+---
+
+## My Work → "My Hours" tab (JIR-77) + discoverability
+
+**JIR-77.** A new third view — alongside the existing List/Board toggle
+— lets a member review their own logged time entries across every
+project they can access, filtered by an explicit From/To date range
+(defaulting to the 1st of the current month through today, the same
+"month" definition this screen's own `monthMinutes` KPI already used).
+Backed by a new `loadProfileTimeEntriesForRange(profileId, ticketIds,
+startDateISO, endDateISO)` (`lib/tickets.ts`), mirroring the existing
+`loadProfileTimeEntries` almost exactly — same table, same
+`logged_by`-scoped query, same `chunkArray`/`ORG_TICKET_ID_BATCH_SIZE`
+batching, same `rowToTimeEntryRecord` mapping — just a `work_date` range
+filter in place of a row-count `limit`, and sorted by `work_date` (then
+`created_at` as tiebreaker) rather than `created_at` alone, since
+"newest first" here means the most recent workday. `ticketIds` passed in
+is every ticket across every project this member can see (`tickets`
+state, already loaded once via the screen's own existing
+`loadOrganizationTickets` call — not just tickets currently assigned to
+them, since a logged hour can be on a ticket reassigned away afterward) —
+combined with the server-side `logged_by = profileId` filter, a Member
+can never see another user's hours or a ticket from an inaccessible
+project, with zero new permission logic. The table shows Date, Project,
+Ticket (links straight to its own detail page, reusing the screen's
+existing `openPreview`), Description, and Hours per row, newest first,
+plus a real accumulated total for the selected range — computed from the
+same successfully-joined rows the table itself renders, so the two can
+never disagree. A real edge case was found and fixed during review: the
+original loading-state guard left the tab stuck on its skeleton forever
+for dev-fallback mode or a member with genuinely zero accessible tickets
+— fixed to resolve straight to a correct empty "ready" state in both
+cases.
+
+**Discoverability follow-up.** Renamed from "Hours" to "My Hours."
+List/Board remain grouped in their own segmented-control pill,
+unchanged; My Hours now sits apart as its own button (a small divider
+before it) with a permanent, subtle `bg-brand-50 dark:bg-brand-500/10`
+background while inactive, so it reads as its own destination rather
+than a third equal option buried in the same group — its active state is
+byte-identical to List/Board's own (white background + shadow). The
+clock icon and all Hours data/behavior are unchanged.
+
+Implemented and type/build-clean (`tsc`/`eslint`/`next build`/`vitest`
+all pass), not yet clicked through in a live browser (no test credentials
+available in this session).
+
+---
+
+## Focus-triggered auto-refresh — real bug found and fixed (Dashboard, Reports, Time Tracking, Projects, My Work)
+
+Not a timer or a poll — the actual mechanism was an effect-dependency
+issue. `current-user-provider.tsx` has a pre-existing, intentional
+window-`focus` listener that revalidates the signed-in session (see its
+own "one-shot, event-driven check, never a timer/poll" comment) — but
+every time it runs, it hands back a **brand-new `organization` object
+reference**, even when the organization itself hasn't changed at all.
+Several screens' main data-loading effects depended on that whole
+`organization` object rather than its `id`, so switching back to the
+browser tab silently re-triggered a full reload — resetting to the
+loading skeleton and refetching everything, with no user action
+involved. In several files this was explicitly (and, in hindsight,
+mistakenly) documented in code comments as a deliberate "refresh-on-
+focus" feature "the Dashboards/Projects/My Work/Reports already rely
+on" — that framing predates this fix and is now removed everywhere it
+appeared.
+
+Fixed by depending on `organization?.id` instead of `organization` in
+every affected effect — the same fix already applied earlier to Project
+Settings' own unsaved-changes bug (see "Unsaved Changes Protection
+(forms)" above) — extended here to every remaining screen with the same
+issue:
+
+- **Dashboard** — `dashboard-screen.tsx` (Admin, 1 effect),
+  `project-lead-dashboard.tsx` (3 effects: led-projects list, main
+  delivery data, org members for Quick Actions), `member-dashboard.tsx`
+  (2 effects: member-projects list, main tickets/hours/attention load —
+  fixed in the same pass as the "All projects" feature above).
+- **Reports** — `reports-screen.tsx` (Admin, 1 effect covering both
+  Delivery and Finance tabs), `project-lead-reports-screen.tsx` (1
+  effect).
+- **Time Tracking** — `time-tracking-screen.tsx` (Admin/Member, 2
+  effects: main load, Custom Range load), `project-lead-time-tracking-screen.tsx`
+  (2 effects, same shape).
+- **Projects** — `projects-list-screen.tsx` (1 effect: the per-row
+  Health/At Risk/Progress/team-stats metrics load), `member-projects-screen.tsx`
+  (1 effect: My Projects' own main load).
+- **My Work** — both of `my-work-screen.tsx`'s own effects (main load,
+  and the new Hours-tab load) were fixed in the same pass that added "My
+  Hours," using the identical pattern.
+
+Every fixed effect's guard clause, query calls, and state-setting logic
+are otherwise byte-for-byte unchanged — only the dependency-array entry
+changed, each with a `// eslint-disable-next-line
+react-hooks/exhaustive-deps` comment matching the convention already
+established at the original Project Settings fix. Initial load on entry,
+a genuine organization change, and every existing explicit
+Retry/`runFetch()`-style user action are all preserved exactly; no
+query, permission, filter, sort, pagination, or mutation/post-mutation
+refresh path was touched anywhere.
+
+**Two things were deliberately left out of scope, by design, not
+oversight:** `current-user-provider.tsx` itself was never touched (the
+focus-revalidation there is legitimate, global, cross-app infrastructure
+— removing it would affect every screen in the app, not just these
+five); and `organization-projects-provider.tsx` (the shared context
+behind `useOrganizationProjects()`, mounted once at the root layout and
+consumed by Sidebar/breadcrumbs/`/projects`/Project Overview/etc.) has
+the exact same whole-`organization`-object dependency in its own effect
+and was found during this work, but was left unfixed since it's shared
+infrastructure well beyond the screens named in scope for these fixes —
+flagged here for a possible deliberate follow-up.
+
+Implemented and type/build-clean (`tsc`/`eslint`/`next build`/`vitest`
+all pass) across every touched file. Not clicked through in a live
+browser in any of these sessions (no test credentials available); the
+fix was instead verified by full code-level tracing of each effect's
+guard/dependency/fetch logic.
 
 ---
 

@@ -161,7 +161,16 @@ export function MemberProjectsScreen() {
     return () => {
       cancelled = true;
     };
-  }, [isDevFallback, organization, userId, projects, requestId]);
+    // organization?.id (not the whole `organization` object) — depending on
+    // the object re-triggers this effect (and its full-page loading flash)
+    // on every window-focus regain, since current-user-provider.tsx hands
+    // back a new `organization` reference on its own session revalidation
+    // even when the org itself hasn't changed. Keying off the real identity
+    // means this only re-runs on a genuine org change, `projects` actually
+    // changing, the initial mount, or an explicit user-triggered runFetch()
+    // (Retry) — no background auto-refresh.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDevFallback, organization?.id, userId, projects, requestId]);
 
   async function handleRequestAccess(project: BrowsableOrgProject) {
     if (!organization || !userId || actionPendingProjectId) return;

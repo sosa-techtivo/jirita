@@ -295,7 +295,10 @@ export function ProjectLeadDashboard() {
     return () => {
       cancelled = true;
     };
-  }, [isDevFallback, organization, userId]);
+    // organization?.id, not the object — see the main delivery effect's own
+    // comment below for why.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDevFallback, organization?.id, userId]);
 
   // ── Project scope selector — only shown when this Project Lead leads more
   // than one active project (see the header JSX below); with 0 or 1 led
@@ -422,7 +425,16 @@ export function ProjectLeadDashboard() {
     return () => {
       cancelled = true;
     };
-  }, [isDevFallback, organization, activeSlug, requestId]);
+    // organization?.id (not the whole `organization` object) — depending on
+    // the object re-triggers this effect (and its full-page loading flash)
+    // on every window-focus regain, since current-user-provider.tsx hands
+    // back a new `organization` reference on its own session revalidation
+    // even when the org itself hasn't changed. Keying off the real identity
+    // means this only re-runs on a genuine org change, a project switch, the
+    // initial mount, or an explicit user-triggered runFetch() (Retry) — no
+    // background auto-refresh.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDevFallback, organization?.id, activeSlug, requestId]);
 
   // ── Quick Actions: Add Member / New Note / New Ticket, each opening the
   // exact same modal already used elsewhere in the app (Team's
@@ -446,7 +458,10 @@ export function ProjectLeadDashboard() {
     return () => {
       cancelled = true;
     };
-  }, [isDevFallback, organization]);
+    // organization?.id, not the object — see the main delivery effect's own
+    // comment above for why.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDevFallback, organization?.id]);
 
   const addMemberCandidates = useMemo(
     () => orgMembers.filter((om) => !team.some((m) => m.id === om.id)),
