@@ -20,6 +20,7 @@
 // itself is unchanged from before the trigger moved off Vercel Cron —
 // it's a plain bearer-token comparison, indifferent to who calls it.
 import { NextResponse, type NextRequest } from "next/server";
+import { createHash } from "node:crypto";
 import { runEmailDigest } from "@/lib/server/run-email-digest";
 
 export const runtime = "nodejs";
@@ -31,7 +32,38 @@ function isAuthorized(request: NextRequest): boolean {
   return header === `Bearer ${secret}`;
 }
 
+function sha256(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+// TEMPORARY diagnostic — never logs CRON_SECRET, the Authorization header,
+// or the bearer token itself, only presence/length/SHA-256 of each side
+// plus whether the two hashes match. Added to determine, without ever
+// revealing either value, whether the CRON_SECRET Vercel Production is
+// actually reading matches the token Supabase's pg_cron job is actually
+// sending — both were independently confirmed to hash to the same value
+// as what's stored in Supabase Vault, yet the endpoint still returns 401.
+// Remove once diagnosed.
+function logCronAuthDebug(request: NextRequest): void {
+  const expectedSecret = process.env.CRON_SECRET ?? null;
+  const authHeader = request.headers.get("authorization");
+  const providedToken = authHeader?.startsWith("Bearer ") ? authHeader.slice("Bearer ".length) : authHeader ?? null;
+
+  console.info("[cron-auth-debug]", {
+    vercelEnv: process.env.VERCEL_ENV ?? null,
+    expectedPresent: Boolean(expectedSecret),
+    expectedLength: expectedSecret?.length ?? 0,
+    expectedSha256: expectedSecret ? sha256(expectedSecret) : null,
+    providedPresent: Boolean(providedToken),
+    providedLength: providedToken?.length ?? 0,
+    providedSha256: providedToken ? sha256(providedToken) : null,
+    hashesMatch: expectedSecret && providedToken ? sha256(expectedSecret) === sha256(providedToken) : false,
+  });
+}
+
 export async function GET(request: NextRequest) {
+  logCronAuthDebug(request);
+
   if (!isAuthorized(request)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
