@@ -18,6 +18,7 @@ import { Avatar } from "@/components/ui/avatar";
 import { presetTicketsFilter } from "@/components/tickets-screen";
 import { loadProjectDetail, loadProjectTeam } from "@/lib/projects";
 import type { ProjectDetail, ProjectTeamMember } from "@/lib/projects";
+import { loadProjectSprints, type Sprint } from "@/lib/sprints";
 import {
   loadProjectTickets,
   loadOrganizationActivity,
@@ -25,6 +26,29 @@ import {
   isTicketClosed,
 } from "@/lib/tickets";
 import type { OrganizationActivityEvent, OrganizationTimeEntry, TicketStatusOption } from "@/lib/tickets";
+
+// "New" preview cap (JIR-82) — same "capped, with a real View all link"
+// shape as the Member Project Overview's own PROJECT_WORK_PREVIEW_LIMIT
+// (project-overview.tsx), so a project that accumulates many freshly
+// created tickets doesn't grow this card unbounded.
+const NEW_WORK_PREVIEW_LIMIT = 5;
+
+// "New" = tickets currently sitting in the project's own default/base
+// status (ticket_statuses.is_default) — the status a ticket lands in when
+// created without an explicit status choice (see createTicket in
+// lib/tickets.ts). Matched by the real status_id, never by display text:
+// a project can rename or reconfigure its default status away from the
+// seeded "To Do" (Fase 2.5 custom statuses), so is_default is the only
+// stable source of truth. Sorted newest-ticket-first (highest
+// ticket_number) so a ticket just created from this page's own "+ New
+// Ticket" is never the one truncated out of the capped preview below.
+export function selectNewStatusTickets(tickets: Ticket[], statuses: TicketStatusOption[]): Ticket[] {
+  const defaultStatus = statuses.find((s) => s.isDefault);
+  if (!defaultStatus) return [];
+  return tickets
+    .filter((t) => t.statusId === defaultStatus.id)
+    .sort((a, b) => b.ticketNumber - a.ticketNumber);
+}
 import {
   buildHoursByPersonRows,
   buildProjectHealthRows,
@@ -178,17 +202,30 @@ export function TicketRow({
   projectCode,
   slug,
   onOpen,
+  highlighted = false,
 }: {
   ticket: Ticket;
   projectCode: string;
   slug: string;
   onOpen: (t: Ticket) => void;
+  /** JIR-82 follow-up — true for the ticket a "+ New Ticket" flow most
+   *  recently created during this page session, so the New section's own
+   *  caller can point at it by its real id (see recentlyCreatedTicketId in
+   *  AdminProjectOverview/ProjectLeadProjectOverview) rather than guessing
+   *  from title/position. Stays true until a newer ticket is created or the
+   *  page is left/reloaded — never on a timer. Unused by every other caller
+   *  (Active Work's TicketGroup never passes it), so this is purely
+   *  additive — no visual change anywhere else. */
+  highlighted?: boolean;
 }) {
   return (
     <button
       type="button"
       onClick={() => onOpen(ticket)}
-      className="w-full py-2.5 flex items-center justify-between gap-2 text-left hover:bg-slate-50 dark:hover:bg-zinc-800/50 -mx-2 px-2 rounded-lg transition-colors"
+      className={[
+        "w-full py-2.5 flex items-center justify-between gap-2 text-left hover:bg-slate-50 dark:hover:bg-zinc-800/50 -mx-2 px-2 rounded-lg transition-colors",
+        highlighted ? "bg-brand-50 dark:bg-brand-500/10 duration-700" : "",
+      ].join(" ")}
     >
       <span className="min-w-0 flex items-baseline gap-1.5">
         <TicketTypeIcon type={ticket.type} />
@@ -196,6 +233,11 @@ export function TicketRow({
           {projectCode}-{ticket.ticketNumber}
         </span>
         <span className="text-sm text-slate-800 dark:text-zinc-200 truncate">{ticket.title}</span>
+        {highlighted && (
+          <span className="text-[10px] font-semibold text-brand-600 dark:text-brand-400 bg-brand-100 dark:bg-brand-500/20 px-1.5 py-0.5 rounded-full flex-shrink-0">
+            Just created
+          </span>
+        )}
       </span>
       <MemberTrigger
         name={ticket.assignee.name}
@@ -236,6 +278,69 @@ export function TicketGroup({
         ))}
       </div>
     </div>
+  );
+}
+
+// ── New: tickets still in the project's default/base status ─────────────────
+// A dedicated card, placed immediately above Active Work, so a ticket that
+// was just created (and hasn't had work started on it yet) doesn't simply
+// vanish from the Overview — Active Work only ever covers Blocked/In
+// Progress/In Review, and "New" is conceptually distinct from those (JIR-82).
+// Renders nothing when there are no such tickets, so Active Work moves back
+// into its normal top position rather than leaving an empty card. Shares
+// TicketRow with Active Work's own TicketGroup above — same row
+// component/interaction, never a parallel one.
+export function NewWorkSection({
+  tickets,
+  projectCode,
+  slug,
+  onOpen,
+  recentlyCreatedTicketId,
+}: {
+  tickets: Ticket[];
+  projectCode: string;
+  slug: string;
+  onOpen: (t: Ticket) => void;
+  /** JIR-82 follow-up — the real id of the ticket a "+ New Ticket" flow on
+   *  this page most recently created during this page session, or
+   *  null/undefined the rest of the time. Purely ephemeral client state
+   *  owned by the caller (Admin/Project Lead Overview) — never persisted,
+   *  never affects which tickets this section shows/orders/counts, only
+   *  which row (if any) renders highlighted. Stays set indefinitely (no
+   *  timer) until a newer ticket is created or the page is left/reloaded. */
+  recentlyCreatedTicketId?: string | null;
+}) {
+  if (tickets.length === 0) return null;
+  const visibleTickets = tickets.slice(0, NEW_WORK_PREVIEW_LIMIT);
+  const hasMore = tickets.length > NEW_WORK_PREVIEW_LIMIT;
+
+  return (
+    <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/40 dark:border-zinc-700/70 dark:bg-zinc-900 dark:shadow-black/20">
+      <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-zinc-400">New</h2>
+      <div className="mt-4 first:mt-0">
+        <p className="text-xs font-medium mb-1.5 text-sky-500 dark:text-sky-400">New ({tickets.length})</p>
+        <div className="divide-y divide-slate-100 dark:divide-zinc-800">
+          {visibleTickets.map((ticket) => (
+            <TicketRow
+              key={ticket.id}
+              ticket={ticket}
+              projectCode={projectCode}
+              slug={slug}
+              onOpen={onOpen}
+              highlighted={ticket.id === recentlyCreatedTicketId}
+            />
+          ))}
+        </div>
+      </div>
+      {hasMore && (
+        <Link
+          href={`/projects/${slug}/tickets`}
+          className="mt-3 inline-block text-xs font-medium text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300"
+        >
+          View all {tickets.length} tickets →
+        </Link>
+      )}
+    </section>
   );
 }
 
@@ -462,9 +567,20 @@ export function AdminProjectOverview({ slug = "mobile-banking-app" }: { slug?: s
   const [teamMembers, setTeamMembers] = useState<ProjectTeamMember[]>([]);
   const [activityEvents, setActivityEvents] = useState<OrganizationActivityEvent[]>([]);
   const [timeEntries, setTimeEntries] = useState<OrganizationTimeEntry[]>([]);
+  // Sprint MVP — this project's own sprints, needed so New Ticket's Sprint
+  // selector here offers the same eligible destinations (Backlog + every
+  // non-closed sprint) tickets-screen.tsx's own New Ticket already does.
+  const [sprints, setSprints] = useState<Sprint[]>([]);
   const [requestId, setRequestId] = useState(0);
 
   const [showNewTicket, setShowNewTicket] = useState(false);
+  // JIR-82 follow-up — the real id of whichever ticket "+ New Ticket" on
+  // this page most recently created, so NewWorkSection can highlight that
+  // exact row. Purely ephemeral client state, kept for the rest of this page
+  // session (no timer): never written to localStorage/sessionStorage/DB,
+  // only ever replaced by a newer ticket's id, and reset to null on a fresh
+  // mount — i.e. cleared by navigating away or reloading.
+  const [recentlyCreatedTicketId, setRecentlyCreatedTicketId] = useState<string | null>(null);
   const router = useRouter();
   // A ticket click now navigates straight to its own Detail page — no more
   // intermediate Preview step. Kept as `setPreview` (not renamed) so every
@@ -474,6 +590,18 @@ export function AdminProjectOverview({ slug = "mobile-banking-app" }: { slug?: s
   }
 
   const runFetch = useCallback(() => setRequestId((id) => id + 1), []);
+
+  // Sprint MVP — same real per-project sprints list, loaded the same
+  // "fire once project.id is known, silently no-op on error" way
+  // tickets-screen.tsx's own equivalent effect already does — kept as its
+  // own effect rather than folded into the Promise.all below so a sprints
+  // load hiccup can never block/error the rest of this page.
+  useEffect(() => {
+    if (isDevFallback || !project) return;
+    loadProjectSprints(project.id).then((result) => {
+      if (result.status === "ready") setSprints(result.sprints);
+    });
+  }, [isDevFallback, project]);
 
   useEffect(() => {
     if (isDevFallback || !organization) return;
@@ -545,9 +673,15 @@ export function AdminProjectOverview({ slug = "mobile-banking-app" }: { slug?: s
     };
   }, [organization, isDevFallback, slug, requestId]);
 
-  function handleTicketCreated() {
+  function handleTicketCreated(ticket: Ticket) {
     setShowNewTicket(false);
     runFetch();
+    // The real id NewTicketModal's onCreated hands back (never guessed from
+    // title/timestamp/array position) — moves the highlight to whichever
+    // ticket was actually just created, including a second one created
+    // while the first is still highlighted. No timer: stays set for the
+    // rest of this page session.
+    setRecentlyCreatedTicketId(ticket.id);
   }
 
   function handlePreviewDuplicate(_ticket: Ticket) {
@@ -583,6 +717,7 @@ export function AdminProjectOverview({ slug = "mobile-banking-app" }: { slug?: s
   const monthPrefix = todayISO.slice(0, 7);
 
   const openTickets = tickets.filter((t) => !isTicketClosed(t));
+  const newTickets = selectNewStatusTickets(tickets, statuses);
   const blocked = tickets.filter((t) => t.status === "blocked");
   const inProgress = tickets.filter((t) => t.status === "in-progress");
   const inReview = tickets.filter((t) => t.status === "review");
@@ -825,6 +960,14 @@ export function AdminProjectOverview({ slug = "mobile-banking-app" }: { slug?: s
       <div className="mt-6 sm:mt-10 grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-8 items-start">
         {/* Left column: primary content */}
         <div className="lg:col-span-2 space-y-4 sm:space-y-6">
+          <NewWorkSection
+            tickets={newTickets}
+            projectCode={projectCode}
+            slug={slug}
+            onOpen={setPreview}
+            recentlyCreatedTicketId={recentlyCreatedTicketId}
+          />
+
           <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/40 dark:border-zinc-700/70 dark:bg-zinc-900 dark:shadow-black/20">
             <div className="flex items-baseline justify-between mb-1">
               <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-zinc-400">Active Work</h2>
@@ -994,6 +1137,7 @@ export function AdminProjectOverview({ slug = "mobile-banking-app" }: { slug?: s
           onCreated={handleTicketCreated}
           onPreviewDuplicate={handlePreviewDuplicate}
           statuses={statuses}
+          sprints={sprints}
         />
       )}
 

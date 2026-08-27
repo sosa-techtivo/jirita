@@ -14,6 +14,7 @@ import { Avatar } from "@/components/ui/avatar";
 import { MemberTrigger, useMemberProfile } from "@/components/member-profile";
 import { loadProjectDetail, loadProjectTeam } from "@/lib/projects";
 import type { ProjectDetail, ProjectTeamMember } from "@/lib/projects";
+import { loadProjectSprints, type Sprint } from "@/lib/sprints";
 import { loadProjectTickets, loadOrganizationLoggedTimeForRange, isTicketClosed } from "@/lib/tickets";
 import type { OrganizationTimeEntry, TicketStatusOption } from "@/lib/tickets";
 import {
@@ -23,7 +24,14 @@ import {
   buildDeliveryStatusItems,
 } from "@/components/reports-screen";
 import type { PersonRow, ProjectRow as DeliveryProjectRow } from "@/components/reports-screen";
-import { ExpandableDescription, TicketGroup, ProjectHealthRow, ProjectOverviewSkeleton } from "@/components/admin-project-overview";
+import {
+  ExpandableDescription,
+  TicketGroup,
+  NewWorkSection,
+  selectNewStatusTickets,
+  ProjectHealthRow,
+  ProjectOverviewSkeleton,
+} from "@/components/admin-project-overview";
 import type { TeamMember, HealthRow, HealthStatus } from "@/components/admin-project-overview";
 
 // The Project Lead Project Overview is the same real project-health read as
@@ -103,9 +111,20 @@ export function ProjectLeadProjectOverview({ slug = "mobile-banking-app" }: { sl
   const [statuses, setStatuses] = useState<TicketStatusOption[]>([]);
   const [teamMembers, setTeamMembers] = useState<ProjectTeamMember[]>([]);
   const [timeEntries, setTimeEntries] = useState<OrganizationTimeEntry[]>([]);
+  // Sprint MVP — this project's own sprints, needed so New Ticket's Sprint
+  // selector here offers the same eligible destinations (Backlog + every
+  // non-closed sprint) tickets-screen.tsx's own New Ticket already does.
+  const [sprints, setSprints] = useState<Sprint[]>([]);
   const [requestId, setRequestId] = useState(0);
 
   const [showNewTicket, setShowNewTicket] = useState(false);
+  // JIR-82 follow-up — the real id of whichever ticket "+ New Ticket" on
+  // this page most recently created, so NewWorkSection can highlight that
+  // exact row. Purely ephemeral client state, kept for the rest of this page
+  // session (no timer): never written to localStorage/sessionStorage/DB,
+  // only ever replaced by a newer ticket's id, and reset to null on a fresh
+  // mount — i.e. cleared by navigating away or reloading.
+  const [recentlyCreatedTicketId, setRecentlyCreatedTicketId] = useState<string | null>(null);
   const router = useRouter();
   // A ticket click now navigates straight to its own Detail page — no more
   // intermediate Preview step. Kept as `setPreview` (not renamed) so every
@@ -115,6 +134,18 @@ export function ProjectLeadProjectOverview({ slug = "mobile-banking-app" }: { sl
   }
 
   const runFetch = useCallback(() => setRequestId((id) => id + 1), []);
+
+  // Sprint MVP — same real per-project sprints list, loaded the same
+  // "fire once project.id is known, silently no-op on error" way
+  // tickets-screen.tsx's own equivalent effect already does — kept as its
+  // own effect rather than folded into the Promise.all below so a sprints
+  // load hiccup can never block/error the rest of this page.
+  useEffect(() => {
+    if (isDevFallback || !project) return;
+    loadProjectSprints(project.id).then((result) => {
+      if (result.status === "ready") setSprints(result.sprints);
+    });
+  }, [isDevFallback, project]);
 
   // Same data-loading shape as AdminProjectOverview's own effect (same
   // loaders, same real sources) — kept as this page's own wiring rather than
@@ -187,9 +218,15 @@ export function ProjectLeadProjectOverview({ slug = "mobile-banking-app" }: { sl
     };
   }, [organization, isDevFallback, slug, requestId]);
 
-  function handleTicketCreated() {
+  function handleTicketCreated(ticket: Ticket) {
     setShowNewTicket(false);
     runFetch();
+    // The real id NewTicketModal's onCreated hands back (never guessed from
+    // title/timestamp/array position) — moves the highlight to whichever
+    // ticket was actually just created, including a second one created
+    // while the first is still highlighted. No timer: stays set for the
+    // rest of this page session.
+    setRecentlyCreatedTicketId(ticket.id);
   }
 
   function handlePreviewDuplicate(_ticket: Ticket) {
@@ -226,6 +263,7 @@ export function ProjectLeadProjectOverview({ slug = "mobile-banking-app" }: { sl
 
   // ── KPIs — identical definitions to AdminProjectOverview ──────────────────
   const openTickets = tickets.filter((t) => !isTicketClosed(t));
+  const newTickets = selectNewStatusTickets(tickets, statuses);
   const blocked = tickets.filter((t) => t.status === "blocked");
   const inProgress = tickets.filter((t) => t.status === "in-progress");
   const inReview = tickets.filter((t) => t.status === "review");
@@ -446,6 +484,14 @@ export function ProjectLeadProjectOverview({ slug = "mobile-banking-app" }: { sl
       <div className="mt-6 sm:mt-10 grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-8 items-start">
         {/* Left column: primary content */}
         <div className="lg:col-span-2 space-y-4 sm:space-y-6">
+          <NewWorkSection
+            tickets={newTickets}
+            projectCode={projectCode}
+            slug={slug}
+            onOpen={setPreview}
+            recentlyCreatedTicketId={recentlyCreatedTicketId}
+          />
+
           <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/40 dark:border-zinc-700/70 dark:bg-zinc-900 dark:shadow-black/20">
             <div className="flex items-baseline justify-between mb-1">
               <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-zinc-400">Active Work</h2>
@@ -581,6 +627,7 @@ export function ProjectLeadProjectOverview({ slug = "mobile-banking-app" }: { sl
           onCreated={handleTicketCreated}
           onPreviewDuplicate={handlePreviewDuplicate}
           statuses={statuses}
+          sprints={sprints}
         />
       )}
 
