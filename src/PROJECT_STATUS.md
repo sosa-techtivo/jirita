@@ -1,4 +1,4 @@
-> Last Updated: August 24, 2026
+> Last Updated: August 27, 2026
 
 ---
 
@@ -4079,104 +4079,6 @@ re-run); `20260928000000` was left for `db push` itself to apply for real
 assumed. The Sprint MVP's own UI (selector, Manage Sprint modal) has not
 yet been clicked through in a live browser.
 
-## Email sender configuration audit (no new email events — infra only)
-
-An explicitly scoped audit: configure/prepare JIRITA's official email
-sender (`alejo+no-reply@techtivo.com`) without adding any new
-notification/email *trigger* — that's a deliberately separate, later
-task.
-
-**What actually sends email today** (full audit, not guessed):
-
-- No email-provider SDK exists anywhere in this repo — no Resend,
-  SendGrid, Nodemailer, Postmark, or Mailgun in `package.json` or any
-  import. No `supabase/config.toml`, no `supabase/functions/` (Edge
-  Functions), no `src/app/api/` route sends mail.
-- The **only** real email-sending capability anywhere is Supabase Auth's
-  own hosted email, via two calls, neither of which accepts a `from`
-  parameter — GoTrue has none:
-  - `resetPasswordForEmail` (`lib/auth.ts`'s `requestPasswordReset`) —
-    live, used by Forgot Password today.
-  - `inviteUserByEmail` (`lib/server/invite-user-action.ts`'s
-    `inviteUserAction`) — code-complete, fully wired, but unreachable
-    from any UI: Invite User's "Send by email" method was removed
-    outright in an earlier pass (see "Users → Delete User" / Invite User
-    entries above), leaving `generateInviteLinkAction` (mints a link,
-    never sends mail) as the only invite path the UI actually offers.
-- Every Supabase Auth email — both of the above — always goes out as
-  whatever **Sender Email/Sender Name is configured under Project
-  Settings → Authentication → SMTP Settings (Custom SMTP) in the Supabase
-  Dashboard**. That setting is entirely external to this repo: no env var
-  reads it, no migration sets it, and this environment holds no Supabase
-  **Management API** token (only the project-scoped anon/service-role
-  keys) that could set it programmatically even if that were desired.
-
-**What changed in code** (deliberately minimal — there is no live "from"
-call site to wire up):
-
-- New `lib/email-sender.ts` — the one canonical, documented sender
-  identity: `JIRITA_EMAIL_SENDER_ADDRESS` (`alejo+no-reply@techtivo.com`),
-  `JIRITA_EMAIL_SENDER_NAME` (`JIRITA`), and the combined
-  `JIRITA_EMAIL_SENDER` (`JIRITA <alejo+no-reply@techtivo.com>`). A plain
-  exported constant, not an env var — this value is fixed branding, not a
-  secret or a value that varies per deployment. Nothing imports it at
-  runtime yet (there's nothing for it to configure); it exists so (1)
-  whoever configures the Dashboard's Custom SMTP has one unambiguous
-  value to copy, and (2) any future non-Auth transactional email code
-  imports it instead of a second hardcoded string.
-- A short doc comment added at both real Auth-email call sites
-  (`lib/auth.ts`, `lib/server/invite-user-action.ts`) pointing at
-  `lib/email-sender.ts` and stating plainly that neither call has a
-  `from` parameter to set.
-- `.env.example` — a comment (no new variable) next to
-  `SUPABASE_SERVICE_ROLE_KEY` explaining the same thing, so a future
-  reader looking for "where's the email config" finds the real answer
-  instead of assuming a missing env var.
-
-**External configuration required (manual — not something this repo or
-session can do)**:
-
-1. **Supabase Dashboard → Project Settings → Authentication → SMTP
-   Settings**: enable Custom SMTP, set Sender Email =
-   `alejo+no-reply@techtivo.com`, Sender Name = `JIRITA`, and fill in
-   Host/Port/Username/Password for a **real SMTP relay** — this repo
-   cannot invent those credentials. Two realistic options, presented
-   without choosing one:
-   - **Reuse existing infrastructure** (`techtivo.com`'s mail already
-     runs on Google Workspace, confirmed via its real MX records —
-     `aspmx.l.google.com` et al.): Google Workspace's own SMTP relay
-     (`smtp-relay.gmail.com`) or Gmail SMTP (`smtp.gmail.com`) with an
-     App Password for the `alejo@techtivo.com` account — no new
-     third-party signup, matching this task's own "don't add a new
-     platform if the existing one can do it" instruction.
-   - **A dedicated transactional ESP** (Resend/SendGrid/Postmark/SES) —
-     more deliverability tooling (webhooks, analytics), but requires a
-     new account and its own domain verification.
-2. **DNS for `techtivo.com`** (checked read-only via `dig`, not
-   modified): **no SPF record and no DMARC record exist today** — only
-   Google's own MX records. Whichever relay is chosen in step 1 needs an
-   SPF `TXT` record on `techtivo.com` authorizing it (e.g. `v=spf1
-   include:_spf.google.com ... ~all` if using Google Workspace relay, or
-   the ESP's own documented `include:`), plus that provider's DKIM
-   `CNAME`/`TXT` records, or mail sent as `@techtivo.com` risks landing in
-   spam/being rejected outright. This must be added by whoever
-   administers `techtivo.com`'s DNS zone — explicitly not done here.
-3. **The `+` in `alejo+no-reply@techtivo.com`**: syntactically valid as a
-   From address and unrestricted by Supabase's own Dashboard field or by
-   Google Workspace SMTP (which natively supports plus-addressing for its
-   own accounts). Not verified against a specific third-party ESP, since
-   none is configured yet — some providers using *single-sender*
-   verification (rather than domain-level) require verifying the *exact*
-   address including the `+`; confirm this once a specific provider is
-   chosen, per this task's own instruction to stop and report rather than
-   substitute a different address.
-
-**No end-to-end send was attempted** — correctly, per this task's own
-instructions: there is no correct configuration yet for a test to
-validate (Supabase's *default*, non-Custom-SMTP sender is Supabase's own
-shared address, not this one), and sending a real email through the wrong
-sender would prove nothing.
-
 ## Unsaved Changes Protection (forms) — real bug found and fixed
 
 A Project Lead-reported bug ("form data disappears switching tabs while
@@ -4404,6 +4306,197 @@ browser (no test credentials available in this session) — the exact
 manual test matrix (favorite/unfavorite, search, both-open/one-open/both-
 closed accordion combinations, per-role visibility) is written up and
 ready for the user's own pass.
+
+---
+
+## Email Notifications — SendGrid, Immediate Email, Preferences, and Digest (live)
+
+Supersedes the earlier "Email sender configuration audit" entry — that
+one predates all of this and described a state (`alejo+no-reply@techtivo.com`,
+no SPF/DMARC, no email SDK, "infra only") that no longer exists. JIRITA
+now sends real transactional email end-to-end, confirmed working in
+production (Vercel), through four connected pieces:
+
+**1. SendGrid infrastructure.** `src/lib/email-sender.ts`
+(`sendTransactionalEmail({ to, subject, text, html })`) is a server-only
+wrapper around `@sendgrid/mail`, initialized from `SENDGRID_API_KEY` /
+`JIRITA_EMAIL_FROM_ADDRESS` / `JIRITA_EMAIL_FROM_NAME` (`.env.example`;
+never a fallback for the API key or address, only the name defaults to
+"JIRITA"). Sender is now `JIRITA <no-reply@jirita.techtivo.com>` — the
+`jirita.techtivo.com` subdomain is authenticated with SendGrid (SPF,
+DKIM, and DMARC all confirmed PASS), replacing the earlier
+`alejo+no-reply@techtivo.com`/Custom-SMTP plan outright. Callers can
+never override the sender. A one-off controlled test send (and, later,
+the real immediate-email/digest sends below) confirmed SendGrid accepts
+messages with HTTP 202.
+
+**2. Immediate email — exactly 4 notification types.**
+`ticket_assigned`, `comment_mention`, `comment_reply`, and
+`project_access_requested` (out of 11 total notification types — the
+other 7 stay in-app only) each also send a real email the moment their
+in-app notification is created. Architecture:
+`create-notification-action.ts` (the single, service-role-only place a
+`notifications` row is ever inserted — unchanged from before) calls
+`sendImmediateNotificationEmail` (`src/lib/server/notification-email.ts`)
+right after a successful insert, never before. That function is
+non-blocking by design — every failure path (SendGrid error, no
+resolvable recipient email, missing project/ticket context) is caught,
+logged as a `console.warn`, and swallowed; the in-app notification that
+already committed is never rolled back by an email problem. A new
+`notifications.emailed_at timestamptz` column
+(`20260930030000_add_notifications_emailed_at.sql`) is the idempotency
+marker — checked null before sending, set only after SendGrid accepts,
+via a conditional `.is("emailed_at", null)` update. `emailed_at` is
+scoped exclusively to immediate email; it does **not** gate the digest
+(see below). Email subject/body content per type — actor name, ticket
+code/title, project name, a sanitized plain-text comment excerpt where
+relevant, and a "View ticket"/"Review request" CTA — is composed in
+`notification-email.ts`, HTML-escaped, never rendering raw
+user-controlled HTML.
+
+Two real production bugs were found and fixed along the way:
+
+- **`project_access_requested` never notified the Lead.** The old
+  client-side query (`lib/projects.ts`'s `requestProjectAccess`) looked
+  up a project's Leads via `project_memberships`, run as the *requester's*
+  own browser client — but `project_memberships_select` RLS
+  (`can_view_project`) only allows a caller to see a project's
+  memberships if they're already an org admin or already staffed on that
+  exact project, which the requester, by definition, is not yet. The
+  query silently returned zero rows under RLS (no error), so the
+  notification (and its email) was never created — confirmed against a
+  real, still-pending production request. Fixed with a new Server Action,
+  `src/lib/server/notify-project-access-request-action.ts`, that resolves
+  Leads with the service-role client (bypassing that RLS safely) and
+  reuses `createNotificationAction` per Lead — verified against the real
+  pending request afterward (notification created, email sent).
+- **Pending Access Requests showed "Requested Invalid Date."**
+  `lib/projects.ts`'s `hydrateAccessRequests` passed
+  `project_access_requests.created_at` (a full `timestamptz`) straight
+  into `formatAbsoluteDate()`, which is built for date-only
+  (`YYYY-MM-DD`) columns like `due_date` and appends its own
+  `T00:00:00` — producing a literal `Invalid Date` string. Fixed with a
+  one-line change (`formatAbsoluteDate(row.created_at.slice(0, 10))`);
+  `formatAbsoluteDate()` itself and its other (genuinely date-only)
+  callers were left untouched.
+
+**3. Base URL centralization.** `src/lib/server/app-base-url.ts`
+(`getAppBaseUrl`/`requireAppBaseUrl`) is now the one source of truth for
+every absolute link this app generates outside a browser's own
+`window.location` — email CTAs and Supabase Auth invite/reset links —
+replacing two slightly-different local implementations that used to live
+in `notification-email.ts` and `invite-user-action.ts`. Reads
+`NEXT_PUBLIC_APP_URL`; falls back to `http://localhost:3000` only when
+genuinely not running on any Vercel deployment (`VERCEL_ENV` unset) —
+never infers a domain from `VERCEL_URL` or request headers, so a Preview
+deployment's `*.vercel.app` URL can never leak into a real email. This
+also introduced the project's **first test suite** —
+`npm run test` (Vitest, newly added as a dependency) —
+`src/lib/server/app-base-url.test.ts` covers local/production/trailing-
+slash/route-preservation/no-guess-on-Vercel cases.
+
+**4. Per-user email preferences (organization_memberships).** Four new
+columns (`20260930040000_add_organization_membership_email_preferences.sql`):
+`email_immediate_enabled`/`email_digest_enabled` (`boolean not null
+default true`), `email_digest_frequency` (`text not null default
+'daily'`, `check (... in ('1h','4h','8h','daily'))`),
+`email_digest_last_sent_at` (`timestamptz`, starts null for everyone).
+Self-service update goes through a new `security definer` RPC,
+`update_own_email_preferences` — `organization_memberships_update` RLS
+is admin-only by design, so this mirrors the existing
+`update_own_weekly_capacity` pattern exactly, scoped strictly to
+`profile_id = auth.uid()`. Read/write client helpers live in
+`src/lib/email-preferences.ts`; the server-side read used by the email
+pipeline (`getEmailPreferencesForRecipient`) lives in
+`src/lib/server/email-preferences.ts`. `notification-email.ts` checks
+`email_immediate_enabled` right after the `emailed_at` idempotency
+pre-check — if disabled (or no active membership can be resolved), the
+email is skipped, but the in-app notification always stands regardless.
+The check is centralized in this one place; no per-caller (`updateTicket`,
+comment creation, access-request) checks were added. Profile
+(`src/components/profile-screen.tsx`) gained a new "Email notifications"
+section — two toggles ("Send important notifications immediately",
+"Send me a summary of notifications I haven't seen") and a frequency
+`<select>` (Every hour/4 hours/8 hours/Daily, visually disabled when the
+digest toggle is off but its saved value is preserved) — saved via the
+same "Save Changes" button as the rest of Profile.
+
+**5. Digest worker.** `src/lib/server/run-email-digest.ts` sends each
+user with `email_digest_enabled = true` at most one summary email per
+due cycle, covering every notification with `recipient_profile_id`/
+`organization_id` matching, `read_at IS NULL`, and `created_at >`
+their own `email_digest_last_sent_at` — deliberately **not** filtered by
+`emailed_at`: an already-immediate-emailed notification (e.g.
+`ticket_assigned`) still belongs in the digest if it's still unread,
+since the digest means "still unseen in JIRITA," not "never emailed."
+`src/lib/server/digest-due.ts`'s `isDigestDue()` is a pure function
+(`now` always passed explicitly, never read internally) deciding
+1h/4h/8h/"daily" (~24h) due-ness — its own Vitest suite
+(`digest-due.test.ts`, 15 cases) covers every threshold plus null/invalid
+inputs. First-ever cycle for a membership (`email_digest_last_sent_at IS
+NULL`) only ever initializes the baseline to `now()` and sends nothing —
+no historical backfill, ever. `src/lib/server/digest-notifications-query.ts`
+caps a single digest at the 50 most recent unread items (oldest-first
+once capped, so the email reads chronologically), with "and N more
+unread notifications" plus a "View all notifications" CTA (→
+`/notifications`, confirmed to be a real, already-existing route) when
+there are more. `src/lib/server/digest-email.ts` groups items by project
+(first-appearance order; items with no project under "Other activity"),
+reusing the exact same logo/header chrome as immediate email — extracted
+into `src/lib/server/email-template.ts` (a behavior-preserving refactor
+of `notification-email.ts`, not a second template) so the two never
+drift. **Concurrency/idempotency**: no new column — a compare-and-swap
+directly on `email_digest_last_sent_at` (claim: `UPDATE ... SET
+last_sent_at = now() WHERE id = ? AND last_sent_at = <value just read>`,
+only the CAS winner proceeds; on a SendGrid failure, a second CAS reverts
+it back to the pre-claim value so the next hourly run retries). A
+supporting partial index,
+`20260930050000_add_notifications_unread_digest_index.sql`
+(`(organization_id, recipient_profile_id, created_at) WHERE read_at IS
+NULL`), backs the query. All of A–G (first baseline, not-due, due+unread,
+due+all-read, an already-immediate-emailed-but-unread item appearing in
+the digest, digest-disabled, SendGrid-failure-never-advances) were
+verified against the real database and real accounts.
+
+**6. Scheduler — Supabase pg_cron + pg_net, not Vercel Cron.**
+`GET /api/cron/email-digest` (`src/app/api/cron/email-digest/route.ts`)
+is the one endpoint that runs `runEmailDigest()`; it fails closed on a
+`CRON_SECRET` mismatch or absence (401), indifferent to who calls it. The
+hourly trigger was first implemented as Vercel Cron (`vercel.json`), then
+moved to Supabase's own `pg_cron` + `pg_net`
+(`20260930060000_add_email_digest_cron_scheduler.sql`) once it became
+clear Vercel's Hobby plan only allows once-daily cron schedules — which
+would have made the 1h/4h/8h frequencies meaningless. `vercel.json` was
+removed outright (confirmed it held nothing else). The migration enables
+both extensions (neither was installed before; `supabase_vault` already
+was) and schedules an idempotent `cron.job` (`jirita-email-digest-hourly`,
+`0 * * * *`) that calls the production URL via `net.http_get`, reading
+the `Authorization: Bearer <token>` value from **Supabase Vault** by
+name (`jirita_cron_secret`) at run time — never hardcoded in the
+migration, Git, or any log. `CRON_SECRET` must be set identically in two
+places: Vercel's Production env vars (for `route.ts` to validate
+against) and the Vault secret (for the job to send). Confirmed working
+end-to-end in production: pg_cron → pg_net → the real endpoint → HTTP
+200. A temporary SHA-256-only diagnostic (never logging the actual
+secret/token) was added to `route.ts` to debug an initial 401, then
+removed once the mismatch was resolved and confirmed working — no trace
+of it remains.
+
+**Confirmed live in production**: SendGrid send, all 4 immediate-email
+types (including the two bugs above, re-verified after their fixes),
+`email_immediate_enabled` gating, the digest worker's full A–G matrix,
+and the Supabase Cron → endpoint → worker path end-to-end. **Not yet
+clicked through in a live browser**: the new Profile "Email
+notifications" UI (toggles/selector) — `tsc`/`eslint`/`next build`/
+`vitest` all pass, but no browser session was available to click it.
+
+**New env vars** (`.env.example`): `SENDGRID_API_KEY`,
+`JIRITA_EMAIL_FROM_ADDRESS`, `JIRITA_EMAIL_FROM_NAME`, `CRON_SECRET`.
+**New migrations**: `20260930030000` (emailed_at),
+`20260930040000` (email preferences + RPC),
+`20260930050000` (digest index),
+`20260930060000` (pg_cron/pg_net scheduler) — all applied to the live
+Supabase project.
 
 ---
 

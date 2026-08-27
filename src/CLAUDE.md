@@ -358,6 +358,20 @@ RLS reusing the existing project-visibility gate), replacing the old
 one place, and each accordion's open/closed state is remembered for the
 session without ever being forced open by an active project.
 
+Most recently still: JIRITA now sends real transactional email. SendGrid
+(sender `JIRITA <no-reply@jirita.techtivo.com>`, domain-authenticated)
+sends immediate email for 4 notification types (ticket assigned,
+mentioned, replied to, project access requested), gated by a new
+per-user Profile preference; a configurable digest (1h/4h/8h/daily,
+grouped by project) covers everything else still unread, triggered
+hourly by Supabase `pg_cron`/`pg_net` (not Vercel Cron — the Hobby plan
+only allows daily schedules) calling a `CRON_SECRET`-protected endpoint,
+with the secret read from Supabase Vault, never Git. Two real bugs
+(project-access-request notifications silently never firing due to an
+RLS gap; a wrong date formatter producing "Invalid Date") were found and
+fixed along the way. This also introduced the project's first test suite
+(Vitest).
+
 **For the authoritative, feature-by-feature breakdown — every Server
 Action, migration, and real bug fixed along the way, and the exact
 boundary of what's confirmed live vs. not-yet-verified vs. still mock —
