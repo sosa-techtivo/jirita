@@ -275,6 +275,7 @@ export async function createNotificationAction(
     await sendImmediateNotificationEmail({
       admin,
       notificationId: insertedRow.id,
+      organizationId: params.organizationId,
       recipientProfileId: params.recipientProfileId,
       actorProfileId: params.actorProfileId,
       type: params.type,

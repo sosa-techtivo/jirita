@@ -22,6 +22,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { sendTransactionalEmail } from "../email-sender";
 import type { NotificationType } from "./create-notification-action";
 import { getAppBaseUrl } from "./app-base-url";
+import { getEmailPreferencesForRecipient } from "./email-preferences";
 
 if (typeof window !== "undefined") {
   throw new Error("notification-email.ts must never be imported by client-side code.");
@@ -72,6 +73,7 @@ export interface SendImmediateNotificationEmailInput {
   /** Reused from the caller — avoids constructing a second service-role client for this one follow-up. */
   admin: SupabaseClient;
   notificationId: string;
+  organizationId: string;
   recipientProfileId: string;
   actorProfileId: string | null;
   type: NotificationType;
@@ -262,6 +264,25 @@ export async function sendImmediateNotificationEmail(input: SendImmediateNotific
     }
     if (notificationRow?.emailed_at) {
       logEmailWarning("already-emailed-skipped");
+      return;
+    }
+
+    // email_immediate_enabled only ever gates this email projection —
+    // never the in-app notification, which already exists and stands
+    // regardless of what happens below. A membership that can't be
+    // resolved (e.g. recipient no longer active in this org) is treated
+    // the same as "disabled": skip the email, never guess.
+    const preferences = await getEmailPreferencesForRecipient(
+      input.admin,
+      input.recipientProfileId,
+      input.organizationId
+    );
+    if (!preferences) {
+      logEmailWarning("recipient-preferences-not-found");
+      return;
+    }
+    if (!preferences.immediateEnabled) {
+      logEmailWarning("immediate-email-disabled-by-preference");
       return;
     }
 
