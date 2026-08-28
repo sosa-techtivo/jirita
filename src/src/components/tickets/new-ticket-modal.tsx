@@ -699,13 +699,27 @@ export function NewTicketModal({
       // best-effort, same "doesn't block the primary write" convention as
       // the Ticket Detail comment composer's own Attach flow. A failed
       // upload never undoes the ticket that was just created.
+      //
+      // JIR-89: uploadTicketAttachment resolves with { status: "error" }
+      // for every ordinary failure (RLS rejection, Storage error, insert
+      // error) — it only ever *rejects* for a genuinely unexpected
+      // exception. A bare `.catch()` only guards the latter, so the
+      // ordinary case resolved silently and the attachment was dropped
+      // with no error logged at all. Ticket Detail's own upload flow
+      // (ticket-detail-screen.tsx's startUpload) already checks
+      // `result.status` for exactly this reason — mirrored here.
       if (attachments.length > 0) {
         await Promise.all(
-          attachments.map((item) =>
-            uploadTicketAttachment(result.ticket.id, item.file).catch((err) => {
+          attachments.map(async (item) => {
+            try {
+              const uploadResult = await uploadTicketAttachment(result.ticket.id, item.file);
+              if (uploadResult.status === "error") {
+                console.error(`Failed to upload attachment "${item.file.name}":`, uploadResult.message);
+              }
+            } catch (err) {
               console.error(`Failed to upload attachment "${item.file.name}":`, err);
-            })
-          )
+            }
+          })
         );
       }
       clearDraft();

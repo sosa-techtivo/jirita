@@ -216,7 +216,16 @@ export function ProjectLeadProjectOverview({ slug = "mobile-banking-app" }: { sl
     return () => {
       cancelled = true;
     };
-  }, [organization, isDevFallback, slug, requestId]);
+    // organization?.id (not the whole `organization` object) — depending on
+    // the object re-triggers this effect (and its "loading" reset above) on
+    // every window-focus regain, since current-user-provider.tsx hands back
+    // a new `organization` reference on its own session revalidation even
+    // when the org itself hasn't changed. Keying off the real identity means
+    // this only re-runs on a genuine org change, the initial mount, or an
+    // explicit user-triggered runFetch() — same fix already applied to
+    // Dashboard/Reports/Time Tracking/Projects.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [organization?.id, isDevFallback, slug, requestId]);
 
   function handleTicketCreated(ticket: Ticket) {
     setShowNewTicket(false);
