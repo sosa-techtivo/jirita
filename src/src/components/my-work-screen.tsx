@@ -1118,8 +1118,8 @@ export function MyWorkScreen() {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <KpiCard
             label="Assigned Tickets"
-            value={myTickets.length}
-            sub={`${activeCount} active`}
+            value={activeCount}
+            sub={`${myTickets.length} total`}
             disabled={myTickets.length === 0}
             onClick={handleAssignedTicketsClick}
           />
