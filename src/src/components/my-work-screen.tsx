@@ -1011,7 +1011,10 @@ export function MyWorkScreen() {
           return {
             id: r.id,
             ticket,
-            hours: round1(r.minutes / 60),
+            // Exact hours, not rounded — round1 here would collapse sub-3-
+            // minute entries to 0.0 before the panel's own total sums them
+            // (JIR-92). formatHours rounds only for display.
+            hours: r.minutes / 60,
             date: formatEntryDateLabel(r.workDate, todayISO, yesterdayISO),
             comment: r.comment,
           };
@@ -1035,7 +1038,8 @@ export function MyWorkScreen() {
             workDateISO: r.workDate,
             ticket,
             projectName: projectsBySlug.get(ticket.projectSlug)?.name ?? ticket.projectSlug,
-            hours: round1(r.minutes / 60),
+            // Exact hours, not rounded — see myTimeEntries above (JIR-92).
+            hours: r.minutes / 60,
             comment: r.comment,
           };
         })
@@ -1046,9 +1050,11 @@ export function MyWorkScreen() {
   // renders, never the raw hoursRecords — an entry whose ticket somehow
   // didn't resolve (never displayed) is excluded from the total too, so
   // the two can never disagree.
-  const hoursTotal = useMemo(() => round1(hoursEntries.reduce((sum, e) => sum + e.hours, 0)), [hoursEntries]);
+  // Sum of the exact per-entry hours, not a sum of already-rounded values —
+  // formatHours rounds once, at display time (JIR-92).
+  const hoursTotal = useMemo(() => hoursEntries.reduce((sum, e) => sum + e.hours, 0), [hoursEntries]);
 
-  const weekHours = round1(weekMinutes / 60);
+  const weekHours = weekMinutes / 60;
   const capacityPct = weeklyCapacity > 0 ? Math.min(100, Math.round((weekHours / weeklyCapacity) * 100)) : 0;
   const showMyTime = user.role === "MEMBER";
 
@@ -1500,7 +1506,7 @@ export function MyWorkScreen() {
         <PersonalTimesheetPanel
           today={todayMinutes / 60}
           week={weekHours}
-          month={round1(monthMinutes / 60)}
+          month={monthMinutes / 60}
           entries={myTimeEntries}
           onOpenTicket={(ticket) => {
             setShowTimesheet(false);

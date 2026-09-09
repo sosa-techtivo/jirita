@@ -243,7 +243,15 @@ export function CapacityCell({ pct }: { pct: number }) {
 }
 
 export function formatHours(h: number): string {
-  return `${Math.round(h * 10) / 10}h`;
+  const rounded1 = Math.round(h * 10) / 10;
+  // A genuinely logged entry under ~3 minutes (h > 0) rounds to 0.0 at one
+  // decimal — fall back to two decimals so it never displays as "0h"
+  // (JIR-92). Anything that already rounds to a nonzero value at one
+  // decimal keeps the existing display unchanged.
+  if (h > 0 && rounded1 === 0) {
+    return `${Math.round(h * 100) / 100}h`;
+  }
+  return `${rounded1}h`;
 }
 
 // For ticket_activity's `old_value`/`new_value` (hours::text on the "hours
