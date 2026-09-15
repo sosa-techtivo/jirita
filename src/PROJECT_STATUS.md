@@ -5120,6 +5120,66 @@ post-import drift correctly left alone; zero invented identities, zero
 duplicated entities, zero synthetic historical activity, zero data loss
 within the approved scope.
 
+## 2026-09-15 — Unfuddle Project Notes recovery
+
+Unfuddle Project Notes (Notebook → Page → Page revision) were never
+modeled by the 7 phases above — `backup.xml`'s `<notebooks>` subtree was
+out of that migration's scope. Root cause of the incident below: every
+Notebook's `<project-id>` is `152` (the shared container project), which
+is **not** the JIRITA destination — the real destination is per-notebook,
+one of several JIRITA projects derived from Unfuddle's separate milestones.
+
+**Incident + containment**: a first recovery pass assigned all 158
+logical Notes (found across all 53 notebooks) to KTVibe by that
+container `project-id`, which was wrong. Caught before being considered
+done. The 158 rows were backed up to
+`public._backup_project_notes_recovery_20260915` (RLS enabled, `ALL`
+revoked from `anon`/`authenticated`) and then deleted from
+`project_notes`; KTVibe was confirmed back to only its original native
+Note. The backup table remains in production, untouched, for audit.
+
+**Corrected recovery** — fail-closed, an explicitly validated
+Notebook → JIRITA Project allowlist (6 entries, reconstructed from
+historical tickets: `tickets.unfuddle_id` → canonical XML →
+milestone-id), no fuzzy/name matching, no fallback project:
+
+| Project | Notebook | Historical milestone | Notes |
+|---|---|---|---|
+| Camp Sunshine | 168 | 142 | 7 |
+| IMLAY | 162 | 151 | 3 |
+| KTRecruits | 222 | 188 | 8 |
+| KTVibe | 216 | 183 | 1 |
+| SW&A | 173 | 150 | 8 |
+| Betsy Akers | 251 ("Besty Akers") | 239 | 1 |
+
+APPLY result: attempted 28, inserted 28, failed 0, no partial import,
+reconciled 28/28 against the DB post-write — 0 missing expected keys, 0
+wrong-destination keys, 0 synthetic `project_note_activity` rows, 0
+blockers, **PASS**. Per-destination distribution confirmed identical to
+the table above. Both pre-existing native Notes (KTVibe's "Siteground
+Staging", KTRecruits' "this is a test note") were left completely
+untouched — never candidates, matched by `unfuddle_note_key IS NOT NULL`
+only, never by title/content. Manually verified live in KTVibe → Notes:
+native Note present, 1 recovered historical Note present, no Notes from
+other projects reappeared.
+
+**Still excluded/unmapped**: 130 of the 158 logical Notes (the other 47
+notebooks), deliberately, pending their own validated mapping — never
+imported by name similarity. Two explicit blockers: Notebook 255
+"Addison Smith" (two plausible current destinations, Residential
+milestone 289 vs. Commercial milestone 294 — Notebook alone can't
+disambiguate); Notebook 224 "KTDrive your career" (historical milestone
+190 — must never be assigned to milestone 284 "KT Drive your career 2.0"
+or milestone 287 "Attorney" without separate approval).
+
+**Migration**: `20260930100000_project_notes_historical_import_support.sql`
+(adds `project_notes.unfuddle_note_key` + the `insert_project_notes_
+bypassing_activity_log` bypass RPC, same GUC-bypass pattern as the
+migrations above) was applied manually to production for this recovery.
+Separately, unresolved: a migration-history drift around
+`20260930070000`–`20260930100000` exists and needs its own reconciliation
+— not addressed here.
+
 ---
 
 # Navigation Status

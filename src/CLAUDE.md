@@ -314,6 +314,18 @@ one-time CLI migration, separate from the live app above; see
 `PROJECT_STATUS.md` → "Unfuddle Import — KTVibe Migration" for the full
 certification.
 
+Project Notes recovered by this importer are routed by an explicitly
+validated Notebook → JIRITA Project mapping, never by the Notebook's own
+`project-id` — Unfuddle Project 152 is a shared container whose milestones
+represent conceptually separate JIRITA projects, so a Notebook's
+`project-id` alone never determines the correct destination. No
+fuzzy/name-based matching and no fallback project are ever used for an
+unmapped or ambiguous Notebook — such Notes stay excluded until a specific
+mapping is validated. A recovered Note's historical identity is
+`unfuddle:note:<notebook_id>:<page_number>` (a Notebook Page's own
+per-revision id is not stable across edits, so it can never be used as
+identity). See `PROJECT_STATUS.md` for recovery-run checkpoints.
+
 The workspace-wide Settings screen (`/settings/*`) was retired outright —
 JIRITA is single-tenant, so that configuration isn't meant to be
 Admin-editable through the UI. "Settings" no longer appears in the
