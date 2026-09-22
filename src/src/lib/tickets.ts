@@ -20,6 +20,7 @@ import type { ProjectStatus } from "./mock-projects";
 import { formatAbsoluteDate, formatAbsoluteDateTime } from "./date-format";
 import { createNotification } from "./notifications";
 import { generateAttachmentThumbnail } from "./attachment-thumbnail";
+import { attachmentPathsToRemove, findUnremovedPaths } from "./attachment-storage-remove";
 import { loadProjectSprints, type Sprint } from "./sprints";
 // Plain, browser-only DOMPurify — same package/reasoning as
 // components/rich-text/rich-text-utils.ts (never "isomorphic-dompurify").
@@ -3654,8 +3655,12 @@ export async function uploadTicketAttachment(
     logDev("attachment record insert failed", insertError);
     // Best-effort cleanup — don't leave an orphaned Storage object with no
     // corresponding row if the insert failed after the upload succeeded.
-    const orphanedPaths = thumbnailPath ? [storagePath, thumbnailPath] : [storagePath];
-    await supabase.storage.from(ATTACHMENTS_BUCKET).remove(orphanedPaths);
+    const orphanedPaths = attachmentPathsToRemove(storagePath, thumbnailPath);
+    const { data: removed, error: cleanupError } = await supabase.storage.from(ATTACHMENTS_BUCKET).remove(orphanedPaths);
+    const unremovedPaths = findUnremovedPaths(orphanedPaths, removed);
+    if (cleanupError || unremovedPaths.length > 0) {
+      logDev("attachment upload cleanup failed — orphaned Storage objects left behind", cleanupError ?? unremovedPaths);
+    }
     return { status: "error", message: insertError.message };
   }
 
@@ -3957,12 +3962,16 @@ export async function deleteTicketAttachment(
     return { status: "error", message: "You don't have permission to delete this attachment." };
   }
 
-  const pathsToRemove = thumbnailPath ? [storagePath, thumbnailPath] : [storagePath];
-  const { error: storageError } = await supabase.storage.from(ATTACHMENTS_BUCKET).remove(pathsToRemove);
-  if (storageError) {
+  const pathsToRemove = attachmentPathsToRemove(storagePath, thumbnailPath);
+  const { data: removed, error: storageError } = await supabase.storage.from(ATTACHMENTS_BUCKET).remove(pathsToRemove);
+  // remove() reports an RLS-filtered object as success with nothing in
+  // `removed` — checking `storageError` alone is what hid the broken
+  // Storage delete policy (fixed in 20260930110000).
+  const unremovedPaths = findUnremovedPaths(pathsToRemove, removed);
+  if (storageError || unremovedPaths.length > 0) {
     // The row is already gone (and the UI already reflects that) — log for
     // visibility but don't surface this as a failure of the delete action.
-    logDev("attachment storage cleanup failed", storageError);
+    logDev("attachment storage cleanup failed — orphaned Storage objects left behind", storageError ?? unremovedPaths);
   }
 
   return { status: "success" };

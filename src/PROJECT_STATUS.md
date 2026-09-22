@@ -5180,6 +5180,43 @@ Separately, unresolved: a migration-history drift around
 `20260930070000`–`20260930100000` exists and needs its own reconciliation
 — not addressed here.
 
+## 2026-09-22 — Ticket attachment Storage delete fix (orphaned objects)
+
+A Storage capacity alert (~0.95 of 1 GB) was traced to a real bug:
+`ticket_attachments_storage_delete` (`20260730000000`) had the same
+unqualified `storage.foldername(name)` column-shadowing bug
+`20260725000000` already fixed for insert. The live policy
+(verified in `pg_policies`) read `storage.foldername(p.name)`, so it never
+matched any object. Storage `remove()` reports that as a success with an empty
+result, so every in-app attachment delete (and `uploadTicketAttachment`'s
+insert-failure cleanup) removed the DB row and silently left the original +
+thumbnail in Storage. Service-role paths (project delete, restore) were
+unaffected.
+
+**Fix**: `20260930110000_fix_ticket_attachments_storage_delete_policy.sql`
+recreates the policy mirroring the insert policy actually deployed in
+production (tickets ⋈ projects, `is_org_admin_or_lead OR
+is_project_member`), with the path qualified as
+`(storage.foldername(objects.name))[1]`. It deliberately does not use
+`can_write_ticket_attachment` (`20260930090000`), which doesn't exist in
+production because of the migration-history drift noted above.
+Authorization semantics are unchanged.
+`deleteTicketAttachment`/`uploadTicketAttachment` now check `remove()`'s
+returned objects against the requested paths
+(`src/lib/attachment-storage-remove.ts`, unit-tested) and log any path left
+behind; user-facing behavior is unchanged.
+
+**Status**: fixed and confirmed live (JIR-98). `20260930110000` was applied
+manually to production via the Supabase SQL Editor; `pg_policies` confirms
+the policy now uses `(storage.foldername(objects.name))[1]` with unchanged
+authorization. Live upload/delete test on JIR-98 PASSED: deleting an image
+attachment through the UI removed the original Storage object, its
+thumbnail, and the `ticket_attachments` row. The 45 already-orphaned
+objects (~18 MB) remain untouched — a separate, approved-first cleanup
+task. ~927 MB of
+the bucket is legitimate referenced Storage, so the 1 GB capacity issue
+remains open independently of this fix.
+
 ---
 
 # Navigation Status
