@@ -5217,6 +5217,21 @@ task. ~927 MB of
 the bucket is legitimate referenced Storage, so the 1 GB capacity issue
 remains open independently of this fix.
 
+**Orphan cleanup — executed in production (2026-09-22)**: new service-role
+CLI `src/lib/attachment-orphan-cleanup/` (`npm run
+cleanup:orphan-attachments:dry-run`; deleting needs an explicit `--apply`).
+An object is eligible only when its exact path matches neither
+`storage_path` nor `thumbnail_path`, it is older than 24h, and it passes a fresh
+re-check. APPLY re-checks again right before each removal batch, aborts
+above `--max-delete` (default 100), and verifies requested vs. actually
+removed. Result: 45 orphaned objects removed (45 requested / 45 confirmed,
+0 failures), **19,147,657 bytes (18.26 MB) recovered**; objects 6,337 →
+6,292. The post-cleanup dry run found 0 eligible objects, and all 6,292
+remaining objects are referenced; `ticket_attachments` still has 3,250 rows. The four historical
+`/unavailable/` records (`is_available = false`, rows with no Storage file) remain
+intentionally untouched. The bucket is now ~926.44 MB, so the 1 GB capacity
+concern is still open.
+
 ---
 
 # Navigation Status
