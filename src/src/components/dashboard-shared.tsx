@@ -34,17 +34,16 @@ export function SkeletonBlock({ className }: { className: string }) {
 // like brand-300/400/900/950 don't exist, so any `dark:` class referencing
 // them is silently dropped and the *light* class stays in effect — that's
 // why these cards looked washed out in dark mode (a light lavender-to-white
-// gradient was still rendering against a dark page). Tailwind's built-in
-// violet scale is used for the dark accent instead, since it's always
-// available and reads as the same purple family as brand.
+// gradient was still rendering against a dark page). Dark mode uses the
+// JIR-97 `brand-accent` magenta tokens (see globals.css) instead.
 export const HERO_CARD_CLASS =
-  "rounded-2xl border border-brand-100 dark:border-violet-900/50 bg-gradient-to-br from-brand-50 to-white dark:from-violet-950/40 dark:to-zinc-900 shadow-sm shadow-brand-100/50 dark:shadow-black/40";
+  "rounded-2xl border border-brand-100 dark:border-brand-accent/20 bg-gradient-to-br from-brand-50 to-white dark:from-brand-accent/10 dark:to-zinc-900 shadow-sm shadow-brand-100/50 dark:shadow-black/40";
 
-export const HERO_LABEL_CLASS = "text-brand-500 dark:text-violet-300";
+export const HERO_LABEL_CLASS = "text-brand-500 dark:text-brand-accent";
 
-export const HERO_ACCENT_TEXT_CLASS = "text-brand-700 dark:text-violet-300";
+export const HERO_ACCENT_TEXT_CLASS = "text-brand-700 dark:text-brand-accent";
 
-export const HERO_BORDER_CLASS = "border-brand-100 dark:border-violet-800/40";
+export const HERO_BORDER_CLASS = "border-brand-100 dark:border-brand-accent/20";
 
 // Marcus's 5 most urgent active tickets — the "My Active Work" list is the
 // same underlying data for every role that has assigned work.

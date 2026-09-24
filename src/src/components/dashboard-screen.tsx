@@ -260,12 +260,12 @@ function DashKpiCard({
     // Every KPI card shares the same dark card background/border — an
     // Admin overview shouldn't let one metric visually outweigh the
     // others. Accent cards keep their light-mode tint but, in dark
-    // mode, only add a faint violet ring as emphasis instead of a
+    // mode, only add a faint brand-accent ring as emphasis instead of a
     // brighter background (brand-300/400/900/950 aren't defined in the
     // theme, so the old `dark:bg-brand-accent/5` etc. silently fell back
     // to the *light* class, which is why this card looked washed out).
     accent
-      ? "border-brand-100 bg-brand-50/40 dark:border-zinc-700/70 dark:bg-zinc-900 dark:ring-1 dark:ring-inset dark:ring-violet-500/15"
+      ? "border-brand-100 bg-brand-50/40 dark:border-zinc-700/70 dark:bg-zinc-900 dark:ring-1 dark:ring-inset dark:ring-brand-accent/20"
       : "border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900",
     href ? KPI_INTERACTIVE_CLASS : "",
   ].join(" ");
@@ -283,7 +283,7 @@ function DashKpiCard({
         {progress !== undefined && (
           <div className="h-1 rounded-full bg-slate-100 dark:bg-zinc-800 overflow-hidden">
             <div
-              className="h-full rounded-full bg-brand-500 transition-all duration-500"
+              className="h-full rounded-full bg-brand-500 transition-all duration-500 dark:bg-brand-accent"
               style={{ width: `${progress}%` }}
             />
           </div>
@@ -1092,7 +1092,7 @@ function AdminDashboard() {
               value={selectedProjectSlug ?? ""}
               onChange={(e) => handleScopeChange(e.target.value)}
               aria-label="Dashboard project scope"
-              className="appearance-none text-[16px] sm:text-[13px] font-medium pl-3 pr-7 py-1.5 rounded-lg border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-slate-700 dark:text-zinc-300 hover:bg-slate-50 dark:hover:bg-zinc-800 transition-colors cursor-pointer outline-none focus:ring-2 focus:ring-brand-500/30"
+              className="appearance-none text-[16px] sm:text-[13px] font-medium pl-3 pr-7 py-1.5 rounded-lg border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-slate-700 dark:text-zinc-300 hover:bg-slate-50 dark:hover:bg-zinc-800 transition-colors cursor-pointer outline-none focus:ring-2 focus:ring-brand-500/30 dark:focus:ring-brand-accent/30"
             >
               <option value="">All Projects</option>
               {activeOrgProjects.map((p) => (

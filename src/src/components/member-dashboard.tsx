@@ -973,7 +973,7 @@ export function MemberDashboard() {
                 value={resolvedProjectSlug ?? ALL_PROJECTS_VALUE}
                 onChange={(event) => handleScopeChange(event.target.value)}
                 aria-label="Current project"
-                className="appearance-none text-[16px] sm:text-[13px] font-medium pl-3 pr-7 py-1.5 rounded-lg border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-slate-700 dark:text-zinc-300 hover:bg-slate-50 dark:hover:bg-zinc-800 transition-colors cursor-pointer outline-none focus:ring-2 focus:ring-brand-500/30"
+                className="appearance-none text-[16px] sm:text-[13px] font-medium pl-3 pr-7 py-1.5 rounded-lg border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-slate-700 dark:text-zinc-300 hover:bg-slate-50 dark:hover:bg-zinc-800 transition-colors cursor-pointer outline-none focus:ring-2 focus:ring-brand-500/30 dark:focus:ring-brand-accent/30"
               >
                 <option value={ALL_PROJECTS_VALUE}>All projects</option>
                 {memberProjects.map((p) => (
@@ -1059,7 +1059,7 @@ export function MemberDashboard() {
             <button
               type="button"
               onClick={() => setPreview(recommended)}
-              className="inline-flex items-center gap-1.5 text-[13px] font-semibold px-4 py-2 rounded-lg bg-brand-500 hover:bg-brand-600 text-white transition-colors shadow-sm shadow-brand-500/30 flex-shrink-0"
+              className="inline-flex items-center gap-1.5 text-[13px] font-semibold px-4 py-2 rounded-lg bg-brand-500 hover:bg-brand-600 text-white transition-colors shadow-sm shadow-brand-500/30 flex-shrink-0 dark:bg-brand-accent dark:hover:bg-brand-accent-strong dark:shadow-brand-accent/30 dark:text-brand-accent-foreground"
             >
               Open Ticket
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24" aria-hidden="true">
@@ -1158,7 +1158,7 @@ export function MemberDashboard() {
             </div>
             <div className="h-1.5 rounded-full bg-slate-100 dark:bg-zinc-800 overflow-hidden">
               <div
-                className="h-full rounded-full bg-brand-500 transition-all duration-500"
+                className="h-full rounded-full bg-brand-500 transition-all duration-500 dark:bg-brand-accent"
                 style={{ width: `${weekProgressPct}%` }}
               />
             </div>

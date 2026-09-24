@@ -308,7 +308,7 @@ export function NotificationBell() {
                   className={[
                     "w-full flex items-start gap-2.5 px-3.5 py-2.5 text-left transition-colors",
                     isUnread
-                      ? "bg-brand-50/60 hover:bg-brand-50 dark:bg-brand-500/[0.06] dark:hover:bg-brand-500/10"
+                      ? "bg-brand-50/60 hover:bg-brand-50 dark:bg-brand-accent/[0.06] dark:hover:bg-brand-accent/10"
                       : "hover:bg-slate-50 dark:hover:bg-zinc-800/60",
                   ].join(" ")}
                 >
@@ -335,7 +335,7 @@ export function NotificationBell() {
                     )}
                     <p className="text-[11px] text-slate-400 dark:text-zinc-600 mt-0.5">{formatRelativeTime(n.createdAt)}</p>
                   </div>
-                  {isUnread && <span className="w-1.5 h-1.5 rounded-full bg-brand-500 flex-shrink-0 mt-1.5" />}
+                  {isUnread && <span className="w-1.5 h-1.5 rounded-full bg-brand-500 flex-shrink-0 mt-1.5 dark:bg-brand-accent" />}
                 </button>
               );
             })}

@@ -887,7 +887,7 @@ function PermissionsTabContent({ user }: { user: User }) {
   return (
     <div>
       <div className="flex items-center gap-3 p-4 rounded-xl border border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900">
-        <div className="w-9 h-9 rounded-xl bg-brand-50 dark:bg-brand-500/10 flex items-center justify-center flex-shrink-0">
+        <div className="w-9 h-9 rounded-xl bg-brand-50 dark:bg-brand-accent/10 flex items-center justify-center flex-shrink-0">
           <svg className="w-4.5 h-4.5 text-brand-600 dark:text-brand-accent" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
             <path d="M12 2l8 4v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6l8-4z" />
           </svg>
@@ -985,7 +985,7 @@ function SecurityTabContent({ user }: { user: User }) {
             type="button"
             onClick={handleGenerateResetLink}
             disabled={generating}
-            className="flex-shrink-0 text-[13px] font-medium text-brand-600 dark:text-brand-accent border border-brand-200 dark:border-brand-500/30 px-3 py-1.5 rounded-lg hover:bg-brand-50 dark:hover:bg-brand-500/5 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+            className="flex-shrink-0 text-[13px] font-medium text-brand-600 dark:text-brand-accent border border-brand-200 dark:border-brand-accent/30 px-3 py-1.5 rounded-lg hover:bg-brand-50 dark:hover:bg-brand-accent/5 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
           >
             {generating ? "Generating…" : "Generate Reset Link"}
           </button>
@@ -1081,7 +1081,7 @@ const ACTIVITY_ICON: Record<ActivityKind, ReactNode> = {
     </ActivityIconBadge>
   ),
   roleChanged: (
-    <ActivityIconBadge className="bg-brand-50 dark:bg-brand-500/10 text-brand-600 dark:text-brand-accent">
+    <ActivityIconBadge className="bg-brand-50 dark:bg-brand-accent/10 text-brand-600 dark:text-brand-accent">
       <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
         <path d="M12 2l8 4v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6l8-4z" strokeLinecap="round" strokeLinejoin="round" />
       </svg>

@@ -105,7 +105,7 @@ export function ResetPasswordLinkModal({
                 readOnly
                 value={link}
                 onFocus={(e) => e.currentTarget.select()}
-                className="w-full bg-white dark:bg-zinc-900 text-[16px] sm:text-[13px] font-medium text-slate-800 dark:text-zinc-200 border border-slate-200 dark:border-zinc-700 rounded-lg px-3 py-2 outline-none focus:border-brand-500 dark:focus:border-brand-accent focus:ring-2 focus:ring-brand-500/20 transition-colors"
+                className="w-full bg-white dark:bg-zinc-900 text-[16px] sm:text-[13px] font-medium text-slate-800 dark:text-zinc-200 border border-slate-200 dark:border-zinc-700 rounded-lg px-3 py-2 outline-none focus:border-brand-500 dark:focus:border-brand-accent focus:ring-2 focus:ring-brand-500/20 transition-colors dark:focus:ring-brand-accent/20"
               />
             </div>
           </div>
@@ -120,7 +120,7 @@ export function ResetPasswordLinkModal({
 
             <button
               onClick={handleClose}
-              className="inline-flex items-center gap-2 px-6 py-2.5 text-[13px] font-semibold rounded-lg transition-all bg-brand-600 hover:bg-brand-700 dark:bg-brand-accent dark:text-brand-accent-foreground dark:hover:bg-brand-accent-strong dark:focus-visible:outline-2 dark:focus-visible:outline-offset-2 dark:focus-visible:outline-brand-accent text-white shadow-md shadow-brand-600/25 dark:shadow-brand-accent/20 hover:shadow-lg hover:shadow-brand-600/30"
+              className="inline-flex items-center gap-2 px-6 py-2.5 text-[13px] font-semibold rounded-lg transition-all bg-brand-600 hover:bg-brand-700 dark:bg-brand-accent dark:text-brand-accent-foreground dark:hover:bg-brand-accent-strong dark:focus-visible:outline-2 dark:focus-visible:outline-offset-2 dark:focus-visible:outline-brand-accent text-white shadow-md shadow-brand-600/25 dark:shadow-brand-accent/20 hover:shadow-lg hover:shadow-brand-600/30 dark:hover:shadow-brand-accent/30"
             >
               Done
             </button>

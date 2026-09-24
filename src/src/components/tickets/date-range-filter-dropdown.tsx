@@ -98,7 +98,7 @@ export function DateRangeFilterDropdown({
   const triggerBase =
     "inline-flex items-center gap-0.5 text-sm px-2 py-1.5 rounded-md transition-colors";
   const triggerActive =
-    "text-brand-700 dark:text-brand-accent bg-brand-50 dark:bg-brand-500/10 font-medium";
+    "text-brand-700 dark:text-brand-accent bg-brand-50 dark:bg-brand-accent/10 font-medium";
   const triggerDefault =
     "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-100 hover:bg-slate-100 dark:hover:bg-zinc-800";
 
@@ -123,7 +123,7 @@ export function DateRangeFilterDropdown({
                 onChange(EMPTY_DATE_RANGE);
               }
             }}
-            className="ml-0.5 text-brand-500 hover:text-brand-700 dark:hover:text-brand-accent-soft transition-colors flex-shrink-0"
+            className="ml-0.5 text-brand-500 hover:text-brand-700 dark:hover:text-brand-accent-soft transition-colors flex-shrink-0 dark:text-brand-accent"
             aria-label={`Clear ${label} filter`}
           >
             <XIcon />
@@ -156,7 +156,7 @@ export function DateRangeFilterDropdown({
               value={value.from}
               max={value.to || undefined}
               onChange={(e) => onChange({ ...value, from: e.target.value })}
-              className="w-full text-[16px] sm:text-sm bg-slate-100 dark:bg-zinc-800 text-slate-800 dark:text-zinc-100 rounded-md px-2.5 py-1.5 outline-none focus:ring-2 focus:ring-brand-500/30 transition-colors"
+              className="w-full text-[16px] sm:text-sm bg-slate-100 dark:bg-zinc-800 text-slate-800 dark:text-zinc-100 rounded-md px-2.5 py-1.5 outline-none focus:ring-2 focus:ring-brand-500/30 transition-colors dark:focus:ring-brand-accent/30"
             />
           </label>
           <label className="block">
@@ -166,7 +166,7 @@ export function DateRangeFilterDropdown({
               value={value.to}
               min={value.from || undefined}
               onChange={(e) => onChange({ ...value, to: e.target.value })}
-              className="w-full text-[16px] sm:text-sm bg-slate-100 dark:bg-zinc-800 text-slate-800 dark:text-zinc-100 rounded-md px-2.5 py-1.5 outline-none focus:ring-2 focus:ring-brand-500/30 transition-colors"
+              className="w-full text-[16px] sm:text-sm bg-slate-100 dark:bg-zinc-800 text-slate-800 dark:text-zinc-100 rounded-md px-2.5 py-1.5 outline-none focus:ring-2 focus:ring-brand-500/30 transition-colors dark:focus:ring-brand-accent/30"
             />
           </label>
         </div>

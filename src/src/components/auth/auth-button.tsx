@@ -26,7 +26,7 @@ export const AuthSubmitButton = forwardRef<
         "w-full inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-[13px] font-semibold transition-all " +
         (isDisabled
           ? "bg-slate-100 dark:bg-zinc-800 text-slate-400 dark:text-zinc-600 cursor-not-allowed"
-          : "bg-brand-600 hover:bg-brand-700 dark:bg-brand-accent dark:text-brand-accent-foreground dark:hover:bg-brand-accent-strong dark:focus-visible:outline-2 dark:focus-visible:outline-offset-2 dark:focus-visible:outline-brand-accent text-white shadow-md shadow-brand-600/25 dark:shadow-brand-accent/20 hover:shadow-lg hover:shadow-brand-600/30")
+          : "bg-brand-600 hover:bg-brand-700 dark:bg-brand-accent dark:text-brand-accent-foreground dark:hover:bg-brand-accent-strong dark:focus-visible:outline-2 dark:focus-visible:outline-offset-2 dark:focus-visible:outline-brand-accent text-white shadow-md shadow-brand-600/25 dark:shadow-brand-accent/20 hover:shadow-lg hover:shadow-brand-600/30 dark:hover:shadow-brand-accent/30")
       }
     >
       {loading && <Spinner />}

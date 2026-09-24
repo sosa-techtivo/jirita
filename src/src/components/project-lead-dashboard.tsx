@@ -177,7 +177,7 @@ function AttentionCard({
   };
 
   const className = `group h-full flex flex-col rounded-xl border p-4 shadow-sm shadow-slate-200/40 dark:shadow-black/20 ${toneStyles[tone]}${
-    disabled ? "" : ` ${KPI_INTERACTIVE_CLASS} hover:border-brand-300 dark:hover:border-brand-700`
+    disabled ? "" : ` ${KPI_INTERACTIVE_CLASS} hover:border-brand-300 dark:hover:border-brand-accent/40`
   }`;
 
   const content = (
@@ -919,7 +919,7 @@ export function ProjectLeadDashboard() {
                 value={activeSlug}
                 onChange={(event) => handleScopeChange(event.target.value)}
                 aria-label="Current project"
-                className="w-full sm:w-auto truncate appearance-none text-[16px] sm:text-[13px] font-medium pl-2 pr-5 sm:pl-3 sm:pr-7 py-1.5 rounded-lg border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-slate-700 dark:text-zinc-300 hover:bg-slate-50 dark:hover:bg-zinc-800 transition-colors cursor-pointer outline-none focus:ring-2 focus:ring-brand-500/30"
+                className="w-full sm:w-auto truncate appearance-none text-[16px] sm:text-[13px] font-medium pl-2 pr-5 sm:pl-3 sm:pr-7 py-1.5 rounded-lg border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-slate-700 dark:text-zinc-300 hover:bg-slate-50 dark:hover:bg-zinc-800 transition-colors cursor-pointer outline-none focus:ring-2 focus:ring-brand-500/30 dark:focus:ring-brand-accent/30"
               >
                 {leadProjects.map((p) => (
                   <option key={p.slug} value={p.slug}>{p.name}</option>
@@ -956,7 +956,7 @@ export function ProjectLeadDashboard() {
           <button
             type="button"
             onClick={() => setShowNewTicket(true)}
-            className="flex-shrink-0 inline-flex items-center gap-1 sm:gap-1.5 text-[10px] sm:text-[13px] font-semibold px-2 sm:px-3.5 py-1.5 rounded-lg bg-brand-500 hover:bg-brand-600 text-white transition-colors shadow-sm shadow-brand-500/30"
+            className="flex-shrink-0 inline-flex items-center gap-1 sm:gap-1.5 text-[10px] sm:text-[13px] font-semibold px-2 sm:px-3.5 py-1.5 rounded-lg bg-brand-500 hover:bg-brand-600 text-white transition-colors shadow-sm shadow-brand-500/30 dark:bg-brand-accent dark:hover:bg-brand-accent-strong dark:shadow-brand-accent/30 dark:text-brand-accent-foreground"
           >
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24" aria-hidden="true">
               <path strokeLinecap="round" d="M12 4v16m8-8H4" />
@@ -991,7 +991,7 @@ export function ProjectLeadDashboard() {
             </div>
             <div className={`w-full sm:w-56 h-2 rounded-full bg-white/80 dark:bg-zinc-800 border overflow-hidden mt-3 ${HERO_BORDER_CLASS}`}>
               <div
-                className="h-full rounded-full bg-brand-500 transition-all duration-500"
+                className="h-full rounded-full bg-brand-500 transition-all duration-500 dark:bg-brand-accent"
                 style={{ width: `${deliveryPct}%` }}
               />
             </div>

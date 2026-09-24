@@ -15,7 +15,7 @@ const FIELD_LABEL =
 const INPUT =
   "w-full bg-white dark:bg-zinc-900 text-[16px] sm:text-[13px] font-medium text-slate-800 dark:text-zinc-200 " +
   "border border-slate-200 dark:border-zinc-700 rounded-lg px-3 py-2 outline-none " +
-  "focus:border-brand-500 dark:focus:border-brand-accent focus:ring-2 focus:ring-brand-500/20 " +
+  "focus:border-brand-500 dark:focus:border-brand-accent focus:ring-2 focus:ring-brand-500/20 dark:focus:ring-brand-accent/20 " +
   "placeholder:text-slate-300 dark:placeholder:text-zinc-600 transition-colors";
 
 export function AddClientModal({
@@ -154,7 +154,7 @@ export function AddClientModal({
               className={
                 "inline-flex items-center gap-2 px-6 py-2.5 text-[13px] font-semibold rounded-lg transition-all " +
                 (canSubmit
-                  ? "bg-brand-600 hover:bg-brand-700 dark:bg-brand-accent dark:text-brand-accent-foreground dark:hover:bg-brand-accent-strong dark:focus-visible:outline-2 dark:focus-visible:outline-offset-2 dark:focus-visible:outline-brand-accent text-white shadow-md shadow-brand-600/25 dark:shadow-brand-accent/20 hover:shadow-lg hover:shadow-brand-600/30"
+                  ? "bg-brand-600 hover:bg-brand-700 dark:bg-brand-accent dark:text-brand-accent-foreground dark:hover:bg-brand-accent-strong dark:focus-visible:outline-2 dark:focus-visible:outline-offset-2 dark:focus-visible:outline-brand-accent text-white shadow-md shadow-brand-600/25 dark:shadow-brand-accent/20 hover:shadow-lg hover:shadow-brand-600/30 dark:hover:shadow-brand-accent/30"
                   : "bg-slate-100 dark:bg-zinc-800 text-slate-400 dark:text-zinc-600 cursor-not-allowed")
               }
             >

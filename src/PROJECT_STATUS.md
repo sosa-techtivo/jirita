@@ -72,7 +72,7 @@ Most recently, the Admin Dashboard header's date display and one KPI label were 
 
 Most recently, every place in the app that renders a user's avatar gained a real fallback for people with no `avatar_url`: instead of a generic gray silhouette, a new shared `Avatar` component (`components/ui/avatar.tsx`) renders the person's initials on a deterministic pastel-colored circle (same convention already used in a sibling Techtivo product, Mi Pádel Club) — the color is derived from the person's own id/name (`lib/avatar.ts`), so the same person always gets the same color everywhere they appear. Every existing avatar `<img>` site across the app now goes through this one component; sizing/layout at each call site is unchanged. See Architecture Status → "Avatar fallback" for the full detail.
 
-Dark mode was later removed (`forcedTheme="light"`, switcher deleted) and has since been **restored under JIR-97** — Light/Dark switcher back in the header and on Profile → Preferences, choice persisted by `next-themes`. See Architecture Status → "Theme — Dark Mode (restored, JIR-97)".
+Dark mode was later removed (`forcedTheme="light"`, switcher deleted) and has since been **restored under JIR-97** — Light/Dark switcher back in the header and on Profile → Preferences, browser-local preference persisted by `next-themes`; Light keeps the Techtivo purple, Dark uses the #F472B6 magenta accent system and the dark logo. See Architecture Status → "Theme — Dark Mode (restored, JIR-97)".
 
 Most recently, JIRITA gained a real Mobile-only bottom tab bar and its own avatar menu, for all three roles — `mobile-tab-bar.tsx` reuses the Desktop Sidebar's own `NAV_LINK` routes/icons and `isNavActive` logic rather than a second navigation model, with each role (Admin/Project Lead/Member) getting its own required set of direct tabs, a shared "More" bottom sheet (`mobile-more-sheet.tsx`) for whatever doesn't fit as a direct tab, and a dynamic fifth/sixth slot that shows a Project Lead's or Member's own project name directly when they're scoped to exactly one project. The header avatar's existing `AccountMenu` is reused as-is on Mobile; Member no longer sees a redundant Profile entry there, since Profile is now a direct tab for that role. Desktop's own Sidebar is completely untouched. See Architecture Status → "Mobile Experience" for the full detail.
 
@@ -3881,43 +3881,37 @@ Supabase query or data path — this is presentation-layer only.
 Scope: presentation-layer only across all of the above — no Supabase
 query, RLS policy, or migration changed.
 
-## Theme — Dark Mode (restored, JIR-97)
+## Theme — Dark Mode (restored, JIR-97) — completed
 
-Dark mode was removed on 2026-07-28 (`b7f9239`: `forcedTheme="light"`,
-`theme-toggle.tsx` deleted) and restored under JIR-97 by reverting exactly
-that switch — no new theming architecture:
+Dark mode had been disabled on 2026-07-28 (`b7f9239`: `forcedTheme="light"`,
+switcher deleted). JIR-97 restored it by reusing the existing `next-themes`
+infrastructure — no new theming architecture:
 
-- `src/app/layout.tsx` — `forcedTheme` dropped; `next-themes` is back to
-  `attribute="class" defaultTheme="light"`, so the stored choice is applied
-  by its blocking init script before first paint (no light/dark flash).
-- `theme-toggle.tsx` restored verbatim from history (Light / Dark
-  segmented control, hydration-safe) and re-added to the header bar and
-  Profile → Preferences → Theme.
-- Options are Light and Dark only, the established JIRITA behavior;
-  `ThemeSystemMigration` (theme-provider.tsx) still moves any legacy
-  "system" value to Light. Default for new visitors is Light.
-- Dark accent (visual QA with Alex): brand-500/600 purples read poorly on
-  the near-black surfaces, and many `dark:` classes referenced brand
-  shades that `@theme` never defined (300/400/800/900/950), so they
-  silently produced no CSS. `globals.css` now adds dark-only tokens —
-  `brand-accent` #F472B6 (Techtivo magenta), `brand-accent-soft` #F9A8D4
-  (hover/emphasis), `brand-accent-strong` #EC4899 (primary-CTA hover),
-  `brand-accent-foreground` #0D0E12 (text on the solid accent) — used only
-  behind `dark:` variants, so Light Mode classes are unchanged (verified:
-  every changed component is identical to before once `dark:` classes are
-  stripped, apart from the toggle and logo additions).
-- Applied to: accent text/icons/links, focus and selected borders,
-  rich-text links/mentions, sidebar active nav + expanded-project
-  container + selected sub-link (dark 8–10% magenta tints, never
-  light-gray), Project Overview Progress, primary CTAs (solid #F472B6 with
-  dark text + magenta focus outline; disabled semantics unchanged),
-  parent-ticket cards (child sky treatment unchanged), and the mobile tab
-  bar (dark `zinc-950` surface). Semantic status/priority colors are
-  untouched.
-- Logo: Dark Mode shows `public/img/jirita-logo2.png` (same 217×47) in the
-  sidebar and auth card via a CSS-only `dark:hidden` / `dark:inline` swap
-  — no client state, correct on first paint. OG image, emails, and the
-  Hours Report PDF export keep the original logo.
+- **Switching & persistence** — Light/Dark switcher (`theme-toggle.tsx`) in
+  the header and Profile → Preferences → Theme. The choice is browser-local
+  (`next-themes` localStorage) and applied by its blocking init script
+  before first paint, so there is no light/dark flash. Default is Light;
+  there is no System option (established JIRITA behavior).
+- **Light Mode** keeps the existing Techtivo purple identity unchanged.
+- **Dark Mode** uses a magenta accent system defined as dark-only tokens in
+  `globals.css`: `brand-accent` #F472B6, `brand-accent-soft` #F9A8D4,
+  `brand-accent-strong` #EC4899 (CTA hover), `brand-accent-foreground`
+  #0D0E12 (text on solid accent). They are used only behind `dark:`
+  variants and cover navigation and selected states (subtle dark magenta
+  tints), primary CTAs (solid #F472B6 with dark text), progress
+  indicators, forms/focus states, the mobile tab bar, parent-ticket cards,
+  and other shared UI.
+- **Logo** — Dark Mode shows `public/img/jirita-logo2.png`; Light Mode keeps
+  the original logo (CSS-only swap, same dimensions). Emails, OG image and
+  the Hours Report PDF keep the original.
+- **Semantic colors** — ticket statuses (e.g. In Review violet),
+  priorities, categories/tags, roles, avatars, and chart/data colors stay
+  independent of the brand accent.
+- **Regression guard** — `src/app/dark-mode-classes.test.ts` compiles
+  `globals.css` with Tailwind and fails if any brand `dark:` class in the
+  source doesn't generate CSS (an undefined token silently falls back to
+  the Light Mode class, producing a partial light/dark mix).
+- **QA** — manual visual QA completed and approved on desktop and mobile.
 
 ## Avatar fallback (initials + deterministic pastel)
 

@@ -423,7 +423,7 @@ export function ProjectReportsScreen({ slug }: { slug: string }) {
             <Stat label="Remaining Hours" value={formatHours(remainingHours)} valueClass="text-slate-500 dark:text-zinc-400" />
           </div>
           <div className="h-2 rounded-full bg-slate-100 dark:bg-zinc-800 overflow-hidden">
-            <div className="h-full rounded-full bg-brand-500" style={{ width: `${loggedPct}%` }} />
+            <div className="h-full rounded-full bg-brand-500 dark:bg-brand-accent" style={{ width: `${loggedPct}%` }} />
           </div>
           <p className="mt-1.5 text-[11px] text-slate-400 dark:text-zinc-600 tabular-nums">{loggedPct}% logged</p>
         </Section>

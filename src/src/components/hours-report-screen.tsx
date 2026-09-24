@@ -86,7 +86,7 @@ function formatAmountOrDash(amount: number | null | undefined): string {
 }
 
 const DATE_INPUT_CLASS =
-  "text-[16px] sm:text-sm bg-slate-50 dark:bg-zinc-800 text-slate-800 dark:text-zinc-100 rounded-md border border-slate-200 dark:border-zinc-700 px-2.5 py-1.5 outline-none focus:ring-2 focus:ring-brand-500/30 transition-colors";
+  "text-[16px] sm:text-sm bg-slate-50 dark:bg-zinc-800 text-slate-800 dark:text-zinc-100 rounded-md border border-slate-200 dark:border-zinc-700 px-2.5 py-1.5 outline-none focus:ring-2 focus:ring-brand-500/30 transition-colors dark:focus:ring-brand-accent/30";
 
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
@@ -213,7 +213,7 @@ function ProjectsFilter({
           "inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border transition-colors duration-150 shadow-sm cursor-pointer",
           allSelected
             ? "border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-slate-600 dark:text-zinc-400 hover:bg-slate-50 dark:hover:bg-zinc-800"
-            : "border-brand-200 dark:border-brand-700/50 bg-brand-50/60 dark:bg-brand-500/10 text-brand-700 dark:text-brand-accent",
+            : "border-brand-200 dark:border-brand-accent/50 bg-brand-50/60 dark:bg-brand-accent/10 text-brand-700 dark:text-brand-accent",
         ].join(" ")}
       >
         Projects: {label}
@@ -240,12 +240,12 @@ function ProjectsFilter({
               className={[
                 "flex-shrink-0 w-4 h-4 rounded border flex items-center justify-center transition-colors",
                 allSelected
-                  ? "bg-brand-600 border-brand-600 dark:bg-brand-500 dark:border-brand-500"
+                  ? "bg-brand-600 border-brand-600 dark:bg-brand-accent dark:border-brand-accent"
                   : "border-slate-300 dark:border-zinc-600",
               ].join(" ")}
             >
               {allSelected && (
-                <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+                <svg className="w-3 h-3 text-white dark:text-brand-accent-foreground" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
                   <path d="M5 12l5 5L20 7" />
                 </svg>
               )}
@@ -265,7 +265,7 @@ function ProjectsFilter({
                 className={[
                   "w-full flex items-center gap-2.5 px-3 py-1.5 text-sm text-left transition-colors",
                   isSelected
-                    ? "text-brand-700 dark:text-brand-accent bg-brand-50/60 dark:bg-brand-500/10"
+                    ? "text-brand-700 dark:text-brand-accent bg-brand-50/60 dark:bg-brand-accent/10"
                     : "text-slate-700 dark:text-zinc-300 hover:bg-slate-50 dark:hover:bg-zinc-800/60",
                 ].join(" ")}
               >
@@ -273,12 +273,12 @@ function ProjectsFilter({
                   className={[
                     "flex-shrink-0 w-4 h-4 rounded border flex items-center justify-center transition-colors",
                     isSelected
-                      ? "bg-brand-600 border-brand-600 dark:bg-brand-500 dark:border-brand-500"
+                      ? "bg-brand-600 border-brand-600 dark:bg-brand-accent dark:border-brand-accent"
                       : "border-slate-300 dark:border-zinc-600",
                   ].join(" ")}
                 >
                   {isSelected && (
-                    <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+                    <svg className="w-3 h-3 text-white dark:text-brand-accent-foreground" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
                       <path d="M5 12l5 5L20 7" />
                     </svg>
                   )}
@@ -774,7 +774,7 @@ export function HoursReportScreen() {
             type="button"
             onClick={handleDownloadExcel}
             disabled={!canDownloadExcel}
-            className="inline-flex items-center gap-1.5 text-xs font-semibold px-3.5 py-2 rounded-lg bg-brand-500 hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed text-white transition-colors shadow-sm shadow-brand-500/30 cursor-pointer"
+            className="inline-flex items-center gap-1.5 text-xs font-semibold px-3.5 py-2 rounded-lg bg-brand-500 hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed text-white transition-colors shadow-sm shadow-brand-500/30 cursor-pointer dark:bg-brand-accent dark:hover:bg-brand-accent-strong dark:shadow-brand-accent/30 dark:text-brand-accent-foreground"
           >
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
               <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3" />

@@ -469,7 +469,7 @@ export function NoteAttachmentsField({
       <div
         className={
           "rounded-lg transition-colors " +
-          (dragOver ? "ring-2 ring-brand-500 dark:ring-brand-500/70" : "")
+          (dragOver ? "ring-2 ring-brand-500 dark:ring-brand-accent/70" : "")
         }
         onDragEnter={(e) => {
           if (!isFileDrag(e)) return;
@@ -527,7 +527,7 @@ export function NoteAttachmentsField({
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
-          className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-lg border border-dashed border-slate-200 dark:border-zinc-700 text-[12px] font-medium text-slate-400 dark:text-zinc-600 hover:border-brand-300 dark:hover:border-brand-700 hover:text-brand-600 dark:hover:text-brand-accent transition-colors"
+          className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-lg border border-dashed border-slate-200 dark:border-zinc-700 text-[12px] font-medium text-slate-400 dark:text-zinc-600 hover:border-brand-300 dark:hover:border-brand-accent/40 hover:text-brand-600 dark:hover:text-brand-accent transition-colors"
         >
           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true">
             <path d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.372L8.552 18.32m.009-.01l-.01.01m5.699-9.941l-7.81 7.81a1.5 1.5 0 002.112 2.13" strokeLinecap="round" strokeLinejoin="round" />

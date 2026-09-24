@@ -1006,7 +1006,7 @@ export function ProjectSettingsScreen({ slug }: { slug: string }) {
                   href={project.repositoryUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex-shrink-0 text-[13px] font-medium text-brand-600 dark:text-brand-accent border border-brand-200 dark:border-brand-500/30 px-3 py-1.5 rounded-lg hover:bg-brand-50 dark:hover:bg-brand-500/5 transition-colors"
+                  className="flex-shrink-0 text-[13px] font-medium text-brand-600 dark:text-brand-accent border border-brand-200 dark:border-brand-accent/30 px-3 py-1.5 rounded-lg hover:bg-brand-50 dark:hover:bg-brand-accent/5 transition-colors"
                 >
                   Open Repository
                 </a>
@@ -1040,7 +1040,7 @@ export function ProjectSettingsScreen({ slug }: { slug: string }) {
                       href={githubStatus.repositoryHtmlUrl ?? project.repositoryUrl ?? undefined}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-[13px] font-medium text-brand-600 dark:text-brand-accent border border-brand-200 dark:border-brand-500/30 px-3 py-1.5 rounded-lg hover:bg-brand-50 dark:hover:bg-brand-500/5 transition-colors"
+                      className="text-[13px] font-medium text-brand-600 dark:text-brand-accent border border-brand-200 dark:border-brand-accent/30 px-3 py-1.5 rounded-lg hover:bg-brand-50 dark:hover:bg-brand-accent/5 transition-colors"
                     >
                       Open Repository
                     </a>
@@ -1065,7 +1065,7 @@ export function ProjectSettingsScreen({ slug }: { slug: string }) {
                   <button
                     type="button"
                     onClick={() => startGithubConnect(project.id)}
-                    className="flex-shrink-0 text-[13px] font-medium text-white bg-brand-600 hover:bg-brand-700 px-3 py-1.5 rounded-lg shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-accent dark:text-brand-accent-foreground dark:hover:bg-brand-accent-strong dark:focus-visible:outline-2 dark:focus-visible:outline-offset-2 dark:focus-visible:outline-brand-accent"
+                    className="flex-shrink-0 text-[13px] font-medium text-white bg-brand-600 hover:bg-brand-700 px-3 py-1.5 rounded-lg shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-accent dark:text-brand-accent-foreground dark:hover:bg-brand-accent-strong dark:focus-visible:outline-2 dark:focus-visible:outline-offset-2 dark:focus-visible:outline-brand-accent dark:shadow-brand-accent/20"
                   >
                     Reconnect GitHub
                   </button>
@@ -1082,7 +1082,7 @@ export function ProjectSettingsScreen({ slug }: { slug: string }) {
                     <button
                       type="button"
                       onClick={() => startGithubConnect(project.id)}
-                      className="text-[13px] font-medium text-white bg-brand-600 hover:bg-brand-700 px-3 py-1.5 rounded-lg shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-accent dark:text-brand-accent-foreground dark:hover:bg-brand-accent-strong dark:focus-visible:outline-2 dark:focus-visible:outline-offset-2 dark:focus-visible:outline-brand-accent"
+                      className="text-[13px] font-medium text-white bg-brand-600 hover:bg-brand-700 px-3 py-1.5 rounded-lg shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-accent dark:text-brand-accent-foreground dark:hover:bg-brand-accent-strong dark:focus-visible:outline-2 dark:focus-visible:outline-offset-2 dark:focus-visible:outline-brand-accent dark:shadow-brand-accent/20"
                     >
                       Connect GitHub
                     </button>
@@ -1091,7 +1091,7 @@ export function ProjectSettingsScreen({ slug }: { slug: string }) {
                         href={project.repositoryUrl}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-[13px] font-medium text-brand-600 dark:text-brand-accent border border-brand-200 dark:border-brand-500/30 px-3 py-1.5 rounded-lg hover:bg-brand-50 dark:hover:bg-brand-500/5 transition-colors"
+                        className="text-[13px] font-medium text-brand-600 dark:text-brand-accent border border-brand-200 dark:border-brand-accent/30 px-3 py-1.5 rounded-lg hover:bg-brand-50 dark:hover:bg-brand-accent/5 transition-colors"
                       >
                         Open Repository
                       </a>
@@ -1138,7 +1138,7 @@ export function ProjectSettingsScreen({ slug }: { slug: string }) {
                     checked={backupType === "full"}
                     onChange={() => setBackupType("full")}
                     disabled={exportingBackup}
-                    className="mt-0.5 accent-brand-600"
+                    className="mt-0.5 accent-brand-600 dark:accent-brand-accent"
                   />
                   <span>
                     <span className="block text-[13px] font-medium text-slate-700 dark:text-zinc-300">Full Backup</span>
@@ -1155,7 +1155,7 @@ export function ProjectSettingsScreen({ slug }: { slug: string }) {
                     checked={backupType === "data-only"}
                     onChange={() => setBackupType("data-only")}
                     disabled={exportingBackup}
-                    className="mt-0.5 accent-brand-600"
+                    className="mt-0.5 accent-brand-600 dark:accent-brand-accent"
                   />
                   <span>
                     <span className="block text-[13px] font-medium text-slate-700 dark:text-zinc-300">Data Only</span>
@@ -1174,7 +1174,7 @@ export function ProjectSettingsScreen({ slug }: { slug: string }) {
               type="button"
               onClick={handleExportProject}
               disabled={exportingBackup}
-              className="flex-shrink-0 text-[13px] font-medium text-white bg-brand-600 hover:bg-brand-700 px-3 py-1.5 rounded-lg shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-accent dark:text-brand-accent-foreground dark:hover:bg-brand-accent-strong dark:focus-visible:outline-2 dark:focus-visible:outline-offset-2 dark:focus-visible:outline-brand-accent disabled:opacity-60 disabled:cursor-not-allowed"
+              className="flex-shrink-0 text-[13px] font-medium text-white bg-brand-600 hover:bg-brand-700 px-3 py-1.5 rounded-lg shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-accent dark:text-brand-accent-foreground dark:hover:bg-brand-accent-strong dark:focus-visible:outline-2 dark:focus-visible:outline-offset-2 dark:focus-visible:outline-brand-accent disabled:opacity-60 disabled:cursor-not-allowed dark:shadow-brand-accent/20"
             >
               {exportingBackup ? "Preparing backup…" : "Export Project"}
             </button>
@@ -1216,7 +1216,7 @@ export function ProjectSettingsScreen({ slug }: { slug: string }) {
                   type="button"
                   onClick={handleRestore}
                   disabled={restoring}
-                  className="flex-shrink-0 text-[13px] font-medium text-white bg-brand-600 hover:bg-brand-700 px-3 py-1.5 rounded-lg shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-accent dark:text-brand-accent-foreground dark:hover:bg-brand-accent-strong dark:focus-visible:outline-2 dark:focus-visible:outline-offset-2 dark:focus-visible:outline-brand-accent disabled:opacity-60 disabled:cursor-not-allowed"
+                  className="flex-shrink-0 text-[13px] font-medium text-white bg-brand-600 hover:bg-brand-700 px-3 py-1.5 rounded-lg shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-accent dark:text-brand-accent-foreground dark:hover:bg-brand-accent-strong dark:focus-visible:outline-2 dark:focus-visible:outline-offset-2 dark:focus-visible:outline-brand-accent disabled:opacity-60 disabled:cursor-not-allowed dark:shadow-brand-accent/20"
                 >
                   {restoring ? "Restoring…" : "Restore Project"}
                 </button>

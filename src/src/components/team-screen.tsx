@@ -340,7 +340,7 @@ export function TeamScreen({ slug }: { slug: string }) {
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             placeholder="Search team..."
-            className="w-full text-[16px] sm:text-sm bg-slate-100 placeholder:text-slate-400 rounded-md pl-8 pr-3 py-1.5 outline-none focus:ring-2 focus:ring-brand-500/30 transition-colors dark:bg-zinc-900 dark:placeholder:text-zinc-500 dark:text-zinc-100"
+            className="w-full text-[16px] sm:text-sm bg-slate-100 placeholder:text-slate-400 rounded-md pl-8 pr-3 py-1.5 outline-none focus:ring-2 focus:ring-brand-500/30 transition-colors dark:bg-zinc-900 dark:placeholder:text-zinc-500 dark:text-zinc-100 dark:focus:ring-brand-accent/30"
           />
         </label>
 
@@ -407,7 +407,7 @@ function MemberCard({ member, slug, onOpen }: { member: TeamMember; slug: string
           onOpen();
         }
       }}
-      className="flex flex-col rounded-xl border border-slate-200 bg-white p-4 shadow-sm shadow-slate-200/40 cursor-pointer outline-none transition-all duration-150 hover:-translate-y-px hover:bg-slate-50/60 hover:shadow-md focus-visible:ring-2 focus-visible:ring-brand-500/40 dark:border-zinc-700/70 dark:bg-zinc-900 dark:shadow-black/20 dark:hover:bg-zinc-800/40"
+      className="flex flex-col rounded-xl border border-slate-200 bg-white p-4 shadow-sm shadow-slate-200/40 cursor-pointer outline-none transition-all duration-150 hover:-translate-y-px hover:bg-slate-50/60 hover:shadow-md focus-visible:ring-2 focus-visible:ring-brand-500/40 dark:border-zinc-700/70 dark:bg-zinc-900 dark:shadow-black/20 dark:hover:bg-zinc-800/40 dark:focus-visible:ring-brand-accent/40"
     >
       <div className="flex items-start gap-3">
         <Avatar src={member.avatar} name={member.name} className="w-10 h-10 rounded-full flex-shrink-0" />
@@ -415,7 +415,7 @@ function MemberCard({ member, slug, onOpen }: { member: TeamMember; slug: string
           <div className="flex items-center gap-1.5 min-w-0">
             <h3 className="text-sm font-semibold text-slate-900 dark:text-zinc-100 truncate">{member.name}</h3>
             {member.projectRole === "lead" && (
-              <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold flex-shrink-0 bg-brand-50 text-brand-700 dark:bg-brand-500/10 dark:text-brand-accent">
+              <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold flex-shrink-0 bg-brand-50 text-brand-700 dark:bg-brand-accent/10 dark:text-brand-accent">
                 Project Lead
               </span>
             )}

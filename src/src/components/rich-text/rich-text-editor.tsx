@@ -131,7 +131,7 @@ export function RichTextEditor({
     <div
       className={
         "rounded-lg border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 overflow-hidden " +
-        "focus-within:border-brand-500 dark:focus-within:border-brand-accent focus-within:ring-1 focus-within:ring-brand-500/30 " +
+        "focus-within:border-brand-500 dark:focus-within:border-brand-accent focus-within:ring-1 focus-within:ring-brand-500/30 dark:focus-within:ring-brand-accent/30 " +
         (className ?? "")
       }
     >

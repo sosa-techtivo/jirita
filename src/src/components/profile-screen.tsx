@@ -24,8 +24,8 @@ const NAME_INPUT =
   "rounded-lg px-2.5 py-1.5 outline-none focus:border-brand-500 dark:focus:border-brand-accent transition-colors w-44";
 
 const CHANGE_PASSWORD_LINK =
-  "flex-shrink-0 text-[13px] font-medium text-brand-600 dark:text-brand-accent border border-brand-200 dark:border-brand-500/30 " +
-  "px-3 py-1.5 rounded-lg hover:bg-brand-50 dark:hover:bg-brand-500/5 transition-colors";
+  "flex-shrink-0 text-[13px] font-medium text-brand-600 dark:text-brand-accent border border-brand-200 dark:border-brand-accent/30 " +
+  "px-3 py-1.5 rounded-lg hover:bg-brand-50 dark:hover:bg-brand-accent/5 transition-colors";
 
 function ListIcon() {
   return (
@@ -92,7 +92,7 @@ function Switch({ checked, onChange, label }: { checked: boolean; onChange: (nex
       aria-label={label}
       onClick={() => onChange(!checked)}
       className={`relative inline-flex h-5 w-9 flex-shrink-0 items-center rounded-full transition-colors ${
-        checked ? "bg-brand-600 dark:bg-brand-500" : "bg-slate-200 dark:bg-zinc-700"
+        checked ? "bg-brand-600 dark:bg-brand-accent" : "bg-slate-200 dark:bg-zinc-700"
       }`}
     >
       <span

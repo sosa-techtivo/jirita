@@ -1073,7 +1073,7 @@ export function ProjectLeadReportsScreen() {
                                 router.push(`/projects/${project.slug}`);
                               }
                             }}
-                            className="hover:bg-slate-50/60 dark:hover:bg-zinc-800/30 transition-colors duration-150 cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-500/40"
+                            className="hover:bg-slate-50/60 dark:hover:bg-zinc-800/30 transition-colors duration-150 cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-500/40 dark:focus-visible:ring-brand-accent/40"
                           >
                             <td className="py-2.5 pr-4">
                               <div className="flex items-center gap-2">
@@ -1128,7 +1128,7 @@ export function ProjectLeadReportsScreen() {
                             setPreview(ticket);
                           }
                         }}
-                        className="flex items-center gap-2.5 py-1.5 px-2.5 -mx-2.5 rounded-lg cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-500/40"
+                        className="flex items-center gap-2.5 py-1.5 px-2.5 -mx-2.5 rounded-lg cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-500/40 dark:focus-visible:ring-brand-accent/40"
                       >
                         <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${isOverdue ? "bg-red-400" : "bg-slate-300 dark:bg-zinc-600"}`} />
                         <span className="flex-1 min-w-0 flex items-baseline gap-1.5">

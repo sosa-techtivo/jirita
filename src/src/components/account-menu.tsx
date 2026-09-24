@@ -47,7 +47,7 @@ export function AccountMenu() {
         aria-expanded={isOpen}
         aria-haspopup="menu"
         aria-label="Account menu"
-        className="block rounded-full ring-offset-2 ring-offset-white dark:ring-offset-[var(--background)] focus:outline-none focus:ring-2 focus:ring-brand-500/50"
+        className="block rounded-full ring-offset-2 ring-offset-white dark:ring-offset-[var(--background)] focus:outline-none focus:ring-2 focus:ring-brand-500/50 dark:focus:ring-brand-accent/50"
       >
         <Avatar src={user.avatar} name={user.name} className="w-7 h-7 rounded-full" />
       </button>

@@ -391,7 +391,7 @@ function KpiCard({
           ? "hover:border-brand-200 dark:hover:border-brand-accent/40"
           : "hover:border-slate-300 dark:hover:border-zinc-600",
         active
-          ? "ring-2 ring-brand-500/40 dark:ring-brand-500/30 !border-brand-300 dark:!border-brand-700"
+          ? "ring-2 ring-brand-500/40 dark:ring-brand-accent/30 !border-brand-300 dark:!border-brand-700"
           : "",
       ].join(" ")}
     >
@@ -1107,7 +1107,7 @@ export function MyWorkScreen() {
           className={[
             "inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg transition-colors border flex-shrink-0 self-end sm:self-auto",
             focusMode
-              ? "bg-brand-600 text-white border-brand-600 dark:bg-brand-500 dark:border-brand-500 shadow-sm shadow-brand-600/20"
+              ? "bg-brand-600 text-white border-brand-600 dark:bg-brand-accent dark:border-brand-accent shadow-sm shadow-brand-600/20 dark:shadow-brand-accent/20 dark:text-brand-accent-foreground"
               : "text-slate-600 border-slate-200 hover:bg-slate-50 dark:text-zinc-400 dark:border-zinc-700 dark:hover:bg-zinc-800",
           ].join(" ")}
         >
@@ -1236,7 +1236,7 @@ export function MyWorkScreen() {
               <button
                 type="button"
                 onClick={() => setKpiMode(null)}
-                className="inline-flex items-center gap-1 text-[11px] font-medium text-brand-600 dark:text-brand-accent bg-brand-50 dark:bg-brand-500/10 px-2 py-0.5 rounded-full hover:bg-brand-100 dark:hover:bg-brand-500/20 transition-colors"
+                className="inline-flex items-center gap-1 text-[11px] font-medium text-brand-600 dark:text-brand-accent bg-brand-50 dark:bg-brand-accent/10 px-2 py-0.5 rounded-full hover:bg-brand-100 dark:hover:bg-brand-accent/20 transition-colors"
               >
                 {KPI_MODE_LABELS[kpiMode]}
                 <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" strokeWidth="3" viewBox="0 0 24 24">
@@ -1260,7 +1260,7 @@ export function MyWorkScreen() {
                     value={hoursFrom}
                     max={hoursTo}
                     onChange={(e) => setHoursFrom(e.target.value)}
-                    className="text-[16px] sm:text-xs bg-slate-50 dark:bg-zinc-800 text-slate-800 dark:text-zinc-100 rounded-md border border-slate-200 dark:border-zinc-700 px-2 py-1 outline-none focus:ring-2 focus:ring-brand-500/30 transition-colors"
+                    className="text-[16px] sm:text-xs bg-slate-50 dark:bg-zinc-800 text-slate-800 dark:text-zinc-100 rounded-md border border-slate-200 dark:border-zinc-700 px-2 py-1 outline-none focus:ring-2 focus:ring-brand-500/30 transition-colors dark:focus:ring-brand-accent/30"
                   />
                 </label>
                 <label className="flex items-center gap-1.5 text-xs font-medium text-slate-500 dark:text-zinc-400">
@@ -1270,7 +1270,7 @@ export function MyWorkScreen() {
                     value={hoursTo}
                     min={hoursFrom}
                     onChange={(e) => setHoursTo(e.target.value)}
-                    className="text-[16px] sm:text-xs bg-slate-50 dark:bg-zinc-800 text-slate-800 dark:text-zinc-100 rounded-md border border-slate-200 dark:border-zinc-700 px-2 py-1 outline-none focus:ring-2 focus:ring-brand-500/30 transition-colors"
+                    className="text-[16px] sm:text-xs bg-slate-50 dark:bg-zinc-800 text-slate-800 dark:text-zinc-100 rounded-md border border-slate-200 dark:border-zinc-700 px-2 py-1 outline-none focus:ring-2 focus:ring-brand-500/30 transition-colors dark:focus:ring-brand-accent/30"
                   />
                 </label>
               </>
@@ -1319,7 +1319,7 @@ export function MyWorkScreen() {
                 "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all duration-150",
                 view === "hours"
                   ? "bg-white dark:bg-zinc-900 text-slate-900 dark:text-zinc-50 shadow-sm shadow-slate-200/80 dark:shadow-black/40"
-                  : "bg-brand-50 dark:bg-brand-500/10 text-slate-600 dark:text-zinc-300 hover:bg-brand-100 dark:hover:bg-brand-500/20",
+                  : "bg-brand-50 dark:bg-brand-accent/10 text-slate-600 dark:text-zinc-300 hover:bg-brand-100 dark:hover:bg-brand-accent/20",
               ].join(" ")}
             >
               {VIEW_ICONS.hours}

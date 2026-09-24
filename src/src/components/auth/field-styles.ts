@@ -13,7 +13,7 @@ export const FIELD_LABEL =
 export const INPUT =
   "w-full bg-white dark:bg-zinc-900 text-[16px] sm:text-[13px] font-medium text-slate-800 dark:text-zinc-200 " +
   "border border-slate-200 dark:border-zinc-700 rounded-lg px-3 py-2 outline-none " +
-  "focus:border-brand-500 dark:focus:border-brand-accent focus:ring-2 focus:ring-brand-500/20 " +
+  "focus:border-brand-500 dark:focus:border-brand-accent focus:ring-2 focus:ring-brand-500/20 dark:focus:ring-brand-accent/20 " +
   "placeholder:text-slate-300 dark:placeholder:text-zinc-600 transition-colors";
 
 export const INPUT_ERROR =

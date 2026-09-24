@@ -163,7 +163,7 @@ export function NotificationsScreen() {
           <h1 className="text-xl font-bold text-slate-900 tracking-tight dark:text-zinc-50">
             Notifications
             {unreadCount > 0 && (
-              <span className="ml-2 align-middle text-[12px] font-semibold text-brand-600 dark:text-brand-accent bg-brand-50 dark:bg-brand-500/10 rounded-full px-2 py-0.5">
+              <span className="ml-2 align-middle text-[12px] font-semibold text-brand-600 dark:text-brand-accent bg-brand-50 dark:bg-brand-accent/10 rounded-full px-2 py-0.5">
                 {unreadCount} unread
               </span>
             )}
@@ -176,7 +176,7 @@ export function NotificationsScreen() {
           <button
             type="button"
             onClick={handleMarkAllRead}
-            className="flex-shrink-0 text-sm font-medium text-brand-600 dark:text-brand-accent border border-brand-200 dark:border-brand-500/30 px-3 py-1.5 rounded-lg hover:bg-brand-50 dark:hover:bg-brand-500/5 transition-colors"
+            className="flex-shrink-0 text-sm font-medium text-brand-600 dark:text-brand-accent border border-brand-200 dark:border-brand-accent/30 px-3 py-1.5 rounded-lg hover:bg-brand-50 dark:hover:bg-brand-accent/5 transition-colors"
           >
             Mark all as read
           </button>
@@ -215,7 +215,7 @@ export function NotificationsScreen() {
                       className={[
                         "w-full flex items-start gap-3 px-5 py-4 border-b border-slate-100 dark:border-zinc-800 last:border-0 text-left transition-colors",
                         isUnread
-                          ? "bg-brand-50/50 hover:bg-brand-50 dark:bg-brand-500/[0.05] dark:hover:bg-brand-500/10"
+                          ? "bg-brand-50/50 hover:bg-brand-50 dark:bg-brand-accent/[0.05] dark:hover:bg-brand-accent/10"
                           : "hover:bg-slate-50 dark:hover:bg-zinc-800/50",
                       ].join(" ")}
                     >
@@ -250,7 +250,7 @@ export function NotificationsScreen() {
                         <span className="text-[11px] text-slate-400 dark:text-zinc-600 whitespace-nowrap">
                           {formatRelativeTime(n.createdAt)}
                         </span>
-                        {isUnread && <span className="w-1.5 h-1.5 rounded-full bg-brand-500" />}
+                        {isUnread && <span className="w-1.5 h-1.5 rounded-full bg-brand-500 dark:bg-brand-accent" />}
                       </div>
                     </button>
                   );

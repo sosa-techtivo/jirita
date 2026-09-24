@@ -179,6 +179,10 @@ body {
   accent-color: var(--color-brand-500, #6655ee);
 }
 
+.dark .jirita-rich-text ul[data-type="taskList"] input[type="checkbox"] {
+  accent-color: var(--color-brand-accent);
+}
+
 .jirita-rich-text ul[data-type="taskList"] li[data-checked="true"] > div {
   color: #94a3b8;
   text-decoration: line-through;
@@ -269,7 +273,7 @@ body {
 
 .dark .jirita-rich-text .mention {
   color: var(--color-brand-accent);
-  background: rgba(102, 85, 238, 0.16);
+  background: rgba(244, 114, 182, 0.14);
 }
 
 .jirita-rich-text-editable p.is-editor-empty:first-child::before {

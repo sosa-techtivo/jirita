@@ -304,7 +304,7 @@ export function FilterDropdown({
     "inline-flex items-center gap-0.5 text-sm px-2 py-1.5 rounded-md transition-colors";
 
   const triggerActive = hasSelection
-    ? (triggerActiveClassName ?? "text-brand-700 dark:text-brand-accent bg-brand-50 dark:bg-brand-500/10 font-medium")
+    ? (triggerActiveClassName ?? "text-brand-700 dark:text-brand-accent bg-brand-50 dark:bg-brand-accent/10 font-medium")
     : "";
 
   const triggerDefault =
@@ -353,7 +353,7 @@ export function FilterDropdown({
                 onChange([]);
               }
             }}
-            className="ml-0.5 text-brand-500 hover:text-brand-700 dark:hover:text-brand-accent-soft transition-colors flex-shrink-0"
+            className="ml-0.5 text-brand-500 hover:text-brand-700 dark:hover:text-brand-accent-soft transition-colors flex-shrink-0 dark:text-brand-accent"
             aria-label={`Clear ${label} filter`}
           >
             <XIcon />
@@ -411,7 +411,7 @@ export function FilterDropdown({
                 placeholder="Search…"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="w-full text-[16px] sm:text-sm bg-slate-100 dark:bg-zinc-800 placeholder:text-slate-400 dark:placeholder:text-zinc-600 text-slate-800 dark:text-zinc-100 rounded-md px-2.5 py-1.5 outline-none focus:ring-2 focus:ring-brand-500/30 transition-colors"
+                className="w-full text-[16px] sm:text-sm bg-slate-100 dark:bg-zinc-800 placeholder:text-slate-400 dark:placeholder:text-zinc-600 text-slate-800 dark:text-zinc-100 rounded-md px-2.5 py-1.5 outline-none focus:ring-2 focus:ring-brand-500/30 transition-colors dark:focus:ring-brand-accent/30"
               />
             </div>
           )}
@@ -441,7 +441,7 @@ export function FilterDropdown({
                     className={[
                       "w-full flex items-center gap-2.5 px-3 py-1.5 text-sm text-left transition-colors",
                       isSelected
-                        ? "text-brand-700 dark:text-brand-accent bg-brand-50/60 dark:bg-brand-500/10"
+                        ? "text-brand-700 dark:text-brand-accent bg-brand-50/60 dark:bg-brand-accent/10"
                         : "text-slate-700 dark:text-zinc-300 hover:bg-slate-50 dark:hover:bg-zinc-800/60",
                     ].join(" ")}
                   >
@@ -451,12 +451,12 @@ export function FilterDropdown({
                         className={[
                           "flex-shrink-0 w-4 h-4 rounded border flex items-center justify-center transition-colors",
                           isSelected
-                            ? "bg-brand-600 border-brand-600 dark:bg-brand-500 dark:border-brand-500"
+                            ? "bg-brand-600 border-brand-600 dark:bg-brand-accent dark:border-brand-accent"
                             : "border-slate-300 dark:border-zinc-600",
                         ].join(" ")}
                       >
                         {isSelected && (
-                          <span className="text-white">
+                          <span className="text-white dark:text-brand-accent-foreground">
                             <CheckIcon />
                           </span>
                         )}

@@ -288,7 +288,7 @@ function MemberProjectCardRow({ card }: { card: MemberProjectCard }) {
           openProject();
         }
       }}
-      className="rounded-xl border border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900 shadow-sm shadow-slate-200/40 dark:shadow-black/20 p-5 cursor-pointer outline-none hover:border-brand-300 dark:hover:border-brand-700 focus-visible:ring-2 focus-visible:ring-brand-500/40 transition-colors"
+      className="rounded-xl border border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900 shadow-sm shadow-slate-200/40 dark:shadow-black/20 p-5 cursor-pointer outline-none hover:border-brand-300 dark:hover:border-brand-accent/40 focus-visible:ring-2 focus-visible:ring-brand-500/40 transition-colors dark:focus-visible:ring-brand-accent/40"
     >
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
@@ -305,7 +305,7 @@ function MemberProjectCardRow({ card }: { card: MemberProjectCard }) {
             e.stopPropagation();
             openProject();
           }}
-          className="inline-flex items-center gap-1.5 text-[13px] font-semibold px-3.5 py-2 rounded-lg bg-brand-500 hover:bg-brand-600 text-white transition-colors shadow-sm shadow-brand-500/30 flex-shrink-0"
+          className="inline-flex items-center gap-1.5 text-[13px] font-semibold px-3.5 py-2 rounded-lg bg-brand-500 hover:bg-brand-600 text-white transition-colors shadow-sm shadow-brand-500/30 flex-shrink-0 dark:bg-brand-accent dark:hover:bg-brand-accent-strong dark:shadow-brand-accent/30 dark:text-brand-accent-foreground"
         >
           Open Project
           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24" aria-hidden="true">
@@ -390,7 +390,7 @@ function OtherProjectCardRow({
               type="button"
               disabled={busy}
               onClick={onRequestAccess}
-              className="inline-flex items-center gap-1.5 text-[13px] font-semibold px-3.5 py-2 rounded-lg border border-slate-200 dark:border-zinc-700 text-slate-700 dark:text-zinc-200 hover:border-brand-300 dark:hover:border-brand-700 hover:text-brand-600 dark:hover:text-brand-accent transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className="inline-flex items-center gap-1.5 text-[13px] font-semibold px-3.5 py-2 rounded-lg border border-slate-200 dark:border-zinc-700 text-slate-700 dark:text-zinc-200 hover:border-brand-300 dark:hover:border-brand-accent/40 hover:text-brand-600 dark:hover:text-brand-accent transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Request to be added to the team
             </button>

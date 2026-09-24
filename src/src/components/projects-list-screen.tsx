@@ -737,7 +737,7 @@ function ManagedProjectsScreen() {
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             placeholder="Search projects, leads or keywords..."
-            className="w-full text-[16px] sm:text-sm bg-slate-100 placeholder:text-slate-400 rounded-md pl-8 pr-3 py-1.5 outline-none focus:ring-2 focus:ring-brand-500/30 transition-colors dark:bg-zinc-900 dark:placeholder:text-zinc-500 dark:text-zinc-100"
+            className="w-full text-[16px] sm:text-sm bg-slate-100 placeholder:text-slate-400 rounded-md pl-8 pr-3 py-1.5 outline-none focus:ring-2 focus:ring-brand-500/30 transition-colors dark:bg-zinc-900 dark:placeholder:text-zinc-500 dark:text-zinc-100 dark:focus:ring-brand-accent/30"
           />
         </label>
 
@@ -929,7 +929,7 @@ function ProjectRow({
           router.push(`/projects/${project.slug}`);
         }
       }}
-      className={`group flex flex-col gap-2 sm:grid ${ROW_GRID_COLS} sm:gap-3 sm:items-center py-4 px-3 -mx-3 rounded-lg cursor-pointer outline-none hover:bg-slate-50 focus-visible:ring-2 focus-visible:ring-brand-500/40 dark:hover:bg-zinc-900/60 transition-colors`}
+      className={`group flex flex-col gap-2 sm:grid ${ROW_GRID_COLS} sm:gap-3 sm:items-center py-4 px-3 -mx-3 rounded-lg cursor-pointer outline-none hover:bg-slate-50 focus-visible:ring-2 focus-visible:ring-brand-500/40 dark:hover:bg-zinc-900/60 transition-colors dark:focus-visible:ring-brand-accent/40`}
     >
       <div className="min-w-0">
         <div className="flex items-center gap-2.5">
@@ -942,7 +942,7 @@ function ProjectRow({
         <p className="text-sm text-slate-500 dark:text-zinc-400 truncate mt-0.5">{project.description}</p>
         <div className="mt-2 flex items-center gap-2">
           <div className="max-w-[160px] w-full h-1 rounded-full bg-slate-100 overflow-hidden dark:bg-zinc-800">
-            <div className="h-full rounded-full bg-brand-500/70" style={{ width: `${progress}%` }} />
+            <div className="h-full rounded-full bg-brand-500/70 dark:bg-brand-accent/70" style={{ width: `${progress}%` }} />
           </div>
           <span className="text-[10px] text-slate-400 dark:text-zinc-500 tabular-nums flex-shrink-0">
             {progress}%
@@ -1040,7 +1040,7 @@ function LeadProjectRow({
           router.push(`/projects/${project.slug}`);
         }
       }}
-      className="group flex flex-col gap-3 py-4 px-3 -mx-3 rounded-lg cursor-pointer outline-none hover:bg-slate-50 focus-visible:ring-2 focus-visible:ring-brand-500/40 dark:hover:bg-zinc-900/60 transition-colors"
+      className="group flex flex-col gap-3 py-4 px-3 -mx-3 rounded-lg cursor-pointer outline-none hover:bg-slate-50 focus-visible:ring-2 focus-visible:ring-brand-500/40 dark:hover:bg-zinc-900/60 transition-colors dark:focus-visible:ring-brand-accent/40"
     >
       {/* Identity block: name/status + quick actions */}
       <div className="flex items-start justify-between gap-3">
@@ -1074,7 +1074,7 @@ function LeadProjectRow({
       {/* Progress block — bar + percentage together on one visible line */}
       <div className="flex items-center gap-2.5">
         <div className="flex-1 max-w-[220px] h-1.5 rounded-full bg-slate-100 overflow-hidden dark:bg-zinc-800">
-          <div className="h-full rounded-full bg-brand-500/70" style={{ width: `${progress}%` }} />
+          <div className="h-full rounded-full bg-brand-500/70 dark:bg-brand-accent/70" style={{ width: `${progress}%` }} />
         </div>
         <span className="text-xs font-semibold text-slate-700 dark:text-zinc-200 tabular-nums flex-shrink-0">
           {progress}%

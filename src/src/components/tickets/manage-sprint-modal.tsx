@@ -111,7 +111,7 @@ function TicketRow({
           title={action.label}
           className={`flex-shrink-0 w-6 h-6 flex items-center justify-center rounded-md transition-colors disabled:opacity-50 ${
             action.variant === "add"
-              ? "text-brand-600 dark:text-brand-accent hover:bg-brand-50 dark:hover:bg-brand-500/10"
+              ? "text-brand-600 dark:text-brand-accent hover:bg-brand-50 dark:hover:bg-brand-accent/10"
               : "text-slate-400 dark:text-zinc-500 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10"
           }`}
         >
@@ -178,7 +178,7 @@ function SprintListView({
       <button
         type="button"
         onClick={onCreateNew}
-        className="w-full mt-2 flex items-center justify-center gap-1.5 text-sm font-medium text-brand-600 dark:text-brand-accent hover:bg-brand-50 dark:hover:bg-brand-500/10 rounded-lg px-3 py-2 transition-colors"
+        className="w-full mt-2 flex items-center justify-center gap-1.5 text-sm font-medium text-brand-600 dark:text-brand-accent hover:bg-brand-50 dark:hover:bg-brand-accent/10 rounded-lg px-3 py-2 transition-colors"
       >
         <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true">
           <path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14M5 12h14" />
@@ -213,7 +213,7 @@ function SprintCreateForm({
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="e.g. Sprint 12"
-          className="w-full text-sm bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-brand-500/30 text-slate-800 dark:text-zinc-100"
+          className="w-full text-sm bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-brand-500/30 text-slate-800 dark:text-zinc-100 dark:focus:ring-brand-accent/30"
         />
       </div>
       <div className="grid grid-cols-2 gap-3">
@@ -223,7 +223,7 @@ function SprintCreateForm({
             type="date"
             value={startDate}
             onChange={(e) => setStartDate(e.target.value)}
-            className="w-full text-sm bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-brand-500/30 text-slate-800 dark:text-zinc-100"
+            className="w-full text-sm bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-brand-500/30 text-slate-800 dark:text-zinc-100 dark:focus:ring-brand-accent/30"
           />
         </div>
         <div>
@@ -232,7 +232,7 @@ function SprintCreateForm({
             type="date"
             value={endDate}
             onChange={(e) => setEndDate(e.target.value)}
-            className="w-full text-sm bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-brand-500/30 text-slate-800 dark:text-zinc-100"
+            className="w-full text-sm bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-brand-500/30 text-slate-800 dark:text-zinc-100 dark:focus:ring-brand-accent/30"
           />
         </div>
       </div>
@@ -251,7 +251,7 @@ function SprintCreateForm({
           onClick={() =>
             onSubmit({ name, startDate: startDate || undefined, endDate: endDate || undefined })
           }
-          className="px-4 py-2 text-[13px] font-semibold text-white bg-brand-600 hover:bg-brand-700 rounded-lg transition-colors disabled:opacity-50"
+          className="px-4 py-2 text-[13px] font-semibold text-white bg-brand-600 hover:bg-brand-700 rounded-lg transition-colors disabled:opacity-50 dark:bg-brand-accent dark:hover:bg-brand-accent-strong dark:text-brand-accent-foreground"
         >
           {submitting ? "Creating…" : "Create Sprint"}
         </button>
@@ -469,7 +469,7 @@ function SprintDetailView({
               type="button"
               disabled={submitting}
               onClick={handleActivate}
-              className="px-3 py-1.5 text-[13px] font-semibold text-white bg-brand-600 hover:bg-brand-700 rounded-lg transition-colors disabled:opacity-50"
+              className="px-3 py-1.5 text-[13px] font-semibold text-white bg-brand-600 hover:bg-brand-700 rounded-lg transition-colors disabled:opacity-50 dark:bg-brand-accent dark:hover:bg-brand-accent-strong dark:text-brand-accent-foreground"
               title={otherActiveSprintExists ? "Another sprint is currently active — close it first." : undefined}
             >
               Activate
@@ -522,7 +522,7 @@ function SprintDetailView({
           value={name}
           disabled={readOnly}
           onChange={(e) => setName(e.target.value)}
-          className="w-full text-sm bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-brand-500/30 text-slate-800 dark:text-zinc-100 disabled:opacity-60"
+          className="w-full text-sm bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-brand-500/30 text-slate-800 dark:text-zinc-100 disabled:opacity-60 dark:focus:ring-brand-accent/30"
         />
       </div>
       <div className="grid grid-cols-2 gap-3">
@@ -533,7 +533,7 @@ function SprintDetailView({
             value={startDate}
             disabled={readOnly}
             onChange={(e) => setStartDate(e.target.value)}
-            className="w-full text-sm bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-brand-500/30 text-slate-800 dark:text-zinc-100 disabled:opacity-60"
+            className="w-full text-sm bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-brand-500/30 text-slate-800 dark:text-zinc-100 disabled:opacity-60 dark:focus:ring-brand-accent/30"
           />
         </div>
         <div>
@@ -543,7 +543,7 @@ function SprintDetailView({
             value={endDate}
             disabled={readOnly}
             onChange={(e) => setEndDate(e.target.value)}
-            className="w-full text-sm bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-brand-500/30 text-slate-800 dark:text-zinc-100 disabled:opacity-60"
+            className="w-full text-sm bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-brand-500/30 text-slate-800 dark:text-zinc-100 disabled:opacity-60 dark:focus:ring-brand-accent/30"
           />
         </div>
       </div>
@@ -553,7 +553,7 @@ function SprintDetailView({
             type="button"
             disabled={submitting || name.trim().length === 0}
             onClick={handleSaveDetails}
-            className="px-3 py-1.5 text-[13px] font-semibold text-white bg-brand-600 hover:bg-brand-700 rounded-lg transition-colors disabled:opacity-50"
+            className="px-3 py-1.5 text-[13px] font-semibold text-white bg-brand-600 hover:bg-brand-700 rounded-lg transition-colors disabled:opacity-50 dark:bg-brand-accent dark:hover:bg-brand-accent-strong dark:text-brand-accent-foreground"
           >
             Save changes
           </button>
@@ -567,7 +567,7 @@ function SprintDetailView({
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search tickets by key or title…"
-            className="w-full text-sm bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-lg px-3 py-2 mb-3 outline-none focus:ring-2 focus:ring-brand-500/30 text-slate-800 dark:text-zinc-100"
+            className="w-full text-sm bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-lg px-3 py-2 mb-3 outline-none focus:ring-2 focus:ring-brand-500/30 text-slate-800 dark:text-zinc-100 dark:focus:ring-brand-accent/30"
           />
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {/* Left — Available tickets */}

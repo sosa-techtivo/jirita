@@ -329,7 +329,7 @@ export function CalendarView({
                     className={[
                       "flex-1 min-w-0 flex flex-col p-1.5 cursor-pointer transition-colors",
                       isSelected
-                        ? "bg-brand-50 dark:bg-brand-500/10"
+                        ? "bg-brand-50 dark:bg-brand-accent/10"
                         : isCurrentMonth
                         ? "bg-white dark:bg-zinc-900 hover:bg-slate-50 dark:hover:bg-zinc-800/70"
                         : "bg-slate-50/60 dark:bg-zinc-900/40 hover:bg-slate-100/70 dark:hover:bg-zinc-800/40",
@@ -341,7 +341,7 @@ export function CalendarView({
                         className={[
                           "w-6 h-6 flex items-center justify-center text-[12px] font-medium rounded-full",
                           isToday
-                            ? "bg-brand-600 text-white dark:bg-brand-500"
+                            ? "bg-brand-600 text-white dark:bg-brand-accent dark:text-brand-accent-foreground"
                             : isCurrentMonth
                             ? "text-slate-700 dark:text-zinc-300"
                             : "text-slate-300 dark:text-zinc-600",

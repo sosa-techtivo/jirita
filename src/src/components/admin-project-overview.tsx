@@ -224,7 +224,7 @@ export function TicketRow({
       onClick={() => onOpen(ticket)}
       className={[
         "w-full py-2.5 flex items-center justify-between gap-2 text-left hover:bg-slate-50 dark:hover:bg-zinc-800/50 -mx-2 px-2 rounded-lg transition-colors",
-        highlighted ? "bg-brand-50 dark:bg-brand-500/10 duration-700" : "",
+        highlighted ? "bg-brand-50 dark:bg-brand-accent/10 duration-700" : "",
       ].join(" ")}
     >
       <span className="min-w-0 flex items-baseline gap-1.5">
@@ -234,7 +234,7 @@ export function TicketRow({
         </span>
         <span className="text-sm text-slate-800 dark:text-zinc-200 truncate">{ticket.title}</span>
         {highlighted && (
-          <span className="text-[10px] font-semibold text-brand-600 dark:text-brand-accent bg-brand-100 dark:bg-brand-500/20 px-1.5 py-0.5 rounded-full flex-shrink-0">
+          <span className="text-[10px] font-semibold text-brand-600 dark:text-brand-accent bg-brand-100 dark:bg-brand-accent/20 px-1.5 py-0.5 rounded-full flex-shrink-0">
             Just created
           </span>
         )}

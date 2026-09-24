@@ -159,7 +159,7 @@ function EditableTitle({ value, onChange }: { value: string; onChange: (v: strin
         ref={inputRef}
         className={
           "w-full text-[22px] font-bold text-slate-900 dark:text-zinc-50 leading-snug tracking-tight " +
-          "bg-transparent border-0 border-b-2 border-brand-500 outline-none pb-0.5"
+          "bg-transparent border-0 border-b-2 border-brand-500 outline-none pb-0.5 dark:border-brand-accent"
         }
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
@@ -381,7 +381,7 @@ function EditableSidebarAssignee({
           className={
             "group w-full flex items-center gap-1.5 -mx-1 px-1 py-0.5 rounded-md text-left " +
             "cursor-pointer transition-colors hover:bg-slate-50 dark:hover:bg-zinc-800/60 " +
-            "focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40"
+            "focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40 dark:focus-visible:ring-brand-accent/40"
           }
         >
           <Avatar src={value.avatar} name={value.name} className="w-5 h-5 rounded-full flex-shrink-0" />
@@ -761,7 +761,7 @@ function EditableSidebarLabels({
                     className={
                       `px-1.5 py-0.5 rounded text-[10px] font-medium transition-colors cursor-pointer ` +
                       (active
-                        ? "bg-brand-500 text-white dark:bg-brand-600"
+                        ? "bg-brand-500 text-white dark:bg-brand-accent dark:text-brand-accent-foreground"
                         : "bg-slate-100 dark:bg-zinc-800 text-slate-500 dark:text-zinc-400 hover:bg-slate-200 dark:hover:bg-zinc-700")
                     }
                   >
@@ -773,7 +773,7 @@ function EditableSidebarLabels({
                 <button
                   onClick={handleCreate}
                   disabled={creating}
-                  className="px-1.5 py-0.5 rounded text-[10px] font-medium border border-dashed border-brand-300 dark:border-brand-700 text-brand-600 dark:text-brand-accent hover:bg-brand-50 dark:hover:bg-brand-accent/10 transition-colors cursor-pointer disabled:opacity-50"
+                  className="px-1.5 py-0.5 rounded text-[10px] font-medium border border-dashed border-brand-300 dark:border-brand-accent/40 text-brand-600 dark:text-brand-accent hover:bg-brand-50 dark:hover:bg-brand-accent/10 transition-colors cursor-pointer disabled:opacity-50"
                 >
                   {creating ? "Creating…" : `➕ Create "${trimmedSearch}"`}
                 </button>
@@ -1493,7 +1493,7 @@ function ChildrenSection({
         </p>
         <div className="h-1 rounded-full bg-slate-100 dark:bg-zinc-800 overflow-hidden">
           <div
-            className="h-full bg-brand-500 rounded-full transition-all duration-300"
+            className="h-full bg-brand-500 rounded-full transition-all duration-300 dark:bg-brand-accent"
             style={{ width: `${progressPct}%` }}
           />
         </div>
@@ -1572,7 +1572,7 @@ function CollapsibleSection({
           <button
             type="button"
             onClick={() => setOpen((v) => !v)}
-            className="flex-1 flex items-center gap-2 min-w-0 py-0.5 focus:outline-none focus-visible:ring-1 focus-visible:ring-brand-500/50 rounded"
+            className="flex-1 flex items-center gap-2 min-w-0 py-0.5 focus:outline-none focus-visible:ring-1 focus-visible:ring-brand-500/50 rounded dark:focus-visible:ring-brand-accent/50"
             aria-expanded={open}
           >
             <span className={SECTION_LABEL}>{title}</span>
@@ -1650,12 +1650,12 @@ function AcceptanceCriteriaChecklist({
               className={
                 "mt-0.5 w-4 h-4 rounded flex-shrink-0 border transition-colors flex items-center justify-center " +
                 (done
-                  ? "bg-brand-500 border-brand-500 dark:bg-brand-600 dark:border-brand-600"
+                  ? "bg-brand-500 border-brand-500 dark:bg-brand-accent dark:border-brand-accent"
                   : "border-slate-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 hover:border-brand-400 dark:hover:border-brand-accent")
               }
             >
               {done && (
-                <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" strokeWidth="3" viewBox="0 0 12 12">
+                <svg className="w-2.5 h-2.5 text-white dark:text-brand-accent-foreground" fill="none" stroke="currentColor" strokeWidth="3" viewBox="0 0 12 12">
                   <path d="M2 6l3 3 5-5" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
               )}
@@ -1768,7 +1768,7 @@ function EditableAcceptanceCriteria({
               "px-3.5 py-1.5 text-[13px] font-semibold rounded-lg transition-all",
               saving
                 ? "bg-slate-100 dark:bg-zinc-800 text-slate-400 dark:text-zinc-600 cursor-not-allowed"
-                : "bg-brand-500 hover:bg-brand-600 text-white shadow-sm shadow-brand-500/30 cursor-pointer",
+                : "bg-brand-500 hover:bg-brand-600 text-white shadow-sm shadow-brand-500/30 cursor-pointer dark:bg-brand-accent dark:hover:bg-brand-accent-strong dark:shadow-brand-accent/30 dark:text-brand-accent-foreground",
             ].join(" ")}
           >
             Save
@@ -1926,7 +1926,7 @@ function UploadingRow({ item }: { item: UploadingItem }) {
         <div className="mt-1.5 flex items-center gap-2">
           <div className="flex-1 h-1 rounded-full bg-slate-200 dark:bg-zinc-700 overflow-hidden">
             <div
-              className="h-full rounded-full bg-brand-500 dark:bg-brand-600 transition-all duration-100 ease-linear"
+              className="h-full rounded-full bg-brand-500 dark:bg-brand-accent transition-all duration-100 ease-linear"
               style={{ width: `${Math.round(item.progress)}%` }}
             />
           </div>
@@ -2088,7 +2088,7 @@ function AttachmentRow({
           className={
             "text-[16px] sm:text-[13px] font-medium text-slate-800 dark:text-zinc-200 w-full " +
             "bg-white dark:bg-zinc-900 border border-brand-500 dark:border-brand-accent " +
-            "rounded px-1.5 py-0.5 outline-none focus:ring-1 focus:ring-brand-500/30"
+            "rounded px-1.5 py-0.5 outline-none focus:ring-1 focus:ring-brand-500/30 dark:focus:ring-brand-accent/30"
           }
           value={renameDraft}
           onChange={(e) => setRenameDraft(e.target.value)}
@@ -2289,7 +2289,7 @@ function CommentDropZone({
     <div
       className={
         "rounded-xl transition-colors " +
-        (dragOver ? "ring-2 ring-brand-500 dark:ring-brand-500/70" : "")
+        (dragOver ? "ring-2 ring-brand-500 dark:ring-brand-accent/70" : "")
       }
       onDragEnter={(e) => {
         if (!isFileDrag(e)) return;
@@ -2553,7 +2553,7 @@ function CommentItem({
                       "px-3.5 py-1.5 text-[13px] font-semibold rounded-lg transition-all",
                       saving || isRichTextEmpty(draft)
                         ? "bg-slate-100 dark:bg-zinc-800 text-slate-400 dark:text-zinc-600 cursor-not-allowed"
-                        : "bg-brand-500 hover:bg-brand-600 text-white shadow-sm shadow-brand-500/30 cursor-pointer",
+                        : "bg-brand-500 hover:bg-brand-600 text-white shadow-sm shadow-brand-500/30 cursor-pointer dark:bg-brand-accent dark:hover:bg-brand-accent-strong dark:shadow-brand-accent/30 dark:text-brand-accent-foreground",
                     ].join(" ")}
                   >
                     Save
@@ -2798,7 +2798,7 @@ function ReplyComposer({
               "px-3.5 py-1.5 text-[13px] font-semibold rounded-lg transition-all",
               isRichTextEmpty(draft) || submitting
                 ? "bg-slate-100 dark:bg-zinc-800 text-slate-400 dark:text-zinc-600 cursor-not-allowed"
-                : "bg-brand-500 hover:bg-brand-600 text-white shadow-sm shadow-brand-500/30 cursor-pointer",
+                : "bg-brand-500 hover:bg-brand-600 text-white shadow-sm shadow-brand-500/30 cursor-pointer dark:bg-brand-accent dark:hover:bg-brand-accent-strong dark:shadow-brand-accent/30 dark:text-brand-accent-foreground",
             ].join(" ")}
           >
             Reply
@@ -3403,9 +3403,9 @@ const AttachmentsSection = forwardRef<
       >
         {/* Drag-over overlay */}
         {dragActive && (
-          <div className="absolute inset-0 rounded-lg bg-white/90 dark:bg-zinc-950/90 border-2 border-dashed border-brand-500 dark:border-brand-600 flex items-center justify-center z-10 pointer-events-none">
+          <div className="absolute inset-0 rounded-lg bg-white/90 dark:bg-zinc-950/90 border-2 border-dashed border-brand-500 dark:border-brand-accent flex items-center justify-center z-10 pointer-events-none">
             <div className="flex flex-col items-center gap-2">
-              <svg className="w-8 h-8 text-brand-500 dark:text-brand-600" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
+              <svg className="w-8 h-8 text-brand-500 dark:text-brand-accent/70" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
                 <path d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
               <p className="text-[13px] font-semibold text-brand-600 dark:text-brand-accent">Drop files to upload</p>
@@ -3424,7 +3424,7 @@ const AttachmentsSection = forwardRef<
               <path d="M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.75a1.125 1.125 0 01-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H6.75a9.06 9.06 0 011.5.124m7.5 10.376h3.375c.621 0 1.125-.504 1.125-1.125V11.25c0-4.46-3.243-8.161-7.5-8.876a9.06 9.06 0 00-1.5-.124H9.375c-.621 0-1.125.504-1.125 1.125v3.5m7.5 10.375H9.375a1.125 1.125 0 01-1.125-1.125v-9.25m12 6.625v-1.875a3.375 3.375 0 00-3.375-3.375h-1.5a1.125 1.125 0 01-1.125-1.125v-1.5a3.375 3.375 0 00-3.375-3.375H9.75" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
             <p className="text-[13px] text-slate-400 dark:text-zinc-600">No attachments yet</p>
-            <p className="text-[11px] font-medium text-brand-500 dark:text-brand-600">Click to upload · drag &amp; drop files here</p>
+            <p className="text-[11px] font-medium text-brand-500 dark:text-brand-accent/70">Click to upload · drag &amp; drop files here</p>
           </button>
         )}
 
@@ -3594,14 +3594,14 @@ const PR_STATE_LABEL: Record<DevelopmentPullRequestState, string> = {
 const PR_STATE_BADGE_CLASS: Record<DevelopmentPullRequestState, string> = {
   open: "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400",
   draft: "bg-slate-100 text-slate-500 dark:bg-zinc-800 dark:text-zinc-400",
-  merged: "bg-brand-50 text-brand-700 dark:bg-brand-500/10 dark:text-brand-accent",
+  merged: "bg-brand-50 text-brand-700 dark:bg-brand-accent/10 dark:text-brand-accent",
   closed: "bg-red-50 text-red-600 dark:bg-red-500/10 dark:text-red-400",
 };
 
 // Light — a hover tint and a visible focus ring, never a bordered/filled
 // card per row (this is a compact, scannable list, not a set of tiles).
 const DEVELOPMENT_ROW_CLASS =
-  "flex items-center gap-2.5 px-2 py-1.5 rounded-md transition-colors hover:bg-slate-50 dark:hover:bg-zinc-800/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-500/50";
+  "flex items-center gap-2.5 px-2 py-1.5 rounded-md transition-colors hover:bg-slate-50 dark:hover:bg-zinc-800/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-500/50 dark:focus-visible:ring-brand-accent/50";
 
 // Small, coherent icon set for the three group headers — plain outline
 // strokes matching every other icon already used in this file (e.g. the
@@ -4164,7 +4164,7 @@ function LogTimeModal({
                   value={hrsStr}
                   onChange={(e) => setHrsStr(e.target.value)}
                   onKeyDown={(e: KeyboardEvent<HTMLInputElement>) => { if (e.key === "Enter") handleSubmit(); }}
-                  className="bg-white dark:bg-zinc-950 text-[16px] sm:text-[13px] font-medium text-slate-800 dark:text-zinc-200 border border-slate-200 dark:border-zinc-700 rounded-md px-2 py-1 outline-none focus:border-brand-500 dark:focus:border-brand-accent focus:ring-1 focus:ring-brand-500/30 w-16 text-center"
+                  className="bg-white dark:bg-zinc-950 text-[16px] sm:text-[13px] font-medium text-slate-800 dark:text-zinc-200 border border-slate-200 dark:border-zinc-700 rounded-md px-2 py-1 outline-none focus:border-brand-500 dark:focus:border-brand-accent focus:ring-1 focus:ring-brand-500/30 w-16 text-center dark:focus:ring-brand-accent/30"
                 />
                 <span className="text-[13px] text-slate-500 dark:text-zinc-400 font-medium">h</span>
               </div>
@@ -4177,7 +4177,7 @@ function LogTimeModal({
                   value={minsStr}
                   onChange={(e) => setMinsStr(e.target.value)}
                   onKeyDown={(e: KeyboardEvent<HTMLInputElement>) => { if (e.key === "Enter") handleSubmit(); }}
-                  className="bg-white dark:bg-zinc-950 text-[16px] sm:text-[13px] font-medium text-slate-800 dark:text-zinc-200 border border-slate-200 dark:border-zinc-700 rounded-md px-2 py-1 outline-none focus:border-brand-500 dark:focus:border-brand-accent focus:ring-1 focus:ring-brand-500/30 w-16 text-center"
+                  className="bg-white dark:bg-zinc-950 text-[16px] sm:text-[13px] font-medium text-slate-800 dark:text-zinc-200 border border-slate-200 dark:border-zinc-700 rounded-md px-2 py-1 outline-none focus:border-brand-500 dark:focus:border-brand-accent focus:ring-1 focus:ring-brand-500/30 w-16 text-center dark:focus:ring-brand-accent/30"
                 />
                 <span className="text-[13px] text-slate-500 dark:text-zinc-400 font-medium">min</span>
               </div>
@@ -4214,7 +4214,7 @@ function LogTimeModal({
               className={
                 "w-full resize-none text-[16px] sm:text-[13px] font-medium text-slate-800 dark:text-zinc-200 " +
                 "bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-700 rounded-md px-2.5 py-2 outline-none " +
-                "focus:border-brand-500 dark:focus:border-brand-accent focus:ring-1 focus:ring-brand-500/30 " +
+                "focus:border-brand-500 dark:focus:border-brand-accent focus:ring-1 focus:ring-brand-500/30 dark:focus:ring-brand-accent/30 " +
                 "placeholder:text-slate-300 dark:placeholder:text-zinc-700"
               }
             />
@@ -4237,7 +4237,7 @@ function LogTimeModal({
             className={[
               "px-3.5 py-1.5 text-[13px] font-semibold rounded-lg transition-all",
               canSubmit
-                ? "bg-brand-500 hover:bg-brand-600 text-white shadow-sm shadow-brand-500/30 cursor-pointer"
+                ? "bg-brand-500 hover:bg-brand-600 text-white shadow-sm shadow-brand-500/30 cursor-pointer dark:bg-brand-accent dark:hover:bg-brand-accent-strong dark:shadow-brand-accent/30 dark:text-brand-accent-foreground"
                 : "bg-slate-100 dark:bg-zinc-800 text-slate-400 dark:text-zinc-600 cursor-not-allowed",
             ].join(" ")}
           >
@@ -4385,7 +4385,7 @@ function TimeHistoryModal({
                     className={`group flex items-start gap-3.5 py-3 ${!isLast ? "border-b border-slate-100 dark:border-zinc-800/60" : ""}`}
                   >
                     <div className="flex flex-col items-center flex-shrink-0 w-3.5 mt-0.5">
-                      <div className="w-1.5 h-1.5 rounded-full bg-brand-400 dark:bg-brand-500 ring-2 ring-white dark:ring-zinc-900" />
+                      <div className="w-1.5 h-1.5 rounded-full bg-brand-400 dark:bg-brand-accent ring-2 ring-white dark:ring-zinc-900" />
                       {!isLast && (
                         <div className="w-px flex-1 bg-slate-200 dark:bg-zinc-800 mt-1 min-h-[20px]" />
                       )}
@@ -4562,7 +4562,7 @@ function TimeTrackingSection({
             <button
               type="button"
               onClick={() => setLogModal(true)}
-              className="flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-md bg-brand-500 text-white hover:bg-brand-600 transition-colors shadow-sm shadow-brand-500/30"
+              className="flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-md bg-brand-500 text-white hover:bg-brand-600 transition-colors shadow-sm shadow-brand-500/30 dark:bg-brand-accent dark:hover:bg-brand-accent-strong dark:shadow-brand-accent/30 dark:text-brand-accent-foreground"
             >
               <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24" aria-hidden="true">
                 <path strokeLinecap="round" d="M12 4v16m8-8H4" />
@@ -4598,14 +4598,14 @@ function TimeTrackingSection({
             {isOver ? (
               <div className="absolute inset-0 flex">
                 <div
-                  className="h-full bg-brand-500 flex-shrink-0 transition-all duration-300"
+                  className="h-full bg-brand-500 flex-shrink-0 transition-all duration-300 dark:bg-brand-accent"
                   style={{ width: `${brandPct}%` }}
                 />
                 <div className="h-full bg-amber-400 flex-1 transition-all duration-300" />
               </div>
             ) : (
               <div
-                className="h-full bg-brand-500 rounded-full transition-all duration-300"
+                className="h-full bg-brand-500 rounded-full transition-all duration-300 dark:bg-brand-accent"
                 style={{ width: `${pct}%` }}
               />
             )}
@@ -5835,7 +5835,7 @@ export function TicketDetailScreen({
                     onClick={copyTicketLink}
                     aria-label="Copy link to this ticket"
                     title="Copy link to this ticket"
-                    className="flex items-center gap-1.5 font-mono text-[12px] font-semibold tracking-wider text-slate-400 dark:text-zinc-500 cursor-pointer rounded hover:text-slate-600 dark:hover:text-zinc-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/50"
+                    className="flex items-center gap-1.5 font-mono text-[12px] font-semibold tracking-wider text-slate-400 dark:text-zinc-500 cursor-pointer rounded hover:text-slate-600 dark:hover:text-zinc-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/50 dark:focus-visible:ring-brand-accent/50"
                   >
                     <TicketTypeIcon type={ticket.type} className="w-3.5 h-3.5" />
                     {getTicketDisplayKey(ticket)}
@@ -6073,7 +6073,7 @@ export function TicketDetailScreen({
                             "px-3.5 py-1.5 text-[13px] font-semibold rounded-lg transition-all",
                             isRichTextEmpty(commentDraft) || submittingComment
                               ? "bg-slate-100 dark:bg-zinc-800 text-slate-400 dark:text-zinc-600 cursor-not-allowed"
-                              : "bg-brand-500 hover:bg-brand-600 text-white shadow-sm shadow-brand-500/30 cursor-pointer",
+                              : "bg-brand-500 hover:bg-brand-600 text-white shadow-sm shadow-brand-500/30 cursor-pointer dark:bg-brand-accent dark:hover:bg-brand-accent-strong dark:shadow-brand-accent/30 dark:text-brand-accent-foreground",
                           ].join(" ")}
                         >
                           Comment

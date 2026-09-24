@@ -108,12 +108,12 @@ export function LoginScreen() {
             className={[
               "flex-shrink-0 w-4 h-4 rounded border flex items-center justify-center transition-colors",
               rememberMe
-                ? "bg-brand-600 border-brand-600 dark:bg-brand-500 dark:border-brand-500"
+                ? "bg-brand-600 border-brand-600 dark:bg-brand-accent dark:border-brand-accent"
                 : "border-slate-300 dark:border-zinc-600",
             ].join(" ")}
           >
             {rememberMe && (
-              <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+              <svg className="w-3 h-3 text-white dark:text-brand-accent-foreground" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
                 <path d="M5 12l5 5L20 7" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
             )}

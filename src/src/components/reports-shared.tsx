@@ -151,7 +151,7 @@ export function KpiCard({
       <p
         className={[
           "text-[10px] font-bold uppercase tracking-widest mb-1",
-          accent ? "text-brand-500" : "text-slate-400 dark:text-zinc-600",
+          accent ? "text-brand-500 dark:text-brand-accent" : "text-slate-400 dark:text-zinc-600",
         ].join(" ")}
       >
         {label}
@@ -171,7 +171,7 @@ export function KpiCard({
       {sub && <p className="text-xs text-slate-400 dark:text-zinc-600 mt-1">{sub}</p>}
       {progress !== undefined && (
         <div className="mt-2 h-1 rounded-full bg-slate-100 dark:bg-zinc-800 overflow-hidden">
-          <div className="h-full rounded-full bg-brand-500" style={{ width: `${progress}%` }} />
+          <div className="h-full rounded-full bg-brand-500 dark:bg-brand-accent" style={{ width: `${progress}%` }} />
         </div>
       )}
     </>
@@ -181,7 +181,7 @@ export function KpiCard({
     "rounded-xl border px-5 pt-4 shadow-sm shadow-slate-200/40 dark:shadow-black/20",
     progress !== undefined ? "pb-3" : "pb-4",
     accent
-      ? "border-brand-100 dark:border-brand-700/40 bg-brand-50/40 dark:bg-brand-500/5"
+      ? "border-brand-100 dark:border-brand-accent/40 bg-brand-50/40 dark:bg-brand-accent/5"
       : "border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900",
   ].join(" ");
 
@@ -232,7 +232,7 @@ export function BlockCompletion({ pct }: { pct: number }) {
   return (
     <span className="inline-flex items-center gap-2">
       <span className="font-mono text-[13px] leading-none select-none" aria-hidden>
-        <span className="text-brand-500">{"█".repeat(filled)}</span>
+        <span className="text-brand-500 dark:text-brand-accent">{"█".repeat(filled)}</span>
         <span className="text-slate-200 dark:text-zinc-700">{"░".repeat(empty)}</span>
       </span>
       <span className="text-xs text-slate-500 dark:text-zinc-400 tabular-nums w-8">{pct}%</span>

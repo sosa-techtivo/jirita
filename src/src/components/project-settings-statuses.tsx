@@ -190,7 +190,7 @@ function ReplaceDefaultModal({
             <button
               onClick={handleConfirm}
               disabled={submitting || !selectedId}
-              className="px-4 py-2 text-[13px] font-semibold text-white bg-brand-600 hover:bg-brand-700 rounded-lg transition-colors disabled:opacity-50"
+              className="px-4 py-2 text-[13px] font-semibold text-white bg-brand-600 hover:bg-brand-700 rounded-lg transition-colors disabled:opacity-50 dark:bg-brand-accent dark:hover:bg-brand-accent-strong dark:text-brand-accent-foreground"
             >
               {submitting ? "Saving…" : "Move to Closed"}
             </button>
@@ -447,7 +447,7 @@ function AddStatusRow({ groupType, onAdd }: { groupType: "open" | "closed"; onAd
       <button
         type="button"
         onClick={commit}
-        className="text-[12px] font-semibold text-white bg-brand-600 hover:bg-brand-700 rounded-md px-2.5 py-1 transition-colors"
+        className="text-[12px] font-semibold text-white bg-brand-600 hover:bg-brand-700 rounded-md px-2.5 py-1 transition-colors dark:bg-brand-accent dark:hover:bg-brand-accent-strong dark:text-brand-accent-foreground"
       >
         Add
       </button>

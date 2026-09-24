@@ -11,7 +11,7 @@ import type { Editor } from "@tiptap/react";
 const BTN =
   "p-1.5 rounded-md text-slate-400 dark:text-zinc-600 hover:text-slate-700 dark:hover:text-zinc-200 " +
   "hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent";
-const BTN_ACTIVE = "text-brand-600 dark:text-brand-accent bg-brand-50 dark:bg-brand-500/10";
+const BTN_ACTIVE = "text-brand-600 dark:text-brand-accent bg-brand-50 dark:bg-brand-accent/10";
 
 function ToolbarButton({
   active,
@@ -121,7 +121,7 @@ function SwatchPopover({
               }}
               className={
                 "w-5 h-5 rounded-full flex-shrink-0 border transition-transform hover:scale-110 " +
-                (activeValue === s.value ? "border-brand-500 dark:border-brand-accent ring-1 ring-brand-500/50" : "border-slate-200 dark:border-zinc-700")
+                (activeValue === s.value ? "border-brand-500 dark:border-brand-accent ring-1 ring-brand-500/50 dark:ring-brand-accent/50" : "border-slate-200 dark:border-zinc-700")
               }
               style={{ background: s.value ?? "repeating-conic-gradient(#cbd5e1 0% 25%, transparent 0% 50%) 50% / 8px 8px" }}
             />

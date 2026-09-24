@@ -205,7 +205,7 @@ function AssigneeWorkload({ tickets }: { tickets: Ticket[] }) {
             </div>
             <div className="h-1.5 w-full rounded-full bg-slate-100 dark:bg-zinc-800 overflow-hidden">
               <div
-                className="h-full rounded-full bg-brand-500 dark:bg-brand-500 transition-all duration-500"
+                className="h-full rounded-full bg-brand-500 dark:bg-brand-accent transition-all duration-500"
                 style={{ width: `${(count / max) * 100}%` }}
               />
             </div>
@@ -269,7 +269,7 @@ function MilestoneProgress({ tickets }: { tickets: Ticket[] }) {
         {milestones.map(({ name, done, total, pct }) => {
           const barColor = pct === 100 ? "bg-emerald-400 dark:bg-emerald-500"
             : pct >= 50 ? "bg-amber-400 dark:bg-amber-500"
-            : "bg-brand-500 dark:bg-brand-500";
+            : "bg-brand-500 dark:bg-brand-accent";
           return (
             <div key={name} className="space-y-1.5">
               <div className="flex items-center justify-between gap-2">

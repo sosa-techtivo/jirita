@@ -68,7 +68,7 @@ function formatDueDate(iso: string): string {
 const INPUT =
   "w-full bg-white dark:bg-zinc-900 text-[16px] sm:text-[13px] font-medium text-slate-800 dark:text-zinc-200 " +
   "border border-slate-200 dark:border-zinc-700 rounded-lg px-3 py-2 outline-none " +
-  "focus:border-brand-500 dark:focus:border-brand-accent focus:ring-2 focus:ring-brand-500/20 " +
+  "focus:border-brand-500 dark:focus:border-brand-accent focus:ring-2 focus:ring-brand-500/20 dark:focus:ring-brand-accent/20 " +
   "placeholder:text-slate-300 dark:placeholder:text-zinc-600 transition-colors";
 
 const FIELD_LABEL =
@@ -247,7 +247,7 @@ function LabelPicker({
             key={l}
             type="button"
             onClick={() => onToggle(l)}
-            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-brand-500 dark:bg-brand-600 text-white hover:bg-brand-600 dark:hover:bg-brand-700 transition-colors"
+            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-brand-500 dark:bg-brand-accent text-white hover:bg-brand-600 dark:hover:bg-brand-accent-strong transition-colors dark:text-brand-accent-foreground"
           >
             {l}
             <svg className="w-2.5 h-2.5 opacity-70" fill="none" stroke="currentColor" strokeWidth="3" viewBox="0 0 24 24">
@@ -313,12 +313,12 @@ function LabelPicker({
                       className={
                         "w-3.5 h-3.5 rounded border flex-shrink-0 flex items-center justify-center transition-colors " +
                         (isSelected
-                          ? "bg-brand-500 border-brand-500"
+                          ? "bg-brand-500 border-brand-500 dark:bg-brand-accent dark:border-brand-accent"
                           : "border-slate-300 dark:border-zinc-600")
                       }
                     >
                       {isSelected && (
-                        <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" strokeWidth="3" viewBox="0 0 24 24">
+                        <svg className="w-2.5 h-2.5 text-white dark:text-brand-accent-foreground" fill="none" stroke="currentColor" strokeWidth="3" viewBox="0 0 24 24">
                           <path d="M20 6L9 17l-5-5" strokeLinecap="round" strokeLinejoin="round" />
                         </svg>
                       )}
@@ -847,9 +847,9 @@ export function NewTicketModal({
           {/* Drag-over overlay — covers the whole modal, since a file can be
               dropped anywhere over it, not just on the Attachments field. */}
           {dragActive && (
-            <div className="absolute inset-0 z-10 rounded-2xl bg-white/90 dark:bg-zinc-950/90 border-2 border-dashed border-brand-500 dark:border-brand-600 flex items-center justify-center pointer-events-none">
+            <div className="absolute inset-0 z-10 rounded-2xl bg-white/90 dark:bg-zinc-950/90 border-2 border-dashed border-brand-500 dark:border-brand-accent flex items-center justify-center pointer-events-none">
               <div className="flex flex-col items-center gap-2">
-                <svg className="w-8 h-8 text-brand-500 dark:text-brand-600" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
+                <svg className="w-8 h-8 text-brand-500 dark:text-brand-accent/70" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
                   <path d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
                 <p className="text-[13px] font-semibold text-brand-600 dark:text-brand-accent">Drop files to attach</p>
@@ -1126,7 +1126,7 @@ export function NewTicketModal({
               className={
                 "inline-flex items-center gap-2 px-6 py-2.5 text-[13px] font-semibold rounded-lg transition-all " +
                 (canSubmit
-                  ? "bg-brand-600 hover:bg-brand-700 dark:bg-brand-accent dark:text-brand-accent-foreground dark:hover:bg-brand-accent-strong dark:focus-visible:outline-2 dark:focus-visible:outline-offset-2 dark:focus-visible:outline-brand-accent text-white shadow-md shadow-brand-600/25 dark:shadow-brand-accent/20 hover:shadow-lg hover:shadow-brand-600/30"
+                  ? "bg-brand-600 hover:bg-brand-700 dark:bg-brand-accent dark:text-brand-accent-foreground dark:hover:bg-brand-accent-strong dark:focus-visible:outline-2 dark:focus-visible:outline-offset-2 dark:focus-visible:outline-brand-accent text-white shadow-md shadow-brand-600/25 dark:shadow-brand-accent/20 hover:shadow-lg hover:shadow-brand-600/30 dark:hover:shadow-brand-accent/30"
                   : "bg-slate-100 dark:bg-zinc-800 text-slate-400 dark:text-zinc-600 cursor-not-allowed")
               }
             >

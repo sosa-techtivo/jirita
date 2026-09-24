@@ -145,7 +145,7 @@ function TodayLine({ pct }: { pct: number }) {
   if (pct < 0 || pct > 100) return null;
   return (
     <div
-      className="absolute inset-y-0 w-0.5 bg-brand-600/80 dark:bg-brand-500/80 pointer-events-none z-10"
+      className="absolute inset-y-0 w-0.5 bg-brand-600/80 dark:bg-brand-accent/80 pointer-events-none z-10"
       style={{ left: `${pct}%` }}
     />
   );
@@ -252,10 +252,10 @@ export function TimelineView({
                   className="absolute top-0 bottom-0 z-20 flex flex-col items-center"
                   style={{ left: `${todayPct}%` }}
                 >
-                  <div className="mt-2 -translate-x-1/2 px-1.5 py-0.5 rounded-full bg-brand-600 dark:bg-brand-500 text-[9px] font-bold text-white whitespace-nowrap shadow-sm shadow-brand-600/30">
+                  <div className="mt-2 -translate-x-1/2 px-1.5 py-0.5 rounded-full bg-brand-600 dark:bg-brand-accent text-[9px] font-bold text-white whitespace-nowrap shadow-sm shadow-brand-600/30 dark:shadow-brand-accent/30 dark:text-brand-accent-foreground">
                     Today
                   </div>
-                  <div className="flex-1 w-0.5 bg-brand-600/80 dark:bg-brand-500/80" />
+                  <div className="flex-1 w-0.5 bg-brand-600/80 dark:bg-brand-accent/80" />
                 </div>
               )}
             </div>

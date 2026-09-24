@@ -504,7 +504,7 @@ export function PeriodSelector({
                 type="date"
                 value={draftRange.from}
                 onChange={(e) => setDraftRange((r) => ({ ...r, from: e.target.value }))}
-                className="w-full text-[16px] sm:text-sm bg-slate-50 dark:bg-zinc-800 text-slate-800 dark:text-zinc-100 rounded-md border border-slate-200 dark:border-zinc-700 px-2.5 py-1.5 outline-none focus:ring-2 focus:ring-brand-500/30 transition-colors"
+                className="w-full text-[16px] sm:text-sm bg-slate-50 dark:bg-zinc-800 text-slate-800 dark:text-zinc-100 rounded-md border border-slate-200 dark:border-zinc-700 px-2.5 py-1.5 outline-none focus:ring-2 focus:ring-brand-500/30 transition-colors dark:focus:ring-brand-accent/30"
               />
             </label>
             <label className="block">
@@ -513,7 +513,7 @@ export function PeriodSelector({
                 type="date"
                 value={draftRange.to}
                 onChange={(e) => setDraftRange((r) => ({ ...r, to: e.target.value }))}
-                className="w-full text-[16px] sm:text-sm bg-slate-50 dark:bg-zinc-800 text-slate-800 dark:text-zinc-100 rounded-md border border-slate-200 dark:border-zinc-700 px-2.5 py-1.5 outline-none focus:ring-2 focus:ring-brand-500/30 transition-colors"
+                className="w-full text-[16px] sm:text-sm bg-slate-50 dark:bg-zinc-800 text-slate-800 dark:text-zinc-100 rounded-md border border-slate-200 dark:border-zinc-700 px-2.5 py-1.5 outline-none focus:ring-2 focus:ring-brand-500/30 transition-colors dark:focus:ring-brand-accent/30"
               />
             </label>
           </div>
@@ -528,7 +528,7 @@ export function PeriodSelector({
             <button
               type="button"
               onClick={applyCustomRange}
-              className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-brand-500 hover:bg-brand-600 text-white transition-colors shadow-sm shadow-brand-500/30"
+              className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-brand-500 hover:bg-brand-600 text-white transition-colors shadow-sm shadow-brand-500/30 dark:bg-brand-accent dark:hover:bg-brand-accent-strong dark:shadow-brand-accent/30 dark:text-brand-accent-foreground"
             >
               Apply
             </button>
@@ -1911,7 +1911,7 @@ export function HoursReportEntryCard() {
         </p>
         <Link
           href="/reports/hours"
-          className="inline-flex items-center gap-1.5 text-xs font-semibold px-3.5 py-2 rounded-lg bg-brand-500 hover:bg-brand-600 text-white transition-colors shadow-sm shadow-brand-500/30 cursor-pointer flex-shrink-0"
+          className="inline-flex items-center gap-1.5 text-xs font-semibold px-3.5 py-2 rounded-lg bg-brand-500 hover:bg-brand-600 text-white transition-colors shadow-sm shadow-brand-500/30 cursor-pointer flex-shrink-0 dark:bg-brand-accent dark:hover:bg-brand-accent-strong dark:shadow-brand-accent/30 dark:text-brand-accent-foreground"
         >
           View Report
           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
@@ -2567,8 +2567,8 @@ function AdminReportsScreen() {
                 <>
                   {kpiSummary.loggedHours}
                   <span className="text-base font-medium ml-0.5">h</span>
-                  <span className="text-sm font-normal text-brand-400 dark:text-brand-600 mx-1.5">/</span>
-                  <span className="text-lg font-semibold text-brand-400 dark:text-brand-600">
+                  <span className="text-sm font-normal text-brand-400 dark:text-brand-accent/70 mx-1.5">/</span>
+                  <span className="text-lg font-semibold text-brand-400 dark:text-brand-accent/70">
                     {kpiSummary.estimatedHours}h
                   </span>
                 </>
@@ -2787,7 +2787,7 @@ function AdminReportsScreen() {
                     >
                       <td className="py-2.5 pr-4">
                         <div className="flex items-center gap-2">
-                          <span className="w-6 h-6 rounded-md bg-slate-100 dark:bg-zinc-800 text-[9px] font-bold text-slate-500 dark:text-zinc-400 flex items-center justify-center flex-shrink-0 transition-colors duration-150 group-hover:bg-brand-50 group-hover:text-brand-600 dark:group-hover:bg-brand-500/10 dark:group-hover:text-brand-accent">
+                          <span className="w-6 h-6 rounded-md bg-slate-100 dark:bg-zinc-800 text-[9px] font-bold text-slate-500 dark:text-zinc-400 flex items-center justify-center flex-shrink-0 transition-colors duration-150 group-hover:bg-brand-50 group-hover:text-brand-600 dark:group-hover:bg-brand-accent/10 dark:group-hover:text-brand-accent">
                             {row.shortName}
                           </span>
                           <span className="font-medium text-slate-800 dark:text-zinc-200 truncate group-hover:text-brand-700 dark:group-hover:text-brand-accent transition-colors duration-150">
@@ -2878,7 +2878,7 @@ function AdminReportsScreen() {
                   const barColor  =
                     entry.utilizationPct > 100 ? "bg-red-400" :
                     entry.utilizationPct >= 80 ? "bg-amber-400" :
-                                                 "bg-brand-500";
+                                                 "bg-brand-500 dark:bg-brand-accent";
                   const pctColor  =
                     entry.utilizationPct > 100 ? "text-red-600 dark:text-red-400" :
                     entry.utilizationPct >= 80 ? "text-amber-600 dark:text-amber-400" :
@@ -2938,7 +2938,7 @@ function AdminReportsScreen() {
                 heavy
               </span>
               <span className="flex items-center gap-1">
-                <span className="w-2 h-2 rounded-full bg-brand-500 flex-shrink-0" />
+                <span className="w-2 h-2 rounded-full bg-brand-500 flex-shrink-0 dark:bg-brand-accent" />
                 normal
               </span>
             </p>

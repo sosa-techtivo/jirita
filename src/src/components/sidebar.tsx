@@ -147,7 +147,7 @@ function SidebarSectionHeader({
         type="button"
         onClick={onToggle}
         aria-expanded={open}
-        className="flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500 hover:text-slate-700 dark:text-zinc-400 dark:hover:text-zinc-200 rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40"
+        className="flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500 hover:text-slate-700 dark:text-zinc-400 dark:hover:text-zinc-200 rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40 dark:focus-visible:ring-brand-accent/40"
       >
         <svg
           className={`w-3 h-3 flex-shrink-0 transition-transform ${open ? "rotate-0" : "-rotate-90"}`}
@@ -196,7 +196,7 @@ function FavoriteStarButton({
       aria-label={favorite ? "Remove from favorites" : "Add to favorites"}
       title={favorite ? "Remove from favorites" : "Add to favorites"}
       className={[
-        "flex-shrink-0 p-1 mr-1 rounded transition-opacity focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40",
+        "flex-shrink-0 p-1 mr-1 rounded transition-opacity focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40 dark:focus-visible:ring-brand-accent/40",
         favorite
           ? "text-amber-500 dark:text-amber-400"
           : "text-slate-300 hover:text-amber-500 dark:text-zinc-600 dark:hover:text-amber-400",
