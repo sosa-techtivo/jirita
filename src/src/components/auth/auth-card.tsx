@@ -31,15 +31,25 @@ export function AuthCard({
         }
       >
         <div className="flex flex-col items-center mb-6">
+          {/* Light/Dark logo variants (JIR-97): CSS-only swap via the `dark` class
+              next-themes sets before first paint — same size, no layout shift. */}
           <Image
             src="/img/jirita-logo.png"
             alt="Jirita"
             width={217}
             height={47}
-            className="h-8 w-auto"
+            className="h-8 w-auto dark:hidden"
             priority
           />
-          <p className="mt-2 text-[11px] font-semibold uppercase tracking-wide text-brand-600/70 dark:text-brand-400/80">
+          <Image
+            src="/img/jirita-logo2.png"
+            alt="Jirita"
+            width={217}
+            height={47}
+            className="hidden h-8 w-auto dark:inline"
+            priority
+          />
+          <p className="mt-2 text-[11px] font-semibold uppercase tracking-wide text-brand-600/70 dark:text-brand-accent/80">
             Jirita
           </p>
         </div>

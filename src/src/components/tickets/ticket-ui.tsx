@@ -123,7 +123,7 @@ export const EDIT_BTN =
 export const INPUT_BASE =
   "bg-white dark:bg-zinc-950 text-[16px] sm:text-[13px] font-medium text-slate-800 dark:text-zinc-200 " +
   "border border-slate-200 dark:border-zinc-700 rounded-md px-2 py-1 outline-none " +
-  "focus:border-brand-500 dark:focus:border-brand-500 focus:ring-1 focus:ring-brand-500/30 w-full";
+  "focus:border-brand-500 dark:focus:border-brand-accent focus:ring-1 focus:ring-brand-500/30 w-full";
 
 export function PencilIcon({ className }: { className?: string }) {
   return (
@@ -503,7 +503,7 @@ export function TicketTypeSelect({
 
   const defaultTrigger =
     "group inline-flex items-center gap-1.5 text-[13px] font-medium text-slate-800 dark:text-zinc-200 " +
-    "hover:text-brand-600 dark:hover:text-brand-400 transition-colors cursor-pointer";
+    "hover:text-brand-600 dark:hover:text-brand-accent transition-colors cursor-pointer";
 
   return (
     <div ref={rootRef} className="relative inline-block">
@@ -543,7 +543,7 @@ export function TicketTypeSelect({
             className={[
               "w-full flex items-center gap-2 px-2.5 py-1.5 text-[13px] text-left transition-colors",
               k === value
-                ? "text-brand-700 dark:text-brand-400 bg-brand-50/60 dark:bg-brand-500/10 font-medium"
+                ? "text-brand-700 dark:text-brand-accent bg-brand-50/60 dark:bg-brand-500/10 font-medium"
                 : "text-slate-700 dark:text-zinc-300 hover:bg-slate-50 dark:hover:bg-zinc-800/60",
             ].join(" ")}
           >

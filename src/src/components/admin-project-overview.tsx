@@ -234,7 +234,7 @@ export function TicketRow({
         </span>
         <span className="text-sm text-slate-800 dark:text-zinc-200 truncate">{ticket.title}</span>
         {highlighted && (
-          <span className="text-[10px] font-semibold text-brand-600 dark:text-brand-400 bg-brand-100 dark:bg-brand-500/20 px-1.5 py-0.5 rounded-full flex-shrink-0">
+          <span className="text-[10px] font-semibold text-brand-600 dark:text-brand-accent bg-brand-100 dark:bg-brand-500/20 px-1.5 py-0.5 rounded-full flex-shrink-0">
             Just created
           </span>
         )}
@@ -335,7 +335,7 @@ export function NewWorkSection({
       {hasMore && (
         <Link
           href={`/projects/${slug}/tickets`}
-          className="mt-3 inline-block text-xs font-medium text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300"
+          className="mt-3 inline-block text-xs font-medium text-brand-600 hover:text-brand-700 dark:text-brand-accent dark:hover:text-brand-accent-soft"
         >
           View all {tickets.length} tickets →
         </Link>
@@ -712,7 +712,7 @@ export function AdminProjectOverview({ slug = "mobile-banking-app" }: { slug?: s
           <button
             type="button"
             onClick={runFetch}
-            className="mt-5 text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3.5 py-2 shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-500 dark:hover:bg-brand-600 dark:shadow-brand-500/20"
+            className="mt-5 text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3.5 py-2 shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-accent dark:text-brand-accent-foreground dark:hover:bg-brand-accent-strong dark:focus-visible:outline-2 dark:focus-visible:outline-offset-2 dark:focus-visible:outline-brand-accent dark:shadow-brand-accent/20"
           >
             Retry
           </button>
@@ -877,7 +877,7 @@ export function AdminProjectOverview({ slug = "mobile-banking-app" }: { slug?: s
           <div className="flex items-center gap-2 flex-shrink-0">
             <button
               onClick={() => setShowNewTicket(true)}
-              className="text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3.5 py-2 shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-500 dark:hover:bg-brand-600 dark:shadow-brand-500/20"
+              className="text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3.5 py-2 shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-accent dark:text-brand-accent-foreground dark:hover:bg-brand-accent-strong dark:focus-visible:outline-2 dark:focus-visible:outline-offset-2 dark:focus-visible:outline-brand-accent dark:shadow-brand-accent/20"
             >
               + New Ticket
             </button>
@@ -935,14 +935,14 @@ export function AdminProjectOverview({ slug = "mobile-banking-app" }: { slug?: s
           <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600">Open Tickets</p>
           <p className="text-2xl font-bold text-slate-900 dark:text-zinc-50 mt-1 leading-none">{openTickets.length}</p>
         </div>
-        <div className="sm:flex-1 bg-brand-50/30 dark:bg-brand-950/10 px-4 sm:px-5 py-3 sm:py-4">
-          <p className="text-[10px] font-bold uppercase tracking-widest text-brand-500 dark:text-brand-400">Progress</p>
-          <p className="text-2xl font-bold text-brand-700 dark:text-brand-300 mt-1 leading-none">
+        <div className="sm:flex-1 bg-brand-50/30 dark:bg-brand-accent/5 px-4 sm:px-5 py-3 sm:py-4">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-brand-500 dark:text-brand-accent">Progress</p>
+          <p className="text-2xl font-bold text-brand-700 dark:text-brand-accent-soft mt-1 leading-none">
             {progressPct}
-            <span className="text-base font-medium text-brand-400 dark:text-brand-500 ml-0.5">%</span>
+            <span className="text-base font-medium text-brand-400 dark:text-brand-accent ml-0.5">%</span>
           </p>
           <div className="mt-2 h-1 rounded-full bg-brand-100/60 dark:bg-zinc-800 overflow-hidden">
-            <div className="h-full rounded-full bg-brand-500 transition-all duration-500" style={{ width: `${progressPct}%` }} />
+            <div className="h-full rounded-full bg-brand-500 dark:bg-brand-accent transition-all duration-500" style={{ width: `${progressPct}%` }} />
           </div>
         </div>
         <div className="sm:flex-1 bg-white dark:bg-zinc-900 px-4 sm:px-5 py-3 sm:py-4">
@@ -982,7 +982,7 @@ export function AdminProjectOverview({ slug = "mobile-banking-app" }: { slug?: s
               <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-zinc-400">Active Work</h2>
               <Link
                 href={`/projects/${slug}/tickets`}
-                className="text-xs font-medium text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300"
+                className="text-xs font-medium text-brand-600 hover:text-brand-700 dark:text-brand-accent dark:hover:text-brand-accent-soft"
               >
                 View all {openTickets.length} tickets →
               </Link>
@@ -1061,7 +1061,7 @@ export function AdminProjectOverview({ slug = "mobile-banking-app" }: { slug?: s
             {hasMoreActivity && (
               <Link
                 href={`/projects/${slug}/activity`}
-                className="mt-4 inline-block text-xs font-medium text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300"
+                className="mt-4 inline-block text-xs font-medium text-brand-600 hover:text-brand-700 dark:text-brand-accent dark:hover:text-brand-accent-soft"
               >
                 View all activity →
               </Link>
@@ -1080,7 +1080,7 @@ export function AdminProjectOverview({ slug = "mobile-banking-app" }: { slug?: s
               {canManageProject && (
                 <Link
                   href={`/projects/${slug}/team`}
-                  className="text-xs font-medium text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300 flex-shrink-0"
+                  className="text-xs font-medium text-brand-600 hover:text-brand-700 dark:text-brand-accent dark:hover:text-brand-accent-soft flex-shrink-0"
                 >
                   View all →
                 </Link>

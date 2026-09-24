@@ -261,15 +261,15 @@ function ProjectNavItem({
 
   const subLinkClass = (section: typeof activeSection) =>
     section === activeSection
-      ? "block px-2 py-1 rounded-md bg-white text-brand-700 font-semibold text-[13px] shadow-sm shadow-slate-100 dark:bg-zinc-800 dark:text-brand-400"
+      ? "block px-2 py-1 rounded-md bg-white text-brand-700 font-semibold text-[13px] shadow-sm shadow-slate-100 dark:bg-brand-accent/10 dark:shadow-none dark:ring-1 dark:ring-inset dark:ring-brand-accent/30 dark:text-brand-accent"
       : "block px-2 py-1 rounded-md text-slate-500 hover:bg-white text-[13px] dark:text-zinc-500 dark:hover:bg-zinc-800/60";
 
   return (
-    <div className="group rounded-md bg-brand-50 dark:bg-brand-500/10 ring-1 ring-brand-100 dark:ring-brand-500/20">
+    <div className="group rounded-md bg-brand-50 dark:bg-brand-accent/8 ring-1 ring-brand-100 dark:ring-brand-accent/20">
       <div className="flex items-center">
         <Link
           href={`/projects/${project.slug}`}
-          className="flex-1 min-w-0 flex items-center gap-2 px-2 py-1.5 text-brand-700 font-semibold dark:text-brand-400"
+          className="flex-1 min-w-0 flex items-center gap-2 px-2 py-1.5 text-brand-700 font-semibold dark:text-brand-accent"
         >
           <span className={`w-1.5 h-1.5 rounded-full ${dot} flex-shrink-0`} />
           <span className="truncate">{project.name}</span>
@@ -614,15 +614,25 @@ export function Sidebar({
     <>
     <aside className="hidden md:flex w-60 flex-shrink-0 border-r border-slate-200 bg-white flex-col overflow-hidden dark:border-zinc-700/60 dark:bg-zinc-950">
       <div className="px-4 py-3 border-b border-slate-100 dark:border-zinc-800">
+        {/* Light/Dark logo variants (JIR-97): CSS-only swap via the `dark` class
+            next-themes sets before first paint — same size, no layout shift. */}
         <Image
           src="/img/jirita-logo.png"
           alt="Techtivo"
           width={217}
           height={47}
-          className="h-5 w-auto"
+          className="h-5 w-auto dark:hidden"
           priority
         />
-        <p className="mt-1.5 text-[11px] font-semibold uppercase tracking-wide text-brand-600/70 leading-none dark:text-brand-400/80">
+        <Image
+          src="/img/jirita-logo2.png"
+          alt="Techtivo"
+          width={217}
+          height={47}
+          className="hidden h-5 w-auto dark:inline"
+          priority
+        />
+        <p className="mt-1.5 text-[11px] font-semibold uppercase tracking-wide text-brand-600/70 leading-none dark:text-brand-accent/80">
           Jirita
         </p>
       </div>
@@ -776,7 +786,7 @@ export function Sidebar({
               className={[
                 "flex items-center gap-2.5 px-2.5 py-1.5 rounded-md",
                 active
-                  ? "bg-brand-50 text-brand-700 font-medium dark:bg-brand-500/10 dark:text-brand-400"
+                  ? "bg-brand-50 text-brand-700 font-medium dark:bg-brand-accent/10 dark:text-brand-accent"
                   : "text-slate-600 hover:bg-slate-100 dark:text-zinc-400 dark:hover:bg-zinc-900",
               ].join(" ")}
             >

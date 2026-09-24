@@ -1,7 +1,7 @@
 export const TAG_OPTIONS = ["Decision", "Meeting Notes", "Links", "Compliance", "General"];
 
 export const TAG_CLASS: Record<string, string> = {
-  Decision: "bg-brand-50 text-brand-700 dark:bg-brand-500/10 dark:text-brand-400",
+  Decision: "bg-brand-50 text-brand-700 dark:bg-brand-500/10 dark:text-brand-accent",
   "Meeting Notes": "bg-violet-50 text-violet-700 dark:bg-violet-500/10 dark:text-violet-400",
   Links: "bg-sky-50 text-sky-700 dark:bg-sky-500/10 dark:text-sky-400",
   Compliance: "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400",
@@ -25,7 +25,7 @@ export function TagBadge({ tag }: { tag: string }) {
 export const INPUT =
   "w-full bg-white dark:bg-zinc-900 text-[16px] sm:text-[13px] font-medium text-slate-800 dark:text-zinc-200 " +
   "border border-slate-200 dark:border-zinc-700 rounded-lg px-3 py-2 outline-none " +
-  "focus:border-brand-500 dark:focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 " +
+  "focus:border-brand-500 dark:focus:border-brand-accent focus:ring-2 focus:ring-brand-500/20 " +
   "placeholder:text-slate-300 dark:placeholder:text-zinc-600 transition-colors";
 
 export const FIELD_LABEL =

@@ -1159,7 +1159,7 @@ export function ProjectLeadDashboard() {
         title="Team Capacity"
         count={teamCapacity.length}
         action={
-          <Link href={projectHref("team")} className="text-[11px] font-medium text-brand-600 dark:text-brand-400 hover:underline">
+          <Link href={projectHref("team")} className="text-[11px] font-medium text-brand-600 dark:text-brand-accent hover:underline">
             View team →
           </Link>
         }
@@ -1195,7 +1195,7 @@ export function ProjectLeadDashboard() {
           title="Project Work"
           count={myActiveWork.length}
           action={
-            <Link href="/my-work" className="text-[11px] font-medium text-brand-600 dark:text-brand-400 hover:underline">
+            <Link href="/my-work" className="text-[11px] font-medium text-brand-600 dark:text-brand-accent hover:underline">
               View all →
             </Link>
           }

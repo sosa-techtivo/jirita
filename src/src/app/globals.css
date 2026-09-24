@@ -24,6 +24,18 @@
   --color-brand-500: #6655ee;
   --color-brand-600: #5644dd;
   --color-brand-700: #4736bb;
+
+  /* Dark Mode accent (JIR-97) — used only behind `dark:` variants, so Light
+     Mode is untouched. brand-500/600 are too dark to read on the near-black
+     surfaces; this is the magenta accent for dark-mode text, icons, links,
+     selected/focus borders, and (at low opacity) tinted selected surfaces. Solid brand buttons and subtle tinted
+     backgrounds keep brand-500/600. */
+  --color-brand-accent: #f472b6;
+  --color-brand-accent-soft: #f9a8d4;
+  /* Dark Mode primary CTA (solid accent button): hover shade + the dark
+     foreground used on it (white on #f472b6 is too low-contrast). */
+  --color-brand-accent-strong: #ec4899;
+  --color-brand-accent-foreground: #0d0e12;
 }
 
 body {
@@ -232,7 +244,7 @@ body {
 }
 
 .dark .jirita-rich-text a {
-  color: var(--color-brand-500, #6655ee);
+  color: var(--color-brand-accent);
 }
 
 .jirita-rich-text mark {
@@ -256,7 +268,7 @@ body {
 }
 
 .dark .jirita-rich-text .mention {
-  color: var(--color-brand-500, #6655ee);
+  color: var(--color-brand-accent);
   background: rgba(102, 85, 238, 0.16);
 }
 

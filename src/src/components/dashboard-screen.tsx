@@ -262,7 +262,7 @@ function DashKpiCard({
     // others. Accent cards keep their light-mode tint but, in dark
     // mode, only add a faint violet ring as emphasis instead of a
     // brighter background (brand-300/400/900/950 aren't defined in the
-    // theme, so the old `dark:bg-brand-950/15` etc. silently fell back
+    // theme, so the old `dark:bg-brand-accent/5` etc. silently fell back
     // to the *light* class, which is why this card looked washed out).
     accent
       ? "border-brand-100 bg-brand-50/40 dark:border-zinc-700/70 dark:bg-zinc-900 dark:ring-1 dark:ring-inset dark:ring-violet-500/15"
@@ -1064,7 +1064,7 @@ function AdminDashboard() {
           <button
             type="button"
             onClick={runFetch}
-            className="mt-5 text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3.5 py-2 shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-500 dark:hover:bg-brand-600 dark:shadow-brand-500/20"
+            className="mt-5 text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3.5 py-2 shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-accent dark:text-brand-accent-foreground dark:hover:bg-brand-accent-strong dark:focus-visible:outline-2 dark:focus-visible:outline-offset-2 dark:focus-visible:outline-brand-accent dark:shadow-brand-accent/20"
           >
             Retry
           </button>
@@ -1187,7 +1187,7 @@ function AdminDashboard() {
             title="My Active Work"
             count={myActiveWork.length}
             action={
-              <Link href="/my-work" className="text-[11px] font-medium text-brand-600 dark:text-brand-400 hover:underline">
+              <Link href="/my-work" className="text-[11px] font-medium text-brand-600 dark:text-brand-accent hover:underline">
                 View all →
               </Link>
             }
@@ -1207,7 +1207,7 @@ function AdminDashboard() {
             title="Recent Activity"
             action={
               hasMoreActivity ? (
-                <Link href="/activity" className="text-[11px] font-medium text-brand-600 dark:text-brand-400 hover:underline">
+                <Link href="/activity" className="text-[11px] font-medium text-brand-600 dark:text-brand-accent hover:underline">
                   View all activity →
                 </Link>
               ) : undefined
@@ -1229,7 +1229,7 @@ function AdminDashboard() {
             title="Projects at Risk"
             count={projectsAtRisk.length}
             action={
-              <Link href="/reports" className="text-[11px] font-medium text-brand-600 dark:text-brand-400 hover:underline">
+              <Link href="/reports" className="text-[11px] font-medium text-brand-600 dark:text-brand-accent hover:underline">
                 Full report →
               </Link>
             }
@@ -1277,7 +1277,7 @@ function AdminDashboard() {
           <Card
             title="Team Workload"
             action={
-              <Link href="/reports" className="text-[11px] font-medium text-brand-600 dark:text-brand-400 hover:underline">
+              <Link href="/reports" className="text-[11px] font-medium text-brand-600 dark:text-brand-accent hover:underline">
                 Details →
               </Link>
             }

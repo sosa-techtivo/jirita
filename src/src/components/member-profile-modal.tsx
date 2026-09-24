@@ -406,7 +406,7 @@ export function MemberProfileModal({
                       className={[
                         "pb-2.5 text-[13px] font-medium border-b-2 -mb-px transition-colors",
                         activeTab === tab.key
-                          ? "text-brand-600 border-brand-500 dark:text-brand-400 dark:border-brand-400"
+                          ? "text-brand-600 border-brand-500 dark:text-brand-accent dark:border-brand-accent"
                           : "text-slate-500 border-transparent hover:text-slate-700 dark:text-zinc-500 dark:hover:text-zinc-300",
                       ].join(" ")}
                     >
@@ -859,7 +859,7 @@ function ProjectsTabContent({ user }: { user: User }) {
           <div key={slug} className="px-4 py-3">
             <Link
               href={`/projects/${slug}`}
-              className="text-[13px] font-medium text-brand-600 dark:text-brand-400 hover:underline truncate block"
+              className="text-[13px] font-medium text-brand-600 dark:text-brand-accent hover:underline truncate block"
             >
               {project?.name ?? slug}
             </Link>
@@ -888,7 +888,7 @@ function PermissionsTabContent({ user }: { user: User }) {
     <div>
       <div className="flex items-center gap-3 p-4 rounded-xl border border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900">
         <div className="w-9 h-9 rounded-xl bg-brand-50 dark:bg-brand-500/10 flex items-center justify-center flex-shrink-0">
-          <svg className="w-4.5 h-4.5 text-brand-600 dark:text-brand-400" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
+          <svg className="w-4.5 h-4.5 text-brand-600 dark:text-brand-accent" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
             <path d="M12 2l8 4v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6l8-4z" />
           </svg>
         </div>
@@ -985,7 +985,7 @@ function SecurityTabContent({ user }: { user: User }) {
             type="button"
             onClick={handleGenerateResetLink}
             disabled={generating}
-            className="flex-shrink-0 text-[13px] font-medium text-brand-600 dark:text-brand-400 border border-brand-200 dark:border-brand-500/30 px-3 py-1.5 rounded-lg hover:bg-brand-50 dark:hover:bg-brand-500/5 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+            className="flex-shrink-0 text-[13px] font-medium text-brand-600 dark:text-brand-accent border border-brand-200 dark:border-brand-500/30 px-3 py-1.5 rounded-lg hover:bg-brand-50 dark:hover:bg-brand-500/5 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
           >
             {generating ? "Generating…" : "Generate Reset Link"}
           </button>
@@ -1081,7 +1081,7 @@ const ACTIVITY_ICON: Record<ActivityKind, ReactNode> = {
     </ActivityIconBadge>
   ),
   roleChanged: (
-    <ActivityIconBadge className="bg-brand-50 dark:bg-brand-500/10 text-brand-600 dark:text-brand-400">
+    <ActivityIconBadge className="bg-brand-50 dark:bg-brand-500/10 text-brand-600 dark:text-brand-accent">
       <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
         <path d="M12 2l8 4v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6l8-4z" strokeLinecap="round" strokeLinejoin="round" />
       </svg>
@@ -1191,7 +1191,7 @@ function ActivityTabContent({ user }: { user: User }) {
         {ev.ticketKey && ev.projectSlug ? (
           <Link
             href={`/projects/${ev.projectSlug}/tickets/${ev.ticketKey}`}
-            className="font-medium text-brand-600 dark:text-brand-400 hover:underline"
+            className="font-medium text-brand-600 dark:text-brand-accent hover:underline"
           >
             {ev.ticketKey}
           </Link>

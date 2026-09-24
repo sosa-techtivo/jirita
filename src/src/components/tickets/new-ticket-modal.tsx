@@ -68,7 +68,7 @@ function formatDueDate(iso: string): string {
 const INPUT =
   "w-full bg-white dark:bg-zinc-900 text-[16px] sm:text-[13px] font-medium text-slate-800 dark:text-zinc-200 " +
   "border border-slate-200 dark:border-zinc-700 rounded-lg px-3 py-2 outline-none " +
-  "focus:border-brand-500 dark:focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 " +
+  "focus:border-brand-500 dark:focus:border-brand-accent focus:ring-2 focus:ring-brand-500/20 " +
   "placeholder:text-slate-300 dark:placeholder:text-zinc-600 transition-colors";
 
 const FIELD_LABEL =
@@ -145,7 +145,7 @@ function PendingAttachmentRow({
         rel="noopener noreferrer"
         download={file.name}
         title={`Open "${file.name}"`}
-        className="flex-1 min-w-0 text-[12px] font-medium text-slate-700 dark:text-zinc-300 truncate hover:text-brand-600 dark:hover:text-brand-400 hover:underline"
+        className="flex-1 min-w-0 text-[12px] font-medium text-slate-700 dark:text-zinc-300 truncate hover:text-brand-600 dark:hover:text-brand-accent hover:underline"
       >
         {file.name}
       </a>
@@ -852,7 +852,7 @@ export function NewTicketModal({
                 <svg className="w-8 h-8 text-brand-500 dark:text-brand-600" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
                   <path d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
-                <p className="text-[13px] font-semibold text-brand-600 dark:text-brand-500">Drop files to attach</p>
+                <p className="text-[13px] font-semibold text-brand-600 dark:text-brand-accent">Drop files to attach</p>
               </div>
             </div>
           )}
@@ -922,7 +922,7 @@ export function NewTicketModal({
             <div>
               <label className={FIELD_LABEL}>
                 Title
-                <span className="ml-1.5 text-brand-500 dark:text-brand-400">*</span>
+                <span className="ml-1.5 text-brand-500 dark:text-brand-accent">*</span>
               </label>
               <input
                 ref={titleRef}
@@ -1098,7 +1098,7 @@ export function NewTicketModal({
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                className="flex items-center gap-1.5 text-[12px] font-medium text-slate-400 dark:text-zinc-600 hover:text-brand-600 dark:hover:text-brand-400 transition-colors"
+                className="flex items-center gap-1.5 text-[12px] font-medium text-slate-400 dark:text-zinc-600 hover:text-brand-600 dark:hover:text-brand-accent transition-colors"
               >
                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
                   <path d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.372L8.552 18.32m.009-.01l-.01.01m5.699-9.941l-7.81 7.81a1.5 1.5 0 002.112 2.13" strokeLinecap="round" strokeLinejoin="round" />
@@ -1126,7 +1126,7 @@ export function NewTicketModal({
               className={
                 "inline-flex items-center gap-2 px-6 py-2.5 text-[13px] font-semibold rounded-lg transition-all " +
                 (canSubmit
-                  ? "bg-brand-600 hover:bg-brand-700 dark:bg-brand-500 dark:hover:bg-brand-600 text-white shadow-md shadow-brand-600/25 dark:shadow-brand-500/20 hover:shadow-lg hover:shadow-brand-600/30"
+                  ? "bg-brand-600 hover:bg-brand-700 dark:bg-brand-accent dark:text-brand-accent-foreground dark:hover:bg-brand-accent-strong dark:focus-visible:outline-2 dark:focus-visible:outline-offset-2 dark:focus-visible:outline-brand-accent text-white shadow-md shadow-brand-600/25 dark:shadow-brand-accent/20 hover:shadow-lg hover:shadow-brand-600/30"
                   : "bg-slate-100 dark:bg-zinc-800 text-slate-400 dark:text-zinc-600 cursor-not-allowed")
               }
             >

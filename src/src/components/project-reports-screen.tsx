@@ -276,7 +276,7 @@ export function ProjectReportsScreen({ slug }: { slug: string }) {
           <button
             type="button"
             onClick={runFetch}
-            className="mt-5 text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3.5 py-2 shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-500 dark:hover:bg-brand-600 dark:shadow-brand-500/20"
+            className="mt-5 text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3.5 py-2 shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-accent dark:text-brand-accent-foreground dark:hover:bg-brand-accent-strong dark:focus-visible:outline-2 dark:focus-visible:outline-offset-2 dark:focus-visible:outline-brand-accent dark:shadow-brand-accent/20"
           >
             Retry
           </button>
@@ -389,11 +389,11 @@ export function ProjectReportsScreen({ slug }: { slug: string }) {
             <span className="text-base font-medium text-slate-400 dark:text-zinc-600 ml-0.5">h</span>
           </p>
         </div>
-        <div className="flex-1 px-5 py-4 bg-brand-50/30 dark:bg-brand-950/10">
-          <p className="text-[10px] font-bold uppercase tracking-widest text-brand-500 dark:text-brand-400">Assigned Hours</p>
-          <p className="text-2xl font-bold text-brand-700 dark:text-brand-300 mt-1 leading-none">
+        <div className="flex-1 px-5 py-4 bg-brand-50/30 dark:bg-brand-accent/5">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-brand-500 dark:text-brand-accent">Assigned Hours</p>
+          <p className="text-2xl font-bold text-brand-700 dark:text-brand-accent-soft mt-1 leading-none">
             {round1(totalAssignedHours)}
-            <span className="text-base font-medium text-brand-400 dark:text-brand-500 ml-0.5">h</span>
+            <span className="text-base font-medium text-brand-400 dark:text-brand-accent ml-0.5">h</span>
           </p>
         </div>
         <div className="flex-1 px-5 py-4">

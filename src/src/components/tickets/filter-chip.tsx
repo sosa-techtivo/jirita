@@ -16,7 +16,7 @@ export function FilterChip({
       className={[
         "inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full border transition-all duration-150",
         active
-          ? "bg-brand-50 text-brand-700 border-brand-200 dark:bg-brand-500/10 dark:text-brand-400 dark:border-brand-500/30"
+          ? "bg-brand-50 text-brand-700 border-brand-200 dark:bg-brand-500/10 dark:text-brand-accent dark:border-brand-500/30"
           : "bg-white text-slate-600 border-slate-300 hover:border-slate-400 hover:text-slate-800 dark:bg-zinc-900 dark:text-zinc-300 dark:border-zinc-600 dark:hover:border-zinc-500 dark:hover:text-zinc-100",
       ].join(" ")}
     >

@@ -111,7 +111,7 @@ function TicketRow({
           title={action.label}
           className={`flex-shrink-0 w-6 h-6 flex items-center justify-center rounded-md transition-colors disabled:opacity-50 ${
             action.variant === "add"
-              ? "text-brand-600 dark:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-500/10"
+              ? "text-brand-600 dark:text-brand-accent hover:bg-brand-50 dark:hover:bg-brand-500/10"
               : "text-slate-400 dark:text-zinc-500 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10"
           }`}
         >
@@ -133,7 +133,7 @@ function TicketGroupHeader({ label, count, action }: { label: string; count: num
           type="button"
           onClick={action.onClick}
           disabled={action.disabled}
-          className="text-[11px] font-medium text-brand-600 dark:text-brand-400 hover:underline disabled:opacity-40 disabled:hover:no-underline"
+          className="text-[11px] font-medium text-brand-600 dark:text-brand-accent hover:underline disabled:opacity-40 disabled:hover:no-underline"
         >
           {action.label}
         </button>
@@ -178,7 +178,7 @@ function SprintListView({
       <button
         type="button"
         onClick={onCreateNew}
-        className="w-full mt-2 flex items-center justify-center gap-1.5 text-sm font-medium text-brand-600 dark:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-500/10 rounded-lg px-3 py-2 transition-colors"
+        className="w-full mt-2 flex items-center justify-center gap-1.5 text-sm font-medium text-brand-600 dark:text-brand-accent hover:bg-brand-50 dark:hover:bg-brand-500/10 rounded-lg px-3 py-2 transition-colors"
       >
         <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true">
           <path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14M5 12h14" />

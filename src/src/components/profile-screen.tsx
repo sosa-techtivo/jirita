@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ROLE_LABELS, type CurrentUser } from "@/lib/current-user";
 import { useCurrentUser } from "@/components/current-user-provider";
 import { SettingRow, SettingGroup, SelectField } from "@/components/settings-ui";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { getDefaultTicketView, setDefaultTicketView, type DefaultTicketView } from "@/lib/user-preferences";
 import {
   loadOwnEmailPreferences,
@@ -20,10 +21,10 @@ import { Avatar } from "@/components/ui/avatar";
 // 13px. Same technique as components/auth/field-styles.ts's INPUT.
 const NAME_INPUT =
   "text-[16px] sm:text-[13px] text-slate-800 dark:text-zinc-200 bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-700 " +
-  "rounded-lg px-2.5 py-1.5 outline-none focus:border-brand-500 dark:focus:border-brand-400 transition-colors w-44";
+  "rounded-lg px-2.5 py-1.5 outline-none focus:border-brand-500 dark:focus:border-brand-accent transition-colors w-44";
 
 const CHANGE_PASSWORD_LINK =
-  "flex-shrink-0 text-[13px] font-medium text-brand-600 dark:text-brand-400 border border-brand-200 dark:border-brand-500/30 " +
+  "flex-shrink-0 text-[13px] font-medium text-brand-600 dark:text-brand-accent border border-brand-200 dark:border-brand-500/30 " +
   "px-3 py-1.5 rounded-lg hover:bg-brand-50 dark:hover:bg-brand-500/5 transition-colors";
 
 function ListIcon() {
@@ -366,6 +367,9 @@ function ProfileForm({ user }: { user: CurrentUser }) {
         </SettingGroup>
 
         <SettingGroup title="Preferences">
+          <SettingRow label="Theme" hint="Applies immediately across the app">
+            <ThemeToggle />
+          </SettingRow>
           <SettingRow label="Default Ticket View" hint="Used when you open a project's Tickets tab">
             <TicketViewToggle value={defaultView} onChange={setDefaultViewState} />
           </SettingRow>
@@ -433,7 +437,7 @@ function ProfileForm({ user }: { user: CurrentUser }) {
           <button
             type="submit"
             disabled={saving}
-            className="text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3.5 py-2 shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-500 dark:hover:bg-brand-600 dark:shadow-brand-500/20 disabled:opacity-60 disabled:cursor-not-allowed"
+            className="text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3.5 py-2 shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-accent dark:text-brand-accent-foreground dark:hover:bg-brand-accent-strong dark:focus-visible:outline-2 dark:focus-visible:outline-offset-2 dark:focus-visible:outline-brand-accent dark:shadow-brand-accent/20 disabled:opacity-60 disabled:cursor-not-allowed"
           >
             {saving ? "Saving…" : "Save Changes"}
           </button>

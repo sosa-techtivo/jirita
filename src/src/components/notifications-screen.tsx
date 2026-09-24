@@ -163,7 +163,7 @@ export function NotificationsScreen() {
           <h1 className="text-xl font-bold text-slate-900 tracking-tight dark:text-zinc-50">
             Notifications
             {unreadCount > 0 && (
-              <span className="ml-2 align-middle text-[12px] font-semibold text-brand-600 dark:text-brand-400 bg-brand-50 dark:bg-brand-500/10 rounded-full px-2 py-0.5">
+              <span className="ml-2 align-middle text-[12px] font-semibold text-brand-600 dark:text-brand-accent bg-brand-50 dark:bg-brand-500/10 rounded-full px-2 py-0.5">
                 {unreadCount} unread
               </span>
             )}
@@ -176,7 +176,7 @@ export function NotificationsScreen() {
           <button
             type="button"
             onClick={handleMarkAllRead}
-            className="flex-shrink-0 text-sm font-medium text-brand-600 dark:text-brand-400 border border-brand-200 dark:border-brand-500/30 px-3 py-1.5 rounded-lg hover:bg-brand-50 dark:hover:bg-brand-500/5 transition-colors"
+            className="flex-shrink-0 text-sm font-medium text-brand-600 dark:text-brand-accent border border-brand-200 dark:border-brand-500/30 px-3 py-1.5 rounded-lg hover:bg-brand-50 dark:hover:bg-brand-500/5 transition-colors"
           >
             Mark all as read
           </button>

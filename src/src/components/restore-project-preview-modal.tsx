@@ -32,7 +32,7 @@ const LABEL = "block text-[10px] font-bold uppercase tracking-widest text-slate-
 const INPUT =
   "w-full bg-white dark:bg-zinc-900 text-[16px] sm:text-[13px] font-medium text-slate-800 dark:text-zinc-200 " +
   "border border-slate-200 dark:border-zinc-700 rounded-lg px-3 py-2 outline-none " +
-  "focus:border-brand-500 dark:focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 " +
+  "focus:border-brand-500 dark:focus:border-brand-accent focus:ring-2 focus:ring-brand-500/20 " +
   "transition-colors";
 const INPUT_ERROR = "border-red-400 dark:border-red-500 focus:border-red-500 dark:focus:border-red-500 focus:ring-red-500/20";
 
@@ -635,7 +635,7 @@ export function RestoreProjectPreviewModal({
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
                   disabled={busy}
-                  className="text-[13px] font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3.5 py-2 shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-500 dark:hover:bg-brand-600 disabled:opacity-60 disabled:cursor-not-allowed"
+                  className="text-[13px] font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3.5 py-2 shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-accent dark:text-brand-accent-foreground dark:hover:bg-brand-accent-strong dark:focus-visible:outline-2 dark:focus-visible:outline-offset-2 dark:focus-visible:outline-brand-accent disabled:opacity-60 disabled:cursor-not-allowed"
                 >
                   {analyzing ? "Analyzing backup…" : "Choose .zip file"}
                 </button>
@@ -827,7 +827,7 @@ export function RestoreProjectPreviewModal({
                         type="button"
                         onClick={buildPlan}
                         disabled={busy || orgMembers === null}
-                        className="text-[13px] font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3.5 py-2 shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-500 dark:hover:bg-brand-600 disabled:opacity-60 disabled:cursor-not-allowed"
+                        className="text-[13px] font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3.5 py-2 shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-accent dark:text-brand-accent-foreground dark:hover:bg-brand-accent-strong dark:focus-visible:outline-2 dark:focus-visible:outline-offset-2 dark:focus-visible:outline-brand-accent disabled:opacity-60 disabled:cursor-not-allowed"
                       >
                         {buildingPlan ? "Building plan…" : "Build Restore Plan"}
                       </button>
@@ -901,7 +901,7 @@ export function RestoreProjectPreviewModal({
                       <button
                         type="button"
                         onClick={() => setShowConfirm(true)}
-                        className="text-[13px] font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3.5 py-2 shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-500 dark:hover:bg-brand-600"
+                        className="text-[13px] font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3.5 py-2 shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-accent dark:text-brand-accent-foreground dark:hover:bg-brand-accent-strong dark:focus-visible:outline-2 dark:focus-visible:outline-offset-2 dark:focus-visible:outline-brand-accent"
                       >
                         Restore Project
                       </button>
@@ -974,7 +974,7 @@ export function RestoreProjectPreviewModal({
                         type="button"
                         onClick={executeRestore}
                         disabled={executing}
-                        className="text-[13px] font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3.5 py-2 shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-500 dark:hover:bg-brand-600 disabled:opacity-60 disabled:cursor-not-allowed"
+                        className="text-[13px] font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3.5 py-2 shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-accent dark:text-brand-accent-foreground dark:hover:bg-brand-accent-strong dark:focus-visible:outline-2 dark:focus-visible:outline-offset-2 dark:focus-visible:outline-brand-accent disabled:opacity-60 disabled:cursor-not-allowed"
                       >
                         {executing ? "Restoring project…" : "Restore Project"}
                       </button>
@@ -997,7 +997,7 @@ export function RestoreProjectPreviewModal({
                         type="button"
                         onClick={openConfigure}
                         disabled={busy}
-                        className="text-[13px] font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3.5 py-2 shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-500 dark:hover:bg-brand-600 disabled:opacity-60 disabled:cursor-not-allowed"
+                        className="text-[13px] font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3.5 py-2 shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-accent dark:text-brand-accent-foreground dark:hover:bg-brand-accent-strong dark:focus-visible:outline-2 dark:focus-visible:outline-offset-2 dark:focus-visible:outline-brand-accent disabled:opacity-60 disabled:cursor-not-allowed"
                       >
                         Configure Restore
                       </button>

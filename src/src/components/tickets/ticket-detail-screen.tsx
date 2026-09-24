@@ -264,7 +264,7 @@ function EditableSidebarStatus({
               aria-pressed={isSubscribed}
               title={isSubscribed ? "Unsubscribe from this ticket" : "Subscribe to this ticket"}
               className={`flex items-center justify-center p-1 rounded-md transition-colors hover:bg-slate-100 dark:hover:bg-zinc-800 ${
-                isSubscribed ? "text-brand-600 dark:text-brand-400" : "text-slate-400 dark:text-zinc-600"
+                isSubscribed ? "text-brand-600 dark:text-brand-accent" : "text-slate-400 dark:text-zinc-600"
               }`}
             >
               {isSubscribed ? <Eye className="w-4 h-4" strokeWidth={2} /> : <EyeOff className="w-4 h-4" strokeWidth={2} />}
@@ -315,7 +315,7 @@ function EditableSidebarType({ value, onChange }: { value: TicketType; onChange:
       <TicketTypeSelect
         value={value}
         onChange={onChange}
-        buttonClassName="group inline-flex items-center gap-1.5 text-[13px] font-medium text-slate-700 dark:text-zinc-300 hover:text-brand-600 dark:hover:text-brand-400 transition-colors cursor-pointer"
+        buttonClassName="group inline-flex items-center gap-1.5 text-[13px] font-medium text-slate-700 dark:text-zinc-300 hover:text-brand-600 dark:hover:text-brand-accent transition-colors cursor-pointer"
       />
     </SidebarField>
   );
@@ -773,7 +773,7 @@ function EditableSidebarLabels({
                 <button
                   onClick={handleCreate}
                   disabled={creating}
-                  className="px-1.5 py-0.5 rounded text-[10px] font-medium border border-dashed border-brand-300 dark:border-brand-700 text-brand-600 dark:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-950/40 transition-colors cursor-pointer disabled:opacity-50"
+                  className="px-1.5 py-0.5 rounded text-[10px] font-medium border border-dashed border-brand-300 dark:border-brand-700 text-brand-600 dark:text-brand-accent hover:bg-brand-50 dark:hover:bg-brand-accent/10 transition-colors cursor-pointer disabled:opacity-50"
                 >
                   {creating ? "Creating…" : `➕ Create "${trimmedSearch}"`}
                 </button>
@@ -787,7 +787,7 @@ function EditableSidebarLabels({
             <div className="flex gap-2">
               <button
                 onClick={save}
-                className="text-[10px] font-medium text-brand-600 dark:text-brand-500 hover:underline"
+                className="text-[10px] font-medium text-brand-600 dark:text-brand-accent hover:underline"
               >
                 Done
               </button>
@@ -1120,7 +1120,7 @@ function RelatedTicketsSection({
         </p>
         <button
           onClick={() => { setLinking((v) => !v); setLinkError(null); }}
-          className="text-[10px] font-semibold text-brand-600 dark:text-brand-500 hover:text-brand-700 dark:hover:text-brand-400 transition-colors leading-none"
+          className="text-[10px] font-semibold text-brand-600 dark:text-brand-accent hover:text-brand-700 dark:hover:text-brand-accent transition-colors leading-none"
         >
           + Link
         </button>
@@ -1397,13 +1397,13 @@ function ChildrenSection({
     <div className="flex items-center gap-3">
       <button
         onClick={onCreateChild}
-        className="text-[11px] font-semibold text-brand-600 dark:text-brand-500 hover:text-brand-700 dark:hover:text-brand-400 transition-colors leading-none"
+        className="text-[11px] font-semibold text-brand-600 dark:text-brand-accent hover:text-brand-700 dark:hover:text-brand-accent transition-colors leading-none"
       >
         + Create
       </button>
       <button
         onClick={() => { setLinking((v) => !v); setLinkError(null); }}
-        className="text-[11px] font-semibold text-brand-600 dark:text-brand-500 hover:text-brand-700 dark:hover:text-brand-400 transition-colors leading-none"
+        className="text-[11px] font-semibold text-brand-600 dark:text-brand-accent hover:text-brand-700 dark:hover:text-brand-accent transition-colors leading-none"
       >
         + Link
       </button>
@@ -1651,7 +1651,7 @@ function AcceptanceCriteriaChecklist({
                 "mt-0.5 w-4 h-4 rounded flex-shrink-0 border transition-colors flex items-center justify-center " +
                 (done
                   ? "bg-brand-500 border-brand-500 dark:bg-brand-600 dark:border-brand-600"
-                  : "border-slate-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 hover:border-brand-400 dark:hover:border-brand-500")
+                  : "border-slate-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 hover:border-brand-400 dark:hover:border-brand-accent")
               }
             >
               {done && (
@@ -1784,7 +1784,7 @@ function EditableAcceptanceCriteria({
         <button
           type="button"
           onClick={startEditing}
-          className="flex items-center gap-1.5 text-[13px] font-medium text-slate-400 dark:text-zinc-600 hover:text-brand-600 dark:hover:text-brand-400 transition-colors"
+          className="flex items-center gap-1.5 text-[13px] font-medium text-slate-400 dark:text-zinc-600 hover:text-brand-600 dark:hover:text-brand-accent transition-colors"
         >
           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24" aria-hidden="true">
             <path d="M12 5v14M5 12h14" strokeLinecap="round" />
@@ -2087,7 +2087,7 @@ function AttachmentRow({
           ref={renameRef}
           className={
             "text-[16px] sm:text-[13px] font-medium text-slate-800 dark:text-zinc-200 w-full " +
-            "bg-white dark:bg-zinc-900 border border-brand-500 dark:border-brand-500 " +
+            "bg-white dark:bg-zinc-900 border border-brand-500 dark:border-brand-accent " +
             "rounded px-1.5 py-0.5 outline-none focus:ring-1 focus:ring-brand-500/30"
           }
           value={renameDraft}
@@ -2619,7 +2619,7 @@ function CommentItem({
                   aria-pressed={comment.reactions.myReaction === "like"}
                   className={`flex items-center gap-1 px-1.5 py-0.5 rounded-md transition-colors hover:bg-slate-100 dark:hover:bg-zinc-800 ${
                     comment.reactions.myReaction === "like"
-                      ? "text-brand-600 dark:text-brand-400"
+                      ? "text-brand-600 dark:text-brand-accent"
                       : "text-slate-400 dark:text-zinc-600"
                   }`}
                 >
@@ -2648,7 +2648,7 @@ function CommentItem({
                   <button
                     type="button"
                     onClick={onReply}
-                    className="text-[12px] font-medium text-slate-400 dark:text-zinc-600 hover:text-brand-600 dark:hover:text-brand-400 transition-colors"
+                    className="text-[12px] font-medium text-slate-400 dark:text-zinc-600 hover:text-brand-600 dark:hover:text-brand-accent transition-colors"
                   >
                     Reply
                   </button>
@@ -3408,7 +3408,7 @@ const AttachmentsSection = forwardRef<
               <svg className="w-8 h-8 text-brand-500 dark:text-brand-600" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
                 <path d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
-              <p className="text-[13px] font-semibold text-brand-600 dark:text-brand-500">Drop files to upload</p>
+              <p className="text-[13px] font-semibold text-brand-600 dark:text-brand-accent">Drop files to upload</p>
             </div>
           </div>
         )}
@@ -3594,7 +3594,7 @@ const PR_STATE_LABEL: Record<DevelopmentPullRequestState, string> = {
 const PR_STATE_BADGE_CLASS: Record<DevelopmentPullRequestState, string> = {
   open: "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400",
   draft: "bg-slate-100 text-slate-500 dark:bg-zinc-800 dark:text-zinc-400",
-  merged: "bg-brand-50 text-brand-700 dark:bg-brand-500/10 dark:text-brand-400",
+  merged: "bg-brand-50 text-brand-700 dark:bg-brand-500/10 dark:text-brand-accent",
   closed: "bg-red-50 text-red-600 dark:bg-red-500/10 dark:text-red-400",
 };
 
@@ -4164,7 +4164,7 @@ function LogTimeModal({
                   value={hrsStr}
                   onChange={(e) => setHrsStr(e.target.value)}
                   onKeyDown={(e: KeyboardEvent<HTMLInputElement>) => { if (e.key === "Enter") handleSubmit(); }}
-                  className="bg-white dark:bg-zinc-950 text-[16px] sm:text-[13px] font-medium text-slate-800 dark:text-zinc-200 border border-slate-200 dark:border-zinc-700 rounded-md px-2 py-1 outline-none focus:border-brand-500 dark:focus:border-brand-500 focus:ring-1 focus:ring-brand-500/30 w-16 text-center"
+                  className="bg-white dark:bg-zinc-950 text-[16px] sm:text-[13px] font-medium text-slate-800 dark:text-zinc-200 border border-slate-200 dark:border-zinc-700 rounded-md px-2 py-1 outline-none focus:border-brand-500 dark:focus:border-brand-accent focus:ring-1 focus:ring-brand-500/30 w-16 text-center"
                 />
                 <span className="text-[13px] text-slate-500 dark:text-zinc-400 font-medium">h</span>
               </div>
@@ -4177,7 +4177,7 @@ function LogTimeModal({
                   value={minsStr}
                   onChange={(e) => setMinsStr(e.target.value)}
                   onKeyDown={(e: KeyboardEvent<HTMLInputElement>) => { if (e.key === "Enter") handleSubmit(); }}
-                  className="bg-white dark:bg-zinc-950 text-[16px] sm:text-[13px] font-medium text-slate-800 dark:text-zinc-200 border border-slate-200 dark:border-zinc-700 rounded-md px-2 py-1 outline-none focus:border-brand-500 dark:focus:border-brand-500 focus:ring-1 focus:ring-brand-500/30 w-16 text-center"
+                  className="bg-white dark:bg-zinc-950 text-[16px] sm:text-[13px] font-medium text-slate-800 dark:text-zinc-200 border border-slate-200 dark:border-zinc-700 rounded-md px-2 py-1 outline-none focus:border-brand-500 dark:focus:border-brand-accent focus:ring-1 focus:ring-brand-500/30 w-16 text-center"
                 />
                 <span className="text-[13px] text-slate-500 dark:text-zinc-400 font-medium">min</span>
               </div>
@@ -4214,7 +4214,7 @@ function LogTimeModal({
               className={
                 "w-full resize-none text-[16px] sm:text-[13px] font-medium text-slate-800 dark:text-zinc-200 " +
                 "bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-700 rounded-md px-2.5 py-2 outline-none " +
-                "focus:border-brand-500 dark:focus:border-brand-500 focus:ring-1 focus:ring-brand-500/30 " +
+                "focus:border-brand-500 dark:focus:border-brand-accent focus:ring-1 focus:ring-brand-500/30 " +
                 "placeholder:text-slate-300 dark:placeholder:text-zinc-700"
               }
             />
@@ -4622,7 +4622,7 @@ function TimeTrackingSection({
           <button
             type="button"
             onClick={() => setHistModal(true)}
-            className="text-[12px] font-medium text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300 flex items-center gap-1 transition-colors"
+            className="text-[12px] font-medium text-brand-600 dark:text-brand-accent hover:text-brand-700 dark:hover:text-brand-accent-soft flex items-center gap-1 transition-colors"
           >
             View {entries.length} {entries.length === 1 ? "entry" : "entries"}
             <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true">
@@ -4680,7 +4680,7 @@ function NotFound({ ticketId, slug }: { ticketId: string; slug: string }) {
         </p>
         <Link
           href={`/projects/${slug}/tickets`}
-          className="mt-6 inline-flex items-center gap-1.5 text-sm font-medium text-brand-600 dark:text-brand-500 hover:underline"
+          className="mt-6 inline-flex items-center gap-1.5 text-sm font-medium text-brand-600 dark:text-brand-accent hover:underline"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
             <path d="M15 18l-6-6 6-6" />
@@ -5205,7 +5205,7 @@ export function TicketDetailScreen({
         <button
           type="button"
           onClick={runFetchTicket}
-          className="mt-5 text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3.5 py-2 shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-500 dark:hover:bg-brand-600 dark:shadow-brand-500/20"
+          className="mt-5 text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3.5 py-2 shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-accent dark:text-brand-accent-foreground dark:hover:bg-brand-accent-strong dark:focus-visible:outline-2 dark:focus-visible:outline-offset-2 dark:focus-visible:outline-brand-accent dark:shadow-brand-accent/20"
         >
           Retry
         </button>
@@ -5818,7 +5818,7 @@ export function TicketDetailScreen({
                 return (
                   <Link
                     href={`/projects/${slug}/tickets/${parentCode}`}
-                    className="group inline-flex items-center gap-1 mb-2 text-[10px] font-bold uppercase tracking-widest text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300 transition-colors"
+                    className="group inline-flex items-center gap-1 mb-2 text-[10px] font-bold uppercase tracking-widest text-brand-600 dark:text-brand-accent hover:text-brand-700 dark:hover:text-brand-accent-soft transition-colors"
                   >
                     <CornerUpLeft className="w-3 h-3" aria-hidden="true" />
                     Parent
@@ -6085,7 +6085,7 @@ export function TicketDetailScreen({
                   <button
                     type="button"
                     onClick={() => setAddingComment(true)}
-                    className="text-[12px] font-medium text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300 transition-colors"
+                    className="text-[12px] font-medium text-brand-600 dark:text-brand-accent hover:text-brand-700 dark:hover:text-brand-accent-soft transition-colors"
                   >
                     Add comment
                   </button>

@@ -162,7 +162,7 @@ export function KpiCard({
           danger
             ? "text-red-600 dark:text-red-400"
             : accent
-            ? "text-brand-700 dark:text-brand-500"
+            ? "text-brand-700 dark:text-brand-accent"
             : "text-slate-900 dark:text-zinc-50",
         ].join(" ")}
       >

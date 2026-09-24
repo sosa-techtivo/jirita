@@ -365,7 +365,7 @@ function CapacityCell({ user, onSave }: { user: User; onSave: (hours: number) =>
       <button
         type="button"
         onClick={startEditing}
-        className="tabular-nums text-slate-600 dark:text-zinc-400 hover:text-brand-600 dark:hover:text-brand-400 hover:underline underline-offset-2 transition-colors"
+        className="tabular-nums text-slate-600 dark:text-zinc-400 hover:text-brand-600 dark:hover:text-brand-accent hover:underline underline-offset-2 transition-colors"
       >
         {formatHours(user.weeklyCapacity)}
       </button>
@@ -385,7 +385,7 @@ function CapacityCell({ user, onSave }: { user: User; onSave: (hours: number) =>
         if (e.key === "Enter") { e.preventDefault(); commit(); }
         if (e.key === "Escape") { e.preventDefault(); cancel(); }
       }}
-      className="w-16 text-right tabular-nums bg-white dark:bg-zinc-900 border border-brand-400 dark:border-brand-500 rounded px-1.5 py-0.5 text-[16px] sm:text-sm outline-none focus:ring-2 focus:ring-brand-500/30"
+      className="w-16 text-right tabular-nums bg-white dark:bg-zinc-900 border border-brand-400 dark:border-brand-accent rounded px-1.5 py-0.5 text-[16px] sm:text-sm outline-none focus:ring-2 focus:ring-brand-500/30"
     />
   );
 }
@@ -683,7 +683,7 @@ export function UsersScreen() {
         <button
           type="button"
           onClick={runFetch}
-          className="mt-5 text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3.5 py-2 shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-500 dark:hover:bg-brand-600 dark:shadow-brand-500/20"
+          className="mt-5 text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3.5 py-2 shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-accent dark:text-brand-accent-foreground dark:hover:bg-brand-accent-strong dark:focus-visible:outline-2 dark:focus-visible:outline-offset-2 dark:focus-visible:outline-brand-accent dark:shadow-brand-accent/20"
         >
           Retry
         </button>
@@ -703,7 +703,7 @@ export function UsersScreen() {
         <button
           type="button"
           onClick={() => setShowInvite(true)}
-          className="text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3.5 py-2 shadow-sm shadow-brand-600/20 transition-colors flex-shrink-0 dark:bg-brand-500 dark:hover:bg-brand-600 dark:shadow-brand-500/20"
+          className="text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3.5 py-2 shadow-sm shadow-brand-600/20 transition-colors flex-shrink-0 dark:bg-brand-accent dark:text-brand-accent-foreground dark:hover:bg-brand-accent-strong dark:focus-visible:outline-2 dark:focus-visible:outline-offset-2 dark:focus-visible:outline-brand-accent dark:shadow-brand-accent/20"
         >
           + Invite User
         </button>
@@ -779,7 +779,7 @@ export function UsersScreen() {
                         onClick={() => openProfile(u, "projects")}
                         disabled={u.projectSlugs.length === 0}
                         title={u.projectSlugs.map((slug) => projectNameBySlug.get(slug) ?? slug).join(", ")}
-                        className="font-semibold text-slate-700 dark:text-zinc-300 tabular-nums hover:text-brand-600 dark:hover:text-brand-400 disabled:hover:text-slate-700 dark:disabled:hover:text-zinc-300 disabled:cursor-default transition-colors"
+                        className="font-semibold text-slate-700 dark:text-zinc-300 tabular-nums hover:text-brand-600 dark:hover:text-brand-accent disabled:hover:text-slate-700 dark:disabled:hover:text-zinc-300 disabled:cursor-default transition-colors"
                       >
                         {u.projectSlugs.length}
                       </button>

@@ -115,7 +115,7 @@ export function TicketBoardCard({
         isChild
           ? "border-sky-300 dark:border-sky-900/60"
           : isParent
-          ? "border-brand-500/40 dark:border-brand-700/40"
+          ? "border-brand-500/40 dark:border-brand-accent/30"
           : isBlocked
           ? "border-red-200 dark:border-red-900/60"
           : "border-slate-200 dark:border-zinc-700/70",
@@ -134,7 +134,7 @@ export function TicketBoardCard({
         isChild
           ? "bg-[#F5FBFF] dark:bg-sky-950/40"
           : isParent
-          ? "bg-[#F6F5FF] dark:bg-brand-500/10"
+          ? "bg-[#F6F5FF] dark:bg-brand-accent/8"
           : "bg-white dark:bg-zinc-900",
         "dark:shadow-black/30",
         draggable ? "cursor-grab active:cursor-grabbing" : "",
@@ -170,7 +170,7 @@ export function TicketBoardCard({
           // Brand lilac — the key itself, not just the trailing `↳ N`
           // badge below, so the whole hierarchy indicator (key included)
           // reads as one lilac unit for a parent card.
-          <span className="inline-flex items-center gap-1 text-brand-600 dark:text-brand-400">
+          <span className="inline-flex items-center gap-1 text-brand-600 dark:text-brand-accent">
             <TicketTypeIcon type={ticket.type} />
             {getTicketDisplayKey(ticket)}
           </span>
@@ -183,7 +183,7 @@ export function TicketBoardCard({
         {childrenCount > 0 && (
           <span
             title={`${childrenCount} child ticket${childrenCount === 1 ? "" : "s"}`}
-            className="inline-flex items-center gap-0.5 text-brand-600 dark:text-brand-400"
+            className="inline-flex items-center gap-0.5 text-brand-600 dark:text-brand-accent"
           >
             <CornerDownRight className="w-3 h-3 flex-shrink-0" aria-hidden="true" />
             {childrenCount}
@@ -286,7 +286,7 @@ export function TicketListRow({
               </span>
             </span>
           ) : childrenCount > 0 ? (
-            <span className="flex items-baseline gap-1.5 text-brand-600 dark:text-brand-400">
+            <span className="flex items-baseline gap-1.5 text-brand-600 dark:text-brand-accent">
               <TicketTypeIcon type={ticket.type} />
               <span className="text-[11px] font-mono font-medium flex-shrink-0">
                 {getTicketDisplayKey(ticket)}
@@ -303,7 +303,7 @@ export function TicketListRow({
           {childrenCount > 0 && (
             <span
               title={`${childrenCount} child ticket${childrenCount === 1 ? "" : "s"}`}
-              className="flex items-center gap-0.5 text-brand-600 dark:text-brand-400 flex-shrink-0"
+              className="flex items-center gap-0.5 text-brand-600 dark:text-brand-accent flex-shrink-0"
             >
               <CornerDownRight className="w-3 h-3 flex-shrink-0" aria-hidden="true" />
               <span className="text-[11px] font-mono font-medium">{childrenCount}</span>

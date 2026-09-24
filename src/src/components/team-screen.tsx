@@ -266,7 +266,7 @@ export function TeamScreen({ slug }: { slug: string }) {
           <button
             type="button"
             onClick={runFetch}
-            className="mt-5 text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3.5 py-2 shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-500 dark:hover:bg-brand-600 dark:shadow-brand-500/20"
+            className="mt-5 text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3.5 py-2 shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-accent dark:text-brand-accent-foreground dark:hover:bg-brand-accent-strong dark:focus-visible:outline-2 dark:focus-visible:outline-offset-2 dark:focus-visible:outline-brand-accent dark:shadow-brand-accent/20"
           >
             Retry
           </button>
@@ -288,7 +288,7 @@ export function TeamScreen({ slug }: { slug: string }) {
           <button
             type="button"
             onClick={() => setShowAddMember(true)}
-            className="text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3.5 py-2 shadow-sm shadow-brand-600/20 transition-colors flex-shrink-0 dark:bg-brand-500 dark:hover:bg-brand-600 dark:shadow-brand-500/20"
+            className="text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3.5 py-2 shadow-sm shadow-brand-600/20 transition-colors flex-shrink-0 dark:bg-brand-accent dark:text-brand-accent-foreground dark:hover:bg-brand-accent-strong dark:focus-visible:outline-2 dark:focus-visible:outline-offset-2 dark:focus-visible:outline-brand-accent dark:shadow-brand-accent/20"
           >
             + Add Member
           </button>
@@ -307,11 +307,11 @@ export function TeamScreen({ slug }: { slug: string }) {
             <span className="text-base font-medium text-slate-400 dark:text-zinc-600 ml-0.5">h</span>
           </p>
         </div>
-        <div className="flex-1 px-5 py-4 bg-brand-50/30 dark:bg-brand-950/10">
-          <p className="text-[10px] font-bold uppercase tracking-widest text-brand-500 dark:text-brand-400">Assigned Hours</p>
-          <p className="text-2xl font-bold text-brand-700 dark:text-brand-300 mt-1 leading-none">
+        <div className="flex-1 px-5 py-4 bg-brand-50/30 dark:bg-brand-accent/5">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-brand-500 dark:text-brand-accent">Assigned Hours</p>
+          <p className="text-2xl font-bold text-brand-700 dark:text-brand-accent-soft mt-1 leading-none">
             {round1(totalAssignedHours)}
-            <span className="text-base font-medium text-brand-400 dark:text-brand-500 ml-0.5">h</span>
+            <span className="text-base font-medium text-brand-400 dark:text-brand-accent ml-0.5">h</span>
           </p>
         </div>
         <div className="flex-1 px-5 py-4">
@@ -415,7 +415,7 @@ function MemberCard({ member, slug, onOpen }: { member: TeamMember; slug: string
           <div className="flex items-center gap-1.5 min-w-0">
             <h3 className="text-sm font-semibold text-slate-900 dark:text-zinc-100 truncate">{member.name}</h3>
             {member.projectRole === "lead" && (
-              <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold flex-shrink-0 bg-brand-50 text-brand-700 dark:bg-brand-500/10 dark:text-brand-400">
+              <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold flex-shrink-0 bg-brand-50 text-brand-700 dark:bg-brand-500/10 dark:text-brand-accent">
                 Project Lead
               </span>
             )}
@@ -445,7 +445,7 @@ function MemberCard({ member, slug, onOpen }: { member: TeamMember; slug: string
           type="button"
           onClick={handleViewTickets}
           onKeyDown={(e) => e.stopPropagation()}
-          className="text-slate-400 dark:text-zinc-500 hover:text-brand-600 dark:hover:text-brand-400 underline-offset-2 hover:underline transition-colors"
+          className="text-slate-400 dark:text-zinc-500 hover:text-brand-600 dark:hover:text-brand-accent underline-offset-2 hover:underline transition-colors"
         >
           {member.activeTicketIds.length} active ticket{member.activeTicketIds.length === 1 ? "" : "s"}
         </button>

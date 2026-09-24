@@ -347,7 +347,7 @@ function KpiCard({
       <p
         className={[
           "text-[10px] font-bold uppercase tracking-widest mb-1",
-          accent ? "text-brand-500 dark:text-brand-400" : "text-slate-400 dark:text-zinc-600",
+          accent ? "text-brand-500 dark:text-brand-accent" : "text-slate-400 dark:text-zinc-600",
         ].join(" ")}
       >
         {label}
@@ -356,7 +356,7 @@ function KpiCard({
         className={[
           "text-2xl font-bold leading-none",
           danger ? "text-red-600 dark:text-red-400" :
-          accent ? "text-brand-700 dark:text-brand-300" :
+          accent ? "text-brand-700 dark:text-brand-accent-soft" :
           "text-slate-900 dark:text-zinc-50",
         ].join(" ")}
       >
@@ -372,7 +372,7 @@ function KpiCard({
     "rounded-xl border px-5 py-4 w-full text-left transition-all duration-150",
     "shadow-sm shadow-slate-200/40 dark:shadow-black/20",
     accent
-      ? "border-brand-100 dark:border-brand-900/40 bg-brand-50/40 dark:bg-brand-950/15"
+      ? "border-brand-100 dark:border-brand-accent/20 bg-brand-50/40 dark:bg-brand-accent/5"
       : "border-slate-200 dark:border-zinc-700/70 bg-white dark:bg-zinc-900",
   ];
 
@@ -388,7 +388,7 @@ function KpiCard({
         ...baseClassName,
         KPI_INTERACTIVE_CLASS,
         accent
-          ? "hover:border-brand-200 dark:hover:border-brand-800"
+          ? "hover:border-brand-200 dark:hover:border-brand-accent/40"
           : "hover:border-slate-300 dark:hover:border-zinc-600",
         active
           ? "ring-2 ring-brand-500/40 dark:ring-brand-500/30 !border-brand-300 dark:!border-brand-700"
@@ -531,7 +531,7 @@ function HoursSection({
         <button
           type="button"
           onClick={onRetry}
-          className="mt-3 text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline"
+          className="mt-3 text-xs font-medium text-brand-600 dark:text-brand-accent hover:underline"
         >
           Retry
         </button>
@@ -1073,7 +1073,7 @@ export function MyWorkScreen() {
           <button
             type="button"
             onClick={runFetch}
-            className="mt-5 text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3.5 py-2 shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-500 dark:hover:bg-brand-600 dark:shadow-brand-500/20"
+            className="mt-5 text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3.5 py-2 shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-accent dark:text-brand-accent-foreground dark:hover:bg-brand-accent-strong dark:focus-visible:outline-2 dark:focus-visible:outline-offset-2 dark:focus-visible:outline-brand-accent dark:shadow-brand-accent/20"
           >
             Retry
           </button>
@@ -1208,7 +1208,7 @@ export function MyWorkScreen() {
           <button
             type="button"
             onClick={() => setShowTimesheet(true)}
-            className="flex-shrink-0 text-[11px] font-medium text-brand-600 dark:text-brand-400 hover:underline whitespace-nowrap"
+            className="flex-shrink-0 text-[11px] font-medium text-brand-600 dark:text-brand-accent hover:underline whitespace-nowrap"
           >
             View Timesheet →
           </button>
@@ -1236,7 +1236,7 @@ export function MyWorkScreen() {
               <button
                 type="button"
                 onClick={() => setKpiMode(null)}
-                className="inline-flex items-center gap-1 text-[11px] font-medium text-brand-600 dark:text-brand-400 bg-brand-50 dark:bg-brand-500/10 px-2 py-0.5 rounded-full hover:bg-brand-100 dark:hover:bg-brand-500/20 transition-colors"
+                className="inline-flex items-center gap-1 text-[11px] font-medium text-brand-600 dark:text-brand-accent bg-brand-50 dark:bg-brand-500/10 px-2 py-0.5 rounded-full hover:bg-brand-100 dark:hover:bg-brand-500/20 transition-colors"
               >
                 {KPI_MODE_LABELS[kpiMode]}
                 <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" strokeWidth="3" viewBox="0 0 24 24">

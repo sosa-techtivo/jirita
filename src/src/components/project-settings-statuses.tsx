@@ -172,7 +172,7 @@ function ReplaceDefaultModal({
           <select
             value={selectedId}
             onChange={(e) => setSelectedId(e.target.value)}
-            className="mt-4 w-full text-[16px] sm:text-[13px] text-slate-800 dark:text-zinc-200 bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-700 rounded-lg px-2.5 py-1.5 outline-none focus:border-brand-500 dark:focus:border-brand-400"
+            className="mt-4 w-full text-[16px] sm:text-[13px] text-slate-800 dark:text-zinc-200 bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-700 rounded-lg px-2.5 py-1.5 outline-none focus:border-brand-500 dark:focus:border-brand-accent"
           >
             {otherOpenStatuses.map((option) => (
               <option key={option.id} value={option.id}>{option.name}</option>
@@ -361,13 +361,13 @@ function StatusRow({
               if (e.key === "Enter") commitRename();
               if (e.key === "Escape") { setDraft(status.name); setEditing(false); }
             }}
-            className="text-[16px] sm:text-[13px] text-slate-800 dark:text-zinc-200 bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-700 rounded-md px-2 py-1 outline-none focus:border-brand-500 dark:focus:border-brand-400 w-48"
+            className="text-[16px] sm:text-[13px] text-slate-800 dark:text-zinc-200 bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-700 rounded-md px-2 py-1 outline-none focus:border-brand-500 dark:focus:border-brand-accent w-48"
           />
         ) : (
           <button
             type="button"
             onClick={() => setEditing(true)}
-            className="text-[13px] font-medium text-slate-800 dark:text-zinc-200 hover:text-brand-600 dark:hover:text-brand-400 transition-colors truncate text-left"
+            className="text-[13px] font-medium text-slate-800 dark:text-zinc-200 hover:text-brand-600 dark:hover:text-brand-accent transition-colors truncate text-left"
           >
             {status.name}
           </button>
@@ -423,7 +423,7 @@ function AddStatusRow({ groupType, onAdd }: { groupType: "open" | "closed"; onAd
       <button
         type="button"
         onClick={() => setAdding(true)}
-        className="mt-2 text-[12px] font-medium text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300 transition-colors"
+        className="mt-2 text-[12px] font-medium text-brand-600 dark:text-brand-accent hover:text-brand-700 dark:hover:text-brand-accent-soft transition-colors"
       >
         + Add status
       </button>
@@ -442,7 +442,7 @@ function AddStatusRow({ groupType, onAdd }: { groupType: "open" | "closed"; onAd
           if (e.key === "Enter") commit();
           if (e.key === "Escape") { setName(""); setAdding(false); }
         }}
-        className="text-[16px] sm:text-[13px] text-slate-800 dark:text-zinc-200 bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-700 rounded-md px-2 py-1 outline-none focus:border-brand-500 dark:focus:border-brand-400 w-48"
+        className="text-[16px] sm:text-[13px] text-slate-800 dark:text-zinc-200 bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-700 rounded-md px-2 py-1 outline-none focus:border-brand-500 dark:focus:border-brand-accent w-48"
       />
       <button
         type="button"

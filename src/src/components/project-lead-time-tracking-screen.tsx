@@ -728,7 +728,7 @@ export function ProjectLeadTimeTrackingScreen() {
           <button
             type="button"
             onClick={() => setLoadRequestId((id) => id + 1)}
-            className="mt-5 text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3.5 py-2 shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-500 dark:hover:bg-brand-600 dark:shadow-brand-500/20"
+            className="mt-5 text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3.5 py-2 shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-accent dark:text-brand-accent-foreground dark:hover:bg-brand-accent-strong dark:focus-visible:outline-2 dark:focus-visible:outline-offset-2 dark:focus-visible:outline-brand-accent dark:shadow-brand-accent/20"
           >
             Retry
           </button>
@@ -957,7 +957,7 @@ function TimesheetTableRow({ row }: { row: LedTimesheetViewRow }) {
         <button
           type="button"
           onClick={goToWorkHistory}
-          className="text-[12px] font-medium text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300 whitespace-nowrap transition-colors"
+          className="text-[12px] font-medium text-brand-600 dark:text-brand-accent hover:text-brand-700 dark:hover:text-brand-accent-soft whitespace-nowrap transition-colors"
         >
           View →
         </button>

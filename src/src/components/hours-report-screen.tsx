@@ -213,7 +213,7 @@ function ProjectsFilter({
           "inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border transition-colors duration-150 shadow-sm cursor-pointer",
           allSelected
             ? "border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-slate-600 dark:text-zinc-400 hover:bg-slate-50 dark:hover:bg-zinc-800"
-            : "border-brand-200 dark:border-brand-700/50 bg-brand-50/60 dark:bg-brand-500/10 text-brand-700 dark:text-brand-400",
+            : "border-brand-200 dark:border-brand-700/50 bg-brand-50/60 dark:bg-brand-500/10 text-brand-700 dark:text-brand-accent",
         ].join(" ")}
       >
         Projects: {label}
@@ -265,7 +265,7 @@ function ProjectsFilter({
                 className={[
                   "w-full flex items-center gap-2.5 px-3 py-1.5 text-sm text-left transition-colors",
                   isSelected
-                    ? "text-brand-700 dark:text-brand-400 bg-brand-50/60 dark:bg-brand-500/10"
+                    ? "text-brand-700 dark:text-brand-accent bg-brand-50/60 dark:bg-brand-500/10"
                     : "text-slate-700 dark:text-zinc-300 hover:bg-slate-50 dark:hover:bg-zinc-800/60",
                 ].join(" ")}
               >

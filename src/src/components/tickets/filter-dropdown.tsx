@@ -304,7 +304,7 @@ export function FilterDropdown({
     "inline-flex items-center gap-0.5 text-sm px-2 py-1.5 rounded-md transition-colors";
 
   const triggerActive = hasSelection
-    ? (triggerActiveClassName ?? "text-brand-700 dark:text-brand-400 bg-brand-50 dark:bg-brand-500/10 font-medium")
+    ? (triggerActiveClassName ?? "text-brand-700 dark:text-brand-accent bg-brand-50 dark:bg-brand-500/10 font-medium")
     : "";
 
   const triggerDefault =
@@ -353,7 +353,7 @@ export function FilterDropdown({
                 onChange([]);
               }
             }}
-            className="ml-0.5 text-brand-500 hover:text-brand-700 dark:hover:text-brand-300 transition-colors flex-shrink-0"
+            className="ml-0.5 text-brand-500 hover:text-brand-700 dark:hover:text-brand-accent-soft transition-colors flex-shrink-0"
             aria-label={`Clear ${label} filter`}
           >
             <XIcon />
@@ -441,7 +441,7 @@ export function FilterDropdown({
                     className={[
                       "w-full flex items-center gap-2.5 px-3 py-1.5 text-sm text-left transition-colors",
                       isSelected
-                        ? "text-brand-700 dark:text-brand-400 bg-brand-50/60 dark:bg-brand-500/10"
+                        ? "text-brand-700 dark:text-brand-accent bg-brand-50/60 dark:bg-brand-500/10"
                         : "text-slate-700 dark:text-zinc-300 hover:bg-slate-50 dark:hover:bg-zinc-800/60",
                     ].join(" ")}
                   >
@@ -463,7 +463,7 @@ export function FilterDropdown({
                       </span>
                     )}
                     {mode === "single" && (
-                      <span className="flex-shrink-0 w-4 h-4 flex items-center justify-center text-brand-600 dark:text-brand-400">
+                      <span className="flex-shrink-0 w-4 h-4 flex items-center justify-center text-brand-600 dark:text-brand-accent">
                         {isSelected && <CheckIcon />}
                       </span>
                     )}

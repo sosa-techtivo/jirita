@@ -72,7 +72,7 @@ Most recently, the Admin Dashboard header's date display and one KPI label were 
 
 Most recently, every place in the app that renders a user's avatar gained a real fallback for people with no `avatar_url`: instead of a generic gray silhouette, a new shared `Avatar` component (`components/ui/avatar.tsx`) renders the person's initials on a deterministic pastel-colored circle (same convention already used in a sibling Techtivo product, Mi Pádel Club) — the color is derived from the person's own id/name (`lib/avatar.ts`), so the same person always gets the same color everywhere they appear. Every existing avatar `<img>` site across the app now goes through this one component; sizing/layout at each call site is unchanged. See Architecture Status → "Avatar fallback" for the full detail.
 
-Most recently, dark mode was removed outright, by explicit product decision: JIRITA now force-locks to a single, consistent Light theme via `next-themes`' `forcedTheme="light"` (`app/layout.tsx`), so neither a previously-stored `localStorage` preference nor the OS-level dark-mode setting can flip it, and the now-unused theme switcher (`theme-toggle.tsx`, previously in the header and on Profile) was deleted outright rather than left unreachable. See Architecture Status → "Theme — Dark Mode removed" for the full detail, and Design Decisions / Definition of Done below (both updated to match — neither still lists dark mode as a goal or a completion requirement).
+Dark mode was later removed (`forcedTheme="light"`, switcher deleted) and has since been **restored under JIR-97** — Light/Dark switcher back in the header and on Profile → Preferences, choice persisted by `next-themes`. See Architecture Status → "Theme — Dark Mode (restored, JIR-97)".
 
 Most recently, JIRITA gained a real Mobile-only bottom tab bar and its own avatar menu, for all three roles — `mobile-tab-bar.tsx` reuses the Desktop Sidebar's own `NAV_LINK` routes/icons and `isNavActive` logic rather than a second navigation model, with each role (Admin/Project Lead/Member) getting its own required set of direct tabs, a shared "More" bottom sheet (`mobile-more-sheet.tsx`) for whatever doesn't fit as a direct tab, and a dynamic fifth/sixth slot that shows a Project Lead's or Member's own project name directly when they're scoped to exactly one project. The header avatar's existing `AccountMenu` is reused as-is on Mobile; Member no longer sees a redundant Profile entry there, since Profile is now a direct tab for that role. Desktop's own Sidebar is completely untouched. See Architecture Status → "Mobile Experience" for the full detail.
 
@@ -345,7 +345,7 @@ Role comes from a real Supabase `organization_membership` when the signed-in use
 
 - Next.js application configured (in `/src/`)
 - Light Mode
-- ~~Dark Mode~~ — removed outright by explicit product decision; JIRITA now force-locks to a single Light theme via `next-themes`' `forcedTheme="light"` and the theme switcher was deleted — see Architecture Status → "Theme — Dark Mode removed"
+- Dark Mode — restored (JIR-97): Light/Dark switcher in the header and on Profile → Preferences, persisted per browser — see Architecture Status → "Theme — Dark Mode (restored, JIR-97)"
 - Global layout (`AppShell` component)
 - Responsive navigation (`Sidebar` component, Desktop) + a real Mobile-only bottom tab bar (`mobile-tab-bar.tsx`) with its own "More" sheet — see Architecture Status → "Mobile Experience"
 - Design system foundation
@@ -3881,26 +3881,43 @@ Supabase query or data path — this is presentation-layer only.
 Scope: presentation-layer only across all of the above — no Supabase
 query, RLS policy, or migration changed.
 
-## Theme — Dark Mode removed (single light theme)
+## Theme — Dark Mode (restored, JIR-97)
 
-By explicit product decision, JIRITA no longer supports dark mode — it
-now force-locks to a single, consistent Light theme.
+Dark mode was removed on 2026-07-28 (`b7f9239`: `forcedTheme="light"`,
+`theme-toggle.tsx` deleted) and restored under JIR-97 by reverting exactly
+that switch — no new theming architecture:
 
-- `src/app/layout.tsx` — `next-themes`' `<ThemeProvider>` now sets
-  `forcedTheme="light"`, so neither a previously-stored `localStorage`
-  preference nor the OS-level `prefers-color-scheme: dark` setting can
-  flip the app into dark mode.
-- `theme-toggle.tsx` (previously rendered in the header bar and on the
-  Profile screen) was deleted outright, not just hidden — there is no
-  unreachable dark-mode code path left in the UI.
-- This supersedes the "Excellent dark mode" UI-Inspiration goal and the
-  "Dark Mode supported" Definition-of-Done checklist item elsewhere in
-  this file (both updated to match — see Design Decisions and Definition
-  of Done). Any dark-mode-specific styling left on individual components
-  (e.g. `dark:` Tailwind classes) is now simply unreachable, not actively
-  removed component-by-component — a future cleanup, not a functional
-  issue, since `forcedTheme` prevents dark mode from ever activating
-  regardless.
+- `src/app/layout.tsx` — `forcedTheme` dropped; `next-themes` is back to
+  `attribute="class" defaultTheme="light"`, so the stored choice is applied
+  by its blocking init script before first paint (no light/dark flash).
+- `theme-toggle.tsx` restored verbatim from history (Light / Dark
+  segmented control, hydration-safe) and re-added to the header bar and
+  Profile → Preferences → Theme.
+- Options are Light and Dark only, the established JIRITA behavior;
+  `ThemeSystemMigration` (theme-provider.tsx) still moves any legacy
+  "system" value to Light. Default for new visitors is Light.
+- Dark accent (visual QA with Alex): brand-500/600 purples read poorly on
+  the near-black surfaces, and many `dark:` classes referenced brand
+  shades that `@theme` never defined (300/400/800/900/950), so they
+  silently produced no CSS. `globals.css` now adds dark-only tokens —
+  `brand-accent` #F472B6 (Techtivo magenta), `brand-accent-soft` #F9A8D4
+  (hover/emphasis), `brand-accent-strong` #EC4899 (primary-CTA hover),
+  `brand-accent-foreground` #0D0E12 (text on the solid accent) — used only
+  behind `dark:` variants, so Light Mode classes are unchanged (verified:
+  every changed component is identical to before once `dark:` classes are
+  stripped, apart from the toggle and logo additions).
+- Applied to: accent text/icons/links, focus and selected borders,
+  rich-text links/mentions, sidebar active nav + expanded-project
+  container + selected sub-link (dark 8–10% magenta tints, never
+  light-gray), Project Overview Progress, primary CTAs (solid #F472B6 with
+  dark text + magenta focus outline; disabled semantics unchanged),
+  parent-ticket cards (child sky treatment unchanged), and the mobile tab
+  bar (dark `zinc-950` surface). Semantic status/priority colors are
+  untouched.
+- Logo: Dark Mode shows `public/img/jirita-logo2.png` (same 217×47) in the
+  sidebar and auth card via a CSS-only `dark:hidden` / `dark:inline` swap
+  — no client state, correct on first paint. OG image, emails, and the
+  Hours Report PDF export keep the original logo.
 
 ## Avatar fallback (initials + deterministic pastel)
 
@@ -5330,7 +5347,7 @@ Goals:
 - Clean
 - Dense information
 - High productivity
-- ~~Excellent dark mode~~ — superseded: dark mode was removed outright by explicit product decision, JIRITA now ships a single, polished Light theme only (see Architecture Status → "Theme — Dark Mode removed")
+- Excellent dark mode — restored under JIR-97 (see Architecture Status → "Theme — Dark Mode (restored, JIR-97)")
 
 ---
 
@@ -5365,7 +5382,7 @@ Never break navigation.
 
 Prefer extending existing components instead of replacing them.
 
-Maintain visual consistency across JIRITA's single Light theme (dark mode is intentionally not supported — see Architecture Status → "Theme — Dark Mode removed").
+Maintain visual consistency across both Light and Dark themes (see Architecture Status → "Theme — Dark Mode (restored, JIR-97)").
 
 Favor reusable components over duplicated implementations.
 
@@ -5449,7 +5466,8 @@ A feature is considered complete when:
 
 - UI implemented
 - Responsive (Desktop and Mobile — see Architecture Status → "Mobile Experience")
-- Light Mode supported (JIRITA's only theme — dark mode is intentionally not supported, see Architecture Status → "Theme — Dark Mode removed")
+- Light Mode supported
+- Dark Mode supported (JIR-97)
 - Connected to application navigation
 - Uses realistic mock data
 - Matches JIRITA design language

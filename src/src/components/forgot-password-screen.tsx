@@ -87,7 +87,7 @@ export function ForgotPasswordScreen() {
         <AuthSubmitButton loading={loading}>{loading ? "Sending…" : "Send recovery email"}</AuthSubmitButton>
 
         <p className="text-center text-[12.5px] text-slate-500 dark:text-zinc-400">
-          <Link href="/login" className="font-medium text-brand-600 dark:text-brand-400 hover:underline">
+          <Link href="/login" className="font-medium text-brand-600 dark:text-brand-accent hover:underline">
             Back to login
           </Link>
         </p>

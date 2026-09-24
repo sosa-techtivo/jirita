@@ -112,7 +112,7 @@ export function DeleteProjectModal({
             disabled={submitting}
             autoComplete="off"
             spellCheck={false}
-            className="w-full bg-white dark:bg-zinc-900 text-[16px] sm:text-[13px] font-medium text-slate-800 dark:text-zinc-200 border border-slate-200 dark:border-zinc-700 rounded-lg px-3 py-2 outline-none focus:border-brand-500 dark:focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 transition-colors disabled:opacity-60"
+            className="w-full bg-white dark:bg-zinc-900 text-[16px] sm:text-[13px] font-medium text-slate-800 dark:text-zinc-200 border border-slate-200 dark:border-zinc-700 rounded-lg px-3 py-2 outline-none focus:border-brand-500 dark:focus:border-brand-accent focus:ring-2 focus:ring-brand-500/20 transition-colors disabled:opacity-60"
           />
 
           <div className="flex items-center justify-end gap-2 mt-6">

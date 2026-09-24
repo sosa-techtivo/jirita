@@ -2648,7 +2648,7 @@ function AdminReportsScreen() {
                       <button
                         type="button"
                         onClick={() => setDeliveryRequestId((id) => id + 1)}
-                        className="font-medium text-brand-600 dark:text-brand-400 hover:underline"
+                        className="font-medium text-brand-600 dark:text-brand-accent hover:underline"
                       >
                         Retry
                       </button>
@@ -2767,7 +2767,7 @@ function AdminReportsScreen() {
                       <button
                         type="button"
                         onClick={() => setDeliveryRequestId((id) => id + 1)}
-                        className="font-medium text-brand-600 dark:text-brand-400 hover:underline"
+                        className="font-medium text-brand-600 dark:text-brand-accent hover:underline"
                       >
                         Retry
                       </button>
@@ -2787,10 +2787,10 @@ function AdminReportsScreen() {
                     >
                       <td className="py-2.5 pr-4">
                         <div className="flex items-center gap-2">
-                          <span className="w-6 h-6 rounded-md bg-slate-100 dark:bg-zinc-800 text-[9px] font-bold text-slate-500 dark:text-zinc-400 flex items-center justify-center flex-shrink-0 transition-colors duration-150 group-hover:bg-brand-50 group-hover:text-brand-600 dark:group-hover:bg-brand-500/10 dark:group-hover:text-brand-400">
+                          <span className="w-6 h-6 rounded-md bg-slate-100 dark:bg-zinc-800 text-[9px] font-bold text-slate-500 dark:text-zinc-400 flex items-center justify-center flex-shrink-0 transition-colors duration-150 group-hover:bg-brand-50 group-hover:text-brand-600 dark:group-hover:bg-brand-500/10 dark:group-hover:text-brand-accent">
                             {row.shortName}
                           </span>
-                          <span className="font-medium text-slate-800 dark:text-zinc-200 truncate group-hover:text-brand-700 dark:group-hover:text-brand-400 transition-colors duration-150">
+                          <span className="font-medium text-slate-800 dark:text-zinc-200 truncate group-hover:text-brand-700 dark:group-hover:text-brand-accent transition-colors duration-150">
                             {row.name}
                           </span>
                         </div>
@@ -2865,7 +2865,7 @@ function AdminReportsScreen() {
                   <button
                     type="button"
                     onClick={() => setDeliveryRequestId((id) => id + 1)}
-                    className="font-medium text-brand-600 dark:text-brand-400 hover:underline"
+                    className="font-medium text-brand-600 dark:text-brand-accent hover:underline"
                   >
                     Retry
                   </button>
@@ -2882,7 +2882,7 @@ function AdminReportsScreen() {
                   const pctColor  =
                     entry.utilizationPct > 100 ? "text-red-600 dark:text-red-400" :
                     entry.utilizationPct >= 80 ? "text-amber-600 dark:text-amber-400" :
-                                                 "text-brand-600 dark:text-brand-500";
+                                                 "text-brand-600 dark:text-brand-accent";
                   const deltaPositive = entry.weekDelta !== null && entry.weekDelta > 0;
                   const deltaColor    = deltaPositive
                     ? "text-amber-500 dark:text-amber-500"
@@ -3042,7 +3042,7 @@ function AdminReportsScreen() {
                 <button
                   type="button"
                   onClick={() => setDeliveryRequestId((id) => id + 1)}
-                  className="font-medium text-brand-600 dark:text-brand-400 hover:underline"
+                  className="font-medium text-brand-600 dark:text-brand-accent hover:underline"
                 >
                   Retry
                 </button>
@@ -3229,7 +3229,7 @@ function AdminReportsScreen() {
                           <button
                             type="button"
                             onClick={() => setDeliveryRequestId((id) => id + 1)}
-                            className="font-medium text-brand-600 dark:text-brand-400 hover:underline"
+                            className="font-medium text-brand-600 dark:text-brand-accent hover:underline"
                           >
                             Retry
                           </button>
@@ -3264,7 +3264,7 @@ function AdminReportsScreen() {
                               <span className="text-slate-300 dark:text-zinc-600">—</span>
                             )}
                           </td>
-                          <td className="py-2.5 text-right font-semibold text-brand-700 dark:text-brand-400 tabular-nums">
+                          <td className="py-2.5 text-right font-semibold text-brand-700 dark:text-brand-accent tabular-nums">
                             {formatCurrency(row.estimatedInvoice)}
                           </td>
                         </tr>
@@ -3289,7 +3289,7 @@ function AdminReportsScreen() {
                         )}
                       </td>
                       <td className="pt-2.5" />
-                      <td className="pt-2.5 text-right font-bold text-brand-700 dark:text-brand-400 tabular-nums">
+                      <td className="pt-2.5 text-right font-bold text-brand-700 dark:text-brand-accent tabular-nums">
                         {financeLoadState === "loading" ? (
                           <SkeletonBlock className="h-4 w-16 ml-auto" />
                         ) : (
@@ -3351,7 +3351,7 @@ function AdminReportsScreen() {
                           <button
                             type="button"
                             onClick={() => setDeliveryRequestId((id) => id + 1)}
-                            className="font-medium text-brand-600 dark:text-brand-400 hover:underline"
+                            className="font-medium text-brand-600 dark:text-brand-accent hover:underline"
                           >
                             Retry
                           </button>
@@ -3381,7 +3381,7 @@ function AdminReportsScreen() {
                           <td className="py-2.5 text-right">
                             <UtilizationCell pct={row.utilizationPct} />
                           </td>
-                          <td className="py-2.5 text-right font-semibold text-brand-700 dark:text-brand-400 tabular-nums">
+                          <td className="py-2.5 text-right font-semibold text-brand-700 dark:text-brand-accent tabular-nums">
                             {formatCurrency(row.estimatedRevenue)}
                           </td>
                         </tr>

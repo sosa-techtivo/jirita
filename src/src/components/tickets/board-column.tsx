@@ -105,7 +105,7 @@ export function BoardColumn({
       className={
         "flex-1 min-w-[170px] flex flex-col min-h-0 rounded-xl bg-slate-100/60 dark:bg-zinc-800/40 border transition-colors " +
         (dropActive
-          ? "border-brand-400 dark:border-brand-500 ring-2 ring-brand-400/40 dark:ring-brand-500/30"
+          ? "border-brand-400 dark:border-brand-accent ring-2 ring-brand-400/40 dark:ring-brand-500/30"
           : "border-slate-200/80 dark:border-zinc-700/30")
       }
       data-column-id={column.id}

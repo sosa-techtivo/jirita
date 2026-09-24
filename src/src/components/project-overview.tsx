@@ -474,7 +474,7 @@ export function ProjectOverview({ slug = "mobile-banking-app" }: { slug?: string
           <button
             type="button"
             onClick={runFetch}
-            className="mt-5 text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3.5 py-2 shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-500 dark:hover:bg-brand-600 dark:shadow-brand-500/20"
+            className="mt-5 text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3.5 py-2 shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-accent dark:text-brand-accent-foreground dark:hover:bg-brand-accent-strong dark:focus-visible:outline-2 dark:focus-visible:outline-offset-2 dark:focus-visible:outline-brand-accent dark:shadow-brand-accent/20"
           >
             Retry
           </button>
@@ -692,7 +692,7 @@ export function ProjectOverview({ slug = "mobile-banking-app" }: { slug?: string
               <Link
                 href={`/projects/${slug}/tickets`}
                 onClick={() => presetTicketsFilter(slug, ["Mine"])}
-                className="text-xs font-medium text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300 flex-shrink-0"
+                className="text-xs font-medium text-brand-600 hover:text-brand-700 dark:text-brand-accent dark:hover:text-brand-accent-soft flex-shrink-0"
               >
                 View all project tickets →
               </Link>
@@ -788,7 +788,7 @@ export function ProjectOverview({ slug = "mobile-banking-app" }: { slug?: string
               <li>
                 <Link
                   href={`/projects/${slug}/notes`}
-                  className="text-slate-600 hover:text-brand-600 dark:text-zinc-400 dark:hover:text-brand-400"
+                  className="text-slate-600 hover:text-brand-600 dark:text-zinc-400 dark:hover:text-brand-accent"
                 >
                   Notes &amp; Documentation
                 </Link>

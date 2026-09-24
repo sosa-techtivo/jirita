@@ -97,7 +97,7 @@ export function LoginScreen() {
             showCapsLockWarning
           />
           <div className="mt-1.5 text-right">
-            <Link href="/forgot-password" className="text-[12.5px] font-medium text-brand-600 dark:text-brand-400 hover:underline">
+            <Link href="/forgot-password" className="text-[12.5px] font-medium text-brand-600 dark:text-brand-accent hover:underline">
               Forgot password?
             </Link>
           </div>

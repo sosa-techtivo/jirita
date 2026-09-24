@@ -172,7 +172,7 @@ export function MobileTabBar({ activePage }: { activePage?: string }) {
     <>
       <nav
         aria-label="Primary"
-        className={`md:hidden fixed bottom-0 inset-x-0 z-40 bg-[#e4e1ff] border-t border-slate-200 dark:border-zinc-800 pb-[env(safe-area-inset-bottom)]`}
+        className={`md:hidden fixed bottom-0 inset-x-0 z-40 bg-[#e4e1ff] dark:bg-zinc-950 border-t border-slate-200 dark:border-zinc-800 pb-[env(safe-area-inset-bottom)]`}
       >
         <div className={`grid ${gridColsClass}`}>
           {tabs.map(({ key, shortLabel }) => {
@@ -187,7 +187,7 @@ export function MobileTabBar({ activePage }: { activePage?: string }) {
                 aria-current={active ? "page" : undefined}
                 className={[
                   TAB_CLASS,
-                  active ? "text-brand-600 dark:text-brand-400" : "text-slate-500 dark:text-zinc-400",
+                  active ? "text-brand-600 dark:text-brand-accent" : "text-slate-500 dark:text-zinc-400",
                   isDashboard ? "font-semibold" : active ? "font-medium" : "font-normal",
                 ].join(" ")}
               >
@@ -203,7 +203,7 @@ export function MobileTabBar({ activePage }: { activePage?: string }) {
               aria-current={onProfilePage ? "page" : undefined}
               className={[
                 TAB_CLASS,
-                onProfilePage ? "text-brand-600 dark:text-brand-400 font-medium" : "text-slate-500 dark:text-zinc-400 font-normal",
+                onProfilePage ? "text-brand-600 dark:text-brand-accent font-medium" : "text-slate-500 dark:text-zinc-400 font-normal",
               ].join(" ")}
             >
               <ProfileIcon />
@@ -219,7 +219,7 @@ export function MobileTabBar({ activePage }: { activePage?: string }) {
               aria-expanded={moreOpen}
               className={[
                 TAB_CLASS,
-                moreActive ? "text-brand-600 dark:text-brand-400 font-medium" : "text-slate-500 dark:text-zinc-400",
+                moreActive ? "text-brand-600 dark:text-brand-accent font-medium" : "text-slate-500 dark:text-zinc-400",
               ].join(" ")}
             >
               <MoreIcon />

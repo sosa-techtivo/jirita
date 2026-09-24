@@ -187,7 +187,7 @@ export function NoteDetailModal({
                 <div>
                   <label className={FIELD_LABEL}>
                     Title
-                    <span className="ml-1.5 text-brand-500 dark:text-brand-400">*</span>
+                    <span className="ml-1.5 text-brand-500 dark:text-brand-accent">*</span>
                   </label>
                   <input
                     ref={titleRef}
@@ -210,7 +210,7 @@ export function NoteDetailModal({
                           "px-2 py-0.5 rounded-md text-[11px] font-medium border transition-colors " +
                           (tag === option
                             ? "bg-brand-500 dark:bg-brand-600 text-white border-transparent"
-                            : "bg-slate-100 dark:bg-zinc-800 text-slate-500 dark:text-zinc-400 border-transparent hover:border-brand-200 dark:hover:border-brand-800")
+                            : "bg-slate-100 dark:bg-zinc-800 text-slate-500 dark:text-zinc-400 border-transparent hover:border-brand-200 dark:hover:border-brand-accent/40")
                         }
                       >
                         {option}
@@ -254,7 +254,7 @@ export function NoteDetailModal({
                   className={
                     "inline-flex items-center gap-2 px-6 py-2.5 text-[13px] font-semibold rounded-lg transition-all " +
                     (canSave
-                      ? "bg-brand-600 hover:bg-brand-700 dark:bg-brand-500 dark:hover:bg-brand-600 text-white shadow-md shadow-brand-600/25 dark:shadow-brand-500/20 hover:shadow-lg hover:shadow-brand-600/30"
+                      ? "bg-brand-600 hover:bg-brand-700 dark:bg-brand-accent dark:text-brand-accent-foreground dark:hover:bg-brand-accent-strong dark:focus-visible:outline-2 dark:focus-visible:outline-offset-2 dark:focus-visible:outline-brand-accent text-white shadow-md shadow-brand-600/25 dark:shadow-brand-accent/20 hover:shadow-lg hover:shadow-brand-600/30"
                       : "bg-slate-100 dark:bg-zinc-800 text-slate-400 dark:text-zinc-600 cursor-not-allowed")
                   }
                 >

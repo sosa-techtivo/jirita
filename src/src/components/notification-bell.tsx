@@ -265,7 +265,7 @@ export function NotificationBell() {
             <button
               type="button"
               onClick={handleMarkAllRead}
-              className="text-[11px] font-medium text-brand-600 dark:text-brand-400 hover:underline"
+              className="text-[11px] font-medium text-brand-600 dark:text-brand-accent hover:underline"
             >
               Mark all as read
             </button>
@@ -348,7 +348,7 @@ export function NotificationBell() {
               setIsOpen(false);
               router.push("/notifications");
             }}
-            className="w-full text-center px-3.5 py-1.5 text-[13px] font-medium text-brand-600 dark:text-brand-400 hover:bg-slate-50 dark:hover:bg-zinc-800/60 transition-colors"
+            className="w-full text-center px-3.5 py-1.5 text-[13px] font-medium text-brand-600 dark:text-brand-accent hover:bg-slate-50 dark:hover:bg-zinc-800/60 transition-colors"
           >
             View all
           </button>

@@ -167,7 +167,7 @@ function ProjectsErrorState({ message, onRetry }: { message: string | null; onRe
       <button
         type="button"
         onClick={onRetry}
-        className="mt-5 text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3.5 py-2 shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-500 dark:hover:bg-brand-600 dark:shadow-brand-500/20"
+        className="mt-5 text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3.5 py-2 shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-accent dark:text-brand-accent-foreground dark:hover:bg-brand-accent-strong dark:focus-visible:outline-2 dark:focus-visible:outline-offset-2 dark:focus-visible:outline-brand-accent dark:shadow-brand-accent/20"
       >
         Retry
       </button>
@@ -873,7 +873,7 @@ function AccessRequestRow({
           type="button"
           disabled={busy}
           onClick={onApprove}
-          className="text-xs font-medium px-2.5 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-700 dark:bg-brand-500 dark:hover:bg-brand-600 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          className="text-xs font-medium px-2.5 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-700 dark:bg-brand-accent dark:text-brand-accent-foreground dark:hover:bg-brand-accent-strong dark:focus-visible:outline-2 dark:focus-visible:outline-offset-2 dark:focus-visible:outline-brand-accent text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           Accept
         </button>
@@ -1228,7 +1228,7 @@ function EmptyState({ hasAnyProjects, onCreate }: { hasAnyProjects: boolean; onC
         <button
           type="button"
           onClick={onCreate}
-          className="mt-5 text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3.5 py-2 shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-500 dark:hover:bg-brand-600 dark:shadow-brand-500/20"
+          className="mt-5 text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3.5 py-2 shadow-sm shadow-brand-600/20 transition-colors dark:bg-brand-accent dark:text-brand-accent-foreground dark:hover:bg-brand-accent-strong dark:focus-visible:outline-2 dark:focus-visible:outline-offset-2 dark:focus-visible:outline-brand-accent dark:shadow-brand-accent/20"
         >
           + Create Project
         </button>
