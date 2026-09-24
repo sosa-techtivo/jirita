@@ -45,3 +45,6 @@ supabase/.branches
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# local backup payloads (e.g. npm run backup:unfuddle-attachments) — never commit
+/backups/

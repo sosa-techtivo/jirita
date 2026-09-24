@@ -5232,6 +5232,48 @@ remaining objects are referenced; `ticket_attachments` still has 3,250 rows. The
 intentionally untouched. The bucket is now ~926.44 MB, so the 1 GB capacity
 concern is still open.
 
+## 2026-09-24 — Historical Unfuddle attachment archival (JIR-100)
+
+Follow-up to the Storage capacity alert above. With orphans already removed
+under JIR-98 (45 objects, ~18.26 MB, after the broken Storage DELETE policy
+was fixed), the remaining reclaimable Storage was historical Unfuddle
+attachments (`ticket_attachments.unfuddle_id IS NOT NULL`).
+
+**Backup first** — `src/lib/attachment-history-backup/` (`npm run
+backup:unfuddle-attachments`), read-only against production: streams every
+physical historical original and separate thumbnail to a git-ignored
+`backups/unfuddle-ticket-attachments/<timestamp>/` with `manifest.json`/
+`manifest.csv` and a per-object SHA-256 journal, then re-verifies against a
+fresh inventory. Result: 2,898 historical rows, 2,894 originals, 2,751
+separate thumbnails, 5,645 physical objects, 649,163,871 bytes
+(~619.09 MiB), all SHA-256 recorded, 0 missing / 0 failed / 0 size
+mismatches — **BACKUP VERIFIED**. An external copy was placed in Drive.
+
+**Archival cleanup** — `src/lib/attachment-history-cleanup/` (`npm run
+cleanup:unfuddle-attachments:dry-run`; apply is never scripted and needs
+`--apply --confirm=<fingerprint of an approved dry run>`). First batch
+policy: historical, still `is_available`, physical original ≥ 5 MiB, and
+fail closed unless the fresh batch matches the expected 19 / ~261 MiB. Each
+candidate must pass a backup gate (manifest path/size, journal SHA-256, and
+a fresh SHA-256 of the local file). Apply re-discovers and re-gates from
+scratch, refuses on a fingerprint mismatch, then per item: fresh re-check →
+Storage `remove()` → confirm the exact path is absent → only then set
+`is_available = false`. The row is never deleted; a separate thumbnail
+would need its own backup gate; a self-thumbnail counts once.
+
+**Production result**: dry run 19 candidates / 19 eligible / 0 ineligible
+(**CLEANUP DRY RUN VERIFIED**). Apply 19/19 archived, 0 failures, 19
+Storage objects removed, exactly **273,402,470 bytes (260.74 MiB)
+reclaimed**; no thumbnails were involved. A before/after snapshot diff
+confirmed all `ticket_attachments` rows preserved, only `is_available`
+changed on the 19 target rows (unavailable rows 4 → 23), and no unrelated
+Storage objects or rows changed. `ticket-attachments`: 6,296 objects /
+971,756,208 bytes → 6,277 objects / 698,353,738 bytes.
+
+The archived attachments' metadata (filename, ticket, `unfuddle_id`,
+`storage_path`) remains in JIRITA; their physical files now exist only in
+the verified backup (local + Drive).
+
 ---
 
 # Navigation Status
