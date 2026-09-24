@@ -82,6 +82,13 @@ const STATUS_FROM_DB: Record<string, ProjectStatus> = {
   archived: "archived",
 };
 
+/** Same DB → UI project status mapping (and "planning" fallback) as every
+ *  loader in this file — exported for lib/tickets.ts's Admin Dashboard
+ *  loader, which reads project rows directly (JIR-101). */
+export function projectStatusFromDb(value: string): ProjectStatus {
+  return STATUS_FROM_DB[value] ?? "planning";
+}
+
 // Inverse of STATUS_FROM_DB, deliberately excluding "archived" — that
 // transition only ever happens through archiveProject/restoreProject,
 // never through updateProjectSettings (see EditableProjectStatus).

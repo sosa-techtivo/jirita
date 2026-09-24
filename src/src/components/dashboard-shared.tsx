@@ -228,13 +228,17 @@ export function Card({
   );
 }
 
-export function ActiveTicketRow({
+// Generic over the fields it actually renders, so a lighter ticket shape
+// (the Admin Dashboard's AdminDashboardTicket) can reuse it as-is.
+type ActiveTicketRowTicket = Pick<Ticket, "status" | "statusGroupType" | "type" | "title" | "dueDate" | "projectSlug" | "ticketNumber">;
+
+export function ActiveTicketRow<T extends ActiveTicketRowTicket>({
   ticket,
   onOpen,
   projectBadge,
 }: {
-  ticket: Ticket;
-  onOpen: (t: Ticket) => void;
+  ticket: T;
+  onOpen: (t: T) => void;
   /** Optional badge rendered above the title — lets multi-project views
    *  (e.g. a Member's cross-project work queue) show which project a
    *  ticket belongs to without competing with the title for attention. */

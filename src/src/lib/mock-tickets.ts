@@ -104,7 +104,7 @@ export function registerProjectCode(slug: string, projectCode: string): void {
 // from the ticket's project (Project Settings → General → Project Code),
 // never hardcoded or derived from a project's name — every screen that
 // shows a ticket ID should call this instead of reading a stored key.
-export function getTicketDisplayKey(ticket: Ticket): string {
+export function getTicketDisplayKey(ticket: Pick<Ticket, "projectSlug" | "ticketNumber">): string {
   const code =
     realProjectCodes.get(ticket.projectSlug) ?? getProjectBySlug(ticket.projectSlug)?.projectCode ?? "TKT";
   return `${code}-${ticket.ticketNumber}`;

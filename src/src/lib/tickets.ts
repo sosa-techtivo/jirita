@@ -15,7 +15,7 @@ import { resolveAvatarUrl } from "./membership";
 import { FALLBACK_AVATAR } from "./current-user";
 import { registerProjectCode } from "./mock-tickets";
 import type { Ticket, TicketPriority, TicketStatus, TicketType } from "./mock-tickets";
-import { loadOrganizationProjects } from "./projects";
+import { loadOrganizationProjects, projectStatusFromDb } from "./projects";
 import type { ProjectStatus } from "./mock-projects";
 import { formatAbsoluteDate, formatAbsoluteDateTime } from "./date-format";
 import { createNotification } from "./notifications";
@@ -102,7 +102,7 @@ export const STATUS_FROM_DB: Record<string, TicketStatus> = {
 // statusGroupType. Never use this for a SPECIFIC comparison like
 // "blocked"/"in_review" — those intentionally keep reading `t.status`
 // (or, going forward, a status's own legacy_enum_value) directly.
-export function isTicketClosed(t: Ticket): boolean {
+export function isTicketClosed(t: Pick<Ticket, "status" | "statusGroupType">): boolean {
   return t.statusGroupType ? t.statusGroupType === "closed" : t.status === "done";
 }
 
@@ -4651,6 +4651,162 @@ export async function loadOrganizationTickets(organizationId: string): Promise<O
     })),
     statusesBySlug,
   };
+}
+
+// ── Admin Dashboard tickets (JIR-101) ─────────────────────────────────────────
+// The Admin Dashboard is a lightweight landing screen (Assigned / Blocked /
+// Due Today / Overdue KPIs + My Active Work), so it doesn't use
+// loadOrganizationTickets above (left untouched for its other callers): that
+// one issues loadOrganizationProjects plus 4 sequential queries *per project*
+// and returns full Tickets with every column. This returns only what the
+// Dashboard needs, with a fixed number of organization-level queries:
+//   1. projects (id/slug/name/status/project_code);
+//   2. tickets for every project (paged, 9 small columns), in parallel with
+//   3. ticket_statuses (id/group_type) for every project.
+// RLS scopes projects/tickets exactly as before. Each field is mapped exactly
+// like rowToTicket (status/type fallbacks, statusGroupType from the project's
+// real statuses, dueDate display string), project codes are registered for
+// getTicketDisplayKey, and order is project order then ticket_number — same
+// as loadOrganizationTickets. Projects/tickets query errors fail the call; a
+// statuses error degrades to isTicketClosed's status === "done" fallback.
+export type AdminDashboardTicket = Pick<
+  Ticket,
+  "id" | "projectSlug" | "ticketNumber" | "title" | "type" | "status" | "statusGroupType" | "dueDate" | "assigneeProfileId"
+> & {
+  /** Raw due_date ("YYYY-MM-DD"), or null — `dueDate` is its display string. */
+  dueDateISO: string | null;
+};
+
+export type AdminDashboardTicketsResult =
+  | {
+      status: "ready";
+      tickets: AdminDashboardTicket[];
+      projects: { slug: string; name: string; status: ProjectStatus }[];
+    }
+  | { status: "error"; message: string };
+
+const ADMIN_DASHBOARD_TICKET_COLUMNS =
+  "id, project_id, ticket_number, title, status, status_id, type, assignee_profile_id, due_date";
+const ADMIN_DASHBOARD_TICKET_PAGE_SIZE = 1000;
+
+interface AdminDashboardTicketRow {
+  id: string;
+  project_id: string;
+  ticket_number: number;
+  title: string;
+  status: string;
+  status_id: string;
+  type: string;
+  assignee_profile_id: string | null;
+  due_date: string | null;
+}
+
+export async function loadAdminDashboardTickets(
+  organizationId: string,
+  signal?: AbortSignal
+): Promise<AdminDashboardTicketsResult> {
+  const supabase = getSupabaseBrowserClient();
+
+  let projectsQuery = supabase
+    .from("projects")
+    .select("id, slug, name, status, project_code")
+    .eq("organization_id", organizationId)
+    // Same ordering as loadOrganizationProjects (the scope selector's order).
+    .order("updated_at", { ascending: false })
+    .order("slug", { ascending: true });
+  if (signal) projectsQuery = projectsQuery.abortSignal(signal);
+  const { data: projectRows, error: projectsError } = await projectsQuery.returns<
+    { id: string; slug: string; name: string; status: string; project_code: string }[]
+  >();
+  if (projectsError) {
+    logDev("admin dashboard projects query failed", projectsError);
+    return { status: "error", message: projectsError.message };
+  }
+
+  const projects = projectRows ?? [];
+  for (const project of projects) registerProjectCode(project.slug, project.project_code);
+  const projectSummaries = projects.map((project) => ({
+    slug: project.slug,
+    name: project.name,
+    status: projectStatusFromDb(project.status),
+  }));
+  if (projects.length === 0) return { status: "ready", tickets: [], projects: projectSummaries };
+
+  // Chunked like the ticket-id batches below, so a very large org can never
+  // push a single `.in()` past the gateway's max URL length.
+  const projectIdBatches = chunkArray(
+    projects.map((project) => project.id),
+    ORG_TICKET_ID_BATCH_SIZE
+  );
+
+  async function loadTicketRows(projectIds: string[]): Promise<{ rows: AdminDashboardTicketRow[] } | { error: string }> {
+    const rows: AdminDashboardTicketRow[] = [];
+    for (let from = 0; ; from += ADMIN_DASHBOARD_TICKET_PAGE_SIZE) {
+      let query = supabase
+        .from("tickets")
+        .select(ADMIN_DASHBOARD_TICKET_COLUMNS)
+        .in("project_id", projectIds)
+        .order("project_id", { ascending: true })
+        .order("ticket_number", { ascending: true })
+        .range(from, from + ADMIN_DASHBOARD_TICKET_PAGE_SIZE - 1);
+      if (signal) query = query.abortSignal(signal);
+      const { data, error } = await query.returns<AdminDashboardTicketRow[]>();
+      if (error) {
+        logDev("admin dashboard tickets query failed", error);
+        return { error: error.message };
+      }
+      rows.push(...(data ?? []));
+      if (!data || data.length < ADMIN_DASHBOARD_TICKET_PAGE_SIZE) return { rows };
+    }
+  }
+
+  async function loadStatusGroups(projectIds: string[]): Promise<{ id: string; groupType: "open" | "closed" }[]> {
+    let query = supabase.from("ticket_statuses").select("id, group_type").in("project_id", projectIds);
+    if (signal) query = query.abortSignal(signal);
+    const { data, error } = await query.returns<{ id: string; group_type: string }[]>();
+    if (error) {
+      logDev("admin dashboard ticket statuses query failed", error);
+      return [];
+    }
+    // Same group_type mapping as rowToTicketStatusOption.
+    return (data ?? []).map((row) => ({ id: row.id, groupType: row.group_type === "closed" ? "closed" : "open" }));
+  }
+
+  const [ticketBatches, statusBatches] = await Promise.all([
+    Promise.all(projectIdBatches.map(loadTicketRows)),
+    Promise.all(projectIdBatches.map(loadStatusGroups)),
+  ]);
+
+  const rows: AdminDashboardTicketRow[] = [];
+  for (const batch of ticketBatches) {
+    if ("error" in batch) return { status: "error", message: batch.error };
+    rows.push(...batch.rows);
+  }
+
+  const groupTypeByStatusId = new Map(statusBatches.flat().map((s) => [s.id, s.groupType]));
+  const projectIndexById = new Map(projects.map((project, index) => [project.id, index]));
+  const slugByProjectId = new Map(projects.map((project) => [project.id, project.slug]));
+
+  rows.sort(
+    (a, b) =>
+      (projectIndexById.get(a.project_id) ?? 0) - (projectIndexById.get(b.project_id) ?? 0) ||
+      a.ticket_number - b.ticket_number
+  );
+
+  const tickets: AdminDashboardTicket[] = rows.map((row) => ({
+    id: row.id,
+    projectSlug: slugByProjectId.get(row.project_id) ?? "",
+    ticketNumber: row.ticket_number,
+    title: row.title,
+    type: TYPE_FROM_DB[row.type] ?? "TASK",
+    status: STATUS_FROM_DB[row.status] ?? "backlog",
+    statusGroupType: groupTypeByStatusId.get(row.status_id),
+    dueDate: formatDueDate(row.due_date),
+    assigneeProfileId: row.assignee_profile_id,
+    dueDateISO: row.due_date,
+  }));
+
+  return { status: "ready", tickets, projects: projectSummaries };
 }
 
 export type OrganizationLoggedHoursResult =
