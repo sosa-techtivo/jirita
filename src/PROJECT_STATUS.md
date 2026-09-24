@@ -1871,6 +1871,12 @@ the true first load — none of their data-loading effects changed.
 
 ## Confirmed working (Dashboard — Admin, Project Lead, and Member)
 
+> **Admin Dashboard superseded by JIR-101** — it is now a KPI row (Assigned
+> Tickets / Blocked / Due Today / Overdue) plus My Active Work; the Admin
+> widgets described below (Hours Burn, Recent Activity, Team Workload,
+> Projects at Risk, insights, deadlines) were removed. See "2026-09-24 —
+> Admin Dashboard loading (JIR-101)". Project Lead/Member notes still apply.
+
 Real KPIs, lists, and quick actions for all three roles' `/dashboard` — no
 mock data remains on any of the three screens themselves (only
 `Ticket`/`getTicketDisplayKey` are still imported from `mock-tickets.ts`,
@@ -5284,6 +5290,65 @@ Storage objects or rows changed. `ticket-attachments`: 6,296 objects /
 The archived attachments' metadata (filename, ticket, `unfuddle_id`,
 `storage_path`) remains in JIRITA; their physical files now exist only in
 the verified backup (local + Drive).
+
+## 2026-09-24 — Admin Dashboard loading (JIR-101) — completed
+
+**Problem**: for Admin users with many projects, `/dashboard` was very slow
+and could stay on its loading skeleton indefinitely (shell and sidebar
+loaded; only the Dashboard content didn't).
+
+**Root causes**:
+1. *Reliability* — the Admin Dashboard's async load had no failure
+   boundary: an unexpected rejection or a request that never settled left
+   `loadState` at `"loading"`, so neither the error UI nor Retry appeared.
+2. *Performance* — tickets came from the shared `loadOrganizationTickets`
+   (project queries plus 4 sequential queries per project, full ticket
+   columns). After removing that N+1, real-data profiling showed the
+   remaining cost was Dashboard widgets loading time entries and activity
+   in ticket-id batches.
+
+**Measured baseline** (real Admin account, before the final
+simplification): 21 projects, 1,630 tickets; tickets ~2.5 s, workload
+~0.3 s, logged minutes ~8.8 s and activity ~11.8 s (17 ticket-id batches
+each); total data load ~14.3 s, painted ready ~14.4 s.
+
+**Product decision** — the Admin Dashboard is now a lightweight landing
+screen: header (project scope selector, New Project / Add Member), one KPI
+row — **Assigned Tickets** (all open tickets in scope; sub-count "N active"
+= in progress or in review), **Blocked**, **Due Today**, **Overdue** (open,
+past due date — same definition as Reports / the Tickets `?alerts=overdue`
+filter) — and **My Active Work** below (same eligibility and order as
+before, max 10 rows, total count badge, "View all" → `/my-work`). Removed
+rather than optimized: Hours Burn, Recent Activity, Upcoming Deadlines,
+Team Workload, Projects at Risk, the insights band (blocked projects, over
+capacity, completed this month, hours). Project Lead and Member dashboards
+are unchanged.
+
+**Data loading**: the Admin Dashboard no longer requests
+`ticket_time_entries`, `ticket_activity`, workload/membership/profile data,
+or a second organization-wide ticket set. A Dashboard-only loader
+(`loadAdminDashboardTickets`, `lib/tickets.ts`) issues 1 `projects` request,
+⌈T/1000⌉ paged `tickets` requests (only the small fields the KPIs and My
+Active Work need — no descriptions/acceptance criteria), and 1
+`ticket_statuses` request — ~4 requests for the measured dataset (request
+count, not a measured timing). Paging keeps it clear of the PostgREST row
+cap. My Active Work reuses the same data. KPI definitions live in
+`lib/admin-dashboard-kpis.ts`.
+
+**Reliability** (`lib/admin-dashboard-load.ts`): the load always settles —
+rejections become the existing error state; a 30 s bound
+(`ADMIN_DASHBOARD_LOAD_TIMEOUT_MS`) turns a stuck load into an error;
+in-flight requests are aborted on timeout/cleanup; stale loads can't
+overwrite newer ones; Retry starts a fresh load; the effect keys on
+`organization?.id`, so tab focus doesn't reload it.
+
+**Validation**: JIR-101 tests 21/21, full Vitest 158/158, `tsc --noEmit`
+and ESLint clean, `npm run build` passing. Implementation commit `f81bf91`.
+
+**Follow-up (out of scope)**: the shared `loadOrganizationTickets`, still
+used by other screens, may be subject to PostgREST `max_rows` truncation
+for very large projects; the Admin Dashboard loader isn't affected (it
+pages its results).
 
 ---
 
